@@ -250,7 +250,7 @@ public class main : MonoBehaviour
 		bool isCanInsert = false;
 		int friendClassIndex = contentStr.LastIndexOf ("friend class");
 		//找到最后的一个class;
-		int lastClassIndex = contentStr.LastIndexOf ("class");
+		int lastClassIndex = contentStr.LastIndexOf ("class ");
 		if(friendClassIndex < 0)
 		{
 			if (lastClassIndex >= 0) {
@@ -262,24 +262,32 @@ public class main : MonoBehaviour
 					string classlineStr = contentStr.Substring (lastlineIndex, lastClassIndex - lastlineIndex);
 					int zhushiIndex = classlineStr.IndexOf ("//");
 					if (zhushiIndex < 0) {
+						string isinClassStr = contentStr.Substring (lastClassIndex-10, 10);
+						if(isinClassStr.IndexOf(":") < 0)
+						{
+							isCanInsert = true;
+						}
+					
+					}
+				}
+				if(isCanInsert)
+				{
+					int prelastClassIndex = classPreStr.LastIndexOf ("class");
+					int lastKuaiZhushiIndex = classPreStr.LastIndexOf ("/*");
+					int preendKuaiZhushiIndex = classPreStr.IndexOf ("*/");
+
+					//在注视块之间 的class 不被相应;
+					//;
+					if ((lastKuaiZhushiIndex > prelastClassIndex || prelastClassIndex == -1)// 上个注视块在class 之后;
+						&& (preendKuaiZhushiIndex < lastKuaiZhushiIndex || preendKuaiZhushiIndex == -1)//并且注视没有结束;) {
+					)
+					{
+						isCanInsert = false;
+					} else {
 						isCanInsert = true;
 					}
 				}
 
-				int prelastClassIndex = classPreStr.LastIndexOf ("class");
-				int lastKuaiZhushiIndex = classPreStr.LastIndexOf ("/*");
-				int preendKuaiZhushiIndex = classPreStr.IndexOf ("*/");
-			
-				//在注视块之间 的class 不被相应;
-				//;
-				if ((lastKuaiZhushiIndex > prelastClassIndex || prelastClassIndex == -1)// 上个注视块在class 之后;
-				   && (preendKuaiZhushiIndex < lastKuaiZhushiIndex || preendKuaiZhushiIndex == -1)//并且注视没有结束;) {
-				)
-				{
-						isCanInsert = false;
-				} else {
-						isCanInsert = true;
-				}
 			}
 		}
 
@@ -360,8 +368,12 @@ public class main : MonoBehaviour
 			//		 contentStrCpp = File.ReadAllText (destCppPath);
 
 			string remiastrCpp = "";
-
-			remiastrCpp = contentStrCpp + "\r\n//zys  code !!!!!!!!!!!\r\n" + funValStr;
+			int indexEndIf = contentStrCpp.LastIndexOf ("NS_CC_EXT_END");
+			if (indexEndIf > 0 && (indexEndIf + 100) > contentStrCpp.Length) {
+				remiastrCpp = contentStrCpp.Insert (indexEndIf, "\r\n//zys  code !!!!!!!!!!!\r\n" + funValStr);
+			} else {
+				remiastrCpp = contentStrCpp + "\r\n//zys  code !!!!!!!!!!!\r\n" + funValStr;
+			}
 			//
 			//		File.WriteAllText (destCppPath, remiastrCpp);
 
