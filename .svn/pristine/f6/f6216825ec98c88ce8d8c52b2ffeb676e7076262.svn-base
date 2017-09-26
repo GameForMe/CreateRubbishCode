@@ -1,0 +1,457 @@
+#if !defined(NOMINMAX) && defined(_MSC_VER)
+#	define NOMINMAX // required to stop windows.h messing up std::min
+#endif
+
+#include "ListControl.h"
+USING_NS_CC;
+USING_NS_CC_EXT;
+
+ListControl::ListControl()
+: m_max_item_num(0)
+, m_reverse_mode(false)
+, m_item_gap(0.0f)
+, m_sync_cache_count(10)
+{
+	set_vertical_mode(true);
+}
+
+int ListControl::add_item(CCNode* item)
+{
+	CC_ASSERT(item);
+	if(m_max_item_num && count() >= m_max_item_num)
+	{
+		remove_item(0);
+	}
+
+	item->setAnchorPoint(ccp(0.5, 0.5f));
+	item->ignoreAnchorPointForPosition(false);
+
+	getContainer()->addChild(item);
+	m_items.push_back(item);
+	
+	arrange_items();
+	return m_items.size() - 1;
+}
+
+void ListControl::add_items_sync(size_t item_num, NodeFactory factory)
+{
+	if(!item_num) 
+	{
+		m_node_factory.clear();
+		return;
+	}
+
+	m_node_factory = factory;
+
+	//! 创建第一个node, 得出大小, 然后创建一组proxy_node.
+	CCNode* ref_item = factory(this, 0);
+	CC_ASSERT(ref_item);
+
+	NodeList proxy_nodes;
+	for (size_t i=0; i<item_num; ++i)
+	{
+		CCNode* proxy = CCNode::create();
+		proxy->setContentSize(ref_item->getContentSize());
+		proxy->setAnchorPoint(ccp(0.5f, 0.5f));
+		proxy_nodes.push_back(proxy);
+	}
+
+	addItemToProxy(ref_item, proxy_nodes.front());
+
+	add_items(proxy_nodes.begin(), proxy_nodes.end());
+}
+
+void ListControl::addItemToProxy(CCNode* item, CCNode* proxy)
+{
+	const CCSize& proxy_size = proxy->getContentSize();
+	item->setPosition(ccp(proxy_size.width * 0.5f, proxy_size.height * 0.5f));
+	proxy->addChild(item);
+	proxy->setTag(item->getTag());
+}
+
+void ListControl::clear_list()
+{
+	getContainer()->removeAllChildrenWithCleanup(true);
+	if(!m_items.empty())
+		m_items.clear();
+
+	if(!m_node_factory.empty())
+		m_node_factory.clear();
+}
+
+void ListControl::scroll_to_top()
+{
+	CCPoint offset = getContentOffset();
+	if (b_vertical)
+	{
+		CCSize contentSize = getContentSize();
+		CCSize viewSize = getViewSize();
+		offset.y = -(contentSize.height - viewSize.height);
+		setContentOffset(offset);
+	}
+	else
+	{
+		offset.x = 0.0f;
+		setContentOffset(offset);
+	}
+
+}
+
+void ListControl::scroll_to_bottom()
+{
+	CCPoint offset = getContentOffset();
+	if (b_vertical)
+	{
+		offset.y = 0.0f;
+		setContentOffset(offset);
+	}
+	else
+	{
+		offset.x = -(getContentSize().width - getViewSize().width);
+		setContentOffset(offset);
+	}
+
+}
+
+void ListControl::arrange_items()
+{
+	if(m_items.empty())
+	{
+		return;
+	}
+
+	float content_length = 0.0f;
+	BOOST_FOREACH(CCNode* item, m_items)
+	{
+		content_length += b_vertical?item->getContentSize().height:item->getContentSize().width;
+	}
+
+	content_length += m_item_gap * (m_items.size() + 1);
+
+	//! 必须保证content_height >= view_height, 不然不能让列表项置顶.
+	CCSize view_size = getViewSize();
+	if (b_vertical)
+	{
+		if(content_length < view_size.height)
+		{
+			content_length = view_size.height;
+		}
+	}
+	else
+	{
+		if(content_length < view_size.width)
+		{
+			content_length = view_size.width;
+		}
+	}
+
+	b_vertical ? setContentSize(CCSizeMake(view_size.width, content_length)) :setContentSize(CCSizeMake(content_length, view_size.height)) ;
+
+	if(!m_items.empty())
+	{
+		CCPoint pos = b_vertical?ccp(view_size.width * 0.5f, content_length - m_item_gap):ccp(m_item_gap,view_size.height * 0.5f);
+
+		void BOOST_LOCAL_FUNCTION(CCNode* item, bind &pos, bind m_item_gap,bind b_vertical)
+		{
+			//! 为了方便, 先假设锚点在中间.
+			if (b_vertical)
+			{
+				float half_item_height = item->getContentSize().height * 0.5f;
+				pos.y -= half_item_height;
+				item->setPosition(pos);
+				pos.y -= half_item_height + m_item_gap;
+			}
+			else
+			{
+				float half_item_width = item->getContentSize().width * 0.5f;
+				pos.x += half_item_width;
+				item->setPosition(pos);
+				pos.x += half_item_width + m_item_gap;
+			}
+
+
+		} BOOST_LOCAL_FUNCTION_NAME(set_item_pos);
+
+		if(m_reverse_mode)
+		{
+			BOOST_REVERSE_FOREACH(CCNode* item, m_items)
+			{
+				set_item_pos(item);
+			}			
+		}
+		else
+		{
+			std::for_each(m_items.begin(), m_items.end(), set_item_pos);
+		}
+	}
+}
+
+void ListControl::onEnter()
+{
+	CCScrollView::onEnter();
+	scheduleUpdate();
+}
+
+void ListControl::onExit()
+{
+	unscheduleUpdate();
+	CCScrollView::onExit();
+}
+
+void ListControl::update(float dt)
+{
+	if(m_node_factory && !m_items.empty())
+	{
+		int start, end;
+		calcCacheItemRange(start, end);
+
+		for(size_t i=0; i<m_items.size(); ++i)
+		{
+			CCNode* proxy = m_items[i];
+			if(i >= (size_t)start && i <= (size_t)end)
+			{
+				//! 没有子节点, 表示要加入.
+				if(!proxy->getChildrenCount())
+				{
+					CCNode* item = m_node_factory(this, i);
+					if(item)
+					{
+						addItemToProxy(item, proxy);
+					}
+					
+				}
+			}
+			else
+			{
+				proxy->removeAllChildrenWithCleanup(true);
+			}
+		}
+	}
+
+	CCScrollView::update(dt);
+
+	if(isVisible() && hasVisibleParents())
+	{
+		update_child_touch_clip_rect();
+	}	
+}
+
+void ListControl::calcCacheItemRange(int& out_start, int& out_end)
+{
+	//FIXME: 支持水平.
+	float tmp = std::max(0.0f, -getContentOffset().y);
+	float content_height = getContentSize().height;
+	int end = floorf((1.0f - (tmp / content_height)) * m_items.size());
+	
+	out_end = end;
+	out_start = out_end - m_sync_cache_count;
+
+	out_end = std::max(0, out_end);
+	out_start = std::max(0, out_start);
+}
+
+CCNode* ListControl::find_item(int tag)
+{
+	BOOST_FOREACH(CCNode* item, m_items)
+	{
+		if(item->getTag() == tag) 
+		{
+			return item;
+		}
+	}
+	return NULL;
+}
+
+void ListControl::remove_item(int idx)
+{
+	if(idx < 0 || (size_t)idx >= m_items.size())
+	{
+		return;
+	}
+
+	if(m_node_factory)
+	{
+		return;
+	}
+
+	NodeList::iterator it = m_items.begin() + idx;
+	
+	CCNode* item = *it;
+	item->removeFromParentAndCleanup(true);
+
+	m_items.erase(it);
+
+	arrange_items();
+}
+
+void ListControl::remove_item(CCNode* node)
+{
+	if(m_node_factory)
+	{
+		return;
+	}
+
+	for(size_t i=0; i<m_items.size(); ++i)
+	{
+		if(m_items[i] == node)
+		{
+			remove_item(i);
+			return;
+		}
+	}
+
+	CC_ASSERT(false && "[listcontrol]: item not found");
+}
+
+void ListControl::set_vertical_mode( bool bvertical )
+{
+	b_vertical = bvertical;
+	setDirection(bvertical?kCCScrollViewDirectionVertical:kCCScrollViewDirectionHorizontal);
+}
+
+void ListControl::scroll_to_pos( size_t pos )
+{
+	size_t size = m_items.size();
+	if (pos>= size)
+	{
+		scroll_to_bottom();
+	}
+	else if (pos ==0)
+	{
+		scroll_to_top();
+	}
+	else
+	{
+		if (b_vertical)
+		{
+			if (getContentSize().height <=  getViewSize().height)
+			{
+				scroll_to_top();
+			}
+			else
+			{
+				scroll_to_top();
+
+				float item_height = m_items.front()->getContentSize().height;
+
+				float length_to_top= pos*(item_height + m_item_gap) + item_height/2.0;
+				
+				float move_length = length_to_top - getViewSize().height/2.0f;
+				
+				if (move_length<0)
+				{
+					move_length = 0;
+				}
+
+				CCPoint offset = getContentOffset();
+				offset.y += move_length;
+
+				if (offset.y >0)
+				{
+					offset.y =0;
+				}
+
+				setContentOffset(offset);
+			}
+		}
+		else
+		{
+			if (getContentSize().width <=  getViewSize().width)
+			{
+				scroll_to_top();
+			}
+			else
+			{
+				scroll_to_top();
+
+				float item_width = m_items.front()->getContentSize().width;
+
+				float length_to_top= pos*(item_width + m_item_gap) + item_width/2.0;
+
+				float move_length = length_to_top - getViewSize().width/2.0f;
+
+				if (move_length<0)
+				{
+					move_length = 0;
+				}
+
+				CCPoint offset = getContentOffset();
+				offset.x -= move_length;
+
+				if (offset.x < getViewSize().width - getContentSize().width)
+				{
+					offset.x = getViewSize().width - getContentSize().width;
+				}
+
+				setContentOffset(offset);
+			}
+		}
+
+	}
+
+}
+
+void ListControl::sort_items()
+{
+	bool BOOST_LOCAL_FUNCTION(CCNode* lhs, CCNode* rhs)
+	{
+		return lhs->getTag() < rhs->getTag();
+
+	} BOOST_LOCAL_FUNCTION_NAME(item_sort_fn);
+
+	std::sort(m_items.begin(), m_items.end(), item_sort_fn);
+	arrange_items();
+}
+
+void ListControl::just_fit_pack()
+{
+	CC_ASSERT(!m_node_factory);
+
+	if(m_items.empty())
+	{
+		return;
+	}
+
+	CCSize item_size = m_items.front()->getContentSize();
+	CCSize content_size = getContentSize();
+	if(b_vertical)
+	{
+		set_item_gap((content_size.height - item_size.height * m_items.size()) / (m_items.size() + 1));
+	}
+	else
+	{
+		set_item_gap((content_size.width - item_size.width * m_items.size()) / (m_items.size() + 1));
+	}
+
+	arrange_items();
+}
+
+//=================================================================================
+// ListControlLoader
+//
+#define LISTCONTROL_PROPERTY_REVERSE "reverse"
+#define LISTCONTROL_PROPERTY_GAP	 "gap"
+
+void ListControlLoader::onHandlePropTypeCheck(CCNode * pNode, CCNode * pParent, const char* pPropertyName, bool pCheck, CCBReader * pCCBReader)
+{
+	if(strcmp(LISTCONTROL_PROPERTY_REVERSE,pPropertyName)== 0)
+	{
+		((ListControl*)pNode)->set_reverse_mode(pCheck);
+	}
+	else
+	{
+		CCScrollViewLoader::onHandlePropTypeCheck(pNode, pParent, pPropertyName, pCheck, pCCBReader);
+	}
+}
+
+void ListControlLoader::onHandlePropTypeInteger(CCNode * pNode, CCNode * pParent, const char* pPropertyName, int pInteger, CCBReader * pCCBReader)
+{
+	if(strcmp(LISTCONTROL_PROPERTY_GAP,pPropertyName) == 0)
+	{
+		((ListControl*)pNode)->set_item_gap(pInteger);
+	}
+	else
+	{
+		CCScrollViewLoader::onHandlePropTypeInteger(pNode, pParent, pPropertyName, pInteger, pCCBReader);
+	}
+}

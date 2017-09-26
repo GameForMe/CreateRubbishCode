@@ -1,0 +1,928 @@
+#include "BloodFightMgr.h"
+#include "GameEventDefine.h"
+#include "TaskTraceUi.h"
+#include "World.h"
+#include "Helper.h"
+#include "ToolTip.h"
+#include "ChatUi.h"
+#include "TCPClient.h"
+#include "NameMgr2.h"
+#include "f_string_table.h"
+#include "f_string_util.h"
+#include "SystemMsg.h"
+#include "CmdAdapter.h"
+#include "MiniMapUi.h"
+#include "UiManager.h"
+#include "ShortCutUi.h"
+#include "BFPointsRankUi.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ActivityMgr.h"
+#include "PlacardManager.h"
+#include "AutoSelfProtect.h"
+#include "BFBattleResultUi.h"
+#include "BFBattlePlayerListUi.h"
+
+
+BloodFightMgr* BloodFightMgr::getInstance()
+{
+	static BloodFightMgr Mgr;
+	return &Mgr;
+}
+
+BloodFightMgr::BloodFightMgr()
+	:m_bIsInBFBattle(false)
+	,m_nCountDownTime(0)
+	,m_bIsPrepare(false)
+	,m_bIsShowPreBtn(false)
+	,m_eBattleResult(BF_Result_Null)
+	,m_eCurrBFGroundType(BF_Ground_Null)
+	,m_is_bf_active_open(false)
+	,m_nActivityBeginTime(0)
+	,m_nFightDomeTime(0)
+{
+
+}
+
+void BloodFightMgr::Init()
+{
+	clearMgrInfo();
+	TCP_CLIENT->register_net_cmd("NET_S2C_Xzdd_Request_Enter_Rst", this, &BloodFightMgr::on_server_requst_enter_prepare);
+	TCP_CLIENT->register_net_cmd("NET_S2C_Xzdd_Request_Match_Ret", this, &BloodFightMgr::on_server_requst_prepare_state);
+	TCP_CLIENT->register_net_cmd("NET_S2C_Xzdd_Role_Score", this, &BloodFightMgr::on_server_locplayer_bfscore);
+	TCP_CLIENT->register_net_cmd("NET_S2C_Xzdd_Battle_Score", this, &BloodFightMgr::on_server_battle_result);
+	TCP_CLIENT->register_net_cmd("NET_S2C_Xzdd_Odd_Time", this, &BloodFightMgr::on_server_activity_time);
+	TCP_CLIENT->register_net_cmd("NET_S2C_Xzdd_Battle_Config", this, &BloodFightMgr::on_server_battle_time);
+	TCP_CLIENT->register_net_cmd("NET_S2C_Xzdd_Rank_List", this, &BloodFightMgr::on_server_recv_rank_info);
+	TCP_CLIENT->register_net_cmd("NET_S2C_XZDD_Broadcast_Role_Enter", this, &BloodFightMgr::on_server_rec_role_enter_battle);
+	TCP_CLIENT->register_net_cmd("NET_S2C_Xzdd_Broadcast_Role_Event", this, &BloodFightMgr::on_server_rec_role_leave_dead);
+	TCP_CLIENT->register_net_cmd("NET_S2C_Xzdd_Total_Score", this, &BloodFightMgr::on_server_rec_bf_end_result);
+	TCP_CLIENT->register_net_cmd("NET_S2C_Xzdd_Open_State", this, &BloodFightMgr::on_server_rec_bf_open_state);
+	REGISTER_EVENT(bf_prepare_pressed,BloodFightMgr,onPrepareBtnPressed);
+	initRankAwardDataFromXML();
+	
+}
+
+void BloodFightMgr::Destroy()
+{
+	UNREGISTER_EVENT(bf_prepare_pressed,BloodFightMgr,onPrepareBtnPressed);
+
+	TCP_CLIENT->unregister_net_cmd("NET_S2C_Xzdd_Request_Enter_Rst", this, &BloodFightMgr::on_server_requst_enter_prepare);
+	TCP_CLIENT->unregister_net_cmd("NET_S2C_Xzdd_Request_Match_Ret", this, &BloodFightMgr::on_server_requst_prepare_state);
+	TCP_CLIENT->unregister_net_cmd("NET_S2C_Xzdd_Role_Score", this, &BloodFightMgr::on_server_locplayer_bfscore);
+	TCP_CLIENT->unregister_net_cmd("NET_S2C_Xzdd_Battle_Score", this, &BloodFightMgr::on_server_battle_result);
+	TCP_CLIENT->unregister_net_cmd("NET_S2C_Xzdd_Odd_Time", this, &BloodFightMgr::on_server_activity_time);
+	TCP_CLIENT->unregister_net_cmd("NET_S2C_Xzdd_Battle_Config", this, &BloodFightMgr::on_server_battle_time);
+	TCP_CLIENT->unregister_net_cmd("NET_S2C_Xzdd_Rank_List", this, &BloodFightMgr::on_server_recv_rank_info);
+	TCP_CLIENT->unregister_net_cmd("NET_S2C_XZDD_Broadcast_Role_Enter", this, &BloodFightMgr::on_server_rec_role_enter_battle);
+	TCP_CLIENT->unregister_net_cmd("NET_S2C_Xzdd_Broadcast_Role_Event", this, &BloodFightMgr::on_server_rec_role_leave_dead);
+	TCP_CLIENT->unregister_net_cmd("NET_S2C_Xzdd_Total_Score", this, &BloodFightMgr::on_server_rec_bf_end_result);
+	TCP_CLIENT->unregister_net_cmd("NET_S2C_Xzdd_Open_State", this, &BloodFightMgr::on_server_rec_bf_open_state);
+	clearMgrInfo();
+	m_is_bf_active_open = false;
+	std::for_each(m_targetItems.begin(),m_targetItems.end(),[](map<int,TargetTouchItem *>::value_type const kv)
+	{
+		delete (kv.second);
+	});
+	m_targetItems.clear();
+
+}
+
+void BloodFightMgr::processEnterNPCChat(int pIndex)
+{
+	if(pIndex == 1)
+	{
+		if (!m_is_bf_active_open)
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["BF_ERER_Not_Open"]);
+			return;
+		}
+		try_open_battle_rank_layer();
+	}
+	else if(pIndex == 2)
+	{
+		try_open_battle_notice_layer();
+	}
+	else if(pIndex==0)
+	{
+		if (!m_is_bf_active_open)
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["BF_ERER_Not_Open"]);
+			return;
+		}
+		try_enter_prepare_ground();//进入准备副本
+	}
+}
+//Npc chat
+
+//打开玩法说明
+void BloodFightMgr::try_open_battle_notice_layer()
+{
+	PlacardManager::getInstance()->open_placard_node(BF_NOTICE_PLACARD_ID);
+}
+//请求进入战场
+void BloodFightMgr::try_enter_prepare_ground()
+{
+	send_server_enter_prepare_ground();
+}
+//请求打开排行榜界面
+void BloodFightMgr::try_open_battle_rank_layer()
+{
+	send_server_open_rank_layer();
+}
+
+//Server 
+
+//发送匹配消息到服务器 发送准备消息 或者取消准备消息
+void BloodFightMgr::send_server_enter_prepare_state() 
+{
+	NET_C2S_Xzdd_Request_Match send;
+	send.nOpt = m_bIsPrepare ? 0 : 1;
+	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+}
+
+//发送获取排行榜信息
+void BloodFightMgr::send_server_open_rank_layer()
+{
+ 	NET_C2S_Get_Rank_List send;
+ 	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+}
+
+//发送进入准备地图的消息
+void BloodFightMgr::send_server_enter_prepare_ground()
+{
+	NET_C2S_Xzdd_Request_Enter send;
+	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+}
+
+// 进入匹配消息回复
+unsigned int BloodFightMgr::on_server_requst_prepare_state(s_net_cmd *cmd)
+{
+	NET_S2C_Xzdd_Request_Match_Ret * msg = (NET_S2C_Xzdd_Request_Match_Ret*)cmd;
+	CC_ASSERT(msg);
+
+	if (msg->dwErrorCode == ERER_Success)
+	{
+		m_bIsPrepare = msg->nOpt == 1;
+		refresh_bfprepare_btn t_evt;
+		t_evt.isPrepare = msg->nOpt == 1;
+		t_evt.isHide = false;
+		SEND_EVENT(&t_evt);
+	}
+	else
+	{
+		onServerErrorCodeProcess(msg->dwErrorCode);
+	}
+	return 0;
+}
+
+//请求准备进入匹配地图
+unsigned int BloodFightMgr::on_server_requst_enter_prepare(s_net_cmd *cmd)
+{
+	NET_S2C_Xzdd_Request_Enter_Rst * msg = (NET_S2C_Xzdd_Request_Enter_Rst*)cmd;
+	CC_ASSERT(msg);
+	if(ERER_Success == msg->dwErrorCode)
+	{
+		//this->onEnterBFPrepareGround();
+	}
+	else
+	{
+		onServerErrorCodeProcess(msg->dwErrorCode);
+	}
+	return  0;
+}
+//推送玩家积分
+unsigned int BloodFightMgr::on_server_locplayer_bfscore(s_net_cmd *cmd)
+{
+	NET_S2C_Xzdd_Role_Score * msg = (NET_S2C_Xzdd_Role_Score*)cmd;
+	CC_ASSERT(msg);
+	m_stLocPlayerScore.dwRankings = msg->dwRankings;
+	m_stLocPlayerScore.dwScore = msg->dwScore;
+	m_stLocPlayerScore.dwSerialWin = msg->dwSerialWin;
+	onUpdateBattleScoreInfo();
+	return 0;
+}
+//推送玩家战斗结果
+unsigned int BloodFightMgr::on_server_battle_result(s_net_cmd *cmd)//推送战斗结果
+{
+	BFBattleResultUi* pUi = dynamic_cast<BFBattleResultUi*>(OPEN_UI(WCT_BF_BattleResult_UI));
+	if (pUi)
+	{
+		pUi->refreshUiByResult(cmd);
+	}
+	
+	return 0;
+}
+
+unsigned int BloodFightMgr::on_server_rec_bf_open_state(s_net_cmd *cmd)
+{
+	NET_S2C_Xzdd_Open_State * msg = (NET_S2C_Xzdd_Open_State*)cmd;
+	CC_ASSERT(msg);
+	m_is_bf_active_open = msg->dwIsOpen == 1;
+	return 0;
+}
+
+//进入准备地图 推送活动时间信息
+unsigned int BloodFightMgr::on_server_activity_time(s_net_cmd* cmd)
+{
+	NET_S2C_Xzdd_Odd_Time * msg = (NET_S2C_Xzdd_Odd_Time*)cmd;
+	CC_ASSERT(msg);
+	m_stBFTimeInfo.dwTotalLen = msg->dwTotalLen;
+	m_stBFTimeInfo.dwOddSecond = msg->dwOddSecond;
+	m_stBFTimeInfo.dwLimitMatchLen = msg->dwLimitMatchLen;
+	m_stBFTimeInfo.dwLimitEndLen = msg->dwLimitEndLen;
+	m_stBFTimeInfo.dwLimitUpdateItem = msg->dwLimitEndLen;
+	m_stBFTimeInfo.dwStartHour = msg->dwStartHour;
+	m_stBFTimeInfo.dwStartMinute = msg->dwStartMinute;
+	m_nActivityBeginTime = m_stBFTimeInfo.dwStartHour * 3600 + m_stBFTimeInfo.dwStartMinute * 60;//开的的秒数
+	return 0;
+}
+
+//进入战场推送战斗时间信息
+unsigned int BloodFightMgr::on_server_battle_time(s_net_cmd* cmd)
+{
+	NET_S2C_Xzdd_Battle_Config * msg = (NET_S2C_Xzdd_Battle_Config*)cmd;
+	CC_ASSERT(msg);
+	m_nCountDownTime = msg->dwBattleLen;
+	m_nFightDomeTime = m_nCountDownTime;
+	tagDWORDTime t_Time = ServerTime::getInstance()->cal_current_server_dword_time();
+	m_nFightBeginTime = t_Time.hour * 3600 + t_Time.min * 60 + t_Time.sec; //当前几点秒数
+	 
+	return 0;
+}
+
+unsigned int BloodFightMgr::on_server_recv_rank_info(s_net_cmd* cmd)
+{
+	NET_S2C_Xzdd_Rank_List* msg = (NET_S2C_Xzdd_Rank_List*)cmd;
+	CC_ASSERT(msg);
+	m_mapRankInfo.clear();
+
+	if (msg->dwIsOpen == 0)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["BF_ERER_Not_Open"]);
+		return 0;
+	}
+	string strName;
+	for (int i = 0 ; i < msg->nRankItemCount; i++)
+	{
+		m_mapRankInfo[i] = msg->RankList[i];
+	}
+	m_stLocPlayerScore.dwScore = msg->dwSelfScore;
+	m_stLocPlayerScore.dwRankings = msg->dwRankings;
+	m_stLocPlayerScore.dwSerialWin = msg->dwMaxSerialWin;
+
+
+	BFPointsRankUi* pUi = dynamic_cast<BFPointsRankUi*>(OPEN_UI(WCT_BF_PointsRank_UI));
+	if (pUi)
+	{
+		pUi->refreshUIByType((e_BFRankShowType)msg->dwIsOldRanking);
+	}
+	return 0;
+}
+
+unsigned int BloodFightMgr::on_server_rec_role_enter_battle(s_net_cmd* cmd)
+{
+	NET_S2C_XZDD_Broadcast_Role_Enter* msg = (NET_S2C_XZDD_Broadcast_Role_Enter*)cmd;
+	CC_ASSERT(msg);
+	BFBattleRoleData pData;
+	pData.dwHp = msg->dwHp;
+	pData.dwMaxHp = msg->dwMaxHp;
+	pData.dwMaxMp = msg->dwMaxMp;
+	pData.dwMp = msg->dwHp;
+	pData.dwRoleID = msg->dwRoleID;
+	pData.dwTeamID = msg->dwTeamID;
+	pData.dwClass = msg->dwClass;
+	pData.m_bIsFriend = pData.dwTeamID == m_stMineBattleData.dwTeamID;
+	m_mapBattleRoleInfo[msg->dwRoleID] = pData;
+
+	bf_refresh_playerlist t_evt;
+	t_evt.roleID = pData.dwRoleID;
+	t_evt.isFriend = pData.m_bIsFriend;
+	SEND_EVENT(&t_evt);
+
+	Player * player=dynamic_cast<Player*>(RoleManager::getInstance()->findRole(pData.dwRoleID));
+	if(player)
+	{
+		eNameShowMode pTyep = pData.m_bIsFriend ? PNSM_BattleWe : PNSM_BattleEnemy;
+		player->switchNameShowMode(pTyep);
+	}
+	return 0;
+}
+
+unsigned int BloodFightMgr::on_server_rec_role_arr_change(s_net_cmd *cmd)//队伍里的远程玩家状态改变，主要是对血条之类的处理
+{
+	NET_SIS_single_remote_att_change* msg = (NET_SIS_single_remote_att_change*)cmd;
+	CC_ASSERT(msg);
+	//非玩家则忽略
+	if (!IS_PLAYER(msg->dw_role_id))
+		return 0 ;
+	//仅考虑血量(当前与最大)的变化情况
+	if ((ERRA_HP != (ERemoteRoleAtt)msg->eType))
+		return 0;
+	BFBattleRoleDataMap::iterator iter = m_mapBattleRoleInfo.find(msg->dw_role_id);
+	if (iter != m_mapBattleRoleInfo.end())
+	{
+		if (ERRA_HP == (ERemoteRoleAtt)msg->eType)
+		{
+			iter->second.dwHp = msg->nValue;
+			bf_refresh_player_att t_evt;
+			t_evt.isDead = false;
+			t_evt.isLeave = false;
+			t_evt.roleID = msg->dw_role_id;
+			t_evt.attType = msg->eType;
+			t_evt.hp = msg->nValue;
+			SEND_EVENT(&t_evt);
+		}
+	}
+	return 0;
+}
+
+unsigned int BloodFightMgr::on_server_rec_role_leave_dead(s_net_cmd *cmd)
+{
+	NET_S2C_Xzdd_Broadcast_Role_Event* msg = (NET_S2C_Xzdd_Broadcast_Role_Event*)cmd;
+	CC_ASSERT(msg);
+	bf_refresh_player_att t_evt;
+	t_evt.isDead = msg->dwEvent ==msg->XZDD_DIE;
+	t_evt.isLeave = msg->dwEvent ==msg->XZDD_LEAVE_TEAM;
+	t_evt.roleID = msg->dwRoleID;
+	t_evt.hp = 0;
+	SEND_EVENT(&t_evt);
+	BFBattleRoleDataMap::iterator iter = m_mapBattleRoleInfo.find(msg->dwRoleID);
+	if (iter != m_mapBattleRoleInfo.end())
+	{
+		m_mapBattleRoleInfo.erase(iter);
+	}
+	return 0;
+}
+
+unsigned int BloodFightMgr::on_server_rec_bf_end_result(s_net_cmd *cmd)
+{
+	NET_S2C_Xzdd_Total_Score* msg = (NET_S2C_Xzdd_Total_Score*)cmd;
+	CC_ASSERT(msg);
+	BFBattleResultUi* pUi = dynamic_cast<BFBattleResultUi*>(OPEN_UI(WCT_BF_BattleResult_UI));
+	if (pUi)
+	{
+		pUi->refreshUiByBFResult(cmd);
+	}
+	return 0;
+}
+
+//处理错误码
+void BloodFightMgr::onServerErrorCodeProcess(int pType)
+{
+	switch(pType)
+	{
+	case ERER_Not_Process:
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["BF_Error_unOpen"]);
+		}
+		break;
+	case ERER_Level_Limit:
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["BF_Error_unEnoughLv"]);
+		}
+		break;
+	case ERER_Team_Limit:
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inTeam"]);
+		}
+		break;
+	case ERER_Stall_Limit:
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inExchange"]);
+		}
+		break;
+	case ERER_Exchange_Limit:
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inExchange"]);
+		}
+		break;
+	case ERER_ComPractice:
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inComParctice"]);
+		}
+		break;
+	case EPER_Map_Limit_Match:
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["BF_EPER_Map_Limit_Match"]);
+		}
+		break;
+	case ERER_Not_Open:
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["BF_ERER_Not_Open"]);
+		}
+		break; 
+	case ERER_CANOT_MATCH:
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["BF_ERER_Conot_MATCH"]);
+		}
+		break;
+	}
+}
+
+//server end
+
+void BloodFightMgr::update(float dt)
+{
+	if( m_eCurrBFGroundType ==  BF_Ground_Null)
+		return;
+
+	tagDWORDTime t_Time = ServerTime::getInstance()->cal_current_server_dword_time();
+	int sec = t_Time.hour * 3600 + t_Time.min * 60 + t_Time.sec; //当前几点秒数
+	if ( m_eCurrBFGroundType ==  BF_Ground_Prepare)
+	{
+		
+		m_stBFTimeInfo.dwOddSecond = m_stBFTimeInfo.dwTotalLen - ( sec - m_nActivityBeginTime );
+
+		float t_beginFightTime = m_stBFTimeInfo.dwTotalLen - m_stBFTimeInfo.dwOddSecond;
+		if ( t_beginFightTime < m_stBFTimeInfo.dwLimitMatchLen)
+		{
+			m_bIsShowPreBtn = false;
+			m_eTitleType = BF_Prepare_Enter;
+			updateTickLabel(m_stBFTimeInfo.dwLimitMatchLen - t_beginFightTime);
+			MiniMapUi *miniMapUi = World::getInstance()->getMiniMapUi();
+			if(miniMapUi)
+			{
+				miniMapUi->showBFBattlePrepareUi(false);
+			}
+			
+		}
+		else if (m_stBFTimeInfo.dwOddSecond <= 0 && m_stBFTimeInfo.dwLimitUpdateItem <= m_stBFTimeInfo.dwLimitEndLen)
+		{
+			m_eTitleType = BF_Activity_Close;
+			m_stBFTimeInfo.dwLimitUpdateItem -= dt;
+			updateTickLabel(m_stBFTimeInfo.dwLimitUpdateItem);
+			if (m_bIsShowPreBtn)
+			{
+				MiniMapUi *miniMapUi = World::getInstance()->getMiniMapUi();
+				if(miniMapUi)
+				{
+					m_bIsShowPreBtn = false;
+					miniMapUi->hideUi(true);
+					miniMapUi->showBFBattlePrepareUi(false);
+					miniMapUi->setShowBFPrepareEff(false);
+				}
+			}
+		}
+		else
+		{
+			m_eTitleType = BF_Prepare_End;
+			updateTickLabel(m_stBFTimeInfo.dwOddSecond);
+			if (!m_bIsShowPreBtn)
+			{
+				MiniMapUi *miniMapUi = World::getInstance()->getMiniMapUi();
+				if(miniMapUi)
+				{
+					m_bIsShowPreBtn = true;
+					miniMapUi->hideUi(true);
+					miniMapUi->showBFBattlePrepareUi(true);
+					miniMapUi->setShowBFPrepareEff(m_bIsPrepare);
+				}
+			}
+		}
+	}
+	else if (m_eCurrBFGroundType ==  BF_Ground_Battle)
+	{
+		if (m_nFightDomeTime > 0)
+		{
+			m_eTitleType = BF_Battle_End;
+			m_nFightDomeTime = m_nCountDownTime -  ( sec - m_nFightBeginTime );
+			updateTickLabel(m_nFightDomeTime);
+		}
+	}
+}
+
+void BloodFightMgr::onPrepareBtnPressed(bf_prepare_pressed* evt)
+{
+	this->send_server_enter_prepare_state();
+}
+
+//enter battle 
+unsigned int BloodFightMgr::onEnterBFInstance(DWORD t_mapId)
+{
+	if (t_mapId == BF_PREPARE_MAP) // is prepare battle ground
+	{
+		this->onEnterBFPrepareGround();// update prepare battle ground ui
+	}
+	else if (t_mapId == BF_BATTLE_MAP) // is battle ground can fight
+	{
+		this->onEnterBFBattleGround();
+	}
+	return 0;
+}
+
+//更新设置战斗地图UI
+unsigned int BloodFightMgr::updateBattleGroundUi()
+{
+	std::map<unsigned int ,BFBattleRoleData>::iterator iter = m_mapBattleRoleInfo.begin();
+	for (;iter != m_mapBattleRoleInfo.end();iter++)
+	{
+		Player * player=dynamic_cast<Player*>(RoleManager::getInstance()->findRole(iter->first));
+		if(player)
+		{
+			eNameShowMode pTyep = iter->second.m_bIsFriend ? PNSM_BattleWe : PNSM_BattleEnemy;
+			player->switchNameShowMode(pTyep);
+		}
+	}
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	player->switchNameShowMode(PNSM_BattleWe);
+
+	m_vecPlayerRole.clear();
+	pushPlayerListToTaskUI();
+	showTickLabel(true);
+	updateTickLabel(m_nCountDownTime);
+	World::getInstance()->setPayIconEnable(false);
+	MiniMapUi *miniMapUi = World::getInstance()->getMiniMapUi();
+	if(miniMapUi)
+	{
+		miniMapUi->hideUi(true);
+		miniMapUi->showIntruduceBtn(false);
+		miniMapUi->showBFBattlePrepareUi(false);
+		miniMapUi->setShowBFPrepareEff(false);
+		miniMapUi->showBFBattleUi(true);
+	}
+	ChatUiLayer *chatUiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if (chatUiLayer)
+		chatUiLayer->showVoiceBtn(false);//临时隐藏 不改变用户设置
+	updatePlayerShow();
+	GET_UI(ShortCutUi,WCT_ShorCutUi)->showTransBtn(false);//hide trans btn
+	return 0;
+}
+
+bool BloodFightMgr::getIsFriendTypeByRoleID(int roleID)
+{
+	std::map<unsigned int ,BFBattleRoleData>::iterator iter = m_mapBattleRoleInfo.find(roleID);
+	if (iter != m_mapBattleRoleInfo.end())
+	{
+		return iter->second.m_bIsFriend;
+	}
+	return false;
+}
+
+//更新设置准备地图UI
+unsigned int BloodFightMgr::updatePrepareBattleGroundUi()
+{
+	createTargetItem(BF_Mine_Score);
+	createTargetItem(BF_Mine_Rank);
+	createTargetItem(BF_Mine_Wins);
+	onUpdateBattleScoreInfo();
+ 	showTickLabel(true);
+ 	updateTickLabel(m_nCountDownTime);
+	World::getInstance()->setPayIconEnable(false);
+	MiniMapUi *miniMapUi = World::getInstance()->getMiniMapUi();
+	if(miniMapUi)
+	{
+		miniMapUi->hideUi(true);
+/*		miniMapUi->showIntruduceBtn(true);*/
+		//miniMapUi->showBFBattlePrepareUi(true);
+		//miniMapUi->setShowBFPrepareEff(m_bIsPrepare);
+	}
+
+	GET_UI(ShortCutUi,WCT_ShorCutUi)->showTransBtn(false);//hide trans btn
+	updatePlayerShow();
+	return 0;
+}
+//更新玩家名字 血条等显示信息
+void BloodFightMgr::updatePlayerShow()
+{
+	bool isInBFBattle = m_eCurrBFGroundType != BF_Ground_Null;
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	if (lp)
+		lp->showRoleHeadHpUi(isInBFBattle);
+}
+
+
+//获取左侧任务栏 通过Tag
+TargetTouchItem * BloodFightMgr::getTargetItem( eBFTargetTag tag )
+{
+	map<int,TargetTouchItem *>::iterator iter=m_targetItems.find(tag);
+	if(iter!=m_targetItems.end())
+	{
+		return iter->second;
+	}
+	return NULL;
+}
+//进入战场在左侧增加 任务信息栏
+void BloodFightMgr::pushPlayerListToTaskUI()
+{
+	BFBattlePlayerListUi * pUi = BFBattlePlayerListUi::create_item();
+	pUi->initPlayerInfo();
+	TaskTraceUi *taskTraceUi = World::getInstance()->getTaskTraceUi();
+	taskTraceUi->appendShowNode(pUi);
+}
+
+//通知 list去刷新消息 通知任务信息栏 刷新数据
+void BloodFightMgr::refreshPlayerListInfo()
+{
+	bf_refresh_playerlist evt;
+	SEND_EVENT(&evt);
+}
+//在准备地图的时候创建左侧任务栏
+TargetTouchItem * BloodFightMgr::createTargetItem( eBFTargetTag tag )
+{
+	TargetTouchItem * item = getTargetItem(tag);
+	TaskTraceUi *taskTraceUi = World::getInstance()->getTaskTraceUi();
+	if(taskTraceUi)
+	{	
+		if(!item)
+		{
+			item=new TargetTouchItem();
+			string str="";
+			switch (tag)
+			{
+			case BF_Mine_Score:
+				{
+					safe_sprintf(str,STRING_TABLE["BF_MyScore"],m_stLocPlayerScore.dwScore);
+					item->appendText(str,"BF_Mine_Score",ccc3(255,0,0));
+					item->signalItem.connect(this,&BloodFightMgr::onMyScorePressed);
+				}
+				break;
+			case BF_Mine_Rank:
+				{
+					safe_sprintf(str,STRING_TABLE["BF_MyRank"],m_stLocPlayerScore.dwRankings);
+					item->appendText(str,"BF_Mine_Rank",ccc3(255,0,0));
+					item->signalItem.connect(this,&BloodFightMgr::onMyRankPressed);
+				}
+				break;
+			case BF_Mine_Wins:
+				{
+					safe_sprintf(str,STRING_TABLE["BF_MyWins"],m_stLocPlayerScore.dwSerialWin);
+					item->appendText(str,"BF_Mine_Wins",ccc3(255,0,0));
+					item->signalItem.connect(this,&BloodFightMgr::onMineWinsPressed);
+				}
+				break;
+			}
+			m_targetItems.insert(make_pair(tag,item));
+		}
+		taskTraceUi->appendTargetItem(item);
+	}
+	return item;
+}
+
+// update the Battle info ui time and task ui;
+void BloodFightMgr::onUpdateBattleScoreInfo()
+{
+	TargetTouchItem * item=NULL;
+	stringstream ss;
+	string str;
+	item = getTargetItem(BF_Mine_Score);
+	if(item)
+	{
+		safe_sprintf(str,STRING_TABLE["BF_MyScore"],m_stLocPlayerScore.dwScore);
+		item->updateText("BF_Mine_Score",str);
+	}
+	item=getTargetItem(BF_Mine_Rank);
+	if(item)
+	{
+		safe_sprintf(str,STRING_TABLE["BF_MyRank"],m_stLocPlayerScore.dwRankings);
+		item->updateText("BF_Mine_Rank",str);
+	}
+	item=getTargetItem(BF_Mine_Wins);
+	if(item)
+	{
+		safe_sprintf(str,STRING_TABLE["BF_MyWins"],m_stLocPlayerScore.dwSerialWin);
+		item->updateText("BF_Mine_Wins",str);
+	}
+}
+
+// Down is UI logic prpgress
+void BloodFightMgr::onMyScorePressed()
+{
+	ToolTip::getInstance()->push(STRING_TABLE["BF_MyScore_Tip"]);
+	showRankUi();
+}
+
+void BloodFightMgr::onMyRankPressed()
+{
+	ToolTip::getInstance()->push(STRING_TABLE["BF_MyRank_Tip"]);
+	showRankUi();
+}
+
+void BloodFightMgr::onMineWinsPressed()
+{
+	ToolTip::getInstance()->push(STRING_TABLE["BF_MyWins_Tip"]);
+	showRankUi();
+}
+
+void BloodFightMgr::showRankUi()
+{
+	try_open_battle_rank_layer();
+}
+
+//set show MiniMap Time label
+void BloodFightMgr::showTickLabel(bool isShow)
+{
+	MiniMapUi *miniMapUi = World::getInstance()->getMiniMapUi();
+	if(miniMapUi)
+	{
+		miniMapUi->showLeftTimeLabel(isShow);
+	}
+}
+
+// update MiniMapUi label time;
+void BloodFightMgr::updateTickLabel(int time)
+{
+	if (BF_Prepare_Null == m_eTitleType || time < 0)
+	{
+		return;
+	}
+	const char * tieldTypeStr= NULL;
+	if(m_eTitleType == BF_Prepare_Enter)
+		tieldTypeStr = STRING_TABLE["BF_Prepare_Enter_Time"];
+	else if(m_eTitleType == BF_Prepare_End)
+		tieldTypeStr = STRING_TABLE["BF_Prepare_End_Time"];
+	else if (BF_Battle_End == m_eTitleType)
+		tieldTypeStr = STRING_TABLE["BF_Battle_End_Time"];
+	else if (BF_Activity_Close == m_eTitleType)
+		tieldTypeStr = STRING_TABLE["BF_Activity_Close_Time"];
+	else
+		tieldTypeStr = "";
+
+	stringstream key;
+	int minute=time/60;
+	int second=time%60;
+	string str;
+	safe_sprintf(str,tieldTypeStr,minute,second);
+
+	MiniMapUi *miniMapUi = World::getInstance()->getMiniMapUi();
+	if(miniMapUi)
+	{
+		miniMapUi->updateLeftTimeLabel(str);
+	}
+}
+
+void BloodFightMgr::onEnterBFPrepareGround()
+{
+	m_eCurrBFGroundType = BF_Ground_Prepare;
+	m_curMapId = BF_PREPARE_MAP;
+	//m_targetItems.clear();
+	TaskTraceUi *taskTraceUi = World::getInstance()->getTaskTraceUi();
+	if(taskTraceUi)
+		taskTraceUi->removeTargetItems();
+	this->updatePrepareBattleGroundUi();
+	AutoSelfProtectMgr::getInstance()->SwitchHpCheck(false);
+}
+
+void BloodFightMgr::onExitBFPrepareGround() // On exit Prepare ground go to the big world
+{
+	if( m_eCurrBFGroundType == BF_Ground_Prepare)
+	{
+		World::getInstance()->setPayIconEnable(true);
+		GET_UI(ShortCutUi,WCT_ShorCutUi)->showTransBtn(true);
+
+		TaskTraceUi *taskTraceUi = World::getInstance()->getTaskTraceUi();
+		if(taskTraceUi)
+			taskTraceUi->removeTargetItems();
+		//m_targetItems.clear();
+		showTickLabel(false);
+		MiniMapUi *miniMapUi = World::getInstance()->getMiniMapUi();
+		if(miniMapUi)
+		{
+			miniMapUi->hideUi(false);
+			miniMapUi->showBFBattlePrepareUi(false);
+			miniMapUi->showIntruduceBtn(false);
+
+			refresh_bfprepare_btn t_evt;
+			t_evt.isPrepare = false;
+			t_evt.isHide = true;
+			SEND_EVENT(&t_evt);
+		}
+		this->clearMgrInfo();
+		updatePlayerShow();
+		AutoSelfProtectMgr::getInstance()->SwitchHpCheck(true);
+	}
+}
+
+void BloodFightMgr::onEnterBFBattleGround()
+{
+	m_eCurrBFGroundType = BF_Ground_Battle;
+	m_curMapId = BF_BATTLE_MAP;
+	m_bIsInBFBattle = true;
+	AutoSelfProtectMgr::getInstance()->SwitchHpCheck(false);
+	initPlayerBattleInfo();
+	this->updateBattleGroundUi();
+	TCP_CLIENT->register_net_cmd("NET_SIS_single_remote_att_change" , this , &BloodFightMgr::on_server_rec_role_arr_change);
+}
+
+void BloodFightMgr::onExitBFBattleGround()
+{
+	if( m_eCurrBFGroundType == BF_Ground_Battle)
+	{
+		std::map<unsigned int ,BFBattleRoleData>::iterator iter = m_mapBattleRoleInfo.begin();
+		for (;iter != m_mapBattleRoleInfo.end();iter++)
+		{
+			Player * player=dynamic_cast<Player*>(RoleManager::getInstance()->findRole(iter->first));
+			if(player)
+			{
+				player->switchNameShowMode(PNSM_Normal);
+			}
+		}
+		m_mapBattleRoleInfo.clear();
+		m_stMineBattleData.clear();
+
+		LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+		player->switchNameShowMode(PNSM_Normal);
+
+		World::getInstance()->setPayIconEnable(true);
+		GET_UI(ShortCutUi,WCT_ShorCutUi)->showTransBtn(true);
+
+		TaskTraceUi *taskTraceUi = World::getInstance()->getTaskTraceUi();
+		if(taskTraceUi)
+			taskTraceUi->removeShowNodes();
+		showTickLabel(false);
+		MiniMapUi *miniMapUi = World::getInstance()->getMiniMapUi();
+		if(miniMapUi)
+		{
+			miniMapUi->hideUi(false);
+			miniMapUi->showBFBattlePrepareUi(false);
+			miniMapUi->showIntruduceBtn(false);
+		}
+
+		ChatUiLayer *chatUiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+		if (chatUiLayer)
+			chatUiLayer->resumeVoiceBtnSet();//恢复临时隐藏 不改变用户设置
+		this->clearMgrInfo();
+		updatePlayerShow();
+		AutoSelfProtectMgr::getInstance()->SwitchHpCheck(true);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_single_remote_att_change" , this , &BloodFightMgr::on_server_rec_role_arr_change);
+	};
+}
+
+bool BloodFightMgr::getBFRankItemInfo(int pRankNum,SXzddRankListItem& pItemInfo)
+{
+	map_rank_info::iterator iter = m_mapRankInfo.find(pRankNum);
+	if (iter == m_mapRankInfo.end())
+		return false;
+
+	pItemInfo = iter->second;
+	return true;
+}
+
+bool BloodFightMgr::getRankAwardDataByRankNum(int pRankNum,BFRankAwardData& pAwardInfo)
+{
+	std::map<int,BFRankAwardData>::iterator iter = m_mapRankAwardList.find(pRankNum);
+	if (iter == m_mapRankAwardList.end())
+		return false;
+
+	pAwardInfo = iter->second;
+	return true;
+}
+
+void BloodFightMgr::clearMgrInfo()
+{
+	m_eTitleType  = BF_Prepare_Null;
+	m_eCurrBFGroundType = BF_Ground_Null;
+	m_bIsInBFBattle = false;
+	m_curMapId = -1;
+	m_nCountDownTime = 0;// Prepare enter or prepare end batttle count down time
+	m_bIsPrepare = false;
+	m_bIsInBFBattle = false;
+	m_bIsShowPreBtn = false;
+	m_nFightBeginTime = 0;
+	m_nActivityBeginTime = 0;
+	m_nFightDomeTime = 0;
+	m_stBFTimeInfo.clear();
+	m_mapBattleRoleInfo.clear();
+}
+
+void BloodFightMgr::initPlayerBattleInfo()
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	m_stMineBattleData.dwTeamID = TeamMgr::getInstance()->get_team_id();
+	m_stMineBattleData.dwRoleID = player->getId();
+	m_stMineBattleData.dwMaxHp = player->getAttribute(RA_MaxHP);
+	m_stMineBattleData.dwMaxMp = player->getAttribute(RA_MaxMP);
+	m_stMineBattleData.dwHp = player->getAttribute(RA_HP);
+	m_stMineBattleData.dwMp = player->getAttribute(RA_MP);
+	m_stMineBattleData.dwClass = player->getAttribute(RA_ROLETYPE);
+	m_stMineBattleData.m_bIsFriend = true;
+	m_mapBattleRoleInfo[m_stMineBattleData.dwRoleID] = m_stMineBattleData;
+}
+
+void BloodFightMgr::initRankAwardDataFromXML()
+{
+	f_data_set dataset;
+	std::list<std::string> fields;
+	bool ret =dataset.load("Config/XzddRankingPrize.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		BFRankAwardData data;
+		data.m_nID = dataset.get_int("id",one.c_str(),0);
+		data.m_nRank = dataset.get_int("ranking",one.c_str(),0);
+		string str = "";
+		for ( int i = 0; i < BF_RANK_AWARD_NUM;i++)
+		{
+			safe_sprintf(str,"ItemID%d",i + 1);
+			int t_nItemID = dataset.get_int(str.c_str(),one.c_str(),0);
+			if (t_nItemID != 0)
+			{
+				data.m_nItemID[i] = t_nItemID;
+				safe_sprintf(str,"ItemNum%d",i + 1);
+				data.m_nItemNum[i] = dataset.get_int(str.c_str(),one.c_str(),0);
+			}
+		}
+		m_mapRankAwardList[data.m_nRank] = data;
+	});
+}

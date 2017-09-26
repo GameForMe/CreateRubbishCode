@@ -1,0 +1,121 @@
+#include "WorldLevelMgr.h"
+#include "f_string_util.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "TCPClient.h"
+#include "CmdAdapter.h"
+
+WorldLevelMgr* WorldLevelMgr::getInstance()
+{
+	static WorldLevelMgr Mgr;
+	return &Mgr;
+}
+WorldLevelMgr::WorldLevelMgr()
+	:m_unCurrWorldLv(0)
+{
+
+}
+
+void WorldLevelMgr::Init()
+{
+	loadWorldLevelDataByXML();
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_world_level", this, &WorldLevelMgr::on_server_recv_refersh_world_lv);
+}
+
+void WorldLevelMgr::Destroy()
+{
+	m_unCurrWorldLv = 0;
+	m_mapAddData.clear();
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_world_level", this, &WorldLevelMgr::on_server_recv_refersh_world_lv);
+}
+
+void WorldLevelMgr::loadWorldLevelDataByXML()
+{
+	f_data_set dataset;
+	std::list<std::string> fields;
+	bool ret =dataset.load("Config/worldLevel.xml","id",&fields);
+	CC_ASSERT(ret);
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		WorldLevelAddData data;
+		data.m_nId = dataset.get_int("id",one.c_str(),0);
+		data.m_fMonsterExpPercent = dataset.get_int("monsterExp",one.c_str(),0);
+		data.m_fStatueExpPercent = dataset.get_int("statueExp",one.c_str(),0);
+		data.m_fBiQiExpPercent = dataset.get_int("biqiExp",one.c_str(),0);
+		data.m_fGuaJiExpPercent = dataset.get_int("guajiExp",one.c_str(),0);
+		data.m_fQuestExpPercent = dataset.get_int("questExp",one.c_str(),0);
+		m_mapAddData[data.m_nId] = data;
+	});
+}
+
+int WorldLevelMgr::getWorldLevelAddedExpPercentByType(eWorldLevelAddedType ptype)
+{
+	int t_dValue = getWorldLvDValue();
+	if (t_dValue <= 0 || ptype == E_ADDED_EXP_NULL || !ifWorldLevelOpen())
+	{
+		return 100;
+	}
+	WorldLevelDataMap::iterator iter = m_mapAddData.find(t_dValue);
+	CC_ASSERT(iter != m_mapAddData.end());
+	if (iter == m_mapAddData.end()) return 100;
+	switch(ptype)
+	{
+	case E_ADDED_MONSTER_EXP_PER:
+		{
+			return iter->second.m_fMonsterExpPercent;
+		}
+	case E_ADDED_STATUE_EXP_PER:
+		{
+			return iter->second.m_fStatueExpPercent;
+		}
+	case E_ADDED_BIQI_EXP_PER:
+		{
+			return iter->second.m_fBiQiExpPercent;
+		}
+	case E_ADDED_GUAJI_EXP_PER:
+		{
+			return iter->second.m_fGuaJiExpPercent;
+		}
+	case E_ADDED_QUEST_EXP_PER:
+		{
+			return iter->second.m_fQuestExpPercent;
+		}
+	}
+	return 100;
+}
+
+bool WorldLevelMgr::ifWorldLevelOpen()
+{
+	LocalPlayer* t_loc = RoleManager::getInstance()->getLocalPlayer();
+	return t_loc->getLevel() >= CFG(int,"worldLevel",30) && (int)m_unCurrWorldLv >= CFG(int,"world_level_limit",55);
+}
+
+unsigned int WorldLevelMgr::getCurrentWorldLv()
+{
+	return m_unCurrWorldLv;
+}
+
+bool WorldLevelMgr::ifLvLowThanWorldLv()
+{
+	LocalPlayer* t_loc = RoleManager::getInstance()->getLocalPlayer();
+	return t_loc->getLevel() < (int)m_unCurrWorldLv;
+}
+
+int WorldLevelMgr::getWorldLvDValue()
+{
+	LocalPlayer* t_loc = RoleManager::getInstance()->getLocalPlayer();
+	return m_unCurrWorldLv -  t_loc->getLevel();
+}
+
+void WorldLevelMgr::refersh_world_lv(int lv)
+{
+	m_unCurrWorldLv = lv;
+}
+
+unsigned int WorldLevelMgr::on_server_recv_refersh_world_lv(s_net_cmd *cmd)
+{
+	NET_SIS_get_world_level * msg = (NET_SIS_get_world_level*)cmd;
+	CC_ASSERT(msg);
+	m_unCurrWorldLv = msg->nLevel;
+	return 0;
+}

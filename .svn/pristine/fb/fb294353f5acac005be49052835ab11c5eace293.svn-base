@@ -1,0 +1,101 @@
+#include "LagDetector.h"
+#include "TCPClient.h"
+
+USING_NS_CC;
+
+LagDetector::LagDetector()
+	:mbSended(false)
+	,mbReached(false)
+	,mfWaitForSend(0)
+	,mfWaitForReach(0)
+	,mbDisconnected(false)
+{
+}
+
+LagDetector::~LagDetector()
+{
+}
+
+void LagDetector::update( float fdt)
+{
+	if (mbDisconnected)
+	{
+		return;
+	}
+
+	if (!mbSended)
+	{
+		mfWaitForSend+=fdt;
+
+		if (mfWaitForSend > 5.0f)
+		{
+			mbSended = true;
+			mbReached  =false;
+			mfWaitForReach = 0;
+
+			NET_SIC_get_delay cmd;
+			TCP_CLIENT->send_net_cmd(&cmd, NP_INSIGNIFICANT, true);
+		}
+	}
+	else
+	{
+		if (!mbReached )
+		{
+			mfWaitForReach += fdt;
+			if (mfWaitForReach > 1.0f)
+			{
+				//显示那什么，如果没有就创建
+				showLagLayer();
+			}
+		}
+	}
+}
+
+unsigned int LagDetector::onMsgRecv( s_net_cmd* cmd )
+{
+	mbReached = true;
+	mbSended = false;
+	//隐藏那什么如果有
+	hideLagLayer();
+
+	return 0;
+}
+
+void LagDetector::disconnected()
+{
+	mbDisconnected = true;
+
+	mbReached = true;
+	mbSended = false;
+	//隐藏那什么如果有
+	hideLagLayer();
+}
+
+void LagDetector::showLagLayer()
+{
+
+}
+
+void LagDetector::hideLagLayer()
+{
+
+}
+
+bool LagDetector::init()
+{
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_delay", this, &LagDetector::onMsgRecv);
+	TCP_CLIENT->_sig_disconnected.connect(this, &LagDetector::disconnected);
+	mbSended=false;
+	mbReached=false;
+	mfWaitForSend=0;
+	mfWaitForReach=0;
+	mbDisconnected=false;
+
+	return true;
+}
+
+void LagDetector::destroy()
+{
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_delay", this, &LagDetector::onMsgRecv);
+	TCP_CLIENT->_sig_disconnected.disconnect(this, &LagDetector::disconnected);
+}

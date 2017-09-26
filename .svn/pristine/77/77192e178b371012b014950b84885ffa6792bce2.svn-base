@@ -1,0 +1,212 @@
+#include "CmdAdapter.h"
+#include "assert.h"
+extern "C"{
+#include "minilzo.h"
+}
+#include <stdio.h>
+#include <stdlib.h>
+#include "Platform.h"
+
+namespace internal{
+	unsigned int __LZO_MMODEL _workmem [((LZO1X_1_MEM_COMPRESS)+(sizeof(unsigned int)-1))/sizeof(unsigned int)];
+}
+
+inline unsigned int lzo_append(unsigned int size_)
+{
+	return (((size_)/64) + 16 + 3);
+}
+
+c_cmd_adapter::c_cmd_adapter(c_mem_pool* pool_):pool(pool_){}
+//--------------------------------------------------------
+c_cmd_adapter::~c_cmd_adapter(){}
+//--------------------------------------------------------
+void c_cmd_adapter::pack(s_net_cmd* cmd_, unsigned int& csz_, unsigned char** stream_)
+{
+	*stream_  = (unsigned char*)pool->alloc(cmd_->size + lzo_append(cmd_->size));
+	lzo_uint sz;
+	if(lzo1x_1_compress((unsigned char*)cmd_ , cmd_->size ,*stream_  ,(lzo_uint*)&sz ,internal::_workmem)!=LZO_E_OK)
+	{
+		pool->dealloc(*stream_ );
+		*stream_ = NULL;
+	}
+	csz_ = sz;
+}
+//--------------------------------------------------------
+void c_cmd_adapter::unpack(char* data_, unsigned int sz_, unsigned int osz_, std::list<s_net_cmd*>& cmds_)
+{
+#ifdef USE_KEY
+	Sara_EnCode((unsigned char*)data_, sz_, recvKey);
+#endif
+	unsigned char* buflzo = (unsigned char*)pool->alloc(osz_);
+	lzo_uint sz = osz_;
+	if(lzo1x_decompress((unsigned char*)data_ , sz_ , buflzo , &sz ,NULL) != LZO_E_OK)
+	{
+		pool->dealloc(buflzo);
+		return;
+	}
+	char* rp = (char*)buflzo;
+	unsigned int packsz = 0;
+	while(rp < (char*)buflzo + osz_)
+	{
+		s_net_cmd* rc = (s_net_cmd*)rp;
+		packsz = rc->size;
+		s_net_cmd* ele = (s_net_cmd*)pool->alloc(packsz);
+		memcpy(ele , rc , packsz);
+		cmds_.push_back(ele);
+		rp += packsz;
+	}
+	pool->dealloc(buflzo);
+}
+
+char* ip2String(unsigned int dwIP)
+{
+	in_addr addr;
+#if defined OVD_PLATFORM_WINDOWS
+	addr.S_un.S_addr = dwIP;
+#else
+	addr.s_addr = dwIP;
+#endif
+	return inet_ntoa(addr);
+}
+
+//void char2wchar(char *str, wchar_t *wstr)
+//{
+//	size_t len = strlen(str) + 1;
+//	size_t converted = 0;
+//#if defined OVD_PLATFORM_WINDOWS
+//	mbstowcs_s(&converted, wstr, len, str, _TRUNCATE);
+//#else
+//	mbstowcs(wstr, str, TRUNCATE);
+//#endif
+//}
+
+
+size_t _utf_length(const char* utf8str_) 
+{
+	size_t cnt = 0;
+	while (*utf8str_++)
+		cnt++;
+	return cnt;
+}
+
+size_t _utf_length(const wchar_t* utf16str_)
+{
+	size_t cnt = 0;
+	while (*utf16str_++)
+		cnt++;
+	return cnt;
+}
+
+size_t _encoded_size(wchar_t codepoint_)
+{
+	if (codepoint_ < 0x80)
+		return 1;
+	else if (codepoint_ < 0x0800)
+		return 2;
+	else if (codepoint_ < 0x10000)
+		return 3;
+	else
+		return 4;
+}
+
+size_t Utf8ToUtf16(const char* src_, wchar_t* dest_, size_t destlen_, size_t srclen_ /*= 0*/) 
+{
+	if (srclen_ == 0)
+		srclen_ = _utf_length(src_);
+	size_t destcapacity = destlen_;
+	for (size_t idx = 0; ((idx < srclen_) && (destcapacity > 0));)
+	{
+		wchar_t	cp;
+		unsigned char	cu = src_[idx++];
+		if (cu < 0x80)
+			cp = (wchar_t)(cu);
+		else if (cu < 0xE0)
+		{
+			cp = ((cu & 0x1F) << 6);
+			cp |= (src_[idx++] & 0x3F);
+		}
+		else if (cu < 0xF0)
+		{
+			cp = ((cu & 0x0F) << 12);
+			cp |= ((src_[idx++] & 0x3F) << 6);
+			cp |= (src_[idx++] & 0x3F);
+		}
+		else
+		{
+			cp = L'?';
+		}
+		*dest_++ = cp;
+		--destcapacity;
+	}
+	return destlen_ - destcapacity;
+}
+
+wchar_t* Utf8ToUtf16( const char* src_)
+{
+	static wchar_t vStr[512] = {0};
+	memset(vStr, 0, sizeof(vStr));
+	Utf8ToUtf16(src_, vStr,300,0);
+	return vStr;
+}
+
+size_t Utf16ToUtf8(const wchar_t* src_, char* dest_, size_t destlen_, size_t srclen_)
+{
+	if (srclen_ == 0)
+		srclen_ = _utf_length(src_);
+	size_t destcapacity = destlen_;
+	for (size_t idx = 0; idx < srclen_; ++idx)
+	{
+		wchar_t cp = src_[idx];
+		if (destcapacity < _encoded_size(cp))
+			break;
+		if (cp < 0x80)
+		{
+			*dest_++ = (char)cp;
+			--destcapacity;
+		}
+		else if (cp < 0x0800)
+		{
+			*dest_++ = (char)((cp >> 6) | 0xC0);
+			*dest_++ = (char)((cp & 0x3F) | 0x80);
+			destcapacity -= 2;
+		}
+		else if (cp < 0x10000)
+		{
+			*dest_++ = (char)((cp >> 12) | 0xE0);
+			*dest_++ = (char)(((cp >> 6) & 0x3F) | 0x80);
+			*dest_++ = (char)((cp & 0x3F) | 0x80);
+			destcapacity -= 3;
+		}
+		else
+		{
+			*dest_++ = (char)'?';
+			*dest_++ = (char)'?';
+			*dest_++ = (char)'?';
+			*dest_++ = (char)'?';
+			destcapacity -= 4;
+		}
+	}
+	return destlen_ - destcapacity;
+}
+
+std::string Utf16ToUtf8( const wchar_t* src_ )
+{
+	static char vStr[512] = {0};
+	memset(vStr, 0, sizeof(char) * 512);
+	Utf16ToUtf8(src_, vStr,300,0);
+	return std::string(vStr);
+}
+
+void Sara_EnCode( unsigned char *buf, unsigned int nsize, unsigned int nkey )
+{
+	unsigned char tempc1 = nsize ^ ~0xFF;//  nsize%256;
+	unsigned char tempc2 = nkey ^ ~0xFF;//  nkey%256;
+	unsigned char tempc3;
+	for( unsigned int i=0; i<nsize; i++ )
+	{
+		tempc3 = buf[i];
+		tempc1 ^= tempc2;
+		buf[i] ^= tempc1;
+		tempc1 = buf[i] ^ tempc3;
+	}
+}

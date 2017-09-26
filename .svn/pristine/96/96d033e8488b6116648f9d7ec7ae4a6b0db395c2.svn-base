@@ -1,0 +1,516 @@
+#include "LabelEx.h"
+#include "CommonView.h"
+#include <algorithm>
+#include "BaseDefine.h"
+#include "Helper.h"
+
+USING_NS_CC;
+
+#define LABEL_FONT_NAME "font/STXihei.ttf"
+
+struct LabelParseState
+{
+	std::stringstream	text;
+	int					font_size;
+	cocos2d::ccColor3B			font_color;
+	cocos2d::CCPoint				pos;
+	cocos2d::CCSize				size;
+	bool				shadow;
+
+	LabelParseState()
+		: font_size(18)
+		, font_color(cocos2d::ccWHITE)
+		, pos(cocos2d::CCPointZero)
+		, size(cocos2d::CCSizeZero)
+		, shadow(false)
+	{}
+
+	void reset()
+	{
+		text.str("");
+		size = cocos2d::CCSizeZero;
+	}
+
+	float right() 
+	{
+		return pos.x + size.width;
+	}
+
+	void add_row(float row_height)
+	{
+		pos.x = 0.0f;
+		pos.y -= row_height;
+	}
+};
+
+LabelEx::LabelEx()
+: m_row_height(20)
+, m_pack_mode(false)
+, m_root(NULL)
+, m_label_size(CCSizeZero)
+, m_top_down(false)
+{
+}
+
+LabelEx::~LabelEx()
+{}
+
+void LabelEx::setup(float row_height, bool pack_mode,ExpandCallback cb /*= NULL*/)
+{
+	m_row_height = row_height;
+	m_pack_mode = pack_mode;
+
+	setExpandCB(cb);
+}
+
+void LabelEx::set_text(const std::string& text)
+{
+	reset();
+	parse(text);
+}
+
+void LabelEx::reset()
+{
+	m_items.resize(0);
+	BOOST_FOREACH(CCNode* node, m_nodes)
+	{
+		node->removeFromParentAndCleanup(true);
+	}
+	m_nodes.resize(0);
+
+	
+}
+
+void LabelEx::parse(const std::string& text)
+{
+	//! 当前状态.
+	LabelParseState	state;
+	CCSize content_size = getContentSize();
+	
+	m_label_size = CCSizeZero;
+
+	const char* text_str = text.c_str();
+	m_row_height = parse_height(text_str, m_row_height);
+
+	size_t text_len = strlen(text_str);
+	for(size_t i=0; i<text_len;)
+	{
+		char c = text_str[i];
+		
+		if(c == '<')
+		{
+			size_t next_i = parse_mark(this, &state, &text_str[i], i);
+			if(next_i != i)
+			{
+				i = next_i;
+				continue;
+			}
+		}
+			
+		if(c == '\\' && text_str[i+1] == 'n')
+		{
+			add_text_item(&state, true);	
+			i+= 2;
+			continue;
+		}
+		
+		const char* a_word = get_word_from_utf8_str(&text_str[i], 0);
+		//std::string fullPath = CCFileUtils::sharedFileUtils()->fullPathForFilename(FT_FONTFACE);
+		const CCSize word_size = /*CCImage::measureString(a_word, FONT_NAME, state.font_size)*/LabelFT::measureTextSize(a_word,state.font_size,FT_FONTFACE);
+		
+		// 满行了, 先存上一个item.
+		if(state.right() + word_size.width > content_size.width)
+		{
+			add_text_item(&state, true);
+		}
+		
+		state.text << a_word;
+		state.size.width += word_size.width;\
+		state.size.height = std::max(state.size.height, word_size.height);
+
+		i += strlen(a_word);
+	}
+
+	//! 结尾的字符串.
+	add_text_item(&state, false);
+	if(state.right() > m_label_size.width)
+	{
+		m_label_size.width = state.right();
+	}
+
+	CCSize pack_size = content_size;
+	pack_size.height = fabs(state.pos.y) + m_row_height;
+
+	m_label_size.height = pack_size.height;
+
+	if(m_pack_mode)
+	{
+		if (mExpandCB)
+		{
+			mExpandCB(pack_size.height - content_size.height);
+		}
+
+		setContentSize(pack_size);
+	}
+
+	build_nodes();
+
+	if(m_top_down)
+	{
+		grab_root()->setPositionY(content_size.height - m_row_height);
+	}
+	else
+	{
+		grab_root()->setPositionY(pack_size.height - m_row_height);
+	}
+}
+
+void LabelEx::add_text_item(LabelParseState* state, bool new_line)
+{
+	if(!state->size.equals(CCSizeZero))
+	{
+		LabelItem item;
+		item.text = state->text.str();
+		item.font_size = state->font_size;
+		item.font_color = state->font_color;
+		item.pos = state->pos;
+		item.size = state->size;
+		item.shadow = state->shadow;
+		m_items.push_back(item);
+	}	
+
+	if(new_line)
+	{
+		if(state->right() > m_label_size.width)
+		{
+			m_label_size.width = state->right();
+		}
+
+		state->add_row(m_row_height);
+	}
+	else 
+	{
+		state->pos.x += state->size.width;
+	}
+
+	state->reset();
+}
+
+// int LabelEx::get_words_num(const std::string& text)
+// {
+// 	size_t word_count = 0;
+// 	size_t i = 0;
+// 	const char* text_str = text.c_str();
+// 	parse_height(text_str);
+// 	size_t text_len = strlen(text_str);
+// 
+// 	for(i=0; i<text_len;)
+// 	{
+// 		char c = text_str[i];
+// 
+// 		if(c == '<')
+// 		{
+// 			size_t next_i = parse_mark(NULL, NULL, &text_str[i], i, &word_count);
+// 			if(next_i != i)
+// 			{
+// 				i = next_i;
+// 				continue;
+// 			}
+// 		}
+// 
+// 		if(c == '\\' && text_str[i+1] == 'n')
+// 		{
+// 			i+= 2;
+// 			continue;
+// 		}
+// 
+// 		const char* a_word = get_word_from_utf8_str(&text_str[i], 0);
+// 		i += strlen(a_word);
+// 
+// 		++word_count;
+// 	}
+// 
+// 	return word_count;
+// }
+
+std::string LabelEx::get_words_from_utf8_str(const std::string& text, int num_word)
+{
+	size_t word_count = 0;
+	size_t i = 0;
+	const char* text_str = text.c_str();
+	parse_height(text_str);
+	size_t text_len = strlen(text_str);
+	size_t height_str_len = (size_t)(text_str - text.c_str());
+
+	for(i=0; i<text_len;)
+	{
+		if(word_count >= (unsigned int)num_word)
+		{
+			break;
+		}
+
+		char c = text_str[i];
+
+		if(c == '<')
+		{
+			size_t next_i = parse_mark(NULL, NULL, &text_str[i], i, &word_count);
+			if(next_i != i)
+			{
+				i = next_i;
+				continue;
+			}
+		}
+
+		if(c == '\\' && text_str[i+1] == 'n')
+		{
+			i+= 2;
+			continue;
+		}
+
+		const char* a_word = get_word_from_utf8_str(&text_str[i], 0);
+		i += strlen(a_word);
+
+		++word_count;
+	}
+
+	return text.substr(0, i + height_str_len);
+}
+
+
+size_t LabelEx::parse_mark(LabelEx* label, LabelParseState* state, const char* str, size_t i, size_t* word_count)
+{
+	//size_t next_i = i;
+	const char* p = str;
+
+	const char* end = strstr(p, ">");
+	if(!end)
+	{
+		return i;
+	}
+
+	char buf[256];
+	
+	const char* font_agent = "<font=";
+	size_t font_agent_len = strlen(font_agent);
+	const char* color_agent = "<color=";
+	size_t color_agent_len = strlen(color_agent);
+	const char* frame_agent = "<frame=";
+	size_t frame_agent_len = strlen(frame_agent);
+	const char* shadow_agent = "<shadow=";
+	size_t shadow_agent_len = strlen(shadow_agent);
+
+	do 
+	{
+		if(strncmp(p, font_agent, font_agent_len) == 0)
+		{
+			if(state)
+			{
+				//<font=size>
+				label->add_text_item(state, false);
+
+				size_t len = (end - p) - font_agent_len;
+				len = std::min<size_t>(len, 255);
+				strncpy(buf, p + font_agent_len, len);
+				buf[len] = '\0';
+				state->font_size = strtol(buf, NULL, 10);
+			}
+		}
+		else if(strncmp(p, color_agent, color_agent_len) == 0)
+		{
+			if(state)
+			{
+				//<color=0xffffff>
+				label->add_text_item(state, false);
+
+				size_t len = (end - p) - color_agent_len;
+				len = std::min<size_t>(len, 255);
+				strncpy(buf, p + color_agent_len, (end - p) - color_agent_len);
+				buf[len] = '\0';
+				unsigned int col = strtol(buf, NULL, 16);
+				state->font_color.b = col & 0xFF;
+				state->font_color.g = (col >> 8) & 0xFF;
+				state->font_color.r = (col >> 16) & 0xFF;
+			}			
+		}
+		else if(strncmp(p, frame_agent, frame_agent_len) == 0)
+		{
+			if(state)
+			{
+				//<frame=name>
+				size_t len = (end - p) - frame_agent_len;
+				len = std::min<size_t>(len, 255);
+				strncpy(buf, p + frame_agent_len, len);
+				buf[len] = '\0';
+				label->add_text_item(state, false);
+				label->add_frame_item(state, buf);
+			}	
+
+			if(word_count)
+			{
+				*word_count += 1;
+			}
+		}
+		else if(strncmp(p, shadow_agent, shadow_agent_len) == 0)
+		{
+			if(state)
+			{
+				//<shadow=1>
+				label->add_text_item(state, false);
+
+				size_t len = (end - p) - shadow_agent_len;
+				len = std::min<size_t>(len, 255);
+				strncpy(buf, p + shadow_agent_len, len);
+				buf[len] = '\0';
+				state->shadow = strtol(buf, NULL, 10);
+			}			
+		}
+		else
+		{
+			break;
+		}
+
+		return i + (end - p) + 1;
+
+	} while (false);	
+
+	return i;
+}
+
+void LabelEx::add_frame_item(LabelParseState* state, const char* frame_name)
+{
+	std::vector<std::string> frames = split_str(frame_name, ',');
+	
+	CCSize max_size = CCSizeZero;
+	for(size_t i=0; i<frames.size(); ++i)
+	{
+		CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frames[i].c_str());
+		if(frame)
+		{
+			CCSize size = frame->getOriginalSize();
+			max_size.width = std::max(max_size.width, size.width);
+			max_size.height = std::max(max_size.height, size.height);
+		}
+		else
+		{
+			CCImage image;
+			image.initWithImageFile(frames[i].c_str());
+			CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addUIImage(&image,frames[i].c_str());
+			frame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+			CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(frame, frames[i].c_str());
+
+			CCSize size = frame->getOriginalSize();
+			max_size.width = std::max(max_size.width, size.width);
+			max_size.height = std::max(max_size.height, size.height);
+		}
+	}
+
+	if(max_size.equals(CCSizeZero))
+	{
+		return;
+	}
+
+	CCSize frame_size = max_size;
+	CCSize content_size = getContentSize();
+
+	//! 看当前行能不能放下.
+	if(state->pos.x > 0.0f)
+	{
+		if(state->pos.x + frame_size.width > content_size.width)
+		{
+			state->add_row(m_row_height);
+		}
+	}
+
+	LabelItem item;
+	item.frame_name = frame_name;
+	item.pos = state->pos;
+	item.size = frame_size;
+	m_items.push_back(item);
+
+	state->pos.x += item.size.width;
+	state->reset();
+}
+
+void LabelEx::build_nodes()
+{
+	for(size_t i=0; i<m_items.size(); ++i)
+	{
+		const LabelItem& item = m_items[i];
+		if(!item.text.empty())
+		{
+			TTFConfig cfg;
+			cfg.fontFilePath=  FT_FONTFACE;
+			cfg.fontSize = item.font_size;
+			cfg.outlineSize = item.shadow?1:0;
+
+			LabelFT* ttf = /*CCLabelTTF::create(item.text.c_str(), FONT_NAME, item.font_size, CCSizeZero, kCCTextAlignmentLeft)*/LabelFT::createWithTTF(cfg,item.text);
+			ttf->setTextColor(Helper::converColor3B_2_4B(item.font_color));
+			ttf->setPosition(ccp(item.pos.x + item.size.width * 0.5f, item.pos.y + item.size.height * 0.5f));
+// 			if(item.shadow)
+// 			{
+// 				//beautify_ttf(ttf);
+// 			}
+			grab_root()->addChild(ttf);			
+			m_nodes.push_back(ttf);
+		}
+		else if(!item.frame_name.empty())
+		{
+			std::vector<std::string> frames = split_str(item.frame_name, ',');
+			
+			CCNode* root = CCNode::create();
+			root->setAnchorPoint(ccp(0.5f, 0.5f));
+			root->setContentSize(item.size);
+			root->setPosition(ccp(item.pos.x + item.size.width * 0.5f, item.pos.y + m_row_height * 0.5f));
+
+			for(size_t k=0; k<frames.size(); ++k)
+			{
+				CCSprite* sprite = CCSprite::createWithSpriteFrameName(frames[k].c_str());
+				sprite->setPosition(ccp(item.size.width * 0.5f, item.size.height * 0.5f));
+				root->addChild(sprite);
+			}
+
+			grab_root()->addChild(root);
+			m_nodes.push_back(root);
+		}
+	}
+}
+
+CCNode* LabelEx::grab_root()
+{
+	if(!m_root)
+	{
+		m_root = CCNode::create();
+		addChild(m_root);
+	}
+	return m_root;
+}
+
+float LabelEx::parse_height(const char*& p, float default_val)
+{
+	float height = default_val;
+	char buf[256];
+	do 
+	{
+		const char* end = strstr(p, ">");
+		if(!end)
+		{
+			break;
+		}
+
+		//! 字符串头里面包含了行间距信息, 需要过滤掉.
+		const char* height_agent = "<height=";
+		size_t height_agent_len = strlen(height_agent);
+		if(strncmp(p, height_agent, height_agent_len) == 0)
+		{
+			size_t len = (end - p) - height_agent_len;
+			len = std::min<size_t>(len, 255);
+			strncpy(buf, p + height_agent_len, len);
+			buf[len] = '\0';
+			height = atof(buf);
+			p = end + 1;
+		}
+
+	} while (false);
+
+	return height;
+}

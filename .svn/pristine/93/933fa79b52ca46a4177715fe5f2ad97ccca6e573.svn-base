@@ -1,0 +1,366 @@
+#include "ArenaMainMgr.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "UiManager.h"
+#include "WorldPacket.h"
+#include "ArenaMainUi.h"
+#include "ToolTip.h"
+#include "UiTools.h"
+#include "CommonMsgDefine.h"
+#include "f_string_table.h"
+#include "TCPClient.h"
+#include "LocalPlayer.h"
+#include "f_string_util.h"
+//////////////////////////////////////////////////////////////////////////
+
+ArenaMainMgr::ArenaMainMgr()
+	:register_schedule(false)
+{
+	m_ShowRoleState = 0;
+	m_AddSilver = 0; //奖励金钱
+	m_AddExp = 0; //奖励经验
+	m_AddDiamond = 0; //奖励钻石
+	m_HighestRank = 0; //最高排名
+	checkedChallengeIndex = -1;//挑战者序号
+}
+
+ArenaMainMgr::~ArenaMainMgr()
+{
+
+}
+
+void ArenaMainMgr::set_countDownTime(int time)
+{
+	if (time < 0 || time > 300)
+	{
+		_countDownTime = 0;
+	}
+	else
+		_countDownTime = time;
+
+	safe_register_schedule();
+}
+
+ArenaMainMgr * ArenaMainMgr::getInstance()
+{
+	static ArenaMainMgr instance;
+	return &instance;
+}
+
+unsigned int ArenaMainMgr::onUpdatejjcData( s_net_cmd *cmd )
+{
+	//<< tagJJCTargetRoleInfo(struct) >> + tagJJCRoleInfo(struct) + 可挑战次数(INT) + CD(INT)  
+	WorldPacket Msg((const void*)cmd);
+		
+		for (int i = 0;i < 3;i++)
+		{
+			Msg >> challengePlayerAttr[i];
+		}
+		Msg >> localPlayerAttr;
+		Msg >> localjjcAccessoryInfo.challengeTimes;
+		Msg >> localjjcAccessoryInfo.challengeCDTime;
+		set_countDownTime(300 - localjjcAccessoryInfo.challengeCDTime);
+		ArenaMainUiLayer* pUI = getUiNodeByTag<ArenaMainUiLayer>(WCT_ARENAMAINUI);
+		if(pUI)
+		{
+			pUI->SetArenaMainUiData();
+		}
+	return 0;
+}
+
+void ArenaMainMgr::setWuyejjcTimes(int conut)
+{
+	localjjcAccessoryInfo.challengeTimes = conut;
+	if (IS_UI_OPEN(WCT_ARENAMAINUI))
+	{
+		GET_UI(ArenaMainUi, WCT_ARENAMAINUI)->updateChallengeTimes(localjjcAccessoryInfo.challengeTimes);
+	}
+	
+}
+
+
+unsigned int ArenaMainMgr::onUpdatejjcRankData( s_net_cmd *cmd )
+{
+	//tagJJCRoleInfo(struct) + << tagJJCTargetRoleInfo(struct) >>  
+	WorldPacket Msg((const void*)cmd);
+	int index;
+	Msg >> index;
+	for (int i = 0;i < index;i++)
+	{
+		Msg >> challengePlayerRankAttr[i];
+	}
+	return 0;
+}
+
+// std::string ArenaMainMgr::getChallengePlayerName(wchar_t* roleName)
+// {
+// 	char vStr[128];
+// 	memset(vStr, 0, sizeof(char) * 128);
+// 	Utf16ToUtf8(roleName, vStr, 128, 0);
+// 	return vStr;
+// }
+
+void ArenaMainMgr::setChallengePlayerRankAttr( int index,tagJJCTargetRoleInfo roleInfo )
+{
+	challengePlayerRankAttr[index] = roleInfo;
+}
+
+void ArenaMainMgr::clearjjcData()
+{
+	memset(challengePlayerAttr,0,sizeof(tagJJCTargetRoleInfo) * 3);
+	memset(&localPlayerAttr,0,sizeof(tagJJCRoleInfo));
+}
+
+unsigned int ArenaMainMgr::onUpdateLosejjcData( s_net_cmd *cmd )
+{
+	//结果[0 = 胜利,1 = 失败  + tagJJCRoleInfo(struct) + 可挑战次数(INT) + CD(INT)]
+	WorldPacket Msg((const void*)cmd);
+	int isWin;
+	Msg >> isWin;
+	if (isWin == 0)
+	{
+		ArenaMainMgr::getInstance()->setIsJJCWin(true);
+		OPEN_UI(WCT_ARENAACCOUNTSUI);
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(CHAllENGSUCCESS);
+		//ToolTip::getInstance()->push("win");
+	}else{
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(CHALLENGFAIL);
+		ArenaMainMgr::getInstance()->setIsJJCWin(false);
+		OPEN_UI(WCT_ARENAACCOUNTSUI);
+		tagJJCRoleInfo tempAttr;
+		Msg >> tempAttr;
+		ArenaMainMgr::getInstance()->setLocalPlayerAttr(tempAttr);
+		Msg >> localjjcAccessoryInfo.challengeTimes;
+		Msg >> localjjcAccessoryInfo.challengeCDTime;
+		set_countDownTime(300 - localjjcAccessoryInfo.challengeCDTime);
+		//ToolTip::getInstance()->push("lose");
+	}
+	return 0;
+}
+
+void ArenaMainMgr::updateArenaTimes(int index)
+{
+	localjjcAccessoryInfo.challengeTimes = index;
+}
+
+//根据剩余时间获取重置挑战cd所需元宝数
+int ArenaMainMgr::GetResetCDNeedYuanBao() const
+{
+	if( _countDownTime <= 0 )
+		return 0;
+	if( _countDownTime <= 30 )
+		return 5;
+	else if( _countDownTime <= 60 )
+		return 10;
+	else if( _countDownTime <= 90 )
+		return 15;
+	else if( _countDownTime <= 120 )
+		return 20;
+	else if( _countDownTime <= 150 )
+		return 25;
+	else if( _countDownTime <= 180 )
+		return 30;
+	else if( _countDownTime <= 210 )
+		return 35;
+	else if( _countDownTime <= 240 )
+		return 40;
+	else if( _countDownTime <= 270 )
+		return 45;
+	else if( _countDownTime <= 300 )
+		return 50;
+	else
+		return 50;
+}
+
+bool ArenaMainMgr::try_to_challenge( size_t index )
+{
+	CC_ASSERT(index < MAX_JJC_RANDOM_ROLE_INFO);
+
+	if (have_enough_challenge_cnt())
+	{
+		if (!try_to_clear_challenge_cd())
+		{
+			setCheckedChallengeIndex(index);
+			//发包
+			WorldPacket SIC_Msg(NET_C2G_REQUEST_JJC_PK);	//组装消息头
+			SIC_Msg << 0;
+			unsigned int tmpRoleId = getChallengePlayerAttr(index).dwRoleID;
+			SIC_Msg << tmpRoleId;
+			int tmpRank = getChallengePlayerAttr(index).nRank;
+			SIC_Msg << tmpRank;										//发送信息内容
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)SIC_Msg.contents(), NP_IDLE, false); //发送
+
+			return true;
+		}
+	}
+	else
+	{
+		try_to_add_challenge_cnt();
+	}
+
+	return false;
+}
+
+void ArenaMainMgr::show_recharge_msgbox()
+{
+	string text = STRING_TABLE["yuanbao_not_enough"];
+	MessageBoxUi* ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, text.c_str(), TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+	World::getInstance()->getScene()->addChild(ui, WZ_MESSAGEBOX);
+	ui->signalOkBtnPressed.connect(UiMgr::getInstance(),&UiMgr::open_recharge_layer);
+}
+
+bool ArenaMainMgr::have_enough_challenge_cnt() const
+{
+	return localjjcAccessoryInfo.challengeTimes >0;
+}
+
+bool ArenaMainMgr::get_add_challenge_cost(int& cost_yuanbao)
+{
+	int max  =get_add_challenge_max_cnt();
+	int already_buy =  get_already_buy_cnt();
+	if (max <=  already_buy)
+		return false;
+	else
+	{
+		cost_yuanbao = (already_buy+1) * 10;
+		return true;
+	}
+}
+
+int ArenaMainMgr::get_already_buy_cnt() const
+{
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if (lp )
+	{
+		return lp->getRoleDayClearInfoTwo(ERDCT_JJC_ADD_PK_COUNT);
+	}
+	return 0;
+}
+
+void ArenaMainMgr::show_buy_challenge_cnt_msgbox( int already_but_cnt,int cost_yuanbao )
+{
+	std::string text;
+	safe_sprintf(text,STRING_TABLE["buy_challenge_cnt_notice_text"],already_but_cnt,get_add_challenge_max_cnt(),cost_yuanbao);
+
+	MessageBoxUi* mb = MessageBoxUi::createWithTwoBtn_LabelEx(TEXT_UTF8_TISHI
+		,text.c_str()
+		,TEXT_UTF8_QUEDING
+		,TEXT_UTF8_QUXIAO);
+	World::getInstance()->getScene()->addChild(mb, WZ_MESSAGEBOX);
+	mb->signalOkBtnPressed.connect(this,&ArenaMainMgr::on_msgbox_buy_challenge_cnt_ok);
+	
+	_cache_cost = cost_yuanbao;
+}
+
+void ArenaMainMgr::on_msgbox_buy_challenge_cnt_ok()
+{
+	int own = PackageManager::getInstance()->getYuanBao();
+	if (own >= _cache_cost)
+	{
+		//竞技场请求增加挑战次数
+		WorldPacket SIC_Msg(NET_C2G_REQUEST_JJC_ADD_PK_COUNT);	//组装消息头
+		TCP_CLIENT->send_net_cmd((const s_net_cmd*)SIC_Msg.contents(), NP_IDLE, false); //发送
+	}
+	else
+	{
+		show_recharge_msgbox();
+	}
+}
+
+bool ArenaMainMgr::is_in_challenge_cd() const
+{
+	return _countDownTime > 0;
+}
+
+bool ArenaMainMgr::have_enough_yuanbao_to_clear_cd( int& cost ) const
+{
+	int yuanbao = PackageManager::getInstance()->getYuanBao();
+	cost = GetResetCDNeedYuanBao();
+
+	return yuanbao >= cost;
+}
+
+void ArenaMainMgr::show_clear_cd_msgbox( int cost )
+{
+	std::string text;
+	safe_sprintf(text,STRING_TABLE["cool_down_imm_for_challenge"],cost);
+
+	MessageBoxUi* mb = MessageBoxUi::createWithTwoBtn_LabelEx(TEXT_UTF8_TISHI
+		,text.c_str()
+		,TEXT_UTF8_QUEDING
+		,TEXT_UTF8_QUXIAO);
+	World::getInstance()->getScene()->addChild(mb, WZ_MESSAGEBOX);
+	mb->signalOkBtnPressed.connect(this,&ArenaMainMgr::on_msgbox_cd_confirm);
+
+	_cache_cost = cost;
+}
+
+void ArenaMainMgr::on_msgbox_cd_confirm()
+{
+	int yuanbao = PackageManager::getInstance()->getYuanBao();
+	if (yuanbao< _cache_cost)
+	{
+		show_recharge_msgbox();
+		return;
+	}
+	//竞技场请求重置挑战CD时间
+	WorldPacket SIC_Msg(NET_C2G_REQUEST_JJC_RESET_PK_CD);	//组装消息头
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)SIC_Msg.contents(), NP_IDLE, false); //发送
+}
+
+bool ArenaMainMgr::try_to_clear_challenge_cd()
+{
+	bool ret = is_in_challenge_cd();
+	if (ret)
+	{
+		int cost=0;
+		have_enough_yuanbao_to_clear_cd(cost);
+		show_clear_cd_msgbox(cost);
+// 		if (have_enough_yuanbao_to_clear_cd(cost))
+// 		{
+// 			//提示准备清除
+// 			show_clear_cd_msgbox(cost);
+// 		}
+// 		else
+// 		{
+// 			//提示去充值
+// 			//show_recharge_msgbox();
+// 			show_clear_cd_msgbox(cost);
+// 		}
+	}
+
+	return ret;
+}
+
+void ArenaMainMgr::try_to_add_challenge_cnt()
+{
+	int cost_yuanbao = 0;
+	if (!get_add_challenge_cost(cost_yuanbao))
+	{
+		//提示 最大购买
+		ToolTip::getInstance()->push(STRING_TABLE["can_not_buy_challenge_cnt"]);
+	}
+	else
+	{
+		//提示 准备购买
+		show_buy_challenge_cnt_msgbox(get_already_buy_cnt(),cost_yuanbao);
+	}
+}
+
+void ArenaMainMgr::reSet_countDownTime()
+{
+	_countDownTime = 0;
+
+	safe_register_schedule();
+}
+
+void ArenaMainMgr::decrease_time( float )
+{
+	--_countDownTime ; 
+	if(_countDownTime <0)
+	{
+		_countDownTime =0;
+
+		safe_unregister_schedule();
+	}
+}

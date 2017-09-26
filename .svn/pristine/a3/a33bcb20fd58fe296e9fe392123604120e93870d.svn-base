@@ -1,0 +1,944 @@
+#include "ClientUpdate.h"
+#include "RoleManager.h"
+#include "MapManager.h"
+#include "MessageBoxUi.h"
+#include "Login.h"
+#include "TCPClient.h"
+#include "CmdAdapter.h"
+#include "World.h"
+#include "ActionProto.h"
+#include "SkillManager.h"
+#include "SelectRole.h"
+#include "RewardMgr.h"
+#include "NameMgr2.h"
+#include "CreateRole.h"
+#include "SkillAnimManager.h"
+#include "GroundItemManager.h"
+#include "PackageManager.h"
+#include "Phyx.h"
+#include "CrossSceneUI.h"
+#include "UiResourceMgr.h"
+#include "Auto_ActionMgr.h"
+#include "AutoSelfProtect.h"
+#include "ChatMgr.h"
+#include "StallMgr.h"
+#include "NewPlayerGuide.h"
+#include "InstanceMgr.h"
+#include "QuestMgr.h"
+#include "UiManager.h"
+#include "AnimationCache.h"
+#include "DBMgr.h"
+#include "FilterMgr.h"
+#include "LoginProto.h"
+#include "StringMgr.h"
+#include "SystemMsg.h"
+#include "Movie.h"
+#include "PoolDefine.h"
+#include "AttackAction.h"
+#include "ReceiveRewardUi.h"
+#include "AppDelegate.h"
+//#include "UpdateUI.h"
+#include "ConcernMgr.h"
+#include "TeamMgr.h"
+#include "DelayUi.h"
+#include "NoticeLayer.h"
+#include "TextTip.h"
+#include "RewardQuestMgr.h"
+#include "StoreMgr.h"
+#include "HearSayMgr.h"
+#include "cc_profiler.h"
+
+#include "f_cache_data_mgr.h"
+
+#include "UpdateNode.h"
+
+#include "CCLuaEngine.h"
+#include "NoticeBoardUi.h"
+#include "ServerListUi.h"
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+#include "wzolJni.h"
+#include "f_string_util.h"
+extern AppDelegate *g_AppDelegate;
+#endif
+
+#include "f_string_util.h"
+#include "f_string_table.h"
+#include "FMBattleMgr.h"
+#include "BloodFightMgr.h"
+#include "SBKSDManager.h"
+#if ENABLE_GOTYE==1
+#include "voice/VoiceMgr.h"
+#endif
+
+
+void setUpNoticeString(const char* text)
+{
+    CCScene *scene = CCDirector::sharedDirector()->getRunningScene();
+    CC_ASSERT(scene);
+    CCNode *node = scene->getChildByTag(10); //获取中间文字node
+    if(node){
+        LabelFT *label = dynamic_cast<LabelFT*>(node->getChildByTag(1));
+        if(label){
+            label->setString(text);
+        }
+    }
+}
+
+ClientUpdate::ClientUpdate()
+	: _currentScene(ST_NONESCENE)
+	, _lastScene(ST_NONESCENE)
+	, _firstCircle(true)
+	, _time(0)
+	, _lastSendTime(0)
+	, _gotoServerList(false)
+	, _gotoServerList2(false)
+	, _loadLoginUI(false)
+	, _gotoLoginUI(false)
+	,_gameselfexit(false)
+	,_sdkInitFailed(false)
+	, _lastMessageTime(0)
+	,_isGamePause(false)
+	,_isDidFinishLaunching(false)
+	,_isSDKInitSuccess(false)
+	,_isSwitchAccount(false)
+	,_inCrossSceneLastFrame(false)
+    ,_isCheckUpdating(false)
+{
+
+}
+
+ClientUpdate * ClientUpdate::getInstance()
+{
+	static ClientUpdate instance;
+	return &instance;
+}
+
+//extern profile_util::cc_profiler g_Profiler;
+void ClientUpdate::update( float dt )//客户端  前端update
+{
+	//g_Profiler.reset();
+	CCProfileBegin("ClientUpdata");
+	//CCLOG("ClientUpdate::update: ClientUpdata Start");
+	checkLaunchFinished();
+
+	_time += dt * 1000;
+
+	//先判断延迟重连
+	if (_currentScene == _lastScene && _currentScene == ST_WORLDSCENE)
+	{
+		if (World::getInstance()->getRepetLoginState())
+		{
+			if (World::getInstance()->getRepetCanClose())
+			{
+				World::getInstance()->setRepetCanClose(false);
+				World::getInstance()->close(true);
+			}
+		}
+	}
+
+	//切换场景
+	if(_currentScene != _lastScene)
+	{
+		CCLOG("_currentScene[%d] != _lastScene[%d]", _currentScene, _lastScene);
+		if(_firstCircle)
+		{
+			_firstCircle = false;
+		}
+		else
+		{
+			switch(_lastScene)
+			{
+			case ST_LOGINSCENE:
+				CCLog("----------- _currentScene = %d, _lastScene = %d", _currentScene, _lastScene);
+				Login::getInstance()->close();
+				break;
+			case ST_SELECTROLESCENE:
+				SelectRole::getInstance()->close();
+				break;
+			case ST_CREATEROLESCENE:
+				CreateRole::getInstance()->close();
+				break;
+			case ST_WORLDSCENE:
+				RoleManager::getInstance()->destory();
+				//GroundItemManager::getInstance()->destroy();
+				PackageManager::getInstance()->destroy();
+				SkillAnimManager::getInstance()->clearAll();
+	
+				MapManager::getInstance()->escape_from_world();
+				World::getInstance()->close();
+				break;
+			}
+
+			//SkillAnimManager::getInstance()->stopLocalPlayerAllSkillAnims();
+			_lastScene = _currentScene;
+			_firstCircle = true;
+		}
+	}
+
+	if(!CrossSceneUI::getInstance()->isInCross())
+	{
+		{
+			CCProfile("UiResourceMgr update");
+			UiResourceMgr::getInstance()->update(dt);
+
+		}
+		//去掉无引用的帧动画缓存
+		if (_inCrossSceneLastFrame)
+		{
+			AnimationCache::getInstance()->releaseResByCurMem();
+			_inCrossSceneLastFrame = false;
+		}
+		//[bing] warning!
+// 		if(CrossSceneUI::getInstance()->isInCross())
+// 		{
+// 			if(_currentScene == ST_WORLDSCENE)
+// 			{
+// 				//CMovie::GetInstance().update(dt);
+// 				World::getInstance()->enter_new_map_in_world_update(dt);
+// 			}
+// 		}
+// 		else 
+		if(_currentScene == ST_WORLDSCENE && _isJoinGame)
+		{
+			//CCLOG("ClientUpdate::update: _currentScene == ST_WORLDSCENE && _isJoinGame");
+			CMovie::GetInstance().update(dt);
+			{
+				CCProfile("RoleManager update");
+				RoleManager::getInstance()->update(dt);//删除role,update role
+			}
+
+			{
+				CCProfile("MapManager update");
+				if(sceneTransationDidFinished())
+					MapManager::getInstance()->update(dt);
+			}
+
+			{
+				CCProfile("World update");
+				World::getInstance()->update(dt);//添加role
+			}
+			{
+				CCProfile("SkillManager update");
+				SkillManager::getInstance()->update(dt);
+			}
+			{
+				CCProfile("SkillAnimManager update");
+				SkillAnimManager::getInstance()->update(dt);
+			}
+			{
+				CCProfile("GroundItemManager update");
+				GroundItemManager::getInstance()->update(dt);
+
+			}
+			AutoActionMgr::getInstance()->Update(dt);//gx add
+			AutoSelfProtectMgr::getInstance()->SelfProtect_Check();//gx
+			ChatMgr::getInstance()->Update();//gx add
+			HearSayMgr::getInstance()->Update();
+			RewardMgr::getInstance()->update(dt);
+			StallMgr::getInstance()->update(dt);
+			{
+				CCProfile("NameMgr2 update");
+				NameMgr2::getInstance()->update(dt);
+
+			}
+			InstanceMgr::getInstance()->update(dt);
+			{
+				CCProfile("RoleActionMgr update");
+				RoleActionMgr::GetInstance()->Update(_time);
+
+			}
+			ConcernMgr::getInstance()->update(dt);
+			CelebrateMgr::getInstance()->update(dt);
+			TeamMgr::getInstance()->update(dt);
+			//QuestMgr::getInstance()->tryResetEveryQuest();
+			RewardMgr::getInstance()->refreshServerActivity();//gx add 2014.3.13
+			FMBattleMgr::getInstance()->update(dt);
+			BloodFightMgr::getInstance()->update(dt);
+			SBKSDManager::get_singleton_ptr()->update(dt);
+			//每隔10秒发送一次同步信息
+// 			if(_time - _lastSendTime > 10 * 1000)
+// 			{
+// 				_lastSendTime = _time;
+// 				NET_SIC_get_delay cmd;
+// 				TCP_CLIENT->send_net_cmd(&cmd, NP_INSIGNIFICANT, true);
+// 			}
+
+			if(_time - _lastMessageTime > 3600 * 1000)
+			{//by zhang
+				_lastMessageTime = _time;
+				ChatMgr::getInstance()->updateRandMessgae();
+			}
+
+// 			if (World::getInstance()->getGotoNewMapStep())
+// 			{
+// 				World::getInstance()->setGotoNewMapStep(0);
+// // 				LocalPlayer *localPlayer = RoleManager::getInstance()->getLocalPlayer();
+// // 				bool isInTrigger = World::getInstance()->getTransmitType();
+// // 				if (localPlayer != NULL)
+// // 				{
+// // 					if (isInTrigger == false)
+// // 					{
+// // 						localPlayer->runTransmitEffect();
+// // 
+// // 					}
+// // 				}
+// 				ChatMgr::getInstance()->updateBossMassage();
+// //				World::getInstance()->setTransmitTypeIsTrigger(false);
+// 			}
+		}
+		else if(_currentScene == ST_LOGINSCENE)
+		{
+			Login::getInstance()->update(dt);
+		}
+
+		signalUpdate.emit(dt);
+
+		{
+			//CCProfile("AnimationCache update");
+			AnimationCache::getInstance()->update(dt);
+		}
+
+		{
+			CCProfile("TCP_CLIENT step");
+			TCP_CLIENT->step();
+			TCP_CLIENT->atuoCalLConnectingTime(dt);
+			if(_currentScene == ST_WORLDSCENE && _isJoinGame)
+			{
+				//在这里检测心跳
+				World::getInstance()->updateHeartbeat(0.0f);
+			}
+		}
+
+	}
+	else//在cross 状态
+	{
+		if (!_inCrossSceneLastFrame)
+		{
+			_inCrossSceneLastFrame = true;
+		}
+
+		if (ST_CREATEROLESCENE==_currentScene)
+		{
+			World::getInstance()->enter_wolrd_form_create_role_update(dt);
+			TCP_CLIENT->step();
+		}
+		if (ST_SELECTROLESCENE==_currentScene)
+		{
+			World::getInstance()->enter_world_from_select_role_update(dt);
+			TCP_CLIENT->step();
+		}
+ 		else if (ST_WORLDSCENE==_currentScene)
+ 		{
+// 			if (World::getInstance()->getRepetLoginState())
+// 			{
+// 				World::getInstance()->repetLoginUpdate(dt);
+// 			}
+// 			else
+			{
+				World::getInstance()->go_through_map_in_world();
+			}
+ 
+ 			extern bool g_bIsWaitingMsgByMovie;
+ 			if (g_bIsWaitingMsgByMovie)
+ 				TCP_CLIENT->step();
+ 		}
+		else
+		{
+			TCP_CLIENT->step();
+		}
+
+		/*
+		if(_currentScene != ST_WORLDSCENE)
+			TCP_CLIENT->step();
+		else
+			World::getInstance()->gotoNewMapUpdate(dt);
+			*/
+	}
+
+	if(_gotoServerList)
+	{//跳转到服务器列表
+		gotoSelectServer();
+	}
+	if(_gotoServerList2)
+	{//跳转到服务器列表
+		gotoSelectServer2();
+	}
+
+	if (_loadLoginUI)
+	{
+		_loadLoginUI = false;
+		Login::getInstance()->openOnCGVedioEnd1();
+	}
+    
+    showUpdatingPage();
+
+	if (_gameselfexit)
+	{
+		_gameselfexit = false;
+		doGameSelfExit();
+	}
+
+	//if (_sdkInitFailed)
+	//{
+	//	_sdkInitFailed = false;
+	//	dosdkInitFailed();
+	//}
+
+	//CCTextureCache::sharedTextureCache()->dumpCachedTextureInfo();
+	//test
+	//if(_currentScene == ST_WORLDSCENE)
+	//{
+	//	int strId = rand() % 5000;
+	//	std::string str = GET_STR(strId);
+	//	if(!str.empty())
+	//	{
+	//		int type = rand() % 2;
+	//		SystemMsg::getInstance()->runMsg(str, type == 0 ? SystemMsg::MT_Sys1 : SystemMsg::MT_Sys2);
+	//	}
+	//}
+	CCProfileEnd("ClientUpdata");
+	//CCLOG("ClientUpdate::update: ClientUpdata End");
+// 	static float delayTime = 1.1f;
+// 	if (delayTime > 1.0f)
+// 	{
+// 		delayTime = 0.0f;
+// 		//SkillManager::getInstance()->judgeIsSkillCanBreak();
+// 		//SkillManager::getInstance()->switchIsCanUpGradeValue();
+// 	}
+// 	delayTime += dt;
+
+	//#ifndef _WIN32
+	//#endif
+	if (this->getIsSwitchAccount())
+	{
+		this->setSwitchAccount(false);
+		this->backToSelectServer();
+	}
+}
+
+void ClientUpdate::init()
+{
+	_isJoinGame = false;
+	_type = ST_NONE;
+	_cmd = NULL;
+	TCP_CLIENT->_sig_connected.connect(this, &ClientUpdate::connected);
+	TCP_CLIENT->_sig_disconnected.connect(this, &ClientUpdate::disconnected);
+	TCP_CLIENT->_sig_connectfailed.connect(this, &ClientUpdate::connectfailed);
+	
+
+	CCScheduler *scheduler = CCDirector::sharedDirector()->getScheduler();
+	scheduler->scheduleUpdateForTarget(this, 0, false);
+
+	//BSAnimationProxy::getInstance()->getAnimationPool().Init(1024,32);
+}
+
+void ClientUpdate::destroy()
+{
+	//closeCurScene();
+
+	CCScheduler *scheduler = CCDirector::sharedDirector()->getScheduler();
+	scheduler->unscheduleAllForTarget(this);
+
+	if(_cmd != NULL)
+		delete _cmd;
+}
+
+void ClientUpdate::onMessageBoxOk()
+{
+	//[bing] 现在用掉线重连方式
+	World::getInstance()->ReLogin();
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&ClientUpdate::ReLoginWait), this, 10.0f, false);
+}
+
+void ClientUpdate::onMessageBoxCancel()
+{
+	//[bing] 返回login界面
+	gotoSelectServer();
+	//add by lpf 20151103
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	Login::getInstance()->resetLoginState();
+#endif
+}
+
+void ClientUpdate::onMessageBoxCancelDoNothing()
+{
+	Login::getInstance()->setUiToLoginFromMen();
+	//gotoSelectServer();
+}
+
+void ClientUpdate::gotoSelectServer()
+{
+	CCLOG("ClientUpdate::gotoSelectServer()");
+	ReceiveRewardUiMgr::GetInstance()->clearItemBowl();
+#ifndef _USE_TX_SDK
+	if(sceneTransationDidFinished())
+	{
+		Login::getInstance()->open();  //Legend
+		CCDirector::sharedDirector()->replaceScene(Login::getInstance()->getScene());
+	}
+#else
+	if(sceneTransationDidFinished())
+	{
+		Login::getInstance()->backtoLoginUI();
+		CCDirector::sharedDirector()->replaceScene(Login::getInstance()->getScene(true));
+	}
+#endif
+	AudioPlayer::getSigletonPtr()->stopMusic();
+	AudioPlayer::getSigletonPtr()->playerMusic(SOUND_SELLECTROLE);
+	SelectRole::getInstance()->clearRole();
+	_isJoinGame = false;
+	_gotoServerList = false;
+}
+
+void ClientUpdate::gotoSeverListMsg()
+{
+	_gotoServerList = true;
+}
+void ClientUpdate::gotoSelectServer2()
+{
+	CCLOG("ClientUpdate::gotoSelectServer2()");
+	if(sceneTransationDidFinished())
+	{
+		Login::getInstance()->open();
+
+		CCDirector::sharedDirector()->replaceScene(Login::getInstance()->getScene());
+		SelectRole::getInstance()->clearRole();
+		_isJoinGame = false;
+		_gotoServerList2 = false;
+	}
+}
+
+void ClientUpdate::gotoSeverListMsg2()
+{
+	_gotoServerList2 = true;
+}
+
+void ClientUpdate::gameSelfExitMsg()
+{
+	_gameselfexit = true;
+}
+void ClientUpdate::doGameSelfExit()
+{
+	static bool bisShow = true;
+
+	bisShow = !bisShow;
+
+	if (!bisShow)
+	{
+		CCScene *scene = UiMgr::getInstance()->getCurScene();
+		if(scene != NULL)
+		{
+			MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, "\xE6\x82\xA8\xE7\xA1\xAE\xE8\xAE\xA4\xE8\xA6\x81\xE9\x80\x80\xE5\x87\xBA\xE6\xB8\xB8\xE6\x88\x8F\xE5\x90\x97\xEF\xBC\x9F",
+				"\xE7\xBB\xA7\xE7\xBB\xAD",
+				"\xE9\x80\x80\xE5\x87\xBA");
+			scene->addChild(msgUi, WZ_Z_MAX);
+			msgUi->signalCancelBtnPressed.connect(this, &ClientUpdate::onExitGameBtn);
+			msgUi->signalOkBtnPressed.connect(this, &ClientUpdate::onContinueBtn);
+			setAllChildernButtonPriority(msgUi, -100);
+		}
+	}
+	else
+	{
+		extern MessageBoxUi *g_msgUi;
+		if (g_msgUi)
+		{
+			g_msgUi->removeFromParentAndCleanup(true);
+			g_msgUi = NULL;
+		}
+	}
+}
+void ClientUpdate::dosdkInitFailed()
+{
+		//CLOSE_ALL_UI();
+		//Login::getInstance()->hideTip();
+
+		//MessageBoxUi *messageBox = NULL;
+		//messageBox = MessageBoxUi::createWithOneBtn("", "\xE6\x82\xA8\xE5\xB7\xB2\xE7\xBB\x8F\xE6\x96\xAD\xE7\xBA\xBF\xEF\xBC\x8C\xE8\xAF\xB7\xE9\x87\x8D\xE6\x96\xB0\xE7\x99\xBB\xE5\xBD\x95\xEF\xBC\x81", 
+		//	"\xe7\xa1\xae\xe5\xae\x9a\x00\x00");
+		//messageBox->signalOkBtnPressed.connect(this, &ClientUpdate::onMessageBoxCancel);
+}
+void ClientUpdate::sdkInitFailedMsg()
+{
+	_sdkInitFailed = true;
+}
+
+void ClientUpdate::onExitGameBtn()
+{
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+	//exitGame();
+	WzolJni::getInstance()->backKeyPressed();
+#endif
+}
+
+void ClientUpdate::onContinueBtn()
+{
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+	WzolJni::getInstance()->continueKeyPressed();
+#endif
+}
+
+void ClientUpdate::backToSelectServer()
+{
+	TCP_CLIENT->close();
+	this->setServerType(ST_NONE);
+	this->gotoSelectServer();
+#ifdef _USE_SDK
+	string params;
+	WzolJni *jni = WzolJni::getInstance();
+	params += "accountId="+ jni->toString(World::getInstance()->getAccountId());
+	jni->logToServer(LOG_LOGOUT, params);
+#endif
+    
+    //add by lpf
+#if ENABLE_GOTYE==1
+    VoiceMgr::getSingleton()->destroy();
+#endif
+}
+
+void ClientUpdate::disconnected()
+{
+	if(_isJoinGame)
+	{// jump to loginUi
+		CLOSE_ALL_UI();
+		Login::getInstance()->hideTip();
+
+		MessageBoxUi *messageBox = NULL;
+
+#ifdef _USE_SDK
+		messageBox = MessageBoxUi::createWithOneBtn("",  GET_STR(9215).c_str(), TEXT_UTF8_QUEDING);
+		messageBox->signalOkBtnPressed.connect(this, &ClientUpdate::onMessageBoxCancel);
+#else
+		//ZHJL:重连了什么都没处理，有很多BUG，改回返回登录界面，注：重连远不是重连这么简单，要做的事情太多。。。
+		// 
+		messageBox = MessageBoxUi::createWithOneBtn("",  GET_STR(9215).c_str(), TEXT_UTF8_QUEDING);
+		messageBox->signalOkBtnPressed.connect(this, &ClientUpdate::onMessageBoxCancel);
+
+		World::getInstance()->setStartSendHeartbeat(false);
+		DelayUi::getInstace()->close();
+
+		/*
+		//[bing] 如果播动画中掉线了 为了安全直接掉出去 不要重登
+		if(CMovie::GetInstance().IsPlay() || CrossSceneUI::getInstance()->isInCross() || _currentScene != ST_WORLDSCENE)
+		{
+			messageBox = MessageBoxUi::createWithOneBtn("", "\xe4\xbd\xa0\xe5\xb7\xb2\xe7\xbb\x8f\xe6\x8e\x89\xe7\xba\xbf\xef\xbc\x8c\xe8\xaf\xb7\xe9\x87\x8d\xe6\x96\xb0\xe8\xbf\x9e\xe6\x8e\xa5\xef\xbc\x81\x00\x00", 
+				"\xe7\xa1\xae\xe5\xae\x9a\x00\x00");
+			messageBox->signalOkBtnPressed.connect(this, &ClientUpdate::onMessageBoxCancel);
+		}
+		else
+		{
+			//你已掉线,是否与服务器重新连接?
+			messageBox = MessageBoxUi::createWithTwoBtn("", "\xE4\xBD\xA0\xE5\xB7\xB2\xE6\x8E\x89\xE7\xBA\xBF\x2C\xE6\x98\xAF\xE5\x90\xA6\xE4\xB8\x8E\xE6\x9C\x8D\xE5\x8A\xA1\xE5\x99\xA8\xE9\x87\x8D\xE6\x96\xB0\xE8\xBF\x9E\xE6\x8E\xA5\x3F"
+				,"\xE7\xA1\xAE\xE5\xAE\x9A", "\xE5\x8F\x96\xE6\xB6\x88");
+
+			messageBox->signalOkBtnPressed.connect(this, &ClientUpdate::onMessageBoxOk);
+			messageBox->signalCancelBtnPressed.connect(this, &ClientUpdate::onMessageBoxCancel);
+		}*/
+
+#endif
+		CCDirector::sharedDirector()->getRunningScene()->addChild(messageBox, WZ_Z_MAX);
+		setAllChildernButtonPriority(messageBox, -100);
+	}
+	else
+	{
+		CCLog("login net disconnected");
+	}
+}
+
+
+void ClientUpdate::connectfailed()
+{
+	if(_type == ST_LOGIN)
+	{
+	}
+	else if(_type == ST_GAME)
+	{
+	}
+
+	TCP_CLIENT->setLConnectingState(false);
+
+	CLOSE_ALL_UI();
+	Login::getInstance()->hideTip();
+
+	
+	//服务器连接不成功，请重试！
+	int CurStatus = ServerListUi::getInstance()->GetCurServerStatus();
+	if(CurStatus != ServerListItem::SS_Preserve)
+	{
+		MessageBoxUi *messageBox = NULL;
+		messageBox = MessageBoxUi::createWithOneBtn("", GET_STR(9216).c_str(),
+			"\xe7\xa1\xae\xe5\xae\x9a\x00\x00");
+
+		messageBox->signalOkBtnPressed.connect(this, &ClientUpdate::onMessageBoxCancelDoNothing);
+		CCDirector::sharedDirector()->getRunningScene()->addChild(messageBox, WZ_Z_MAX);
+		setAllChildernButtonPriority(messageBox, -100);
+	}
+	
+	
+	
+}
+
+void ClientUpdate::connected()
+{
+
+	CC_ASSERT(_cmd != NULL);
+
+	if(_type == ST_LOGIN)
+	{
+		TCP_CLIENT->send_net_cmd(_cmd, NP_NORMAL , false);
+	}
+	else if(_type == ST_GAME)
+	{
+		TCP_CLIENT->send_net_cmd(_cmd, NP_NORMAL , false);
+	}
+}
+
+void ClientUpdate::setCmd( s_net_cmd *cmd )
+{
+	if(_cmd != NULL)
+		delete _cmd;
+	_cmd = cmd;
+}
+
+void ClientUpdate::ReLoginWait( float fDT )
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&ClientUpdate::ReLoginWait), this);
+
+	//检查一下LP登录状态 如果还没登陆弹出MessageBox询问
+	if(_isJoinGame == false)
+	{
+		_isJoinGame = true;
+		disconnected();
+		_isJoinGame = false;
+	}
+}
+
+void ClientUpdate::setGamePause( bool isPause )
+{
+	_isGamePause = isPause;
+	if (_type == ST_GAME)
+	{
+		World::getInstance()->willEnterForeground(isPause);
+	}
+}
+
+void ClientUpdate::closeCurScene()
+{
+	switch (_currentScene)
+	{
+	case ST_WORLDSCENE:
+		{
+			World::getInstance()->close();
+		}
+		break;
+	case ST_LOGINSCENE:
+		{
+			Login::getInstance()->close();
+		}
+		break;
+	case ST_CREATEROLESCENE:
+		{
+			CreateRole::getInstance()->close();
+		}
+		break;
+	case ST_SELECTROLESCENE:
+		{
+			SelectRole::getInstance()->close();
+		}
+		break;
+	}
+}
+
+bool ClientUpdate::sceneTransationDidFinished() const
+{
+	return _currentScene == _lastScene;
+}
+
+void ClientUpdate::safeReplaceToCreateRoleScene()
+{
+	if(sceneTransationDidFinished())
+	{
+		CCDirector::sharedDirector()->replaceScene(CreateRole::getInstance()->getScene(true));
+		CreateRole::getInstance()->open();
+	}
+}
+
+void ClientUpdate::showUpdatingPage(){
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+    if(_gotoLoginUI){
+        _gotoLoginUI = false;
+        CCScene *curScene = CCDirector::sharedDirector()->getRunningScene();
+        if (curScene) {
+            CCNode *node = curScene->getChildByTag(10);
+            if (node) {
+                node->setVisible(true);
+            }
+        }
+        CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&ClientUpdate::checkUpdateRes), this, 0.5, false);
+    }
+#endif
+}
+
+bool bDone = false;
+void ClientUpdate::checkUpdateRes(float dt)
+{
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+    CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&ClientUpdate::checkUpdateRes), this);
+    
+    //static bool bDone = false;
+    if(!bDone && sceneTransationDidFinished())
+    {
+        CCLog("check update@@@@@");
+
+        bDone = true;
+
+        ClientUpdate::getInstance()->_currentScene = ST_UPDATESCENE;
+
+        std::string res_ver=CCUserDefault::sharedUserDefault()->getStringForKey(KEY_OF_VERSION);
+
+        WzolJni* platform= WzolJni::getInstance();
+        if (res_ver.empty())
+        {
+            //std::string default_ver;
+            platform->callPlatformWithReturn(GET_DEFAULT_RES_VER,"",res_ver);
+        }
+        std::string check_up_url;
+        platform->callPlatformWithReturn(GET_UPDATE_CHECK_URL,"",check_up_url);
+		AssetsManager::ErrorCode code = AssetsManager::kNoNewVersion;
+		if(check_up_url.empty() || res_ver.empty())
+		{
+#ifdef _USE_SDK//...使用SDK下,URL为空,直接提示错误 [12/1/2016 CatchY]
+			code = AssetsManager::kNetwork;
+#endif
+		}
+		else
+		{
+			safe_sprintf(check_up_url,"%s/%s.txt",check_up_url.c_str(),res_ver.c_str());
+			code = AssetsManager::fastCheckUpdate(check_up_url,3,"");
+			CCLOG("UP_URL(code:%d):%s", code, check_up_url.c_str());
+		}
+		switch (code)
+		{
+		case AssetsManager::kNeedUpdate:
+			{
+				extern AppDelegate *g_AppDelegate;
+				CCScene *UpdateScene = CCScene::create();
+
+				UpdateNode* node =UpdateNode::create();
+				node->setFinishedFn(std::bind(&AppDelegate::doSthWhenUpdateFinished,g_AppDelegate,std::placeholders::_1));
+				node->set_end_game_func(std::bind(&AppDelegate::end_game,g_AppDelegate));
+				UpdateScene->addChild(node);
+				CCDirector::sharedDirector()->replaceScene(UpdateScene);
+				// 			CCScene *UpdateScene = CCScene::create();
+				// 			ClientUpdate::getInstance()->_currentScene = ST_UPDATESCENE;
+				// 			extern AppDelegate *g_AppDelegate;
+				// 			UpdateUI::Init(UpdateScene, g_AppDelegate);
+			}
+			break;
+		case AssetsManager::kNetwork:
+			{
+				setUpNoticeString(STRING_TABLE["ver_notice_network"]);
+
+				CCScene* scene = CCDirector::sharedDirector()->getRunningScene();
+				MessageBoxUi* ui =MessageBoxUi::createWithOneBtn(STRING_TABLE["ver_msg_title"], STRING_TABLE["ver_msg_notice"], STRING_TABLE["ver_msg_btn"]);
+				ui->signalOkBtnPressed.connect(this, &ClientUpdate::confirmRetryCheckUpdate);
+				scene->addChild(ui,WZ_MESSAGEBOX);
+			}
+			break;
+		default:
+			{
+				g_AppDelegate->doSthWhenUpdateFinished(false);
+			}
+			break;
+		}
+            
+        //return _assertsMgr->fastCheckUpdate(check_up_url) == AssetsManager::kNeedUpdate;
+        CCLog("check update end@@@@@");
+    }
+#endif
+    //Login::getInstance()->openOnCGVedioEnd4();
+}
+
+
+void ClientUpdate::retryInDelay(float fdt)
+{
+    CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(schedule_selector(ClientUpdate::retryInDelay),this);
+    
+    _gotoLoginUI = true;
+    bDone = false;
+    
+
+}
+
+void ClientUpdate::confirmRetryCheckUpdate()
+{
+    
+    CCDirector::sharedDirector()->getScheduler()->scheduleSelector(schedule_selector(ClientUpdate::retryInDelay),this,0.5f,false);
+    
+    setUpNoticeString(STRING_TABLE["ver_notice_0"]);
+
+}
+
+void ClientUpdate::checkLaunchFinished()
+{
+	//add by lpf 2015-11-04
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	if (_isDidFinishLaunching && g_AppDelegate->m_sparse_graph)
+	{
+		_isDidFinishLaunching = false;
+		_isSDKInitSuccess = false;
+		g_AppDelegate->RunGame(false);
+	}
+#endif
+}
+
+void exitGame()
+{
+// 	if(ClientUpdate::getInstance()->_currentScene == ST_WORLDSCENE)
+// 	{
+// 		World::getInstance()->close();
+// 	}
+// 	else if(ClientUpdate::getInstance()->_currentScene == ST_LOGINSCENE)
+// 	{
+// 		Login::getInstance()->close();
+// 	}
+	//Login::getInstance()->close();
+	NoticeBoardUi::getInstance()->destroy();
+	Phyx::getInstance()->shutdown();
+	MapManager::getInstance()->destroy();
+	RoleManager::getInstance()->destory();
+	ClientUpdate::getInstance()->destroy();
+	FilterMgr::getInstance()->Destroy();
+	UiMgr::getInstance()->destroy();
+	//g_BSAnimationPool.UnInit();
+
+	//_CrtDumpMemoryLeaks();
+	//RewardQuestMgr::getInstance()->destroy();
+	RewardQuestMgr::destoryInstance();
+
+	ConcernMgr::destoryInstance();
+	CelebrateMgr::destoryInstance();
+	StoreMgr::destoryInstance();
+	DelayUi::destoryInstance();
+	NoticeLayer::destroyInstance();
+	TextTip::destoryInstance();
+
+	std::string fullpath = CCFileUtils::sharedFileUtils()->fullPathForFilename(SQLITE_DBNAME0);
+	c_db_manager::getSingleton()->destroy_a_connection(fullpath);
+	c_db_manager::destroy_instance();
+
+	TCP_CLIENT->shutdown();
+	delete TCP_CLIENT;
+
+	CCLuaEngine* pEngine = CCLuaEngine::defaultEngine();
+	pEngine->getLuaStack()->clean();
+	lua_State* tolua_s = pEngine->getLuaStack()->getLuaState();
+	lua_close(tolua_s);
+	tolua_s  = NULL;
+	CCScriptEngineManager::sharedManager()->removeScriptEngine();
+
+	//releaseQuickConfig();
+
+	f_cache_data_mgr::get_singleton().destroy();
+
+	//exit(0);
+}

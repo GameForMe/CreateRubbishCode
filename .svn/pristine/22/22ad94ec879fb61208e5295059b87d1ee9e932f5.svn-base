@@ -1,0 +1,211 @@
+#include "DBMgr.h"
+#include "cocos2d.h"
+#include "cocos-ext.h"
+
+using namespace cocos2d;
+using namespace cocos2d::extension;
+namespace internal{
+	int _process_ddl_row(void* db_, int count_, char** values_, char** columns_)
+	{
+		if(count_ != 1)
+			return -1;
+		if(sqlite3_exec(static_cast<sqlite3*>(db_), values_[0], NULL, NULL, NULL) != SQLITE_OK)
+			return -1;
+		
+		return 0;
+	}
+	//--------------------------------------------------------
+	int _process_dml_row(void *db_, int count, char** values_, char** columns_)
+	{
+		if(count != 1)
+			return -1;
+		char* stmt = sqlite3_mprintf("INSERT INTO main.%q SELECT * FROM origin.%q", values_[0], values_[0]);
+		if(sqlite3_exec(static_cast<sqlite3*>(db_), stmt, 0, 0, 0) != SQLITE_OK)
+			return -1;
+		sqlite3_free(stmt);    
+		return 0;
+	}
+}
+c_db_manager::c_db_manager()
+	:m_db(NULL)
+	, m_ref(0)
+	, m_tmpCmd(NULL)
+{}
+//--------------------------------------------------------
+c_db_manager::~c_db_manager(){}
+//--------------------------------------------------------
+bool c_db_manager::initialize()
+{
+	return true;
+}
+//--------------------------------------------------------
+void c_db_manager::shutdown()
+{
+}
+//--------------------------------------------------------
+bool c_db_manager::create_a_connection(const std::string& dbname_, const char* pwd_, bool inmem_)
+{
+	CCLOG("create_a_connection name:%s,pwd:%s", dbname_.c_str(), pwd_);
+
+#ifdef USE_ENCRYPTION
+	//...如果有加密,密码不为空,实现解密
+	if(pwd_)
+	{
+
+	}
+#endif
+
+	m_ref = 0;
+	sqlite3* db = NULL;
+	int ret = sqlite3_open(dbname_.c_str(), &db);
+	if(ret != SQLITE_OK)
+	{
+		if(db)
+			sqlite3_close(db);
+
+		CCLog("sqlite errorcode: %d-%s" , ret, dbname_.c_str());
+		return false;
+	}
+
+	if(inmem_)
+	{
+		sqlite3* memdb = NULL;
+		sqlite3_open(":memory:", &memdb);
+		sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
+		sqlite3_exec(db, "SELECT sql FROM sqlite_master WHERE sql NOT NULL;", &internal::_process_ddl_row, memdb, NULL);
+		sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
+		sqlite3_close(db);
+		std::string sql = "";
+		sql+="ATTACH DATABASE '";
+		sql+=dbname_;
+		sql+="' as origin;";
+		CCLOG("create_a_connection sql:%s",sql.c_str());
+		if(sqlite3_exec(memdb, sql.c_str(), NULL, NULL, NULL) != SQLITE_OK)
+		{
+			CCLOG("sqlite3_exec fail %s", sql.c_str());
+			return false;
+		}
+		//if(pwd_)
+		//	sqlite3_key(memdb , pwd_ , strlen(pwd_));
+		sqlite3_exec(memdb, "BEGIN", NULL, NULL, NULL);
+		sqlite3_exec(memdb, "SELECT name FROM origin.sqlite_master WHERE type='table'",	&internal::_process_dml_row, memdb, NULL);
+		sqlite3_exec(memdb, "COMMIT", NULL, NULL, NULL);
+		m_db = memdb;
+	}
+	else
+		m_db = db;
+	return true;
+}
+//--------------------------------------------------------
+void c_db_manager::destroy_a_connection(const std::string& dbname_)
+{
+	sqlite3_close(m_db);
+}
+//--------------------------------------------------------
+c_sql_command* c_db_manager::begin_operation(const std::string& cmd_)
+{
+	//[bing] 现在还可能出现begin_operation嵌套使用 这样会造成泄漏 加一个断言先看看 mark
+	//CCAssert(m_ref == 0, CCString::createWithFormat("begin_operation cycel! %s", cmd_.c_str())->getCString());
+	CCLOG("begin_operation cmd:%s", cmd_.c_str());
+	std::string t = cmd_;
+	if(t.empty() || t[t.length()-1] != L';')
+		t += ";";
+	int result = SQLITE_ERROR;
+	const char* tail = NULL;
+	const char* str = (const char*)t.c_str();
+
+	c_sql_command* pCmd = new c_sql_command(m_db, const_cast<std::string &>(cmd_));
+	CCAssert(pCmd, CCString::createWithFormat("c_sql_command is NULL!")->getCString());
+
+	for(int i = 0; i < 1000; i++)
+	{
+		result = sqlite3_prepare(m_db , str, strlen(str) , &pCmd->m_vm, (const char**)&tail);
+		if (result != SQLITE_BUSY)
+			break;
+		
+#ifdef OVD_PLATFORM_WINDOWS
+		Sleep(1);
+#else
+		struct timespec ts = {0,10000000};	//[bing] 如果begin_operation显示数据库忙碌要阻塞线程直到数据库返回结果 避免崩溃 1毫秒
+		nanosleep(&ts, NULL);
+#endif
+	}
+	if(result != SQLITE_OK)
+	{
+		CC_SAFE_DELETE(pCmd);
+		std::string error = sqlite3_errmsg(m_db);
+		CCLOG("begin_operation Fail cmd:%s", cmd_.c_str());
+		return NULL;
+	}
+	m_ref++;
+
+	m_tmpCmd = pCmd; //[bing] 临时记录一笔交给create_table绑定
+	return pCmd;
+}
+//--------------------------------------------------------
+void c_db_manager::end_operation(c_sql_command* cmd_)
+{
+	if(cmd_)
+	{
+		//m_ref--;
+		//if(!m_ref)
+		//{
+		sqlite3_reset(cmd_->m_vm);
+		int result = sqlite3_finalize(cmd_->m_vm);
+		cmd_->m_vm = NULL;
+		if(result != SQLITE_OK)
+		{
+			std::string err = sqlite3_errmsg(m_db);
+		}
+		//}
+
+		if(cmd_ == m_tmpCmd)
+		{
+			m_tmpCmd = NULL;
+		}
+
+		delete cmd_;
+	}
+}
+//--------------------------------------------------------
+c_sql_table* c_db_manager::create_table()
+{
+	//m_ref++;
+	if(m_db && m_tmpCmd)
+	{
+		return new c_sql_table(m_db , m_tmpCmd);
+	}
+	else
+	{
+		return NULL;
+	}
+}
+//--------------------------------------------------------
+void c_db_manager::destroy_table(c_sql_table* reader_)
+{
+	/*
+	m_ref--;
+	if(!m_ref)
+	{
+		sqlite3_reset(m_vm);
+		int result = sqlite3_finalize(m_vm);
+		if(result != SQLITE_OK)
+		{
+			std::string err = sqlite3_errmsg(m_db);
+		}
+	}
+	*/
+	if(reader_)
+	{
+		reader_->m_Cmd = NULL;
+		delete reader_;
+	}
+}
+
+c_db_manager* c_db_manager::inst = 0;
+c_db_manager* c_db_manager::getSingleton()
+{
+	if(!inst)
+		inst = new c_db_manager();
+	return inst;
+}

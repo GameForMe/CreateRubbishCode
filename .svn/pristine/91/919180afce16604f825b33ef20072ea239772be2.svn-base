@@ -1,0 +1,1843 @@
+#include "Monster.h"
+#include "DBMgr.h"
+#include "CfgReader.h"
+#include "PlayerState.h"
+#include "BaseDefine.h"
+#include "tools.h"
+#include "MapManager.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "NameMgr2.h"
+#include "MessageDispatcher.h"
+#include "UiTools.h"
+#include "AudioPlayer.h"
+#include "LandNode.h"
+#include "UIUtil.h"
+#include "CommonClient.h"
+#include "GameEventDefine.h"
+#include "BossSkillManager.h"
+#include "CommonView.h"
+#include "ArenaMainMgr.h"
+
+#include <string>
+using namespace std;
+
+const std::string skillName = "E1_152";
+
+MonsterDeadAnimation * MonsterDeadAnimation::getInstance()
+{
+	static MonsterDeadAnimation instance;
+	return &instance;
+}
+
+void MonsterDeadAnimation::runAnimation( const CCPoint &pos,Monster* pMonster )
+{
+	if (_type == 1)//客户端配表控制，不播放特效
+	{
+		return;
+	}
+	else if (_type == 0)
+	{
+		LandNode* landNode = LandNode::create();
+		landNode->setTag(ELN_MonsterDead);
+		AnimationCache::AnimateList anims;
+		AnimationCache::createDefList(1, anims);
+		AnimationCache::getInstance()->getSinEffect(0, "E1_37", anims);					//【Ji：】更改死亡特效文件名称
+		CCSprite *sprite = CCSprite::create();
+		landNode->addChild(sprite);
+		//UIUtil::childNodeAlign(sprite,node,eha_center,eva_center,CCPointZero);
+		//sprite->setAnchorPoint(ccp(0.0f, 1.0f));
+
+		BSAnimate *animate = anims[0];
+		sprite->runAction(CCSequence::createWithTwoActions(animate, CCCallFuncN::create(this, SEL_CallFuncN(&MonsterDeadAnimation::animationCallback))));
+		landNode->setPosition(pos);
+
+		MapManager* map_mgr = MapManager::getInstance();
+
+		//sprite->setZOrder(map_mgr->getZOrderAtPoint(pos));
+
+		map_mgr->getMap()->addChild(landNode,map_mgr->getZOrderAtPoint(pos));
+		sprite->setOpacity(map_mgr->isAlpha(pos)?ALPHA_VALUE:255);
+		//landNode->getParent()->reorderChild(landNode, MapManager::getInstance()->getZOrderAtPoint(pos));
+		//if(sprite->getParent() != NULL)
+		//	sprite->getParent()->reorderChild(sprite, MapManager::getInstance()->getZOrderAtPoint(pos));
+
+// 		if(MapManager::getInstance()->isAlpha(pos))
+// 		{
+// 			sprite->setOpacity(ALPHA_VALUE);
+// 		}
+// 		else
+// 		{
+// 			sprite->setOpacity(255);
+// 		}
+	}
+	else if (_type == 2)
+	{
+		if (pMonster != NULL)
+		{
+			/*
+			LandNode* landNode = LandNode::create();
+			landNode->setTag(ELN_MonsterTransmit);
+			CCSprite* target = CCSprite::create();
+			AnimationCache::AnimateList anims;
+			AnimationCache::createDefList(1, anims,true);
+			AnimationCache::getInstance()->getSinEffect(0, "E1_121", anims);
+			landNode->addChild(target);
+
+			MapManager::getInstance()->getMap()->addChild(landNode);
+
+			target->runAction(CCSequence::createWithTwoActions(anims.front(),RemoveFromParentAction::create()));
+
+			target->setPosition(pos);
+			target->setZOrder(RZN_EFFECT);*/
+
+			//_node->getParent()->addChild(target);
+		}
+	}
+}
+
+void MonsterDeadAnimation::animationCallback( CCNode *node )
+{
+	//node->stopAllActions();
+	LandNode* landNode = dynamic_cast<LandNode*>(node->getParent());
+	landNode->removeFromParentAndCleanup(true);
+
+	AnimationCache::getInstance()->releaseSinEffect("E1_37");					//【Ji：】更改死亡特效文件名称(原名siwang)
+}
+
+void MonsterDeadAnimation::setType( int type )
+{
+	_type = type;
+}
+
+
+MonsterDeadAnimation::MonsterDeadAnimation()
+	:_type(0)
+{
+
+}
+
+MonsterDeadAnimation::~MonsterDeadAnimation()
+{
+
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+Monster::Monster()
+	: _entity(NULL)
+	, _body(NULL)
+	,_weapon(NULL)
+	,_wing(NULL)
+	, _shadow(NULL)
+	, _realDelete(false)
+	, _monsterType(0)
+	//, _ownNameSet(false)
+	, _nDirType(0)
+	, _skill(NULL) 
+	, _mChatLabel(NULL)
+	, _monsterChat(NULL)
+	,_mStandTime(0)
+	,_mFightTime(0)
+	,_mstandlast(0)
+	,_mFightlast(0)
+	,_mIsSpreakLast(0)
+	,_mContinueTime(0)
+	,_mIsStandLast(false)
+	,_mIsFightLast(false)
+	,_mIsSpreakPaoPao(false)
+	,_mtalkLast(false)
+	,_mtalkStandLast(0)
+
+{
+	_creatureType = CT_MONSTER;
+	CC_ASSERT(_node);
+	_node->setTag(ELN_Monster);
+
+	REGISTER_EVENT(ChangeMonsterName,Monster,updateMonsterName);
+	REG_NAME_CB(this,&Monster::on_owner_name_return);
+}
+
+Monster::~Monster()
+{
+	stopAni();
+
+	if(_isAniLoaded)
+	{
+		//for(int i = 0; i < MA_NUM; i ++)
+		//{
+		//	//CC_ASSERT(_anims[i]->realRefCount() == 1);
+		//	_anims[i]->release();
+		//}
+		//AnimationCache::releaseDefList(_anims);
+		//if (isShenshou())
+		//{
+			//AnimationCache::getInstance()->releaseOctEffect(skillName.c_str());
+			//AnimationCache::releaseDefList(_skillanims);
+		//}
+
+		//AnimationCache::releaseDefList(_bodyAnims);
+	}
+	_skill = NULL;
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&Monster::runShenshouSkill), this);
+	_mChatLabel = NULL;
+	_monsterChat = NULL;
+
+	UNREGISTER_EVENT(ChangeMonsterName,Monster,updateMonsterName);
+	UNREG_NAME_CB(this,&Monster::on_owner_name_return);
+
+}
+
+bool Monster::loadAnimate(unsigned int id /*= 0*/)
+{
+	CC_ASSERT(_isAniLoaded == false);
+	RoleManager* roleMgr = RoleManager::getInstance();
+	if (!roleMgr->isCanShowOtherPlayer(this))
+		return false;
+	
+	stCreateProto const* proto = roleMgr->getCreatureProto(getTypeID());
+	CC_ASSERT(proto);
+
+	if(proto->nAniType==1)
+	{
+		//从数据库中获取数据
+		std::string creatureName;
+		//RoleManager::CreatureInfo creatureInfo = RoleManager::getInstance()->getCreatureInfo(getTypeID());
+		//stCreateProto const* proto = RoleManager::getInstance()->getCreatureProto(getTypeID());
+		creatureName = proto->strName;
+		setLevel(proto->nLevel);
+		_monsterType = proto->nBossType; //怪物类型
+
+		//eAnimsType type = AT_Monster;
+
+		//AnimationCache::releaseDefList(_bodyAnims);
+		//AnimationCache::releaseDefList(_weaponAnims);
+
+		releaseAllLoadAnim();
+
+		_nDirType = 2;
+
+		//std::string bodyAnimFile;
+		//std::string weaponAnimFile;
+		//int param[2]={0};
+		//unsigned char* pCharData = param;
+		//const unsigned char bySize = sizeof(unsigned int);
+		//unsigned char aCharData[bySize * 2 * 3];
+		//pCharData = aCharData;
+		//memset(pCharData, 0, bySize * 2 * 3);
+
+		//RoleManager::DisplayData bodyDisplayData = RoleManager::getInstance()->getDisplayData(9431003);
+		//std::string const& bodyAnimFile = /*bodyDisplayData._animFile*/proto->strAvatorBody;
+
+		//武器
+		//RoleManager::DisplayData weaponDisplayData = RoleManager::getInstance()->getDisplayData(9119100);
+		//std::string const& weaponAnimFile = /*weaponDisplayData._animFile*/proto->strWeapon;
+		//std::string const& wingAnimFile = proto->strWing;
+
+		//*(unsigned int*)pCharData = bodyDisplayData._zhiye;
+		//*(unsigned int*)(pCharData + bySize) = bodyDisplayData._suitnum;
+
+		//*(unsigned int*)(pCharData + bySize * 2) = weaponDisplayData._zhiye;
+		//*(unsigned int*)(pCharData + bySize * 3) = weaponDisplayData._suitnum;
+
+		CC_ASSERT(proto->nbodyDisplayID);
+		RoleManager::DisplayData const*  pbodyDisplayData = roleMgr->getDisplayData(proto->nbodyDisplayID);
+		CC_ASSERT(pbodyDisplayData);
+		RoleManager::DisplayData const& bodyDisplayData =*pbodyDisplayData;
+		_body->setColor(ccc3(bodyDisplayData._r, bodyDisplayData._g, bodyDisplayData._b));
+		std::string const& bodyAnimFile =bodyDisplayData._animFile;
+		
+		//AnimationCache::createDefList(PA_NUM, _bodyAnims, false);
+		//AnimationCache::createDefList(PA_NUM, _weaponAnims, false);
+
+		float offestX = 0.0f;
+		float offestY = 0.0f;
+		getModelOffest(bodyAnimFile, offestX, offestY);
+		_body->setPosition(ccp(offestX,offestY));
+		//AnimationCache::getInstance()->getPlayerAnis((const void*)pCharData, 9431003, bodyAnimFile.c_str(), _bodyAnims, 1);
+
+		int param[2]={0};
+		param[0] = bodyDisplayData._zhiye;
+		param[1] = bodyDisplayData._suitnum;
+
+		bool ret=resetConfig(eBodyAction,bodyAnimFile);
+		if(ret)
+			AnimationCache::getInstance()->setupPlayerAni((const void*)(param),bodyAnimFile,1,true);
+		//saveUsedAnim(AnimsUsed(AT_Player, bodyAnimFile));
+		//_usedAnim.push_back(AnimsUsed(type, bodyAnimFile));
+
+		if (proto->nweaponDisplayID > 0 && _weapon)
+		{
+			_weapon->setPosition(ccp(offestX,offestY));
+
+			RoleManager::DisplayData const*  pweaponDisplayData = roleMgr->getDisplayData(proto->nweaponDisplayID);
+			CC_ASSERT(pweaponDisplayData);
+			RoleManager::DisplayData const& weaponDisplayData =*pweaponDisplayData;
+			_weapon->setColor(ccc3(weaponDisplayData._r, weaponDisplayData._g, weaponDisplayData._b));
+
+			std::string const& weaponAnimFile = weaponDisplayData._animFile;
+
+			param[0] = weaponDisplayData._zhiye;
+			param[1] = weaponDisplayData._suitnum;
+
+			ret=resetConfig(eWeaponAction,weaponAnimFile);
+			if(ret)
+				AnimationCache::getInstance()->setupWeaponAni((const void*)param,weaponAnimFile,0,true);
+		}
+
+		if (proto->nwingDisplayID > 0 && _wing)
+		{
+			_wing->setPosition(ccp(offestX,offestY));
+			
+			RoleManager::DisplayData const* pwingDisplayData = RoleManager::getInstance()->getDisplayData(proto->nwingDisplayID);
+			CC_ASSERT(pwingDisplayData);
+			RoleManager::DisplayData const& wingDisplayData = *pwingDisplayData;
+			_wing->setColor(ccc3(wingDisplayData._r, wingDisplayData._g, wingDisplayData._b));
+			std::string const& wingAnimFile = wingDisplayData._animFile;
+
+			param[0] = wingDisplayData._zhiye;
+			param[1] = wingDisplayData._suitnum;
+
+			bool ret=resetConfig(eWingAction,wingAnimFile);
+			if(ret)
+				AnimationCache::getInstance()->setupWingAni((const void*)param, wingAnimFile.c_str(),0,true);
+		}
+
+		//saveUsedAnim(AnimsUsed(AT_Weapon, bodyAnimFile));
+		//AnimationCache::getInstance()->getWeaponAnis((const void*)(pCharData + bySize * 2),9119100, weaponAnimFile.c_str(), _weaponAnims);
+		//_usedAnim.push_back(AnimsUsed(AT_Weapon, weaponAnimFile));
+
+		_isAniLoaded = true;
+
+		setName(creatureName.c_str());
+		//更换竞技场机器人名字
+		ArenaMainMgr* arena_mgr=  ArenaMainMgr::getInstance();
+		int challengeIndex = arena_mgr->getCheckedChallengeIndex();
+		if(challengeIndex >= 0)
+		{
+			tagJJCTargetRoleInfo const& info  = arena_mgr->getChallengePlayerAttr(challengeIndex);
+			std::string roleName = Helper::convert_wstr_to_string<128>(info.szRoleName);
+			if(!roleName.empty())
+				setName(roleName.c_str());
+		}
+
+		//_ownNameSet = false;
+
+	}
+	else if (proto->nAniType == 2)//穿本地玩家的衣服
+	{
+		//从数据库中获取数据
+		std::string creatureName;
+		LocalPlayer* pRole = roleMgr->getLocalPlayer();
+		if (!pRole)
+		{
+			return false;
+		}
+
+		creatureName = convertName(pRole->getName());
+		setLevel(proto->nLevel);
+		_monsterType = proto->nBossType; //怪物类型
+
+		//eAnimsType type = AT_Monster;
+
+		releaseAllLoadAnim();
+
+		_nDirType = 2;
+
+		unsigned int nBodyID = pRole->getDisplayAttr(ePlayerDisplayAttr(0));
+		CC_ASSERT(nBodyID > 0);
+		//if (nBodyID > 0)
+		//{
+			RoleManager::DisplayData const*  pbodyDisplayData = roleMgr->getDisplayData(nBodyID);
+			CC_ASSERT(pbodyDisplayData);
+			RoleManager::DisplayData const& bodyDisplayData =*pbodyDisplayData;
+			_body->setColor(ccc3(bodyDisplayData._r, bodyDisplayData._g, bodyDisplayData._b));
+			std::string const& bodyAnimFile =bodyDisplayData._animFile;
+
+			float offestX = 0.0f;
+			float offestY = 0.0f;
+			getModelOffest(bodyAnimFile, offestX, offestY);
+			_body->setPosition(ccp(offestX,offestY));
+
+			int param[2]={0};
+			param[0] = bodyDisplayData._zhiye;
+			param[1] = bodyDisplayData._suitnum;
+
+			bool ret=resetConfig(eBodyAction,bodyAnimFile);
+			if(ret)
+				AnimationCache::getInstance()->setupPlayerAni((const void*)(param),bodyAnimFile,1,true);
+		//}
+
+		int nWeaponID = pRole->getDisplayAttr(ePlayerDisplayAttr(2));
+		if (nWeaponID > 0 && _weapon)
+		{
+			_weapon->setPosition(ccp(offestX,offestY));
+
+			RoleManager::DisplayData const*  pweaponDisplayData = roleMgr->getDisplayData(nWeaponID);
+			CC_ASSERT(pweaponDisplayData);
+			RoleManager::DisplayData const& weaponDisplayData =*pweaponDisplayData;
+			_weapon->setColor(ccc3(weaponDisplayData._r, weaponDisplayData._g, weaponDisplayData._b));
+
+			std::string const& weaponAnimFile = weaponDisplayData._animFile;
+
+			param[0] = weaponDisplayData._zhiye;
+			param[1] = weaponDisplayData._suitnum;
+
+			ret=resetConfig(eWeaponAction,weaponAnimFile);
+			if(ret)
+				AnimationCache::getInstance()->setupWeaponAni((const void*)param,weaponAnimFile,0,true);
+		}
+
+		int nWingID = pRole->getDisplayAttr(ePlayerDisplayAttr(1));
+		if (nWingID > 0 && _wing)
+		{
+			_wing->setPosition(ccp(offestX,offestY));
+			
+			RoleManager::DisplayData const* pwingDisplayData = RoleManager::getInstance()->getDisplayData(nWingID);
+			CC_ASSERT(pwingDisplayData);
+			RoleManager::DisplayData const& wingDisplayData = *pwingDisplayData;
+			_wing->setColor(ccc3(wingDisplayData._r, wingDisplayData._g, wingDisplayData._b));
+			std::string const& wingAnimFile = wingDisplayData._animFile;
+
+			param[0] = wingDisplayData._zhiye;
+			param[1] = wingDisplayData._suitnum;
+
+			ret=resetConfig(eWingAction,wingAnimFile);
+			if(ret)
+				AnimationCache::getInstance()->setupWingAni((const void*)param, wingAnimFile.c_str(),0,true);
+		}
+
+		_isAniLoaded = true;
+
+		setName(creatureName.c_str());
+
+		//_ownNameSet = false;
+	}
+	else
+	{
+		if(!_isAniLoaded)
+		{
+			//从数据库中获取数据
+			std::string fileName;
+			std::string creatureName;
+			//RoleManager::CreatureInfo creatureInfo = RoleManager::getInstance()->getCreatureInfo(getTypeID());
+			//stCreateProto const* proto = RoleManager::getInstance()->getCreatureProto(getTypeID());
+			fileName = proto->strAnimatorName;
+			creatureName = proto->strName;
+			setLevel(proto->nLevel);
+			_monsterType = proto->nBossType; //怪物类型
+			if(fileName.empty())
+				return false;
+
+			CC_ASSERT(!fileName.empty());
+			//CC_ASSERT(!creatureName.empty());
+
+			//AnimationCache::releaseDefList(_anims);
+			//AnimationCache::releaseDefList(_skillanims);
+			releaseAllLoadAnim();
+
+			_nDirType = 0;
+			//int num = MA_NUM;
+			//eAnimsType type = AT_Monster;
+			if (fileName=="mon_015")
+			{
+				_nDirType = 2;
+				//num = MA_NUM8;
+				//type = AT_Monster8;
+
+			}
+			else if (fileName=="mon_016")
+			{
+				_nDirType = 1;
+				//num = MA_NUM8;
+				//type = AT_Monster5;
+
+			}
+
+
+			//载入动画
+			//AnimationCache::createDefList(num, _anims, false);
+			//AnimationCache::getInstance()->getMonsterAni(id, fileName.c_str(), _anims, _nDirType);
+			bool ret=resetConfig(eMonster,fileName);
+			if(ret)
+				AnimationCache::getInstance()->setupMonsterAni(fileName,_nDirType,true);
+			//saveUsedAnim(AnimsUsed(type, fileName));
+			//_usedAnim.push_back(AnimsUsed(type, fileName));
+
+			//for(int i = 0; i < MA_NUM; i ++)
+			//{
+			//	CCAssert(animations[i] != NULL, fileName.c_str());
+			//	_anims[i] = BSAnimate::create(animations[i]);
+			//	_anims[i]->retain();
+			//}
+
+			/*//设置名字
+			switch( getMonsterType() )
+			{
+			case 0: //普通怪物
+			setNameColor(0xffffff); //白色
+			break;
+			case 1: //世界boss
+			setNameColor(0xff0000); //红色
+			break;
+			case 2: //精英怪
+			setNameColor(0xffff00); //金色
+			break;
+			default:
+			setNameColor(0xffffff);
+			break;
+			}
+			*/
+
+			LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+			std::string questName;
+			string ownerName = "";
+			int questId =lp->getAttackQuestId();
+			unsigned int id = lp->getAttackMonsterId();
+			unsigned int typeId = getTypeID();
+			/*CCLOG("%d",id);
+			CCLOG("%d",typeId);*/
+			if(id == typeId){
+				if(questId >= 101 && questId <= 500){
+					questName = GET_STR(9180);  //支线
+				}else if(questId >= 501 && questId <= 799){
+					questName = GET_STR(9181);   //日常
+				}else if(questId >= 800 && questId <= 999){
+					questName = GET_STR(9179);   //比奇
+				}else if(questId >= 1000 && questId <= 2000){
+					questName = GET_STR(9178);   //主线
+				}else if(questId >= 2001 && questId <= 3000){
+					questName = GET_STR(9183);   //环任务
+				}else if(questId >= 10000 && questId <= 10080){
+					questName = GET_STR(9182);   //悬赏
+				}else {
+					questName = "";
+				}
+			}
+
+			if (proto->nFuncType == 30)  //db中functype 30代表宝宝
+			{
+				switch(proto->nFunid)
+				{
+				case 0:
+					setNameColor(0xffffff);
+					break;
+				case 1:
+					setNameColor(0x07ffff);
+					break;
+				case 2:
+					setNameColor(0x8cd7ee);
+					break;
+				case 3:
+					setNameColor(0x2ba0cc);
+					break;
+				case 4:
+					setNameColor(0x7890ff);
+					break;
+				case 5:
+					setNameColor(0x007de2);
+					break;
+				case 6:
+					setNameColor(0x0f4be1);
+					break;
+				case 7:
+					setNameColor(0x0002ff);
+					break;
+				case 8:
+					setNameColor(0x10b014);
+					break;
+				default:
+					break;
+				}
+			}
+
+			//add by lpf 2015-09-15
+			if (_owner != (unsigned int)-1 && proto->nFuncType == 30)
+			{
+				//客户端获得人物名字有延迟，须判断是否为空
+				std::string owner_name;
+				_owner_name_got = RoleManager::getInstance()->getPetOwnerNameByCondition(owner_name,this);
+				if (!_owner_name_got)
+					_owner_name_got  = NameMgr2::getInstance()->queryName(_owner,owner_name);
+				if (_owner_name_got)
+				{
+					ownerName =  "(" + owner_name + ")";
+				}
+// 				if (_owner == lp->getId() && !lp->getNameUtf8().empty())
+// 				{
+// 					ownerName = "(" + lp->getNameUtf8() + ")";
+// 					//_ownNameSet = true;
+// 				}
+// 				else if(NameMgr2::getInstance()->queryName(_owner, ownerName))
+// 				{
+// 					ownerName = "(" + ownerName + ")";
+// 					//_ownNameSet = true;
+// 				}
+// 				else
+// 				{
+// 					//_ownNameSet = false;			
+// 				}
+			}
+// 			else
+// 			{
+// 				if (proto->nFuncType == 30)
+// 				{
+// 					//_ownNameSet = false;
+// 				}else
+// 				{
+// 					//_ownNameSet = true;
+// 				}
+// 			}
+
+			CCString *name = CCString::createWithFormat("%s%s%s",questName.c_str(), creatureName.c_str(), ownerName.c_str());
+
+			setName(name->getCString());
+
+			_isAniLoaded = true;
+
+			//MessageDispatcher::Instance()->DispatchMsg(-1, this, this, M_UpdateDis, NULL);
+			if (isShenshou())
+			{
+				_skill = CCSprite::create();
+				_entity->addChild(_skill, RZN_EFFECT);
+				//AnimationCache::createDefList(8, _skillanims, false);
+				//AnimationCache::getInstance()->getOctEffect(0, skillName, _skillanims);
+				bool ret = resetConfig(eMonsterSkill,skillName);
+				if(ret)
+					AnimationCache::getInstance()->setupEffectAnim(AT_Oct, skillName, true);
+				//saveUsedAnim(AnimsUsed(AT_Oct, skillName));
+				//_usedAnim.push_back(AnimsUsed(AT_Oct, skillName));
+			}
+			else
+			{
+				deleteConfig(eMonsterSkill);
+			}
+		}
+	}
+	talkinfo = RoleManager::getInstance()->getNpctalk(getTypeID());
+	return true;
+}
+
+cocos2d::CCPoint Monster::getHeadPos() const
+{
+	return ccp(0.0f, 0.0f);
+}
+
+void Monster::update( float dt )
+{
+	CC_ASSERT(_isAniLoaded);
+	//第一次进入 特例
+	if(_firstUpdate && _stateMechine != NULL && _isAniLoaded)
+	{
+		if(isDead())
+		{
+			runDeadAni();
+			_stateMechine->SetCurrentState(RoleStateDead::getInstance());
+		}
+		else
+		{
+			runStandAni();
+			_stateMechine->SetCurrentState(RoleStateStand::getInstance());
+		}
+
+		_firstUpdate = false;
+	}
+
+	if(_stateMechine != NULL)
+		_stateMechine->Update(dt);
+
+	updateRealPosition();
+
+	updateRoleOrderOnMap();
+
+// 	if(_owner != (unsigned int)-1 && !_ownNameSet)
+// 	{
+// 		std::string name;
+// 		if(NameMgr2::getInstance()->queryName(_owner, name))
+// 		{
+// 			name = getNameUtf8() + "(" + name + ")";
+// 			setName(name.c_str());
+// 			//setName(getNameUtf8().c_str());
+// 			_ownNameSet = true;
+// 		}
+// 	}
+	
+	updateAnimConfig();
+
+	updateTalk(dt);
+}
+
+void Monster::initFsm()
+{
+	if (RoleManager::getInstance()->isCanShowOtherPlayer(this) == false)
+		return;
+	//std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	//_shadow = CCSprite::create((uiDir + "shade.png").c_str());
+
+	if( getTypeID()!=2910159 && getTypeID()!=2910164 && getTypeID() != 2910503) //不是蛋糕也不能是烟火，也不是年兽
+	{
+		_shadow = CCSprite::createWithSpriteFrameName("shadow_shade");
+		_node->addChild(_shadow, RZN_SHADOW);
+	}
+
+	_body = CCSprite::create();
+	stCreateProto const* proto = RoleManager::getInstance()->getCreatureProto(getTypeID());
+	if (proto->nAniType > 0)
+	{
+		if(proto->nweaponDisplayID > 0)
+		{
+			_weapon = CCSprite::create();
+			_node->addChild(_weapon,RZN_WEAPONFRONT);
+		}
+
+		if(proto->nwingDisplayID > 0)
+		{
+			_wing =CCSprite::create();
+			_node->addChild(_wing,RZN_WingFront);
+		}
+	}
+	_entity = CCNode::create();
+	_entity->addChild(_body, RZN_BODY);
+	_node->addChild(_entity, RZN_BODY);
+
+// 	if (proto->nAniType ==1)
+// 	{
+// 		_node->addChild(_weapon,RZN_WEAPONFRONT);
+// 		_node->addChild(_wing,RZN_WingFront);
+// 	}
+
+	_stateMechine  = new StateMachine<Role>(this);
+	_node->setVisible(true);
+
+	//int id = getTypeID();
+
+	talkinfo = RoleManager::getInstance()->getNpctalk(getTypeID());
+	
+	//[bing] 角色缩放15%
+	//_node->setScale(0.85f);
+}
+
+void Monster::runStandAni()
+{
+
+	if (RoleManager::getInstance()->isCanShowOtherPlayer(this) == false)
+		return;
+	if(!_isAniLoaded)
+		return;
+
+	//火墙的id
+	if(2910191 == getTypeID())
+	{
+		setPosition(ccp(getPosition().x + 20,getPosition().y + 20));
+	}
+
+	if(isLoadAnimByAvator())
+	{
+		eOctDir dir = (eOctDir)getRoleDir();
+	//	newDir = dir;
+		std::vector<CCSprite *> sprites2;
+		sprites2.push_back(_body);
+		if(_weapon)
+			sprites2.push_back(_weapon);
+		flipSprites(sprites2,false);
+
+		size_t pos = size_t(PA_STAND + dir);
+		runRoleAction(_body,eBodyAction,pos,true);
+		if(_weapon)
+			runRoleAction(_weapon,eWeaponAction,pos,true);
+
+		if (_wing)
+		{
+			sprites2.clear();
+			sprites2.push_back(_wing);
+			flipOctDirSprite(dir, sprites2);
+			eOctDir newWingDir = flipOctDirWing(dir);
+
+			runRoleAction(_wing,eWingAction,size_t(PA_STAND + newWingDir),true);
+		}
+		//_body->runAction(CCRepeatForever::create(_bodyAnims[PA_STAND + newDir]));
+		//_weapon->runAction(CCRepeatForever::create(_weaponAnims[PA_STAND + newDir]));
+
+		//_lastAni = _bodyAnims[PA_STAND + newDir];
+	}
+	else
+	{
+		if (_nDirType == 2)
+		{
+			eOctDir dir = (eOctDir)getRoleDir();
+
+			//std::vector<CCSprite *> sprites;
+			//sprites.push_back(_body);
+			//flipOctDirSprite(dir, sprites);
+			eOctDir newDir = dir;//flipOctDir(dir);
+			//CC_ASSERT(_anims[PA_STAND + newDir]->realRefCount() == 1);
+			runRoleAction(_body,eMonster,size_t(MA_STAND8 + newDir),true);
+			//_body->runAction(CCRepeatForever::create(_anims[MA_STAND8 + newDir]));
+			//CC_ASSERT(_anims[PA_STAND + newDir]->realRefCount() == 2);
+			//_lastAni = _anims[MA_STAND8 + newDir];
+			return;
+		}
+		if (_nDirType==1)
+		{
+			eOctDir dir = (eOctDir)getRoleDir();
+
+			std::vector<CCSprite *> sprites;
+			sprites.push_back(_body);
+			flipOctDirSprite(dir, sprites);
+			eOctDir newDir = flipOctDirWing(dir);
+			runRoleAction(_body,eMonster,size_t(MA_STAND8 + newDir),true);
+			//_body->runAction(CCRepeatForever::create(_anims[MA_STAND8 + newDir]));
+			//_lastAni = _anims[MA_STAND8 + newDir];
+			return;
+		}
+
+		eFourDirEx dir = (eFourDirEx)getRoleDir();
+		std::vector<CCSprite *> sprites;
+		sprites.push_back(_body);
+		flipFourDirSprite(dir, sprites);
+		eFourDirEx newDir = flipFourDir(dir);
+		//CC_ASSERT(_anims[PA_STAND + newDir]->realRefCount() == 1);
+		runRoleAction(_body,eMonster,size_t(MA_STAND + newDir),true);
+		//_body->runAction(CCRepeatForever::create(_anims[MA_STAND + newDir]));
+		//CC_ASSERT(_anims[PA_STAND + newDir]->realRefCount() == 2);
+		//_lastAni = _anims[MA_STAND + newDir];
+	}
+}
+
+
+void Monster::updateStandChat(RoleManager::Npctalk info,bool isRotation)
+{
+	int num = rand() % 3;
+	std::string desstr = "0";
+	int descount = 0;
+	info.GetStandString(num,desstr,descount);
+	if(!(desstr == std::string("0")))
+	{
+		setMonsterChat(desstr,descount,isRotation);
+
+		if(NULL == _monsterChat || NULL == _mChatLabel ||  NULL == _entity )
+			return ;
+
+		_monsterChat->setVisible(true);	
+		//把他转回来
+		_monsterChat->setRotationY(360);
+		_mChatLabel->setRotationY(360);
+		if(1 == getMonsterType())
+			_monsterChat->setPosition(ccp(-90,75));
+		else
+			_monsterChat->setPosition(ccp(-90,50)); 
+		//旋转180度 泡泡框箭头向左
+		if(isRotation)
+		{
+			_monsterChat->setRotationY(180.0f);
+			_mChatLabel->setRotationY(-180.0f);
+			if(1 == getMonsterType())
+				_monsterChat->setPosition(ccp(120,75));
+			else
+				_monsterChat->setPosition(ccp(120,50));
+		}		
+	}	
+}
+
+void Monster::updateFightChat(RoleManager::Npctalk info,bool isRotation)
+{
+	int num = rand() % 3;
+	std::string desstr = "0";
+	int descount = 0;
+	info.GetFightString(num,desstr,descount);
+	if(!(desstr == std::string("0")))
+	{
+		setMonsterChat(desstr,descount,isRotation);
+
+		if(NULL == _monsterChat || NULL == _mChatLabel ||  NULL == _entity )
+			return ;
+
+		_monsterChat->setVisible(true);	
+		//把他转回来
+		_monsterChat->setRotationY(360);
+		_mChatLabel->setRotationY(360);
+		if(1 == getMonsterType())
+			_monsterChat->setPosition(ccp(-90,75));
+		else
+			_monsterChat->setPosition(ccp(-90,50)); 
+		//旋转180度 泡泡框箭头向左
+		if(isRotation)
+		{
+			_monsterChat->setRotationY(180.0f);
+			_mChatLabel->setRotationY(-180.0f);
+			if(1 == getMonsterType())
+				_monsterChat->setPosition(ccp(120,75));
+			else
+				_monsterChat->setPosition(ccp(120,50)); 
+		}		
+	}	
+}
+
+void Monster::luaUpdateMonsterChat(std::string chatText){
+	bool isRotation = false;
+	if(!MapManager::getInstance()->CheakIsRotation(getPosition()))
+		isRotation = false;
+	else
+		isRotation = true;
+
+	std::string desstr = "0";
+	int descount = 0;
+
+	#ifdef _WIN32
+		desstr = converstring(chatText,14,descount);
+	#else
+		desstr = converstring(chatText,7,descount);
+	#endif
+
+	setMonsterChat(desstr,descount,isRotation);
+
+	if(NULL == _monsterChat || NULL == _mChatLabel ||  NULL == _entity )
+		return ;
+
+	_monsterChat->setVisible(true);	
+
+	_monsterChat->setRotationY(360);
+	_mChatLabel->setRotationY(360);
+	//float y = getBoundBox().getMaxY();
+	_monsterChat->setPosition(ccp(_monsterChat->getPositionX()-15,getBoundBox().getMaxY() + 20));
+	//旋转180度 泡泡框箭头向左
+	if(isRotation)
+	{
+		_monsterChat->setRotationY(180.0f);
+		_mChatLabel->setRotationY(-180.0f);
+		_monsterChat->setPosition(ccp(40,getBoundBox().getMaxY() + 20));
+	}				
+
+	_mtalkLast = true;
+}
+
+
+void Monster::runRunAni()
+{
+	if (RoleManager::getInstance()->isCanShowOtherPlayer(this) == false)
+		return;
+	if(!_isAniLoaded)
+		return;
+	//int type =  getTypeID();
+	if(isLoadAnimByAvator())
+	{
+		eOctDir dir = (eOctDir)getRoleDir();
+		//	newDir = dir;
+		std::vector<CCSprite *> sprites2;
+		sprites2.push_back(_body);
+		if(_weapon)
+			sprites2.push_back(_weapon);
+		flipSprites(sprites2,false);
+
+		size_t pos = size_t(PA_RUN + dir);
+		runRoleAction(_body,eBodyAction,pos,true);
+		if(_weapon)
+			runRoleAction(_weapon,eWeaponAction,pos,true);
+
+		if (_wing)
+		{
+			sprites2.clear();
+			sprites2.push_back(_wing);
+			flipOctDirSprite(dir, sprites2);
+			eOctDir newWingDir = flipOctDirWing(dir);
+
+			runRoleAction(_wing,eWingAction,size_t(PA_RUN + newWingDir),true);
+		}
+		//_body->runAction(CCRepeatForever::create(_bodyAnims[PA_RUN + newDir]));
+		//_weapon->runAction(CCRepeatForever::create(_weaponAnims[PA_RUN + newDir]));
+
+		//_lastAni = _bodyAnims[PA_RUN + newDir];
+	}
+	else
+	{
+		if (_nDirType==2)
+		{
+			eOctDir dir = (eOctDir)getRoleDir();
+
+			//std::vector<CCSprite *> sprites;
+			//sprites.push_back(_body);
+			//flipOctDirSprite(dir, sprites);
+			eOctDir newDir = dir;//flipOctDir(dir);
+			//CC_ASSERT(_anims[PA_STAND + newDir]->realRefCount() == 1);
+			runRoleAction(_body,eMonster,size_t(MA_RUN8 + newDir),true);
+			//_body->runAction(CCRepeatForever::create(_anims[MA_RUN8 + newDir]));
+			//CC_ASSERT(_anims[PA_STAND + newDir]->realRefCount() == 2);
+			//_lastAni = _anims[MA_RUN8 + newDir];
+			return;
+		}
+
+		if (_nDirType==1)
+		{
+			eOctDir dir = (eOctDir)getRoleDir();
+
+			std::vector<CCSprite *> sprites;
+			sprites.push_back(_body);
+			flipOctDirSprite(dir, sprites);
+			eOctDir newDir = flipOctDirWing(dir);
+			runRoleAction(_body,eMonster,size_t(MA_RUN8 + newDir),true);
+			//_body->runAction(CCRepeatForever::create(_anims[MA_RUN8 + newDir]));
+			//_lastAni = _anims[MA_RUN8 + newDir];
+			return;
+		}
+
+		eFourDirEx dir = (eFourDirEx)getRoleDir();
+		std::vector<CCSprite *> sprites;
+		sprites.push_back(_body);
+		flipFourDirSprite(dir, sprites);
+		eFourDirEx newDir = flipFourDir(dir);
+		//CC_ASSERT(_anims[PA_STAND + newDir]->realRefCount() == 1);
+		runRoleAction(_body,eMonster,size_t(MA_RUN + newDir),true);
+		//_body->runAction(CCRepeatForever::create(_anims[MA_RUN + newDir]));
+		//CC_ASSERT(_anims[PA_STAND + newDir]->realRefCount() == 2);
+		//_lastAni = _anims[MA_RUN + newDir];
+	}
+}
+
+void Monster::runAttrackAni()
+{
+	if (RoleManager::getInstance()->isCanShowOtherPlayer(this) == false)
+		return;
+	if(!_isAniLoaded)
+		return;
+
+	//火墙的id
+	if(2910191 == getTypeID())
+	{
+		setPosition(ccp(getPosition().x + 20,getPosition().y + 20));
+	}
+
+	//RoleManager::CreatureInfo creatureInfo = RoleManager::getInstance()->getCreatureInfo(getTypeID());
+	stCreateProto const* proto = RoleManager::getInstance()->getCreatureProto(getTypeID());
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	if(lp->getId() == _dwSrcRoleID){
+		AudioPlayer::getSigletonPtr()->playerMonsterSceneEffect(proto->strAttSound,false);   //只是本地玩家播放该音效
+	}
+
+	//int type =  getTypeID();
+	if(isLoadAnimByAvator())
+	{
+		eOctDir dir = (eOctDir)getRoleDir();
+		//	newDir = dir;
+		std::vector<CCSprite *> sprites2;
+		sprites2.push_back(_body);
+		if(_weapon)
+			sprites2.push_back(_weapon);
+		flipSprites(sprites2,false);
+
+		size_t pos = size_t(PA_ATTACK + dir);
+		runRoleAction(_body,eBodyAction,pos,false);
+		if(_weapon)
+			runRoleAction(_weapon,eWeaponAction,pos,false);
+
+		if(_wing)
+		{
+			sprites2.clear();
+			sprites2.push_back(_wing);
+			flipOctDirSprite(dir, sprites2);
+			eOctDir newWingDir = flipOctDirWing(dir);
+			runRoleAction(_wing,eWingAction,size_t(PA_ATTACK + newWingDir),false);
+		}
+		//_body->runAction(CCRepeatForever::create(_bodyAnims[PA_ATTACK + newDir]));
+		//_weapon->runAction(CCRepeatForever::create(_weaponAnims[PA_ATTACK + newDir]));
+
+		//_lastAni = _bodyAnims[PA_ATTACK + newDir];
+	}
+	else
+	{
+		if (_nDirType==2)
+		{
+			eOctDir dir = (eOctDir)getRoleDir();
+
+			//std::vector<CCSprite *> sprites;
+			//sprites.push_back(_body);
+			//flipOctDirSprite(dir, sprites);
+			eOctDir newDir = dir;//flipOctDir(dir);
+			//CC_ASSERT(_anims[PA_STAND + newDir]->realRefCount() == 1);
+			runRoleAction(_body,eMonster,size_t(MA_ATTRACK8 + newDir),false);
+			//_body->runAction(_anims[MA_ATTRACK8 + newDir]);
+			//CC_ASSERT(_anims[PA_STAND + newDir]->realRefCount() == 2);
+			//_lastAni = _anims[MA_ATTRACK8 + newDir];
+			if (isShenshou())
+			{
+				CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&Monster::runShenshouSkill), this, 0.5f, false);
+			}
+			return;
+		}
+
+		if (_nDirType==1)
+		{
+			eOctDir dir = (eOctDir)getRoleDir();
+
+			std::vector<CCSprite *> sprites;
+			sprites.push_back(_body);
+			flipOctDirSprite(dir, sprites);
+			eOctDir newDir = flipOctDirWing(dir);
+			runRoleAction(_body,eMonster,size_t(MA_ATTRACK8 + newDir),false);
+			//_body->runAction(_anims[MA_ATTRACK8 + newDir]);
+			//_lastAni = _anims[MA_ATTRACK8 + newDir];
+			if (isShenshou())
+			{
+				CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&Monster::runShenshouSkill), this, 0.5f, false);
+			}
+			return;
+		}
+
+		eFourDirEx dir = (eFourDirEx)getRoleDir();
+		std::vector<CCSprite *> sprites;
+		sprites.push_back(_body);
+		flipFourDirSprite(dir, sprites);
+		eFourDirEx newDir = flipFourDir(dir);
+		//CC_ASSERT(_anims[PA_STAND + newDir]->realRefCount() == 1);
+		runRoleAction(_body,eMonster,size_t(MA_ATTRACK+ newDir),false);
+		//_body->runAction(_anims[MA_ATTRACK + newDir]);
+		//CC_ASSERT(_anims[PA_STAND + newDir]->realRefCount() == 2);
+		//_lastAni = _anims[MA_ATTRACK + newDir];
+		if (isShenshou())
+		{
+			CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&Monster::runShenshouSkill), this, 0.5f, false);
+		}
+	}
+
+	//RoleManager::Npctalk info = RoleManager::getInstance()->getNpctalk(getTypeID());
+	//if(NULL != _monsterChat && NULL != _mChatLabel )
+	//{
+	//	_monsterChat->setZOrder(10);
+	//	_monsterChat->setPosition(ccp(-20,100));
+	//	_mChatLabel->setFontSize(12);
+	//	_mChatLabel->setTag(10);
+	//	_mChatLabel->setPosition(ccp(50,-90));
+	//	_mChatLabel->setColor(ccc3(255,255,255));
+	//	_mChatLabel->setString(info.fightchats1.c_str()); 
+	//	//_monsterChat->setCapInsets(CCRect(16,16,10,10));
+	//	
+	//}	
+	
+}
+
+void Monster::runAttrackedAni()
+{
+	if (RoleManager::getInstance()->isCanShowOtherPlayer(this) == false)
+		return;
+	//if(!_isAniLoaded)
+	//	return;
+
+	//eFourDir dir = (eFourDir)getRoleDir();
+	//std::vector<CCSprite *> sprites;
+	//sprites.push_back(_body);
+	//flipFourDirSprite(dir, sprites);
+	//eFourDir newDir = flipFourDir(dir);
+	////CC_ASSERT(_anims[PA_STAND + newDir]->realRefCount() == 1);
+	//_body->runAction(_anims[MA_ATTRACKED + newDir]);
+	////CC_ASSERT(_anims[PA_STAND + newDir]->realRefCount() == 2);
+	//_lastAni = _anims[MA_ATTRACKED + newDir];
+}
+
+void Monster::runSitAni()
+{
+	if (RoleManager::getInstance()->isCanShowOtherPlayer(this) == false)
+		return;
+}
+
+bool Monster::isDead() const
+{
+	return 0;
+}
+
+void Monster::runDeadAni()
+{
+	if (RoleManager::getInstance()->isCanShowOtherPlayer(this) == false)
+		return;
+	//RoleManager::CreatureInfo creatureInfo = RoleManager::getInstance()->getCreatureInfo(getTypeID());
+	stCreateProto const* proto =  RoleManager::getInstance()->getCreatureProto(getTypeID());
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	if(lp->getId() == _dwSrcRoleID){
+		AudioPlayer::getSigletonPtr()->playerMonsterSceneEffect(proto->strDieSound,false);  //只是本地玩家播放该音效
+	}
+	MonsterDeadAnimation::getInstance()->setType(proto->nDeadEffectType);
+	MonsterDeadAnimation::getInstance()->runAnimation(this->getPosition(),this);
+	this->setVisiable(false);
+	RoleManager::getInstance()->freeRole(this->getId());
+}
+
+void Monster::stopAni()
+{
+	if (_node)
+		_node->stopAllActions();
+	if (_body)
+		_body->stopAllActions();
+	if (_weapon)
+		_weapon->stopAllActions();
+
+	if (_wing)
+	{
+		_wing->stopAllActions();
+	}
+
+	if (_skill)
+	{	
+		_skill->setVisible(false);
+		_skill->stopAllActions();
+	}
+		
+}
+
+void Monster::setAlpha( bool alpha )
+{
+	if (_body != NULL)
+	{
+		if(alpha)
+		{
+			_body->setOpacity(ALPHA_VALUE);
+			if (_weapon)
+			{
+				_weapon->setOpacity(ALPHA_VALUE);
+			}
+
+			if (_wing)
+			{
+				_wing->setOpacity(ALPHA_VALUE);
+			}
+		}
+		else
+		{
+			_body->setOpacity(255);
+			if (_weapon)
+			{
+				_weapon->setOpacity(255);
+			}
+
+			if (_wing)
+			{
+				_wing->setOpacity(255);
+			}
+		}
+	}
+}
+
+int Monster::getRoleDir()
+{
+	//float angle = getRoleAngle();
+	//float degree = angle / PI * 180.0;
+	//if(degree < 0) degree += 360.0;
+	//if(degree > 360.0) degree -= 360.0;
+
+	//eFourDir direction;
+
+	//if(degree > 45.0f && degree <= 135.0f)
+	//	direction = FD_UP;
+	//else if(degree > 135.0f && degree <= 225.0f)
+	//	direction = FD_LEFT;
+	//else if(degree > 225.0f && degree <= 315.0f)
+	//	direction = FD_DOWN;
+	//else
+	//	direction = FD_RIGHT;
+
+	//return (int)direction;
+
+	if (_nDirType>0)
+	{
+		float angle = getRoleAngle();
+		float degree = angle / PI * 180.0;
+		if(degree < 0) degree += 360.0;
+		if(degree > 360.0) degree -= 360.0;
+
+		eOctDir direction;
+
+		if(degree > 12.5 && degree <= 67.5)
+			direction = OD_UR;
+		else if(degree > 67.5 && degree <= 112.5)
+			direction = OD_UP;
+		else if(degree > 112.5 && degree <= 157.5)
+			direction = OD_UL;
+		else if(degree > 157.5 && degree <= 202.5)
+			direction = OD_LEFT;
+		else if(degree > 202.5 && degree <= 247.5)
+			direction = OD_DL;
+		else if(degree > 247.5 && degree <= 292.5)
+			direction = OD_DOWN;
+		else if(degree > 292.5 && degree <= 345.5)
+			direction = OD_DR;
+		else
+			direction = OD_RIGHT;
+
+		return (int)direction;
+	}
+
+	float angle = getRoleAngle();
+	float degree = angle / PI * 180.0;
+	if(degree < 0) degree += 360.0;
+	if(degree > 360.0) degree -= 360.0;
+
+	eFourDirEx direction;
+
+	if(degree > 90.0f && degree <= 180.0f)
+		direction = FDE_UL;
+	else if(degree > 180.0f && degree <= 270.0f)
+		direction = FDE_DL;
+	else if(degree > 0.0f && degree <= 90.0f)
+		direction = FDE_UR;
+	else
+		direction = FDE_DR;
+
+	return (int)direction;
+}
+
+void Monster::setScale( int scale )
+{
+	if(_entity != NULL)
+	{
+		_entity->setScale((float)scale / 10000.f);
+	}
+
+	if (_weapon)
+	{
+		_weapon->setScale((float)scale / 10000.f);
+	}
+
+	if (_wing)
+	{
+		_wing->setScale((float)scale / 10000.f);
+	}
+}
+void Monster::setColorPoisoning(unsigned char r,unsigned char g,unsigned char b)
+{
+	if (_body)
+	{
+		_body->setColor(ccc3(r, g, b));
+	}
+
+	if (_weapon)
+	{
+		_weapon->setColor(ccc3(r, g, b));
+	}
+
+	if (_wing)
+	{
+		_wing->setColor(ccc3(r, g, b));
+	}
+}
+
+void Monster::setColorHoc()
+{
+	if (_body)
+	{
+		_body->setGray();
+	}
+	if (_weapon)
+	{
+		_weapon->setGray();
+	}
+
+	if (_wing)
+	{
+		_wing->setGray();
+	}
+}
+
+void Monster::delColorHoc()
+{
+	if (_body)
+	{
+		_body->delGray();
+	}
+
+	if (_weapon)
+	{
+		_weapon->delGray();
+	}
+
+	if (_wing)
+	{
+		_wing->delGray();
+	}
+}
+
+void Monster::setMonsterChat(std::string desstr,int count,bool isRotation)
+{
+	if(NULL == _mChatLabel && NULL == _monsterChat)
+	{
+		std::string name = "guaiwuqipao";
+		CCSpriteFrame* spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(name.c_str());
+		if (NULL == spriteFrame)
+		{
+			std::string fileName = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "SingleUI/" + name + std::string(".png");
+			CCImage image;
+			image.initWithImageFile(fileName.c_str());
+			CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addUIImage(&image, name.c_str());
+			if(NULL != texture)
+				spriteFrame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+		}
+
+		if(NULL != spriteFrame)
+		{
+			CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(spriteFrame, name.c_str());
+		
+			TTFConfig cfg;
+			cfg.fontFilePath = FT_FONTFACE;
+			cfg.fontSize = 12;
+			cfg.outlineSize = 1;
+
+			_mChatLabel = LabelFT::createWithTTF(cfg,desstr);
+			if(NULL != _mChatLabel)
+			{
+				//_mChatLabel->setColor(ccc3(255,255,255));
+				_mChatLabel->setAnchorPoint(CCPointZero);
+				//_mChatLabel->setHorizontalAlignment(kCCTextAlignmentLeft);
+			}
+
+			_monsterChat = CCScale9Sprite::createWithSpriteFrame(spriteFrame);
+			if(NULL != _monsterChat && NULL != _entity)
+			{
+				if(NULL != getNameNode())
+				{
+					if(1 == getMonsterType())
+						_monsterChat->setPosition(ccp(-90,75));
+					else
+						_monsterChat->setPosition(ccp(-90,50));
+
+					_monsterChat->setZOrder(10);						
+					_monsterChat->setAnchorPoint(ccp(0,0));
+					_monsterChat->addChild(_mChatLabel);
+					getNameNode()->addChild(_monsterChat);
+				}
+				
+			}	
+		}
+	}
+
+	if(NULL != _mChatLabel && NULL != _monsterChat)
+	{
+		int posx = 0;
+		if(isRotation)
+			posx = 105;
+		else
+			posx = 10;
+
+		_mChatLabel->setString(desstr.c_str()); 
+		_monsterChat->setContentSize(CCSizeMake(_mChatLabel->getContentSize().width + 20,_mChatLabel->getContentSize().height + 40));
+		if(1 == count)
+			_mChatLabel->setPosition(CCSizeMake(posx,27));
+		else if(2 == count)
+			_mChatLabel->setPosition(CCSizeMake(posx,26));
+		else if(3 == count)
+			_mChatLabel->setPosition(CCSizeMake(posx,26));
+		else if( 4 == count)
+			_mChatLabel->setPosition(CCSizeMake(posx,28));
+	}
+}
+
+void Monster::setCreatureNameColor(Eaiaction type)
+{
+	switch( getMonsterType() )
+	{
+	case 0: //普通怪物
+		if (type == AIAT_Attack)
+		{
+			setNameColor(0xff7826); //橙色
+			//setNameColor(ccc3(0xe0,0x78,0x09));
+		} 
+		else if (type == AIAT_Guard)
+		{
+			setNameColor(ccc3(255, 255, 255)); //白色
+		}
+		break;
+	case 1: //世界boss
+		//setNameColor(0xff0000); //红色
+		setNameColor(ccc3(255, 0, 0));
+		break;
+	case 2: //精英怪
+		//setNameColor(0xffff00); //金色
+		setNameColor(ccc3(0xe1,0xe4,0x00));
+		break;
+	default:
+		setNameColor(ccc3(255, 255, 255)); //白色
+		break;
+	}
+}
+
+void Monster::runHeightenEffect( const std::string &animFile,eRoleZorderNum layerTag,eNodeTag effectTag )
+{
+	if (RoleManager::getInstance()->isCanShowOtherPlayer(this) == false)
+		return;
+	CCSprite *oldSprite = dynamic_cast<CCSprite*>(_node->getChildByTag(effectTag));
+	if(oldSprite == NULL)
+	{
+		AnimationCache::AnimateList anims;
+		AnimationCache::createDefList(1, anims);
+		AnimationCache::getInstance()->getSinEffect(0, animFile, anims);
+		BSAnimate *animate = anims[0];
+		if (animate)
+		{
+			CCSprite *sprite = CCSprite::create();
+			float offestX = 0.0f;
+			float offestY = 0.0f;
+			getModelOffest(animFile, offestX, offestY);
+			sprite->setPosition(ccp(offestX, offestY));
+			_node->addChild(sprite, layerTag, effectTag);
+			sprite->runAction(CCRepeatForever::create(animate));
+		}
+	}
+}
+
+void Monster::stopHeightenEffect( eNodeTag effectTag )
+{
+	CCSprite *sprite = dynamic_cast<CCSprite*>(_node->getChildByTag(effectTag));
+	if(sprite != NULL)
+	{
+		sprite->stopAllActions();
+		sprite->removeFromParentAndCleanup(true);
+	}
+}
+
+void Monster::runTransmitEffect_UP(const std::string &animFile,float y)
+{
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::ostringstream ost;
+	ost << animFile << ".plist";
+	std::string sSEPlist = sSEDir + ost.str();
+
+	GameActionNode* pNode = GameActionNode::create();
+	pNode->InitWithPList(sSEPlist.c_str(), animFile.c_str());
+	pNode->setAnchorPoint(ccp(0.f, 0.0f));
+	pNode->setPosition(ccp(0.f,y));
+	_node->addChild(pNode,RZN_ZUOQI,NT_TransmitEffect);
+
+	pNode->playAnimOnce(0.09f, true);
+}
+
+void Monster::runShenshouSkill(float dt)
+{
+	if (_skill)
+	{
+		eOctDir dir = (eOctDir)getRoleDir();
+		
+		runRoleAction(_skill,eMonsterSkill,MA_SKILL8 + dir,false);
+		//_skill->runAction(_skillanims[MA_SKILL8 + dir]);
+		//_lastAni = _skillanims[MA_SKILL8 + dir];
+		_skill->setVisible(true);
+	}
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&Monster::runShenshouSkill), this);
+}
+
+
+bool Monster::isShenshou()
+{
+	if (getTypeID() == 2000000 || getTypeID() == 2000005 || getTypeID() == 2211003 || getTypeID() == 2211004 || getTypeID() == 2211005 || getTypeID() == 2211006 || getTypeID() == 2211007|| getTypeID() == 2211008|| getTypeID() == 2211009|| getTypeID() == 2211010|| getTypeID() == 2211011)
+	{
+		return true;
+	}
+	return false;
+}
+
+
+void Monster::runCreatureSpreakPaoPao(int msgId,float ntime)
+{
+	std::string strbase = GET_STR(msgId);
+	if(strbase.empty())
+		return ;
+
+	if(!_mIsSpreakPaoPao)
+	{
+		_mContinueTime = ntime;
+		_mIsSpreakPaoPao = true;
+	}
+	else
+		return ;
+
+	int count = 0;
+	std::string desstr = "0";
+	#ifdef _WIN32
+		desstr = converstring(strbase,14,count);
+	#else
+		desstr = converstring(strbase,7,count);
+	#endif
+	setMonsterChat(desstr,count,false);
+	if(NULL != _monsterChat && NULL != _entity)
+		_monsterChat->setVisible(true);
+
+}
+
+void Monster::destroyFsm()
+{
+	if(_shadow)
+		_shadow->removeFromParentAndCleanup(true);
+	if(_body)
+		_body->removeFromParentAndCleanup(true);
+	if(_weapon)
+		_weapon->removeFromParentAndCleanup(true);
+
+	if (_wing)
+	{
+		_wing->removeFromParentAndCleanup(true);
+	}
+
+	if(_entity)
+		_entity->removeFromParentAndCleanup(true);
+
+	_shadow = NULL;
+	_body = NULL;
+	_entity = NULL;
+	_weapon = NULL;
+	_wing = NULL;
+	CC_SAFE_DELETE(_stateMechine);
+	_node->setVisible(false);
+}
+
+void Monster::updateAnimConfig()
+{
+	BOOST_FOREACH(AnimConfigMap::value_type& kv,mmapAnimConfig)
+	{
+		stAnimConfig& one = kv.second;
+		int type = kv.first;
+		//有没读取到的动作
+		if (one.mnCurPos != INVALID && one.last==NULL)
+		{
+			BSAnimate* ani = makeAnimate(one);
+
+			CCSprite* target = NULL;
+			if (type == eMonster || type == eBodyAction)
+			{
+				target= _body;
+			}
+			else if (type == eMonsterSkill)
+			{
+				target = _skill;
+			}
+			else if (type == eWeaponAction)
+			{
+				target = _weapon;
+			}
+			else if (type == eWingAction)
+			{
+				target = _wing;
+			}
+
+			CC_ASSERT(target);
+			if (ani)
+			{
+				one.setupLast(ani);
+
+
+				runWithTarget(target,one);
+			}
+			else
+			{
+				target->stopAllActions();
+			}
+		}
+	}
+}
+
+bool Monster::isAnimationFinished() const
+{
+	int type =isLoadAnimByAvator()?eBodyAction: eMonster;
+	BOOST_AUTO(iter,mmapAnimConfig.find(type));
+	if (iter != mmapAnimConfig.end())
+	{
+		stAnimConfig const& config = iter->second;
+		if(config.last)
+		{
+			return config.last->isDone();
+		}
+	}
+	return true;
+}
+
+void Monster::updateMonsterName(ChangeMonsterName* pEvent){
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if( !player )
+		return;
+	
+	unsigned int id = player->getAttackMonsterId();
+	unsigned int typeId = getTypeID();
+	const stCreateProto * proto = RoleManager::getInstance()->getCreatureProto(getTypeID());
+	if (proto == NULL)
+		return;
+	if (proto->nFuncType == 30)
+		return;
+	if(id == typeId){
+		std::string questName;
+		int questId =player->getAttackQuestId();
+		if(questId >= 101 && questId <= 500){
+			questName = GET_STR(9180);  //支线
+		}else if(questId >= 501 && questId <= 799){
+			questName = GET_STR(9181);   //日常
+		}else if(questId >= 800 && questId <= 999){
+			questName = GET_STR(9179);   //比奇
+		}else if(questId >= 1000 && questId <= 2000){
+			questName = GET_STR(9178);   //主线
+		}else if(questId >= 2001 && questId <= 3000){
+			questName = GET_STR(9183);   //环任务
+		}else if(questId >= 10000 && questId <= 10080){
+			questName = GET_STR(9182);   //悬赏
+		}else {
+			questName = "";
+		}
+		if (questName.size())
+		{
+			CCString *name = CCString::createWithFormat("%s%s",questName.c_str(),proto->strName.c_str());
+			setName(name->getCString());
+		}
+	}else{
+		CCString *name = CCString::createWithFormat("%s",proto->strName.c_str());
+		setName(name->getCString());
+	}
+}
+
+bool Monster::changeState( unsigned int mask, const Telegram& telegram )
+{
+	bool ret = Role::changeState(mask,telegram);
+	if (ret && telegram.Msg ==M_ATTRACK )
+	{
+		RoleSkillStateData *data = (RoleSkillStateData*)telegram.ExtraInfo;
+		Role *targetRole = RoleManager::getInstance()->findRole(data->targetId);
+
+		BossSkillManager::getInstance()->runSkillAnimation(data->skillId, getPosition(),targetRole?&targetRole->getPosition():nullptr ,(eOctDir)getRoleDir());
+	}
+
+	return ret;
+}
+
+bool Monster::isLoadAnimByAvator() const
+{
+	stCreateProto const* proto = RoleManager::getInstance()->getCreatureProto(getTypeID());
+	CC_ASSERT(proto);
+
+	return proto->nAniType == 1 || proto->nAniType == 2;
+}
+
+void Monster::updateTalk(float dt)
+{
+	if(-1 == talkinfo.id )
+		return ;
+
+	if(NULL == _stateMechine || NULL == RoleStateStand::getInstance() || NULL == RoleStateAttack::getInstance())
+		return ;
+
+	if (talkinfo.emptyTalk())
+	{
+		return;
+	}
+
+	if (_stateMechine->CurrentState() == RoleStateStand::getInstance())
+	{
+
+		if (talkinfo.standtime > 0)
+		{
+			//10秒频率根据随机率更换台词
+			_mStandTime += dt;
+			if(_mStandTime > talkinfo.standtime / 1000)
+			{
+				int num =  rand()% 100;
+				if(0 <= num && talkinfo.standodds > num)
+				{
+					if(!MapManager::getInstance()->CheakIsRotation(getPosition()))
+						updateStandChat(talkinfo,false);
+					else
+						updateStandChat(talkinfo,true);
+
+					_mIsStandLast = true;
+					_mStandTime = 0;
+				}
+
+				_mStandTime = 0;
+			}
+
+			//持续3秒待机泡泡消失
+			if(_mIsStandLast)
+			{
+				_mstandlast += dt;
+				if(talkinfo.displaytime / 1000 <= _mstandlast)
+				{
+					_mIsStandLast = false;
+					if (_monsterChat)
+						_monsterChat->setVisible(false);
+					_mstandlast = 0;
+				}
+			}
+		}
+
+	}
+	else if(_stateMechine->CurrentState() == RoleStateAttack::getInstance())
+	{
+		if (talkinfo.fighttime > 0)
+		{
+			_mFightTime += dt;
+			if(_mFightTime > (talkinfo.fighttime / 1000))
+			{
+				int num =  rand()% 100;
+				if(0 <= num && talkinfo.fightodds > num)
+				{
+					_mIsFightLast = true;
+					if(!MapManager::getInstance()->CheakIsRotation(getPosition()))
+						updateFightChat(talkinfo,false);
+					else
+						updateFightChat(talkinfo,true);
+
+					_mFightTime = 0;
+				}
+
+				_mFightTime = 0;
+			}
+		}
+
+	}
+
+	//持续3秒战斗台词泡泡消失
+	if(_mIsFightLast)
+	{
+		_mFightlast += dt;
+		if(talkinfo.displaytime / 1000  <= _mFightlast)
+		{
+			_mFightlast = 0;
+			_mIsFightLast = false;
+			if (_monsterChat)
+				_monsterChat->setVisible(false);
+		}
+	}
+
+	if(_mIsSpreakPaoPao)
+	{
+		_mIsSpreakLast += dt;
+		if(_mContinueTime <= _mIsSpreakLast)
+		{
+			_mIsSpreakLast = 0;
+			_mIsSpreakPaoPao = false;
+			if (_monsterChat)
+				_monsterChat->setVisible(false);
+		}
+	}
+
+	if(_mtalkLast){
+		_mtalkStandLast += dt;
+		if(3000 / 1000 <= _mtalkStandLast)
+		{
+			_mtalkLast = false;
+			if(NULL != _monsterChat)
+				_monsterChat->setVisible(false);
+
+			_mtalkStandLast = 0;
+		}
+	}
+}
+
+void Monster::on_owner_name_return( unsigned int role_id, const std::string& name )
+{
+	if (!_owner_name_got && _isAniLoaded &&IS_VALID(role_id)&& role_id == _owner)
+	{
+		std::stringstream ss;
+		ss<<getNameUtf8()<<"("<<name<<")";
+		setName(ss.str().c_str());
+
+		_owner_name_got = true;
+	}
+}
+
+void Monster::playHitSound()
+{
+	stCreateProto const* proto = RoleManager::getInstance()->getCreatureProto(getTypeID());
+	if(proto)
+	{
+		AudioPlayer::getSigletonPtr()->playerEffect(proto->nHitSound);
+	}
+}

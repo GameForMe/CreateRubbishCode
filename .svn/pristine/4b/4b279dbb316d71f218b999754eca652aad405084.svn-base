@@ -1,0 +1,565 @@
+#include "MapPath.h"
+#include "DBMgr.h"
+#include "CCPlatformDefine.h"
+
+#include "cocos2d.h"
+using namespace cocos2d;
+
+/*邻接表方式构建图
+MapPath::MapPath(string filename){
+	int j,k,w;
+	
+	ifstream fin(filename,ios::in);
+	fin>>n;
+	fin>>e;
+
+	for(int i = 1; i <= n; i++){
+		adjlist[i].vertex = i;
+		adjlist[i].firstedge = NULL;
+	}
+
+	for(int i =0; i < e; i++){
+		EdgeNode* s = (EdgeNode*)malloc(sizeof(EdgeNode));
+		fin>>j;
+		fin>>k;
+		fin>>w;
+		s->adjnode = k;
+		s->weight = w;
+		s->next = adjlist[j].firstedge;
+		adjlist[j].firstedge = s;
+
+		s = (EdgeNode*)malloc(sizeof(EdgeNode));
+		s->adjnode = j;
+		s->weight = w;
+		s->next = adjlist[k].firstedge;
+		adjlist[k].firstedge = s;	
+	}
+}
+
+*/
+
+void MapPath::init(string filename){
+	//读取配置数据
+	/*
+	CExcelTextTable ExcelTable;
+	//mapid1	mapid2	weight
+	//第一行是点与边的数量
+	ExcelTable.ReadExcelTable(filename.c_str());
+	for (int i=1; i<ExcelTable.GetNumLines(); i++)
+	{
+		if (i==1)
+		{
+			n = ExcelTable.GetInt(i,0);
+			e = ExcelTable.GetInt(i,1);
+
+			for(int i = 1;i <= n;i++){
+				for(int j = 1;j <= n;j++){
+					mgraph.edges[i][j] = INFINITY;
+				}
+				mgraph.vexs[i] = i;
+			}
+		}
+		else
+		{
+			int j,k,w;
+			j = ExcelTable.GetInt(i,0);
+			k = ExcelTable.GetInt(i,1);
+			w = ExcelTable.GetInt(i,2);
+			mgraph.edges[j][k] = w;
+			mgraph.edges[k][j] = w;
+		}
+	}
+	
+	dist = (EdgeType **)malloc(sizeof(EdgeType*) * n);
+	pre = (VertexType **)malloc(sizeof(VertexType*) * n);
+	for(int i = 1; i <= K; i++){
+		Kpath[i] = (Path **)malloc(sizeof(Path) * n);
+		for(int j = 1; j <= n; j++)
+			Kpath[i][j] = (Path *)malloc(sizeof(Path) * n);
+	}
+	for( int i = 1; i <= n; i++){
+		dist[i] = (EdgeType *)malloc(sizeof(EdgeType) * n);
+		pre[i] = (VertexType *)malloc(sizeof(VertexType) *n);
+	}
+
+	*/
+}
+
+
+//求出V点的所有最短路径，结果保存在类的变量Kpath[1][v][i]里面，1表示第一短路径，v、i表示从v到i，
+//Kpath结构里，node[i]表示第几跳的点，node[0]是自身，也就是v，另外保存了总跳数和总距离
+void MapPath::Dijkstra(VertexType v){
+	bool s[MAXNODE];
+
+	for(int i = 1; i <= n; i++){
+		dist[v][i] = mgraph.edges[v][i];
+		s[i] = 0;
+
+		if(dist[v][i] == INFINITY)
+			pre[v][i] = 0;
+		else
+			pre[v][i] = v;
+	}
+
+ 
+	s[v] = 1;
+	dist[v][v] = 0;
+
+	for( int i = 2; i <= n; i++){
+		VertexType u = v;
+		EdgeType tmp = INFINITY;
+
+		for(int j = 1; j <= n; j++){
+			if(!s[j] && dist[v][j] < tmp){
+				tmp = dist[v][j];
+				u = j;
+			}
+		}
+		s[u] = 1;
+		for(int j = 1; j <= n; j++){
+			if(mgraph.edges[u][j] + dist[v][u] < dist[v][j]){
+				dist[v][j] = mgraph.edges[u][j] + dist[v][u];
+				pre[v][j] = u;
+			}
+		}
+	}
+
+	for(VertexType i = 1; i <= n; i++){
+		int counthop = 0;
+		EdgeType length = 0;
+		VertexType j = i;
+		while(pre[v][j] != 0){
+			length += mgraph.edges[j][pre[v][j]];
+			j = pre[v][j];
+			counthop++;
+		}
+
+		Kpath[1][v][i].hop = counthop;
+		Kpath[1][v][i].distance = length;
+		VertexType m = i;
+		while(counthop){								//处理结果是路径node[1]即为第一跳，根据pre[][]把结果弄出来
+			Kpath[1][v][i].node[counthop] = m;
+			m = pre[v][m];
+			counthop--;
+		}
+		Kpath[1][v][i].node[counthop] = v;
+	}
+}
+
+
+//这个跟上面有很大重复，稍微改了下，接收两个点，返回两点之间的最短路径
+Path MapPath::Dijkstra(VertexType v,VertexType e){            
+	bool s[MAXNODE];
+	//Path *tmpath = (Path*)malloc(sizeof(Path) * n);
+	Path tmpath[MAXNODE];
+	Path nopath;
+
+	nopath.distance = 0;
+	nopath.hop = 0;
+
+	int flag = 0;
+
+	for(int i = 1; i <= n; i++){
+		if(mgraph.edges[v][i] != INFINITY){
+			flag = 1;
+			break;
+		}
+	}
+
+	if(flag == 0)
+		return nopath;
+
+	for(int i = 1; i <= n; i++){
+		dist[v][i] = mgraph.edges[v][i];
+		s[i] = 0;
+
+		if(dist[v][i] == INFINITY)
+			pre[v][i] = 0;
+		else
+			pre[v][i] = v;
+	}
+
+ 
+	s[v] = 1;
+	dist[v][v] = 0;
+
+	for( int i = 2; i <= n; i++){
+		VertexType u = v;
+		EdgeType tmp = INFINITY;
+
+		for(int j = 1; j <= n; j++){
+			if(!s[j] && dist[v][j] < tmp){
+				tmp = dist[v][j];
+				u = j;
+			}
+		}
+		s[u] = 1;
+		for(int j = 1; j <= n; j++){
+			if(mgraph.edges[u][j] + dist[v][u] < dist[v][j]){
+				dist[v][j] = mgraph.edges[u][j] + dist[v][u];
+				pre[v][j] = u;
+			}
+		}
+	}
+
+	for(VertexType i = 1; i <= e; i++){
+		int counthop = 0;
+		EdgeType length = 0;
+		VertexType j = i;
+		while(pre[v][j] != 0){
+			length += mgraph.edges[j][pre[v][j]];
+			j = pre[v][j];
+			counthop++;
+		}
+
+		tmpath[i].hop = counthop;
+		tmpath[i].distance = length;
+		VertexType m = i;
+		while(counthop){								//处理结果是路径node[1]即为第一跳，不存取本节点
+			tmpath[i].node[counthop] = m;
+			m = pre[v][m];
+			counthop--;
+		}
+		tmpath[i].node[counthop] = v;
+	}
+
+	Path tmpath2 = tmpath[e];
+	return tmpath2;
+
+}
+
+
+
+
+void MapPath::PrintShortestPath(VertexType v){
+	/*for(VertexType i = 1; i <= n; i++){
+		cout<<v<<"->"<<i<<": "<<i<<"<-";
+		VertexType j = i;
+		while(pre[v][j] != v && pre[v][j] != 0){
+			cout<<pre[v][j]<<"<-";
+			j = pre[v][j];
+		}
+		cout<<v<<endl;
+	}
+	*/
+
+	for(VertexType i = 1; i <= n; i++){
+		int counthop = Kpath[1][v][i].hop;
+		cout<<v;
+		for(int j = 1; j <= counthop; j++)
+			cout<<"-->"<<Kpath[1][v][i].node[j];
+		cout<<"\nhop: "<<counthop<<endl;
+		cout<<"distance: "<<Kpath[1][v][i].distance<<endl;
+		cout<<endl;
+	}
+}
+
+//求出所有点之间的最短路径
+void MapPath::DijkstraAll(){
+	for(VertexType i = 1; i <= n; i++){
+		Dijkstra(i);
+	}
+}
+
+void MapPath::PrintShortestPathAll(){
+	for(VertexType i = 1; i <= n; i++){
+		PrintShortestPath(i);
+		cout<<"\n"<<endl;
+	}
+}
+
+
+void MapPath::PrintOut(void){
+	/*
+	for(int i = 0; i < n; i++){
+		EdgeNode* s = adjlist[i].firstedge;
+		while(s != NULL){
+			cout<<"<"<<i<<","<<s->adjnode<<">:"<<s->weight<<endl;
+			s = s->next;
+		}
+	}
+	*/
+
+	for(int i = 1; i <= n; i++){
+		for(int j = 1; j <= n; j++){
+			if(mgraph.edges[i][j] != INFINITY && mgraph.edges[i][j] != 0)
+				cout<<"<"<<i<<","<<j<<">:"<<mgraph.edges[i][j]<<endl;
+		}
+	}
+
+	cout<<"Output End"<<endl;
+}
+
+
+/*
+void MapPath::KShortestPath(VertexType v){		//求出v点到其他所有点的K最短路径,K在define里指定
+
+	typedef struct tmpedge{
+		VertexType a,b;
+		EdgeType c;
+	}tmpedge;
+
+	//vector<Path> pathset;
+	VertexType end = 8;
+	Path sufpath;
+	Path pathset[100];
+	int pathcount = 0;
+	stack<tmpedge> tmpstore;
+
+	tmpedge t;
+
+	
+
+	for(int j = 1; j <= K - 1; j++){			//第K短路径要参考第K-1短的路径情况
+
+	for(int i = 1; i <= Kpath[j][v][end].hop; i++){
+		int flag = 0;
+		t.a = Kpath[j][v][end].node[i - 1];
+		t.b = Kpath[j][v][end].node[i];
+		t.c = mgraph.edges[Kpath[j][v][end].node[i]][Kpath[j][v][end].node[i - 1]];
+		tmpstore.push(t);
+		mgraph.edges[Kpath[j][v][end].node[i - 1]][Kpath[j][v][end].node[i]] = INFINITY;
+		mgraph.edges[Kpath[j][v][end].node[i]][Kpath[j][v][end].node[i - 1]] = INFINITY;		//遍历，另K-1短路径里面的每条边断一次
+
+		sufpath = Dijkstra(Kpath[j][v][end].node[i - 1],end);                       //求出新的路径
+		if(sufpath.distance == 0 && sufpath.hop == 0){						//如果路径不存在，就把原来设置为无穷的给复原
+			while(!tmpstore.empty()){
+				t = tmpstore.top();
+				tmpstore.pop();
+				mgraph.edges[t.a][t.b] = t.c;
+				mgraph.edges[t.b][t.a] = t.c;
+			}
+			continue;
+		}
+		while(flag != 1){							//flag=1说明新的路径没有与之前的任何K-1条路径的前i个点重合
+			for(int m = 1;m <= j; m++){                                // m <= k - 1
+				int flag2 = 0;
+				int count = 1;
+				for( count = 1; count <= i - 1; count++){                   //flag2 = 1 表示前i-1个点不重合
+					if( Kpath[m][v][end].node[count] != Kpath[j][v][end].node[count])
+						flag2 = 1;
+				}
+				if( flag2 == 0 && Kpath[m][v][end].node[count] == sufpath.node[1])   //flag2 = 0表示前i-1个点重合。
+					flag2 = 2;
+
+				if( flag2 == 2 ){                                                 //flag2 = 2表示前i个点都重合
+					flag = 0;
+					t.a = Kpath[m][v][end].node[i - 1];
+					t.b = Kpath[m][v][end].node[i];
+					t.c = mgraph.edges[Kpath[m][v][end].node[i]][Kpath[m][v][end].node[i - 1]];                 //重合就要把边设为无穷，再求最短路径
+					tmpstore.push(t);
+					mgraph.edges[Kpath[m][v][end].node[i - 1]][Kpath[m][v][end].node[i]] = INFINITY;
+					mgraph.edges[Kpath[m][v][end].node[i]][Kpath[m][v][end].node[i - 1]] = INFINITY;
+					sufpath = Dijkstra(Kpath[m][v][end].node[i - 1],end);
+					break;
+				}
+				else if( m == j )
+					flag = 1;
+			}
+		}
+		if(sufpath.distance == 0 && sufpath.hop == 0){                     //如果总是重合，这个情况算是结束，复原边的情况。
+			while(!tmpstore.empty()){
+				t = tmpstore.top();
+				tmpstore.pop();
+				mgraph.edges[t.a][t.b] = t.c;
+				mgraph.edges[t.b][t.a] = t.c;
+			}
+			continue;
+		}
+
+		for(int h = sufpath.hop + i; h >= 1; h--){						//从i遍历出的路径是由两部分组成的，i之前是第K-1短路径的前i个点。后面是新求的。
+			if (h >= i) 
+				sufpath.node[h] = sufpath.node[h - i + 1];
+			else{
+				sufpath.node[h] = Kpath[j][v][end].node[h];
+				sufpath.hop++;
+				sufpath.distance += mgraph.edges[Kpath[j][v][end].node[h]][Kpath[j][v][end].node[h - 1]];
+			}
+		}
+		sufpath.node[0] = v;
+
+		while(!tmpstore.empty()){
+			t = tmpstore.top();
+			tmpstore.pop();
+			mgraph.edges[t.a][t.b] = t.c;
+			mgraph.edges[t.b][t.a] = t.c;
+		}
+//		pathset.push_back(sufpath);
+		
+		VertexType noloop[MAXNODE+1] = {0};           //监测路径中是否有环路
+		int loop = 0;
+		for(int f = 0; f <= sufpath.hop; f++){
+			if( noloop[sufpath.node[f]] == 0)
+				noloop[sufpath.node[f]] = 1;
+			else
+				loop = 1;
+		}
+		if(loop == 0)
+			pathset[pathcount++] = sufpath;           //没有环路，则放入pathset中，pathset里面放了每一次求出的符合条件的路径
+	}      
+
+	int toremove = 0;
+	Path spath = pathset[0];
+
+	if( pathcount == 0){
+		cout<<"\nno loopless path left\n"<<endl;
+		cout<<"at most   " << j <<"   shortest paths are found"<<endl;
+		
+		break;
+	}
+	for(int i = 1; i < pathcount; i++)
+		if(pathset[i].distance < spath.distance){			//在求K短时候，就是在每一次遍历后，从pathset里面选出一条。
+			spath = pathset[i];								//注意K短一定要遍历K-1的所有边，但最后的结果可能不是从K-1的遍历中出来的，只要是最短就行
+			toremove = i;
+		}
+	for(int i = 0; i <= pathcount; i++){
+		if(i >= toremove ){							//pathset输出一条，就把那条删除掉
+			pathset[i] = pathset[i+1];
+		}
+	}
+	pathcount--;
+
+//////////
+	vector<Path>::iterator it = pathset.begin();
+	vector<Path>::iterator toremove;
+	Path spath = *it;
+
+	for( it = pathset.begin(); it != pathset.end(); it++){
+		if(it->distance < spath.distance){
+			spath = *it;
+			toremove = it;
+		}
+	}
+	
+	pathset.erase(toremove);
+/////////////
+
+	Kpath[j + 1][v][end] = spath;	
+	int counthop = Kpath[j + 1][v][end].hop;
+	cout<<v<<"'s  "<<j+1<<"  shortest path"<<endl;
+	cout<<v;
+	for(int l = 1; l <= counthop; l++)
+		cout<<"-->"<<Kpath[j + 1][v][end].node[l];
+	cout<<"\nhop: "<<counthop<<endl;
+	cout<<"distance: "<<Kpath[j + 1][v][end].distance<<endl;
+	cout<<endl;
+	
+
+	}
+}
+*/
+
+
+
+bool LinkMapPath::FindAToBPath( unsigned int dwMapId1, unsigned int dwMapId2, std::list<unsigned int>& PathList )
+{
+	//[bing] 判断一下这2个地图是不是不在列表内 或者相等
+	if(m_SceneMap.find(dwMapId1) == m_SceneMap.end()
+		|| m_SceneMap.find(dwMapId2) == m_SceneMap.end()
+		|| dwMapId1 == dwMapId2)
+		return false;
+
+	//重置每一个节点的per节点记录
+	std::map<unsigned int, S_MapNode>::iterator SceneIT = m_SceneMap.begin();
+	while(SceneIT != m_SceneMap.end())
+	{
+		SceneIT->second.dwPerMapID = 0;
+		SceneIT++;
+	}
+
+	//头节点标志一下
+	m_SceneMap[dwMapId1].dwPerMapID = (unsigned int)-1;
+
+	//将头节点加入递归列表内
+	std::map<unsigned int, unsigned int> findmap;
+	findmap.insert(make_pair(dwMapId1, dwMapId1));
+	
+	//广度优先算法找最近的连通点
+	while(findmap.find(dwMapId2) == findmap.end())
+	{
+		std::vector<unsigned int> vecSaveLinkMapID;
+
+		//遍历每一个节点的Link节点
+		std::map<unsigned int, unsigned int>::iterator FindIT = findmap.begin();
+		while(FindIT != findmap.end())
+		{
+			std::vector<unsigned int>& vecLinkMapId = m_SceneMap[FindIT->first].m_LinkMapId;
+			for(size_t i = 0; i < vecLinkMapId.size(); ++i)
+			{
+				//若该节点没有被遍历过加入到递归节点内
+				if(m_SceneMap[vecLinkMapId[i]].dwPerMapID == 0)
+				{
+					//记录连接它的上一级节点
+					m_SceneMap[vecLinkMapId[i]].dwPerMapID = FindIT->first;
+					vecSaveLinkMapID.push_back(vecLinkMapId[i]);
+				}
+			}
+
+			FindIT++;
+		}
+
+		findmap.clear();
+
+		for(size_t i = 0; i < vecSaveLinkMapID.size(); ++i)
+		{
+			findmap[vecSaveLinkMapID[i]] = vecSaveLinkMapID[i];
+		}
+
+		//根本没找到可以连通
+		if(!findmap.size())
+			return false;
+	}
+
+	//尾节点加入到path最后
+	PathList.push_back(dwMapId2);
+	unsigned int dwPerMapID = m_SceneMap[dwMapId2].dwPerMapID;
+	//反向查找上一级的link节点 直到找到头结点
+	while(m_SceneMap[dwPerMapID].dwPerMapID != (unsigned int)-1)
+	{
+		PathList.push_front(dwPerMapID);
+		dwPerMapID = m_SceneMap[dwPerMapID].dwPerMapID;
+	}
+	//将头结点加入到pathlist内	//[bing] 第一个中转点为邻接地图ID 所以不要把头结点加进来
+	//PathList.push_front(dwMapId1);
+
+	return true;
+}
+
+void LinkMapPath::Init()
+{
+	CCLOG("LinkMapPath Init");
+
+	S_MapNode SMapLink;
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM LinkMap");
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		//CCLOG("LinkMapPath Add Row");
+
+		SMapLink.m_LinkMapId.clear();
+
+		unsigned int dwSrcMapID = 0;
+		unsigned int dwTargetMapID = 0;
+		unsigned int idx = table->get_index("srcmapid");
+		dwSrcMapID = table->get_integer32(idx);
+		idx = table->get_index("targetmapid");
+		dwTargetMapID = table->get_integer32(idx);
+
+		if(dwSrcMapID == 0 || dwTargetMapID == 0)
+		{
+			//CCLOG("LinkMapPath dwSrcMapID = %d && dwTargetMapID = %d", dwSrcMapID, dwTargetMapID);
+
+			CC_ASSERT(0);
+			continue;
+		}
+
+		//CCLOG("LinkMapPath dwSrcMapID = %d && dwTargetMapID = %d", dwSrcMapID, dwTargetMapID);
+
+		m_SceneMap[dwSrcMapID].m_LinkMapId.push_back(dwTargetMapID);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	CCLOG("LinkMapPath Init End");
+}

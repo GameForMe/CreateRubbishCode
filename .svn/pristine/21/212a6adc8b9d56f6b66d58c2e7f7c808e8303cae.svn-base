@@ -1,0 +1,413 @@
+#include "ReceiveRewardUi.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "ItemMarixLayer.h"
+#include "DBMgr.h"
+#include "CfgReader.h"
+#include "PackageManager.h"
+#include "CommonMsgDefine.h"
+#include "WorldPacket.h"
+#include "TCPClient.h"
+#include "ToolTip.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "PackageManager.h"
+#include "ItemNode.h"
+#include "RewardProto.h"
+#include "StringMgr.h"
+#include "LocalPlayer.h"
+#include "Helper.h"
+////////////////////////////////////////////////////////////
+ReceiveRewardUiMgr::ReceiveRewardUiMgr()
+	: _isHaveInformation(0)
+	,isShowContinueBtn(false)
+	,rechargeTimes(-1),uiTag(WCT_Null)	
+{
+
+}
+
+ReceiveRewardUiMgr::~ReceiveRewardUiMgr()
+{
+
+}
+
+ReceiveRewardUiMgr* ReceiveRewardUiMgr::GetInstance()
+{
+	static ReceiveRewardUiMgr mgr;
+	return &mgr;
+}
+void ReceiveRewardUiMgr::sendToServerRequestEmailReward(int level)
+{	
+/*签到后再充值不再补充发邮件奖励 by zhang 2015.09.21
+	if (level < rewardData.vipLevel)
+	{
+		return;
+	}
+	NET_SIC_get_sign_reward cmd;
+	cmd.byDay = rewardData.selectIndex;
+	cmd.byType = 2;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_IDLE , false);*/
+}
+
+void ReceiveRewardUiMgr::setAwardBySelf(std::string name,std::string iconname)
+{
+	ReceiveRewardItem item;
+	item.itemId = 0;
+	item.itemName = name;
+	item.iconName = iconname;
+	_RewardItemBowl.push_back(item);
+}
+
+void ReceiveRewardUiMgr::setItemData(unsigned int Id,int Count/*= 1*/,int index /*= 0*/)
+{
+	if (Id != -1 && Id != 0 && Id > 1000001 && Id < 9999999)
+	{
+		ReceiveRewardItem item;
+		item.itemId = Id;
+		item.itemCount = Count;
+		item.itemName = PackageManager::getInstance()->getItemTypeData(Id).name;
+		//_RewardItemBowl.push_back(item);
+		std::vector<ReceiveRewardItem>::iterator it;
+		bool isSame = false;
+		//检测是否重复，双击签到有可能重复显示奖励
+		for(it = _RewardItemBowl.begin();it !=_RewardItemBowl.end();++it)
+		{
+			if (it->itemId == Id)
+			{
+				isSame = true;
+				break;
+			}
+		}
+		if (!isSame)
+		{
+			_RewardItemBowl.push_back(item);
+		}
+		_isHaveInformation = 0;//_isHaveInformation = index;暂时屏蔽VIP提示(2015.09.12版本_测)
+	}
+}
+
+std::vector<ReceiveRewardItem> const& ReceiveRewardUiMgr::getItemBowl()
+{
+	return _RewardItemBowl;
+}
+
+void ReceiveRewardUiMgr::clearItemBowl()
+{
+	_RewardItemBowl.clear();
+}
+
+void ReceiveRewardUiMgr::CloseReceiveRewardUI()
+{
+	CLOSE_UI(WCT_ReceiveRewardUi);
+}
+
+void ReceiveRewardUiMgr::openRewardUi()
+{
+	if (_RewardItemBowl.size() <= 0)
+	{
+		return;
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(REWEAD);
+
+	LocalPlayer* pPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if (pPlayer && pPlayer->isInRoleStateAny(RA_Stall) )
+	{
+		clearItemBowl();
+	}
+	
+	OPEN_UI(WCT_ReceiveRewardUi);
+}
+
+//////////////////////////////////////
+ReceiveRewardUi::ReceiveRewardUi()
+{
+}
+
+ReceiveRewardUi::~ReceiveRewardUi()
+{
+
+}
+
+CCNode* ReceiveRewardUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["receiverewarduilayer"] = UiLayerLoader<ReceiveRewardUiLayer>::loader();
+	return readUiFromCCBI("receivesthui", nodeLoaders, _loadSpriteSheet);
+}
+
+///////////////////////////////////////////////////////////////////////
+ReceiveRewardUiLayer::ReceiveRewardUiLayer()
+	: _moveNode(NULL),_awardSprite(NULL)
+{
+	_moveNode = CCNode::create();
+	_moveNode->retain();
+
+	_itemListScrollView = NULL;
+}
+
+ReceiveRewardUiLayer::~ReceiveRewardUiLayer()
+{
+	CC_ASSERT(_moveNode != NULL);
+	CCLog("_t_t_t_t_t_t_t_t_t_t_t_t_t_t:ReceiveRewardUiLayer::~ReceiveRewardUiLayer()");
+	_moveNode->release();
+	if(NULL != _awardSprite)
+		_awardSprite->removeFromParent();
+
+	_itemListScrollView = NULL;
+}
+
+cocos2d::SEL_MenuHandler ReceiveRewardUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler ReceiveRewardUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onokBtnPressed", ReceiveRewardUiLayer::onOkBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onjixulingquBtnPressed", ReceiveRewardUiLayer::onjixulingquBtnPressed);
+	return NULL;
+}
+
+void ReceiveRewardUiLayer::onOkBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	_isLessThanFore = false;
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_ReceiveRewardUi);
+	ReceiveRewardUiMgr::GetInstance()->setUiTag(WCT_Null);
+}
+
+
+void ReceiveRewardUiLayer::onjixulingquBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	ReceiveRewardUiMgr::GetInstance()->setContinueLingquReward(false);
+	ReceiveRewardUiMgr::GetInstance()->setRechargeTimes(0); //标识走的是签到时充值奖励
+	RechargeNewUiMgr::GetInstance()->openRechargeNewUi();	
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_ReceiveRewardUi);
+}
+
+bool ReceiveRewardUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (_itemListScrollView && !_isLessThanFore && isTouchOnNodeContent(_itemListScrollView, pTouch)) {
+		return true;
+	}
+	onOkBtnPressed(NULL, NULL);
+	return true;
+}
+void ReceiveRewardUiLayer::setContinueButtonDisplay(bool isShow)
+{
+	_continueRewardButton->setVisible(isShow);
+}
+
+void ReceiveRewardUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	Helper::replaceLabelTTFWithLabelFTAndRemove(_btn);
+
+	_isLessThanFore = false;
+	std::vector<ReceiveRewardItem> const& reward_item_list = ReceiveRewardUiMgr::GetInstance()->getItemBowl();
+	size_t count = reward_item_list.size();
+
+	_itemListScrollView = NULL;
+
+	if (count == 0)
+		return;
+
+	CCSprite *_rotationSprite = (CCSprite*)getChildByTag(RNT_Sprite);
+	CCRotateBy* rotateTo = CCRotateBy::create(6, 360);
+	_rotationSprite->runAction(CCRepeatForever::create(rotateTo));
+
+	CCNode *_node = getChildByTag(RNT_Layer)->getChildByTag(RNT_Layer);
+	//_continueRewardButton = (CCControlButton*)(this->getChildByTag(RNT_Layer)->getChildByTag(RNT_BUTTON));
+	//_continueRewardButton->setVisible(false);暂时屏蔽VIP领取(2015.09.12版本_测)
+	_moveNode->setAnchorPoint(ccp(0.5,0.5));
+	//_node->addChild(_moveNode);
+	//if (ReceiveRewardUiMgr::GetInstance()->getContinueLingquReward())
+	//{
+	//	_continueRewardButton->setVisible(true);暂时屏蔽VIP领取(2015.09.12版本_测)
+	//}
+
+	CCSpriteFrame* spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("receivesthui_bottom");
+	CC_ASSERT(spriteFrame != NULL);
+
+	if (spriteFrame != NULL)
+	{
+		for (size_t i = 0;i < count;i++)
+		{
+			CCSprite *sprite = CCSprite::createWithSpriteFrame(spriteFrame);
+			_itemSpriteWidth = sprite->getContentSize().width;
+			float x = REWARDITEMBIANJIE + _itemSpriteWidth * i + REWARDITEMJIANJU * i + _itemSpriteWidth / 2;
+			sprite->setPosition(ccp(x,_node->getContentSize().height / 2));
+			_moveNode->addChild(sprite,1,i + RNT_ItemSprite);
+
+			if(0 != reward_item_list.at(i).itemId)
+			{
+				ItemNode *itemNode = ItemNode::create();
+				itemNode->setBlank();
+				itemNode->setPosition(sprite->getPosition());
+				itemNode->setTag(i + RNT_ItemNodeBegin);
+				itemNode->setClickable(false);
+				itemNode->hideItemOpBtn();
+				_moveNode->addChild(itemNode,2);
+				//“金币”
+				TTFConfig fc;
+				fc.fontFilePath = FT_FONTFACE;
+				fc.fontSize = 16;
+				//fc.outlineSize = 1;
+				LabelFT * label = LabelFT::createWithTTF(fc,"");
+				itemNode -> addChild(label,1,i + RNT_ItemLabelTTF);
+				label -> setPosition(ccp(itemNode->getContentSize().width * 0.5,itemNode->getPositionY() - itemNode->getContentSize().height));
+
+// 				CCLabelTTF *label = CCLabelTTF::create();
+// 				itemNode->addChild(label,1,i + RNT_ItemLabelTTF);
+// 				label->setPosition(ccp(itemNode->getContentSize().width * 0.5,itemNode->getPositionY() - itemNode->getContentSize().height));
+// 				label->setFontSize(16);
+			}
+			else
+			{
+				_awardSprite = CCSprite::create();
+				CC_ASSERT(_awardSprite != NULL);
+				_awardSprite->setPosition(sprite->getPosition());
+				CCSpriteFrame* Frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(reward_item_list.at(i).iconName.c_str());
+				if(Frame == NULL)
+				{
+					CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addImage(reward_item_list.at(i).iconName.c_str());
+					if(NULL != texture)
+					{
+						Frame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+						CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(Frame, reward_item_list.at(i).iconName.c_str());
+					}
+				}
+				if (Frame)
+				_awardSprite->setDisplayFrame(Frame);
+				_awardSprite->setTag(i + RNT_ItemLabelTTF);
+				_moveNode->addChild(_awardSprite,2);
+
+				TTFConfig fc;
+				fc.fontFilePath = FT_FONTFACE;
+				fc.fontSize = 16;
+				LabelFT * label = LabelFT::createWithTTF(fc,"");
+				_awardSprite->addChild(label,1,i + RNT_ItemLabelTTF);
+				label -> setPosition(ccp(_awardSprite->getContentSize().width * 0.5,_awardSprite->getPositionY() - _awardSprite->getContentSize().height));
+// 				CCLabelTTF *label = CCLabelTTF::create();
+// 				_awardSprite->addChild(label,1,i + RNT_ItemLabelTTF);
+// 				label->setPosition(ccp(_awardSprite->getContentSize().width * 0.5,_awardSprite->getPositionY() - _awardSprite->getContentSize().height));
+// 				label->setFontSize(16);
+			}
+		}
+	
+		float modeNodeWidth = count * _itemSpriteWidth + (count - 1) * REWARDITEMJIANJU + REWARDITEMBIANJIE * 2;
+		_moveNode->setContentSize(CCSize(modeNodeWidth,_node->getContentSize().height));	//这步骤很关键，利用锚点和宽度居中
+		if (count > 4)
+		{
+			_itemListScrollView = createScrollViewWithContentHorizontal(_moveNode);
+			_itemListScrollView->setContainer(_moveNode);
+			_itemListScrollView->setTouchPriority(-1001);
+			CCSize nodeSize = _node->getContentSize();
+			CCPoint scrollPoint;
+			_itemListScrollView->setViewSize(CCSize(nodeSize.width - _itemSpriteWidth, nodeSize.height));
+			_itemListScrollView->setContentSize(_moveNode->getContentSize());
+			scrollPoint = ccp((nodeSize.width - _itemListScrollView->getViewSize().width) / 2, 0);
+			_node->addChild(_itemListScrollView);
+			_itemListScrollView->setPosition(scrollPoint);
+		}else
+		{
+			_node->addChild(_moveNode);
+			_moveNode->setPosition(ccp(_node->getContentSize().width / 2,_node->getContentSize().height / 2));
+			getChildByTag(1)->getChildByTag(3)->setVisible(false);  //获得确定按钮
+			getChildByTag(1)->getChildByTag(2)->setVisible(true);   //显示点击任意位置继续文字
+			_isLessThanFore = true;
+		}
+
+		setRewardData();
+	}
+
+	CCNode *ok_btn_node = getChildByTag(RNT_Layer)->getChildByTag(3);
+	if (ok_btn_node)
+	{
+		ok_btn_node->setVisible(false);
+	}
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -1000, true);
+	setAllChildernButtonPriority(this,-14);
+	//AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_26);
+}
+
+//“点击任意继续”修改为LabelFT类型
+ bool ReceiveRewardUiLayer::onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode)
+{
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"button1",CCLabelTTF*,_btn);
+	return false;
+}
+
+void ReceiveRewardUiLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+
+ItemNode * ReceiveRewardUiLayer::getItemNode( int index )
+{
+	return dynamic_cast<ItemNode*>(_moveNode->getChildByTag(index + RNT_ItemNodeBegin));
+}
+
+void ReceiveRewardUiLayer::setRewardData()
+{
+	std::vector<ReceiveRewardItem> const& reward_item_list = ReceiveRewardUiMgr::GetInstance()->getItemBowl();
+
+	for (size_t i = 0;i < reward_item_list.size();i++)
+	{
+		if(0 != reward_item_list.at(i).itemId)
+		{
+			ItemNode *item = getItemNode(i);
+			if (item != NULL)
+			{
+				getItemNode(i)->setDataId(reward_item_list[i].itemId);
+				getItemNode(i)->setNum(reward_item_list[i].itemCount);
+				if (reward_item_list[i].itemCount == 1)
+				{
+					getItemNode(i)->SetShowNum(true);
+				}
+
+				LabelFT *label = dynamic_cast<LabelFT*>(item->getChildByTag(i + RNT_ItemLabelTTF));
+				if (label != NULL)
+				{
+					label->setString(reward_item_list[i].itemName.c_str());
+					label->setColor(ccc3(239, 230, 57));
+				}
+			}
+		}
+		else
+		{
+			CCNode* spriteNode = _moveNode->getChildByTag(i + RNT_ItemLabelTTF);
+			if(spriteNode != NULL)
+			{
+				LabelFT* spriteLabel = dynamic_cast<LabelFT*>(spriteNode->getChildByTag(i + RNT_ItemLabelTTF));
+				if(spriteLabel != NULL)
+				{
+					spriteLabel->setString(reward_item_list[i].itemName.c_str());
+					spriteLabel->setColor(ccc3(239, 230, 57));
+				}
+			}
+		}
+	}
+
+	if (ReceiveRewardUiMgr::GetInstance()->getInformation() > 0)
+	{
+		int nInformation = ReceiveRewardUiMgr::GetInstance()->getInformation();
+		LabelFT* label2 = (LabelFT*)getChildByTag(RNT_Layer)->getChildByTag(RNT_LabelTTF);
+		std::stringstream mergeStr;
+		//vip多少级以上可领取双倍奖励
+		mergeStr << "\x76\x69\x70" << nInformation << "\xE4\xBB\xA5\xE4\xB8\x8A\xE4\xBB\x8A\xE6\x97\xA5\xE5\x8F\xAF\xE9\xA2\x86\xE5\x8F\x96\xE5\x8F\x8C\xE5\x80\x8D\xE5\xA5\x96\xE5\x8A\xB1";
+		std::string content = mergeStr.str();
+		label2->setString(content.c_str());
+		label2->setColor(ccc3(239, 230, 57));
+	}
+
+	ReceiveRewardUiMgr::GetInstance()->clearItemBowl();
+}
+
+
+
+
+
+

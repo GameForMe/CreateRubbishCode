@@ -1,0 +1,1266 @@
+/****************************************************************************
+ Copyright (c) 2013 cocos2d-x.org
+ 
+ http://www.cocos2d-x.org
+ 
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+ 
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+ 
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE.
+ ****************************************************************************/
+
+#include "ResUpdateManager.h"
+#include "cocos2d.h"
+
+#if (CC_TARGET_PLATFORM != CC_PLATFORM_WINRT) && (CC_TARGET_PLATFORM != CC_PLATFORM_WP8)
+#include <curl/curl.h>
+#include <curl/easy.h>
+
+#include <stdio.h>
+#include <vector>
+
+#if (CC_TARGET_PLATFORM != CC_PLATFORM_WIN32)
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <errno.h>
+#include <unistd.h>
+#endif
+
+#ifdef _USE_SDK
+#include "wzolJni.h"
+#endif
+#include "support/zip_support/unzip.h"
+
+//using namespace cocos2d;
+using namespace std;
+
+NS_CC_EXT_BEGIN;
+
+#define BUFFER_SIZE    8192
+#define MAX_FILENAME   512
+
+// Message type
+#define ResUpdateManager_MESSAGE_UPDATE_COMPLETED              0
+#define ResUpdateManager_MESSAGE_FIRST_UNCOMPRESS              1
+#define ResUpdateManager_MESSAGE_ONE_DOWNLOAD_BEGIN            2
+#define ResUpdateManager_MESSAGE_ONE_UPDATE_SUCCEED            3
+#define ResUpdateManager_MESSAGE_RECORD_DOWNLOADED_VERSION     4
+#define ResUpdateManager_MESSAGE_PROGRESS                      5
+#define ResUpdateManager_MESSAGE_ERROR                         6
+
+#define ResUpdateManager_MESSAGE_FIRST_UNCOMPRESS_GET              100
+#define ResUpdateManager_MESSAGE_FIRST_UNCOMPRESS_WRITE            101
+#define ResUpdateManager_MESSAGE_FIRST_UNCOMPRESS_WRITE_OK         102
+#define ResUpdateManager_MESSAGE_FIRST_UNCOMPRESS_READZIP          103
+
+// Some data struct for sending messages
+
+struct ErrorMessage
+{
+    ResUpdateManager::ErrorCode code;
+    ResUpdateManager* manager;
+};
+
+struct ProgressMessage
+{
+    int percent;
+	double totalToDownload;
+	double nowDownloaded;
+    ResUpdateManager* manager;
+};
+
+// Implementation of ResUpdateManager
+
+ResUpdateManager::ResUpdateManager(const char* user, const char* packageUrl/* =NULL */, const char* versionFileUrl/* =NULL */, const char* storagePath/* =NULL */)
+:  _userName(user)
+, _storagePath(storagePath)
+, _version("")
+, _downloadedVersion("")
+, _curl(NULL)
+#ifndef WIN32
+, _tid(NULL)
+#endif
+, _connectionTimeout(0)
+, _delegate(NULL)
+{
+#ifdef WIN32
+  InitializeCriticalSection(&_updateMutex);
+  InitializeCriticalSection(&_dataMutex);
+#else
+	pthread_mutex_init(&_updateMutex,NULL);
+	pthread_mutex_init(&_dataMutex,NULL);
+#endif
+
+#ifdef _USE_SDK
+	WzolJni::getInstance()->callPlatformWithReturn(GET_PACKAGEURL,"",_packageUrl);
+	CCLog("GET_PACKAGEURL data: %s", _packageUrl.c_str());
+	WzolJni::getInstance()->callPlatformWithReturn(GET_VERSIONFILEURL,"",_versionFileUrl);
+	CCLog("GET_VERSIONFILEURL data: %s", _versionFileUrl.c_str());
+#else
+	_packageUrl = packageUrl;
+	_versionFileUrl = versionFileUrl;
+#endif
+    checkStoragePath();
+    _schedule = new Helper();
+}
+
+ResUpdateManager::~ResUpdateManager()
+{
+    if (_schedule)
+    {
+        _schedule->release();
+    }
+}
+
+void ResUpdateManager::checkStoragePath()
+{
+    if (_storagePath.size() > 0 && _storagePath[_storagePath.size() - 1] != '/')
+    {
+        _storagePath.append("/");
+    }
+}
+struct VersionType
+{
+    char ver[32];
+    VersionType(const char* str, int length)
+    {
+        int l = MIN(31, length);
+        l = MAX(l, 0);
+        memcpy(ver, str, l);
+        ver[l] = '\0';
+    }
+};
+std::vector<VersionType> g_versionList;
+static size_t getVersionCode(void *ptr, size_t size, size_t nmemb, void *userdata)
+{
+    string *version = (string*)userdata;
+    version->append((char*)ptr, size * nmemb);
+    //g_versionList.clear();
+
+	char* pData = (char*)ptr;
+    int totalSize = size * nmemb;
+	int curPos = 0;
+	char ch = 0;
+	int num = 0;
+	int lastPos = 0;
+	while( curPos < totalSize )
+	{
+		ch = pData[curPos++];
+		if( ch == 0x0D)
+		{
+			char *pBegin = pData + lastPos;
+			VersionType ver(pBegin,curPos-1-lastPos);
+			g_versionList.push_back(ver);
+			num++;
+            lastPos = curPos+1;
+		}
+
+	}
+
+    return (size * nmemb);
+}
+
+int ResUpdateManager::checkUpdate()
+{
+    CCLog("update log:8888888888");
+    if (_versionFileUrl.size() == 0)
+    {
+        sendErrorMessage(kUnkown);
+        return -1;
+    }
+    
+	CCLog("_versionFileUrl:%s", _versionFileUrl.c_str());
+
+    _curl = curl_easy_init();
+    if (! _curl)
+    {
+        sendErrorMessage(kUnkown);
+        CCLog("can not init curl");
+        return -2;
+    }
+    
+    //return true;
+    // Clear _version before assign new value.
+    _version.clear();
+    g_versionList.clear();
+    
+    CURLcode res;
+    //curl_easy_setopt(_curl, CURLOPT_USERPWD, _userName.c_str());
+    curl_easy_setopt(_curl, CURLOPT_URL, _versionFileUrl.c_str());
+    curl_easy_setopt(_curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(_curl, CURLOPT_WRITEFUNCTION, getVersionCode);
+    curl_easy_setopt(_curl, CURLOPT_WRITEDATA, &_version);
+    if (_connectionTimeout)
+		curl_easy_setopt(_curl, CURLOPT_CONNECTTIMEOUT, _connectionTimeout);
+	else
+		curl_easy_setopt(_curl, CURLOPT_CONNECTTIMEOUT, 3);
+
+	//CCLog("curl_easy_perform 1");
+    res = curl_easy_perform(_curl);
+	//CCLog("curl_easy_perform 2");
+	curl_easy_cleanup(_curl);
+	//CCLog("curl_easy_perform 3");
+
+    if (res != CURLE_OK)
+    {
+		/*
+		if (res == 28 || res == 7)//网络连接超时
+	        sendErrorMessage(kNetwork);
+		else
+	        sendErrorMessage(kUnkown);
+			*/
+		CCLog("_versionFileUrl:%s", _versionFileUrl.c_str());
+        CCLog("can not get version file content, error code is %d", res);
+        return -3;
+    }
+    
+    VersionType lastVer = g_versionList.back();
+    string version;
+    version.append(lastVer.ver, strlen(lastVer.ver));
+	lockData();
+    string recordedVersion = _versionCurInFile;//zhjltodo//CCUserDefault::sharedUserDefault()->getStringForKey(KEY_OF_VERSION);
+	unlockData();
+
+    if (recordedVersion == version)
+    {
+		//还需要检查资源文件是否存在
+		string rpzName = _storagePath + "GameRes.rpz";
+		if (CCFileUtils::sharedFileUtils()->isFileExist(rpzName) )
+		{
+			/*unsigned int nCurVer = */CCFileUtils::sharedFileUtils()->reInitResource();
+			sendErrorMessage(kNoNewVersion);
+			CCLog("there is not new version");
+			ResUpdateManager::Message *msg2 = new ResUpdateManager::Message();
+			msg2->what = ResUpdateManager_MESSAGE_UPDATE_COMPLETED;
+			msg2->obj = this;
+			_schedule->sendMessage(msg2);
+			return 1;
+		}
+    }
+
+	std::string::size_type pos = recordedVersion.find('.');
+	std::string v1 = recordedVersion.substr(0,pos);
+
+	pos = version.find('.');
+	std::string v2 = version.substr(0,pos);
+
+	//大版本更新，需要重新更新新的APP，现在可以更新SO文件，这里就不需要了。
+	//if (v1!=v2)
+	//{
+	//    CCLog("cur version: %s, new version: %s, need big ver to download new app", recordedVersion.c_str(), version.c_str());
+	//	sendErrorMessage(kBigVersionUpdate);
+	//	return -4;
+	//}
+    
+    CCLog("cur version: %s, there is a new version: %s", recordedVersion.c_str(), version.c_str());
+    
+    return 0;
+}
+bool ResUpdateManager::firstUncompress()
+{
+	const char *path = "096DBJ20EVO.db";
+	unsigned long size = 0;
+	unsigned char *data = NULL;
+	std::string fileName = _storagePath + "096DBJ20EVO.db";
+	CCLog("-------------AppDelegate::initDatabaseFile ============= 2");
+	FILE *dbFile = NULL;
+	if (CCFileUtils::sharedFileUtils()->isFileExist( fileName ))
+		remove(fileName.c_str());
+	data = CCFileUtils::sharedFileUtils()->getFileData(path,  "rb" , &size);
+	if (data!=NULL && size>0)
+	{
+		dbFile = fopen(fileName.c_str(), "wb");
+		fwrite(data, sizeof(unsigned char), size, dbFile);
+		fclose(dbFile);
+
+		CC_SAFE_DELETE_ARRAY(data);
+	}
+
+#ifndef _USE_SDK
+	CCLog("-------------AppDelegate::initDatabaseFile ============= serverlist");
+	path = "serverlist.xml";
+	fileName = _storagePath + "serverlist.xml";
+	if (CCFileUtils::sharedFileUtils()->isFileExist( fileName ))
+		remove(fileName.c_str());
+	data = CCFileUtils::sharedFileUtils()->getFileData(path,  "rb" , &size);
+	if (data!=NULL && size>0)
+	{
+		dbFile = fopen(fileName.c_str(), "wb");
+		fwrite(data, sizeof(unsigned char), size, dbFile);
+		fclose(dbFile);
+
+		CC_SAFE_DELETE_ARRAY(data);
+	}
+#endif
+
+	//第一次安装删除记录文件
+	//path = "ClientConfig.cfg";
+	fileName = _storagePath + "ClientConfig.cfg";
+	if (CCFileUtils::sharedFileUtils()->isFileExist( fileName ))
+		remove(fileName.c_str());
+	
+
+	string rpzName = _storagePath + "GameRes.rpz";
+
+	if (CCFileUtils::sharedFileUtils()->isFileExist( rpzName ))
+		remove(rpzName.c_str());
+
+    setUpdateFlag(true);
+	//string outFileName = _storagePath + TEMP_PACKAGE_FILE_NAME;
+	//string outFileName = CCFileUtils::sharedFileUtils()->fullPathForFilename("Client_0.0.0.1.zip");
+	_outFileName = _storagePath + "GameRes.rpz";
+	CCLog("outFileName:%s",_outFileName.c_str());
+
+    ResUpdateManager::Message *msg = new ResUpdateManager::Message();
+    msg->what = ResUpdateManager_MESSAGE_FIRST_UNCOMPRESS_GET;
+    msg->obj = this;
+    _schedule->sendMessage(msg);
+    size = 0;
+	unsigned char* Data = CCFileUtils::sharedFileUtils()->getFileData("GameRes.rpz",  "rb" , &size);
+	if (Data!=NULL && size>0)
+	{
+        ResUpdateManager::Message *msg = new ResUpdateManager::Message();
+        msg->what = ResUpdateManager_MESSAGE_FIRST_UNCOMPRESS_WRITE;
+        msg->obj = this;
+        _schedule->sendMessage(msg);
+
+		//std::string fileName = self->_storagePath + "Client_0.0.0.1.zip";
+		FILE *file = fopen(_outFileName.c_str(), "wb");
+		if (file==NULL)
+		{
+			CCLog("outFileName:%s, open file failed.",_outFileName.c_str());
+			sendErrorMessage(ResUpdateManager::kCreateFile);
+
+			CC_SAFE_DELETE_ARRAY(Data);
+			return false;
+		}
+		fwrite(Data, sizeof(unsigned char), size, file);
+            
+        ResUpdateManager::Message *msg2 = new ResUpdateManager::Message();
+        msg2->what = ResUpdateManager_MESSAGE_FIRST_UNCOMPRESS_WRITE_OK;
+        msg2->obj = this;
+        _schedule->sendMessage(msg2);
+
+		fclose(file);
+
+		CC_SAFE_DELETE_ARRAY(Data);
+		//第一次拷贝，不需要删除
+		unsigned int nCurVer = CCFileUtils::sharedFileUtils()->reInitResource();
+
+		unsigned int nCurVer1 = (nCurVer / 1000000)%100;
+		unsigned int nCurVer2 = (nCurVer / 10000)%100;
+		unsigned int nCurVer3 = (nCurVer / 100)%100;
+		unsigned int nCurVer4 = nCurVer % 100;
+
+		char szTemp[256];
+		memset(szTemp, 0, 256);
+		sprintf(szTemp,"%d.%d.%d.%d", nCurVer1, nCurVer2, nCurVer3, nCurVer4);
+
+		//需要得到版本号
+		_versionCur = szTemp;
+		CCLog("firstUncompress ver:%d,%s",nCurVer, szTemp);
+	}
+	else
+	{
+		CCLog("CCFileUtils::sharedFileUtils()->getFileData():GameRes.rpz ERROR size:%lu",size);
+	}
+	//string outFileName = "assets/Client_0.0.0.1.zip";
+    //if (! uncompress(outFileName.c_str()))
+    //{
+    //  sendErrorMessage(ResUpdateManager::kUncompress);
+	//	setUpdateFlag(false);
+    //    return false;
+    //}
+	return true;
+}
+
+#ifdef WIN32
+unsigned long WINAPI ResUpdateManagerDownloadAndUncompress(void *data)
+#else
+void* ResUpdateManagerDownloadAndUncompress(void *data)
+#endif
+{
+    ResUpdateManager* self = (ResUpdateManager*)data;
+    CCLog("update log:33333333333");
+    if (self==NULL)
+	{
+	    CCLog("ResUpdateManagerDownloadAndUncompress: ERROR, self is null");
+	}
+
+    self->setUpdateFlag(false);
+    do
+    {
+        // Sleep 50 ms
+#ifdef WIN32
+        Sleep(50);
+#else
+        usleep(50000);
+#endif
+
+		CCLog("update log:555555555555");
+       
+        if (self->isUpdateing())
+            continue;
+
+		self->lockData();
+		string recordedVersion = self->_versionCurInFile;//zhjltodo//CCUserDefault::sharedUserDefault()->getStringForKey(KEY_OF_VERSION);
+		self->unlockData();
+		string nullVersion = "";
+		CCLog("first ver:%s",recordedVersion.c_str());
+		
+        if (recordedVersion == nullVersion)
+		{
+			ResUpdateManager::Message *msg = new ResUpdateManager::Message();
+			msg->what = ResUpdateManager_MESSAGE_FIRST_UNCOMPRESS;
+			msg->obj = self;
+			self->_schedule->sendMessage(msg);
+
+			if (!self->firstUncompress())
+				break;
+
+			// Record updated version and remove downloaded zip file
+			ResUpdateManager::Message *msg2 = new ResUpdateManager::Message();
+			msg2->what = ResUpdateManager_MESSAGE_ONE_UPDATE_SUCCEED;
+			msg2->obj = self;
+			self->_schedule->sendMessage(msg2);
+			continue;
+		}
+
+        int ret = self->checkUpdate();
+		if (ret == -3)
+		{
+			int count = 5;
+			while(count-- > 0)
+			{
+				ret = self->checkUpdate();
+				if (ret != -3)
+					break;
+#ifdef WIN32
+				Sleep(50);
+#else
+				usleep(50000);
+#endif
+			}
+		}
+        if (ret!=0)
+        {
+			if (ret == -3)
+			{
+				self->sendErrorMessage(ResUpdateManager::kNetwork);
+			}
+			CCLog("update log:777777777");
+            break;
+        }
+        
+        bool bHaveError = false;
+        while (self->checkNeedDownload())
+        {
+            // Sleep 50 ms
+#ifdef WIN32
+            Sleep(50);
+#else
+            usleep(50000);
+#endif
+            if (self->isUpdateing())
+                continue;
+            
+            self->setUpdateFlag(true);
+            if (! self->downLoad())
+            {
+                bHaveError = true;
+                break;
+            }
+            // Record downloaded version.
+            ResUpdateManager::Message *msg = new ResUpdateManager::Message();
+            msg->what = ResUpdateManager_MESSAGE_RECORD_DOWNLOADED_VERSION;
+            msg->obj = self;
+            self->_schedule->sendMessage(msg);
+            
+			//self->mergeAndRemoveDownloadFile();
+
+            // Uncompress zip file.
+            if (! self->uncompress())
+            {
+               self->sendErrorMessage(ResUpdateManager::kUncompress);
+                bHaveError = true;
+                break;
+            }
+            
+			self->mergeAndRemoveAfterZipUncompress();
+
+			// Record updated version and remove downloaded zip file
+            ResUpdateManager::Message *msg2 = new ResUpdateManager::Message();
+            msg2->what = ResUpdateManager_MESSAGE_ONE_UPDATE_SUCCEED;
+            msg2->obj = self;
+            self->_schedule->sendMessage(msg2);
+        }
+        
+        if (bHaveError)
+        {
+            self->setUpdateFlag(false);
+            break;
+        }
+        
+    } while (1);
+    
+#ifndef WIN32
+	//DetachCurrentThread();
+
+	pthread_detach(pthread_self());
+	pthread_exit((void*)0);
+	return ((void*)0);
+#endif    
+    return NULL;
+}
+
+void ResUpdateManager::update()
+{
+    CCLog("update log:11111111111");
+#ifndef WIN32
+#endif
+
+    // 1. Urls of package and version should be valid;
+    // 2. Package should be a zip file.
+    if (_versionFileUrl.size() == 0 ||
+        _packageUrl.size() == 0 )
+    {
+        CCLog("no version file url, or no package url, or the package is not a zip file");
+        return;
+    }
+    
+    
+    CCLog("update log:22222222222");
+    // Is package already downloaded?
+	lockData();
+    _downloadedVersion = CCUserDefault::sharedUserDefault()->getStringForKey(KEY_OF_DOWNLOADED_VERSION);
+    _versionCurInFile = CCUserDefault::sharedUserDefault()->getStringForKey(KEY_OF_VERSION);
+	unlockData();
+
+#ifdef _WINDOWS_
+		CreateThread(NULL,          // default security attributes
+			0,             // use default stack size
+			ResUpdateManagerDownloadAndUncompress,   // thread function name
+			this,          // argument to thread function
+			0,             // use default creation flags
+			NULL);
+#else
+    pthread_t tid;
+	pthread_attr_t tattr;
+	pthread_attr_init(&tattr);
+	pthread_attr_setdetachstate(&tattr,	PTHREAD_CREATE_DETACHED);
+
+	pthread_create(&tid, &tattr, ResUpdateManagerDownloadAndUncompress, this);
+#endif
+}
+
+bool ResUpdateManager::mergeAndRemoveDownloadFile()
+{
+	string rpzName = _storagePath + "GameRes.rpz";
+
+	if (_bRpz)
+	{	//完整包直接替换改名
+		remove(rpzName.c_str());
+		rename(_outFileName.c_str(), rpzName.c_str());
+		//完整替换后需要重新初始化资源
+		/*unsigned int nCurVer = */CCFileUtils::sharedFileUtils()->reInitResource();
+	}
+	else
+	{
+		//合并
+		CCFileUtils::sharedFileUtils()->patchResource(rpzName.c_str(),_outFileName.c_str());
+		remove(_outFileName.c_str());
+		//合并的不需要重新初始化，合并内部已经重新做了
+	}
+
+	return true;
+	//if (remove(_outFileName.c_str()) != 0)
+	//{
+	//   CCLog("can not remove downloaded file %s", _outFileName.c_str());
+	//}
+}
+
+bool ResUpdateManager::mergeAndRemoveAfterZipUncompress()
+{
+	string rpzName = _storagePath + "GameRes.rpz";
+
+	if (_bRpz)
+	{	//完整包直接替换改名
+		remove(rpzName.c_str());
+		rename(_rpzFileName.c_str(), rpzName.c_str());
+		//完整替换后需要重新初始化资源
+		unsigned int nCurVer = CCFileUtils::sharedFileUtils()->reInitResource();
+		CCLog("mergeAndRemoveAfterZipUncompress 1 %d", nCurVer);
+	}
+	else
+	{
+		//合并，如果存在补丁文件才合并，不存在的话，也应该重置当前的RPZ包内的版本号
+		if (CCFileUtils::sharedFileUtils()->isFileExist(_rppFileName.c_str()))
+		{
+			/*unsigned int nCurVer1 = */CCFileUtils::sharedFileUtils()->reInitResource();
+			CCFileUtils::sharedFileUtils()->patchResource(rpzName.c_str(),_rppFileName.c_str());
+			remove(_rppFileName.c_str());
+			//unsigned int nCurVer2 = CCFileUtils::sharedFileUtils()->reInitResource();
+			//CCLog("mergeAndRemoveAfterZipUncompress 2 %d -> %d", nCurVer1, nCurVer2);
+		}
+		//合并的不需要重新初始化，合并内部已经重新做了
+	}
+	remove(_outFileName.c_str());
+
+	return true;
+}
+
+bool ResUpdateManager::uncompress(const char *file)
+{
+	string outFileName = file;
+    unzFile zipfile = unzOpen(outFileName.c_str());
+    if (! zipfile)
+    {
+        CCLog("error: can not open downloaded zip file %s", outFileName.c_str());
+        return false;
+    }
+    
+    ResUpdateManager::Message *msg = new ResUpdateManager::Message();
+    msg->what = ResUpdateManager_MESSAGE_FIRST_UNCOMPRESS_READZIP;
+    msg->obj = this;
+    _schedule->sendMessage(msg);
+
+    // Get info about the zip file
+    unz_global_info global_info;
+    if (unzGetGlobalInfo(zipfile, &global_info) != UNZ_OK)
+    {
+        CCLog("error: can not read file global info of %s", outFileName.c_str());
+        unzClose(zipfile);
+        return false;
+    }
+    
+    // Buffer to hold data read from the zip file
+    char readBuffer[BUFFER_SIZE];
+    
+    CCLog("start uncompressing");
+    
+    // Loop to extract all files.
+    uLong i;
+    for (i = 0; i < global_info.number_entry; ++i)
+    {
+        // Get info about current file.
+        unz_file_info fileInfo;
+        char fileName[MAX_FILENAME];
+        if (unzGetCurrentFileInfo(zipfile,
+                                  &fileInfo,
+                                  fileName,
+                                  MAX_FILENAME,
+                                  NULL,
+                                  0,
+                                  NULL,
+                                  0) != UNZ_OK)
+        {
+            CCLog("error: can not read file info");
+            unzClose(zipfile);
+            return false;
+        }
+        
+        //string fullPath = _storagePath + "temp/"+ fileName;
+        string fullPath = _storagePath + fileName;
+        
+        // Check if this entry is a directory or a file.
+        const size_t filenameLength = strlen(fileName);
+        if (fileName[filenameLength-1] == '/')
+        {
+            // Entry is a direcotry, so create it.
+            // If the directory exists, it will failed scilently.
+            if (!createDirectory(fullPath.c_str()))
+            {
+                CCLog("error: can not create directory %s", fullPath.c_str());
+                unzClose(zipfile);
+                return false;
+            }
+        }
+        else
+        {
+            // Entry is a file, so extract it.
+            
+            // Open current file.
+            if (unzOpenCurrentFile(zipfile) != UNZ_OK)
+            {
+                CCLog("error: can not open file %s", fileName);
+                unzClose(zipfile);
+                return false;
+            }
+            
+            // Create a file to store current file.
+            //CCLog("open destination file %s", fullPath.c_str());
+            FILE *out = fopen(fullPath.c_str(), "wb");
+            if (! out)
+            {
+                CCLog("error: can not open destination file %s", fullPath.c_str());
+                unzCloseCurrentFile(zipfile);
+                unzClose(zipfile);
+                return false;
+            }
+            
+            // Write current file content to destinate file.
+            int error = UNZ_OK;
+            do
+            {
+                error = unzReadCurrentFile(zipfile, readBuffer, BUFFER_SIZE);
+                if (error < 0)
+                {
+                    CCLog("error: can not read zip file %s, error code is %d", fileName, error);
+                    unzCloseCurrentFile(zipfile);
+                    unzClose(zipfile);
+                    return false;
+                }
+                
+                if (error > 0)
+                {
+                    fwrite(readBuffer, error, 1, out);
+                }
+            } while(error > 0);
+            
+            fclose(out);
+        }
+        
+        unzCloseCurrentFile(zipfile);
+        
+        //解压进度
+        int percent = (int)(((i+1)*100/global_info.number_entry));
+        ResUpdateManager::Message *msg = new ResUpdateManager::Message();
+        msg->what = ResUpdateManager_MESSAGE_PROGRESS;
+        
+        ProgressMessage *progressData = new ProgressMessage();
+        progressData->percent = percent;
+        progressData->manager = this;
+        msg->obj = progressData;
+        
+        //CCLog("i:%lu/%lu,percent:%d",i,global_info.number_entry,percent);
+        _schedule->sendMessage(msg);
+
+        // Goto next entry listed in the zip file.
+        if ((i+1) < global_info.number_entry)
+        {
+            if (unzGoToNextFile(zipfile) != UNZ_OK)
+            {
+                CCLog("error: can not read next file");
+                unzClose(zipfile);
+                return false;
+            }
+        }
+    }
+    
+    CCLog("end uncompressing");
+    
+    return true;
+}
+
+bool ResUpdateManager::uncompress()
+{
+    // Open the zip file
+    //string outFileName = _storagePath + TEMP_PACKAGE_FILE_NAME;
+	//return uncompress(outFileName.c_str());
+	return uncompress(_outFileName.c_str());
+}
+
+/*
+ * Create a direcotry is platform depended.
+ */
+bool ResUpdateManager::createDirectory(const char *path)
+{
+#if (CC_TARGET_PLATFORM != CC_PLATFORM_WIN32)
+    mode_t processMask = umask(0);
+    int ret = mkdir(path, S_IRWXU | S_IRWXG | S_IRWXO);
+    umask(processMask);
+    if (ret != 0 && (errno != EEXIST))
+    {
+        return false;
+    }
+    
+    return true;
+#else
+    BOOL ret = CreateDirectoryA(path, NULL);
+	if (!ret && ERROR_ALREADY_EXISTS != GetLastError())
+	{
+		return false;
+	}
+    return true;
+#endif
+}
+
+void ResUpdateManager::setSearchPath()
+{
+   // vector<string> searchPaths = CCFileUtils::sharedFileUtils()->getSearchPaths();
+   // vector<string>::iterator iter = searchPaths.begin();
+   // searchPaths.insert(iter, _storagePath);
+   // CCFileUtils::sharedFileUtils()->setSearchPaths(searchPaths);
+}
+
+static size_t downLoadPackage(void *ptr, size_t size, size_t nmemb, void *userdata)
+{
+    FILE *fp = (FILE*)userdata;
+    size_t written = fwrite(ptr, size, nmemb, fp);
+    return written;
+}
+
+int ResUpdateManagerProgressFunc(void *ptr, double totalToDownload, double nowDownloaded, double totalToUpLoad, double nowUpLoaded)
+{
+    int percent = (int)nowDownloaded/totalToDownload*100;
+    if (percent<0) {
+        return 0;
+    }
+    
+	static int sper = 0;
+	if (sper==percent)
+		return 0;
+
+	sper =	percent;
+	if (sper==100)
+		sper = 0;
+
+    ResUpdateManager* manager = (ResUpdateManager*)ptr;
+    ResUpdateManager::Message *msg = new ResUpdateManager::Message();
+    msg->what = ResUpdateManager_MESSAGE_PROGRESS;
+    
+    ProgressMessage *progressData = new ProgressMessage();
+    progressData->percent = percent;
+	progressData->nowDownloaded = nowDownloaded;
+	progressData->totalToDownload = totalToDownload;
+    progressData->manager = manager;
+    msg->obj = progressData;
+    
+    manager->_schedule->sendMessage(msg);
+    
+    //CCLog("downloading... %d%%", percent);
+    
+    return 0;
+}
+
+bool ResUpdateManager::checkNeedDownload()
+{
+    if (g_versionList.size()<=0)
+        return false;
+    
+    VersionType lastVer = g_versionList.back();
+    string version;
+    version.append(lastVer.ver, strlen(lastVer.ver));
+	lockData();
+    string recordedVersion = _versionCurInFile;//zhjltodo//CCUserDefault::sharedUserDefault()->getStringForKey(KEY_OF_VERSION);
+	unlockData();
+
+    if (recordedVersion == version)
+	{
+		string rpzName = _storagePath + "GameRes.rpz";
+		if (CCFileUtils::sharedFileUtils()->isFileExist(rpzName) )
+        {
+			return false;
+		}
+	}
+    
+    return true;
+}
+
+bool ResUpdateManager::downLoad()
+{
+    string newPackageUrl;
+	lockData();
+    string recordedVersion = _versionCurInFile;//zhjltodo//CCUserDefault::sharedUserDefault()->getStringForKey(KEY_OF_VERSION);
+	unlockData();
+    
+    VersionType lastVer = g_versionList.back();
+    string versionLast;
+    versionLast.append(lastVer.ver, strlen(lastVer.ver));
+    
+    string versionNext;
+    
+    bool bHave = false;
+    std::vector<VersionType>::iterator ite = g_versionList.begin();
+    while (ite!=g_versionList.end()) {
+        string version;
+        version.append(ite->ver, strlen(ite->ver));
+        
+        if (version==recordedVersion)
+        {
+            ++ite;
+            if(ite!=g_versionList.end())
+            {
+                versionNext.append(ite->ver, strlen(ite->ver));
+                bHave = true;
+            }
+            break;
+        }
+        
+        ++ite;
+    }
+    
+    _versionCur.clear();
+	//std::string fileName;
+    if (bHave)
+    {
+		//fileName = "GameRes" + "_" + recordedVersion + "_" + versionNext + ".rpp";
+        //newPackageUrl = _packageUrl+ "ResPatch" + "_" + recordedVersion + "_" + versionNext + ".rpp";
+		//_outFileName = _storagePath + "ResPatch" + "_" + recordedVersion + "_" + versionNext + ".rpp";
+        
+		newPackageUrl = _packageUrl + "res" + "_" + recordedVersion + "_" + versionNext + ".zip";
+        _outFileName = _storagePath + "res" + "_" + recordedVersion + "_" + versionNext + ".zip";
+		_rppFileName = _storagePath + "ResPatch" + "_" + recordedVersion + "_" + versionNext + ".rpp";
+
+		_downloadedVersion = versionNext;
+		_versionCur = versionNext;
+		_bRpz = false;
+    }
+    else
+    {
+		//fileName = "ResPatch" + "_" + versionLast + ".rpz";
+
+		//newPackageUrl = _packageUrl + "GameRes" + "_" + versionLast + ".rpz";
+        //_outFileName = _storagePath + "GameRes" + "_" + versionLast + ".rpz";
+
+		newPackageUrl = _packageUrl + "res" + "_" + versionLast + ".zip";
+        _outFileName = _storagePath + "res" + "_" + versionLast + ".zip";
+		_rpzFileName = _storagePath + "GameRes" + "_" + versionLast + ".rpz";
+
+		_downloadedVersion = versionLast;
+		_versionCur = versionLast;
+		_bRpz = true;
+    }
+
+	//newPackageUrl = _packageUrl + fileName;
+    //_outFileName = _storagePath + fileName;
+	//_bRpz;
+
+    // Create a file to save package.
+    FILE *fp = fopen(_outFileName.c_str(), "wb");
+    if (! fp)
+    {
+        sendErrorMessage(kCreateFile);
+        CCLog("can not create file %s", _outFileName.c_str());
+        return false;
+    }
+
+	_curl = curl_easy_init();
+    if (! _curl)
+    {
+        CCLog("can not init curl");
+        return false;
+    }
+    
+    ResUpdateManager::Message *msg = new ResUpdateManager::Message();
+    msg->what = ResUpdateManager_MESSAGE_ONE_DOWNLOAD_BEGIN;
+    msg->obj = this;
+    _schedule->sendMessage(msg);
+
+    // Download pacakge
+    CURLcode res;
+    //curl_easy_setopt(_curl, CURLOPT_USERPWD, _userName.c_str());
+    curl_easy_setopt(_curl, CURLOPT_URL, newPackageUrl.c_str());
+    curl_easy_setopt(_curl, CURLOPT_WRITEFUNCTION, downLoadPackage);
+    curl_easy_setopt(_curl, CURLOPT_WRITEDATA, fp);
+    curl_easy_setopt(_curl, CURLOPT_NOPROGRESS, false);
+    curl_easy_setopt(_curl, CURLOPT_PROGRESSFUNCTION, ResUpdateManagerProgressFunc);
+    curl_easy_setopt(_curl, CURLOPT_PROGRESSDATA, this);
+    if (_connectionTimeout)
+		curl_easy_setopt(_curl, CURLOPT_CONNECTTIMEOUT, _connectionTimeout);
+	else
+		curl_easy_setopt(_curl, CURLOPT_CONNECTTIMEOUT, 3);
+    res = curl_easy_perform(_curl);
+    curl_easy_cleanup(_curl);
+    if (res != 0)
+    {
+        sendErrorMessage(kNetwork);
+		/*
+		if (res == 28 || res == 7)//网络连接超时
+	        sendErrorMessage(kNetwork);
+		else
+	        sendErrorMessage(kUnkown);
+		//if (res == 78)//没有找到对应文件
+		*/
+        CCLog("error when download file %s", newPackageUrl.c_str());
+        //CCLog("error when download package");
+        fclose(fp);
+        return false;
+    }
+    
+    CCLog("succeed downloading package %s", newPackageUrl.c_str());
+    
+    fclose(fp);
+    return true;
+}
+
+const char* ResUpdateManager::getPackageUrl() const
+{
+    return _packageUrl.c_str();
+}
+
+void ResUpdateManager::setPackageUrl(const char *packageUrl)
+{
+    _packageUrl = packageUrl;
+}
+
+const char* ResUpdateManager::getStoragePath() const
+{
+    return _storagePath.c_str();
+}
+
+void ResUpdateManager::setStoragePath(const char *storagePath)
+{
+    _storagePath = storagePath;
+    checkStoragePath();
+}
+
+const char* ResUpdateManager::getVersionFileUrl() const
+{
+    return _versionFileUrl.c_str();
+}
+
+void ResUpdateManager::setVersionFileUrl(const char *versionFileUrl)
+{
+    _versionFileUrl = versionFileUrl;
+}
+
+string ResUpdateManager::getVersionDownloading()
+{
+	return _downloadedVersion;
+}
+
+string ResUpdateManager::getVersion()
+{
+    return CCUserDefault::sharedUserDefault()->getStringForKey(KEY_OF_VERSION);
+}
+
+void ResUpdateManager::deleteVersion()
+{
+    CCUserDefault::sharedUserDefault()->setStringForKey(KEY_OF_VERSION, "");
+}
+
+void ResUpdateManager::setDelegate(ResUpdateManagerDelegateProtocol *delegate)
+{
+    _delegate = delegate;
+}
+
+void ResUpdateManager::setConnectionTimeout(unsigned int timeout)
+{
+    _connectionTimeout = timeout;
+}
+
+unsigned int ResUpdateManager::getConnectionTimeout()
+{
+    return _connectionTimeout;
+}
+unsigned int ResUpdateManager::getTotalCount()
+{
+	return 0;
+}
+
+void ResUpdateManager::sendErrorMessage(ResUpdateManager::ErrorCode code)
+{
+    Message *msg = new Message();
+    msg->what = ResUpdateManager_MESSAGE_ERROR;
+    
+    ErrorMessage *errorMessage = new ErrorMessage();
+    errorMessage->code = code;
+    errorMessage->manager = this;
+    msg->obj = errorMessage;
+    
+    _schedule->sendMessage(msg);
+}
+
+// Implementation of ResUpdateManagerHelper
+
+ResUpdateManager::Helper::Helper()
+{
+    _messageQueue = new list<Message*>();
+#ifdef WIN32
+	InitializeCriticalSection(&_messageQueueMutex);
+#else
+	pthread_mutex_init(&_messageQueueMutex,NULL);
+#endif
+    CCDirector::sharedDirector()->getScheduler()->scheduleUpdateForTarget(this, 0, false);
+}
+
+ResUpdateManager::Helper::~Helper()
+{
+    CCDirector::sharedDirector()->getScheduler()->unscheduleAllForTarget(this);
+    delete _messageQueue;
+}
+
+void ResUpdateManager::Helper::sendMessage(Message *msg)
+{
+	lockMsgQue();
+    _messageQueue->push_back(msg);
+	unlockMsgQue();
+}
+
+void ResUpdateManager::Helper::update(float dt)
+{
+    Message *msg = NULL;
+    
+    int msgNum = 0;
+    
+    // Returns quickly if no message
+	lockMsgQue();
+    msgNum = _messageQueue->size();
+    if (0 == msgNum)
+    {
+		unlockMsgQue();
+        return;
+    }
+	unlockMsgQue();
+
+    for (int i=0; i<msgNum; i++) {
+
+        // Gets message
+		lockMsgQue();
+        msg = *(_messageQueue->begin());
+        _messageQueue->pop_front();
+		unlockMsgQue();
+        
+        switch (msg->what) {
+            case ResUpdateManager_MESSAGE_UPDATE_COMPLETED:
+                handleUpdateCompleted(msg);
+                
+                break;
+            case ResUpdateManager_MESSAGE_FIRST_UNCOMPRESS:
+                handleFirstUncompress(msg);
+                
+                break;
+            case ResUpdateManager_MESSAGE_FIRST_UNCOMPRESS_GET:
+                {
+                    ResUpdateManager* manager = (ResUpdateManager*)msg->obj;
+                    if (manager) manager->_delegate->onUpdateType(1);
+                }
+                break;
+            case ResUpdateManager_MESSAGE_FIRST_UNCOMPRESS_WRITE:
+                {
+                    ResUpdateManager* manager = (ResUpdateManager*)msg->obj;
+                    if (manager) manager->_delegate->onUpdateType(2);
+                }
+                break;
+            case ResUpdateManager_MESSAGE_FIRST_UNCOMPRESS_WRITE_OK:
+                {
+                    ResUpdateManager* manager = (ResUpdateManager*)msg->obj;
+                    if (manager) manager->_delegate->onUpdateType(3);
+                }
+                break;
+            case ResUpdateManager_MESSAGE_FIRST_UNCOMPRESS_READZIP:
+                {
+                    ResUpdateManager* manager = (ResUpdateManager*)msg->obj;
+                    if (manager) manager->_delegate->onUpdateType(4);
+                }
+                break;
+            case ResUpdateManager_MESSAGE_ONE_UPDATE_SUCCEED:
+                handleOneUpdateSucceed(msg);
+                
+                break;
+            case ResUpdateManager_MESSAGE_ONE_DOWNLOAD_BEGIN:
+                handleOneDownloadBegin(msg);
+                
+                break;
+				
+            case ResUpdateManager_MESSAGE_RECORD_DOWNLOADED_VERSION:
+				{
+				ResUpdateManager* manager = (ResUpdateManager*)msg->obj;
+				manager->lockData();
+                CCUserDefault::sharedUserDefault()->setStringForKey(KEY_OF_DOWNLOADED_VERSION,
+                                                                    ((ResUpdateManager*)msg->obj)->_versionCur.c_str());
+                CCUserDefault::sharedUserDefault()->flush();
+
+				manager->_versionCurInFile = manager->_versionCur;
+
+				manager->unlockData();
+
+				if (manager) manager->_delegate->onDownloadOK();
+				}
+                break;
+            case ResUpdateManager_MESSAGE_PROGRESS:
+                if (((ProgressMessage*)msg->obj)->manager->_delegate)
+                {
+                    //CCLog("downloading... %d%%", (int)(((ProgressMessage*)msg->obj)->percent));
+                    ((ProgressMessage*)msg->obj)->manager->_delegate->onProgress(((ProgressMessage*)msg->obj)->percent,((ProgressMessage*)msg->obj)->totalToDownload,((ProgressMessage*)msg->obj)->nowDownloaded);
+                }
+                
+                delete (ProgressMessage*)msg->obj;
+                
+                break;
+            case ResUpdateManager_MESSAGE_ERROR:
+                // error call back
+                if (((ErrorMessage*)msg->obj)->manager->_delegate)
+                {
+                    ((ErrorMessage*)msg->obj)->manager->_delegate->onError(((ErrorMessage*)msg->obj)->code);
+                }
+                
+                delete ((ErrorMessage*)msg->obj);
+                
+                break;
+            default:
+                break;
+        }
+        
+        delete msg;
+    }
+}
+
+void ResUpdateManager::Helper::handleUpdateCompleted(Message *msg)
+{
+    ResUpdateManager* manager = (ResUpdateManager*)msg->obj;
+    
+    if (manager) manager->_delegate->onSuccess();
+}
+void ResUpdateManager::Helper::handleOneDownloadBegin(Message *msg)
+{
+    ResUpdateManager* manager = (ResUpdateManager*)msg->obj;
+    
+    if (manager) manager->_delegate->onDownloadBegin();
+}
+void ResUpdateManager::Helper::handleOneUpdateSucceed(Message *msg)
+{
+    ResUpdateManager* manager = (ResUpdateManager*)msg->obj;
+    
+	manager->lockData();
+    // Record new version code.
+    CCUserDefault::sharedUserDefault()->setStringForKey(KEY_OF_VERSION, manager->_versionCur.c_str());
+	manager->_versionCurInFile = manager->_versionCur;
+    
+    // Unrecord downloaded version code.
+    CCUserDefault::sharedUserDefault()->setStringForKey(KEY_OF_DOWNLOADED_VERSION, "");
+    CCUserDefault::sharedUserDefault()->flush();
+
+	manager->unlockData();
+    
+    // Set resource search path.
+    //manager->setSearchPath();
+    
+    if (manager) manager->_delegate->onDelTempData();
+
+    // Delete unloaded zip file.
+    //string zipfileName = manager->_storagePath + TEMP_PACKAGE_FILE_NAME;
+    //if (remove(zipfileName.c_str()) != 0)
+    //{
+    //    CCLog("can not remove downloaded zip file %s", zipfileName.c_str());
+    //}
+    
+    //这时才继续判断是否更新下一个
+    manager->setUpdateFlag(false);
+
+    CCLog("Helper::handleOneUpdateSucceed %s", manager->_versionCur.c_str());
+
+    if (manager) manager->_delegate->onOneUpdate();
+}
+void ResUpdateManager::Helper::handleFirstUncompress(Message *msg)
+{
+    ResUpdateManager* manager = (ResUpdateManager*)msg->obj;
+    if (manager) manager->_delegate->onFirstUncompress();
+}
+
+NS_CC_EXT_END;
+#endif // CC_PLATFORM_WINRT

@@ -1,0 +1,1802 @@
+#include "MysteryBoxUi.h"
+#include "UiManager.h"
+#include "UiTools.h"
+#include "UiLoader.h"
+#include "WorldPacket.h"
+#include "CommonMsgDefine.h"
+#include "TCPClient.h"
+#include "LocalPlayer.h"
+#include "tagDWORDTime.h"
+#include "SQLCommand.h"
+#include "DBMgr.h"
+#include "PackageManager.h"
+#include "ToolTip.h"
+#include "ServerTime.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "CfgReader.h"
+#include "UiResourceMgr.h"
+#include "World.h"
+#include "StringMgr.h"
+#include "VIPMgr.h"
+#include "Helper.h"
+#include "NameMgr2.h"
+#include "CommonView.h"
+#include "CommonDefine.h"
+#include "MysteryShop.h"
+MysteryBoxItem::MysteryBoxItem()
+{
+	for(int i = NT_PlayerName; i <= NT_ItemName; i ++)
+	{
+		LabelFT *label = createLabel("");
+		//label->setColor(ccc3(0xff,0xe8,0x80));//vv
+		label->setTag(i);
+		_node->addChild(label);
+	}
+	getLabel(NT_PlayerName)->setPosition(ccp(HP_Rank, -4.f));
+	getLabel(NT_CommonFont)->setPosition(ccp(HP_GuildName, -4.f));
+	getLabel(NT_ItemName)->setPosition(ccp(HP_LeardName, -4.f));
+	
+	
+}
+MysteryBoxItem::~MysteryBoxItem()
+{
+
+}
+
+cocos2d::CCSize MysteryBoxItem::getContentSize()
+{
+	return _contentSize;
+}
+
+LabelFT * MysteryBoxItem::getLabel( eNodeTag tag )
+{
+	return dynamic_cast<LabelFT*>(_node->getChildByTag(tag));
+}
+
+LabelFT* MysteryBoxItem::createLabel( const std::string &text )
+{
+	TTFConfig config;
+	config.fontFilePath=  FT_FONTFACE;
+	config.fontSize = 16;
+	config.outlineSize = 1;
+
+	LabelFT *label = LabelFT::createWithTTF(config,"");
+	//CCLabelTTF *label = CCLabelTTF::create();
+	//label->setFontSize(16.0f);
+	label->setAnchorPoint(ccp(0.5f, 0.5f));
+	label->setString(text.c_str());
+	//label->setColor(ccc3(0xff, 0xff, 0xff));//vv 没有。。。
+	return label;
+}
+float MysteryBoxItem::getItemHeight() 
+{
+	return _contentSize.height;
+}
+void MysteryBoxItem::updateRoleName( int id, const std::string& name )
+{
+	if(m_unRoleId == id)
+	{
+		getLabel(NT_PlayerName)->setTextColor(Helper::converColor3B_2_4B(ccc3(247,246,186)));
+		getLabel(NT_PlayerName)->setString(name.c_str());
+	}
+}
+void MysteryBoxItem::setData( unsigned int unRoleId, unsigned int ItemId, unsigned int nQuality,bool IsShop,int num)
+{
+	std::string PlayerName;
+	std::string ItemName;
+	m_unRoleId =  unRoleId;
+	NameMgr2::getInstance()->queryName(unRoleId,PlayerName);
+	ItemName = PackageManager::getInstance()->getItemTypeData(ItemId).name;
+	getLabel(NT_PlayerName)->setTextColor(Helper::converColor3B_2_4B(ccc3(247,246,186)));
+	getLabel(NT_PlayerName)->setString(PlayerName.c_str());
+	//getLabel(NT_Name)->setColor(ccc3(0x88,0xe5,0x00));//vv   设置成员显示颜色 2014.9.20 
+	if(IsShop)
+	{
+		getLabel(NT_CommonFont)->setPosition(ccp(HP_GuildName-2, -4.f));
+		getLabel(NT_ItemName)->setPosition(ccp(HP_LeardName+5, -4.f));
+		getLabel(NT_PlayerName)->setPosition(ccp(HP_Rank-5, -4.f));
+		getLabel(NT_CommonFont)->setString(GET_STR(9454).c_str());
+	}
+	else
+	{
+		getLabel(NT_CommonFont)->setString(GET_STR(9419).c_str());
+	}
+	
+	//getLabel(NT_Position)->setColor(ccc3(0x42,0x84,0x08));//vv
+	ccColor3B color;
+	switch(nQuality)
+	{
+	case 0:
+		color = ccc3(0xfe,0xf8,0xd8);
+		break;
+	case 1:
+		color = ccc3(0x3f,0xd4,0x16);
+		break;
+	case 2:
+		color = ccc3(0x1d,0xad,0xe7);
+		break;
+	case 3:
+		color = ccc3(0x91,0x13,0xbc);
+		break;
+	case 4:
+		color = ccc3(0xe0,0x78,0x09);
+		break;
+	case 5:
+		color = ccc3(0xe1,0xe4,0x00);
+		break;
+	default:
+		color = ccc3(0xff,0xff,0xff);
+		break;
+	}
+	if(num != 0)
+	{
+		CCString* str1 = CCString::createWithFormat("%s*%d",ItemName.c_str(),num);
+		getLabel(NT_ItemName)->setTextColor(Helper::converColor3B_2_4B(color));
+		getLabel(NT_ItemName)->setString(str1->getCString());
+	}
+	else
+	{
+		getLabel(NT_ItemName)->setTextColor(Helper::converColor3B_2_4B(color));
+		getLabel(NT_ItemName)->setString(ItemName.c_str());
+	}
+	
+	//	getLabel(NT_Roletype)->setColor(ccc3(0xe5, 0xc0, 0x04));//褐色
+	
+	if(IsShop)
+	{
+		updateShopContent();
+	}
+	else
+	{
+		updateContent();
+	}
+	
+}
+void MysteryBoxItem::updateShopContent()
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+	{
+		float totalheight = ui->GetGroundNoticeHight();
+		float singleheight = (totalheight)/10.0;
+		_contentSize.height = singleheight;
+
+		LabelFT *last = getLabel(NT_ItemName);
+		if(last != NULL)
+		{
+			_contentSize.width = HP_LeardName + last->getContentSize().width;
+		}
+	}
+
+
+}
+void MysteryBoxItem::updateContent()
+{
+	KaiBaoXiangUiLayer* ui = getUiNodeByTag<KaiBaoXiangUiLayer>(WCT_MysteryBoxUi);
+	if(ui != NULL)
+	{
+		float totalheight = ui->GetGroundHight();
+		float singleheight = (totalheight)/4.0;
+		_contentSize.height = singleheight;
+
+		LabelFT *last = getLabel(NT_ItemName);
+		if(last != NULL)
+		{
+			_contentSize.width = HP_LeardName + last->getContentSize().width;
+		}
+	}
+		
+	
+}
+
+MysteryBoxUi::MysteryBoxUi()
+{
+
+}
+
+MysteryBoxUi::~MysteryBoxUi()
+{
+
+}
+
+CCNode* MysteryBoxUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["KaiBaoXiangUiLayer"] = UiLayerLoader<KaiBaoXiangUiLayer>::loader();
+	nodeLoaders["CheckButton"] = CheckButtonLoader::loader();
+	CCNode* uiNode = readUiFromCCBI("kaibaoxiang", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+void MysteryBoxUi::getTresureData(s_net_cmd* cmd )
+{
+	KaiBaoXiangUiLayer* ui = getUiNodeByTag<KaiBaoXiangUiLayer>(WCT_MysteryBoxUi);
+	if(ui != NULL)
+		ui->setOpenResult(cmd);
+	else
+		return;
+}
+
+void MysteryBoxUi::UpdateNoticeList()
+{
+	KaiBaoXiangUiLayer* ui = getUiNodeByTag<KaiBaoXiangUiLayer>(WCT_MysteryBoxUi);
+	if(ui != NULL)
+		ui->upDataList();
+	else
+		return;
+}
+void MysteryBoxUi::updateRoleName( int id, const std::string& name )
+{
+	KaiBaoXiangUiLayer* ui = getUiNodeByTag<KaiBaoXiangUiLayer>(WCT_MysteryBoxUi);
+	if(ui != NULL)
+		ui->updateRoleName(id,name);
+	else
+		return;
+}
+void MysteryBoxUi::InitFrame()
+{
+	KaiBaoXiangUiLayer* ui = getUiNodeByTag<KaiBaoXiangUiLayer>(WCT_MysteryBoxUi);
+	if(ui != NULL)
+		ui->InitFrame();
+	else
+		return;
+}
+
+void MysteryBoxUi::SetCurentBoxId(INT64 id)
+{
+	KaiBaoXiangUiLayer* ui = getUiNodeByTag<KaiBaoXiangUiLayer>(WCT_MysteryBoxUi);
+	if(ui != NULL)
+		ui->SetCurBoxId(id);
+	else
+		return;
+}
+void MysteryBoxUi::SetCurentBindBoxId(INT64 id)
+{
+	KaiBaoXiangUiLayer* ui = getUiNodeByTag<KaiBaoXiangUiLayer>(WCT_MysteryBoxUi);
+	if(ui != NULL)
+		ui->SetCurentBindBoxId(id);
+	else
+		return;
+}
+INT64 MysteryBoxUi::GetCurentBindBoxId()
+{
+	KaiBaoXiangUiLayer* ui = getUiNodeByTag<KaiBaoXiangUiLayer>(WCT_MysteryBoxUi);
+	if(ui != NULL)
+		return ui->GetCurentBindBoxId();
+	else
+		return -1;
+} 
+INT64 MysteryBoxUi::GetCurentBoxId()
+{
+	KaiBaoXiangUiLayer* ui = getUiNodeByTag<KaiBaoXiangUiLayer>(WCT_MysteryBoxUi);
+	if(ui != NULL)
+		return ui->GetCurBoxId();
+	else
+		return -1;
+} 
+bool MysteryBoxUi::GetIsYuanBox()
+{
+	KaiBaoXiangUiLayer* ui = getUiNodeByTag<KaiBaoXiangUiLayer>(WCT_MysteryBoxUi);
+	if(ui != NULL)
+	{
+		return ui->GetIsYuanBox();
+	}
+	else
+	{
+		return false;
+	}
+
+}
+void MysteryBoxUi::SetIsYuanBox(bool bIs)
+{
+	KaiBaoXiangUiLayer* ui = getUiNodeByTag<KaiBaoXiangUiLayer>(WCT_MysteryBoxUi);
+	if(ui != NULL)
+	{
+		ui->SetIsYuanBox(bIs);
+	}
+	else
+	{
+		return;
+	}
+		
+}
+void MysteryBoxUi::getTresureResult( s_net_cmd* cmd )
+{
+	//KaiBaoXiangUiLayer* ui = getUiNodeByTag<KaiBaoXiangUiLayer>(WCT_MysteryBoxUi);
+	//if(ui != NULL)
+		//ui->getAwardResult(cmd);
+}
+
+
+KaiBaoXiangUiLayer::KaiBaoXiangUiLayer()
+{
+	m_YuanBaoNum = NULL;
+	m_MoneyNum = NULL;
+	m_BoxNum = NULL;
+	m_GetFont1 = NULL;
+	m_GetFont2 = NULL;
+	m_GetFont3 = NULL;
+	m_GetFont4 = NULL;
+	m_GetFont5 = NULL;
+	m_GetStuff1 = NULL;
+	m_GetStuff2 = NULL;
+	m_GetStuff3 = NULL;
+	m_GetStuff4 = NULL;
+	m_GetStuff5 = NULL;
+
+	m_HookFont = NULL;
+
+	m_BagNum = NULL;
+
+	m_Consume1 = NULL;
+	m_Consume2 = NULL;
+
+	m_WillGetNum = NULL;
+	m_WillGetFont = NULL;
+	_itemSupportNode10 = NULL;
+
+	m_BoxNameText1 = NULL;
+	m_BoxNameText2 = NULL;
+	m_BoxNameText3 = NULL;
+	m_BoxNameText4 = NULL;
+	m_BoxNameText5 = NULL;
+	checkAutoBuyMoney =NULL;
+	m_effectBox = NULL;
+	_verticalList = NULL;
+	_scrollView = NULL;
+	button1 = NULL;
+	button2 = NULL;
+	button3 = NULL;
+	button4 = NULL;
+	_showItemAry = NULL;
+	m_AutoBuyMoney = false;
+	m_Box64Id = 0;
+	IsFiveBox = false;
+	FiveBoxNum = 0;
+	IsYuanBox = false;
+	IsAnimate = false;
+	IsRuningAni = false;
+	bNeedRunAni = false;
+	dwDiff = 0;
+	m_sprite = NULL;
+	bCanRun = false;
+	m_BoxSprite =NULL;
+	nCanClick = true;
+	m_action = NULL;
+	m_anims.clear();
+	m_BindBox64Id = -1;
+	_itemNodeContent = NULL;
+	_itemNodeScrollView = NULL;
+	_itemNodeScrollViewContainer = NULL;
+	bTouchMoved = false;
+}
+
+KaiBaoXiangUiLayer::~KaiBaoXiangUiLayer()
+{
+	
+}
+
+cocos2d::SEL_MenuHandler KaiBaoXiangUiLayer::onResolveCCBCCMenuItemSelector( CCObject* pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler KaiBaoXiangUiLayer::onResolveCCBCCControlSelector( CCObject* pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", KaiBaoXiangUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", KaiBaoXiangUiLayer::onBuySilverPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onFFOkBtnPressed", KaiBaoXiangUiLayer::onBuyGoldPressed);
+	
+	return NULL;
+}
+
+void KaiBaoXiangUiLayer::onNodeLoaded( cocos2d::CCNode* pNode, cocos2d::extension::CCNodeLoader* pNodeLoader )
+{//初始化数据
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if( !player )
+		return;
+	LoadEffectBox();
+	frame = dynamic_cast<CCSprite*>(getChildByTag(1));
+	CCNode* node7 = frame->getChildByTag(7);
+	m_YuanBaoNum = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(frame->getChildByTag(MTN_YuanBaoNum))));
+	m_MoneyNum = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(frame->getChildByTag(MTN_MoneyNum))));
+	m_BoxNum = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(frame->getChildByTag(MTN_BoxNum))));
+	m_BagNum = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(frame->getChildByTag(MTN7_BagNum))));
+	m_Consume1 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(frame->getChildByTag(MTN7_Consume1))));
+	m_Consume2 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(frame->getChildByTag(MTN7_Consume2))));
+	m_WillGetNum = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(frame->getChildByTag(MTN7_WillGetNum))));
+	m_WillGetFont = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(frame->getChildByTag(MTN7_WillGetFont))));
+	m_effectBox = dynamic_cast<CCSprite*>(frame->getChildByTag(MTN7_EffectBox));
+	button1 = frame->getChildByTag(MTN_OneButton);
+	button2 =frame->getChildByTag(MTN7_FiveButton);
+	button3 =frame->getChildByTag(MTN_CheckBox);
+	button4 =frame->getChildByTag(MTN_CloseButton);
+	m_BoxSprite = dynamic_cast<CCSprite*>(frame->getChildByTag(MTN_SpriteBox));
+	m_GetFont1 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(node7->getChildByTag(MTN7_GetFont1))));
+	m_GetFont2 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(node7->getChildByTag(MTN7_GetFont2))));
+	m_GetFont3 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(node7->getChildByTag(MTN7_GetFont3))));
+	m_GetFont4 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(node7->getChildByTag(MTN7_GetFont4))));
+	m_GetFont5 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(node7->getChildByTag(MTN7_GetFont5))));
+	m_GetStuff1 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(node7->getChildByTag(MTN7_GetStuff1))));
+	m_GetStuff2 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(node7->getChildByTag(MTN7_GetStuff2))));
+	m_GetStuff3 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(node7->getChildByTag(MTN7_GetStuff3))));
+	m_GetStuff4 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(node7->getChildByTag(MTN7_GetStuff4))));
+	m_GetStuff5 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(node7->getChildByTag(MTN7_GetStuff5))));
+
+	_itemSupportNode10 = frame->getChildByTag(MTN_ItemSupporter10);
+	
+	m_BoxNameText1 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(_itemSupportNode10->getChildByTag(MTN_ITEMText1))));
+	m_BoxNameText2 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(_itemSupportNode10->getChildByTag(MTN_ITEMText2))));
+	m_BoxNameText3 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(_itemSupportNode10->getChildByTag(MTN_ITEMText3))));
+	m_BoxNameText4 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(_itemSupportNode10->getChildByTag(MTN_ITEMText4))));
+	m_BoxNameText5 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(_itemSupportNode10->getChildByTag(MTN_ITEMText5))));
+
+	_content = frame->getChildByTag(MTN_ScollNode);
+	_content->setVisible(false);		// 需求改变，另加了scrollview，这个不删，隐藏掉。
+	_scrollView = createScrollViewWithContent(_content);
+	CC_ASSERT(_scrollView != NULL);
+	_content->addChild(_scrollView);
+	_verticalList = new VerticalList<MysteryBoxItem>;
+	_verticalList->addToScrollView(_scrollView);
+	_verticalList->setMinSize(_content->getContentSize());
+	//_verticalList->setSelectSpriteFrame("guildmemberui_selectrect");
+	_verticalList->setEnableSelect(false);
+	_verticalList->setLineSpace(0.0);
+	_showItemAry = CCArray::create();
+	_showItemAry->retain();
+	m_sprite = CCSprite::create();
+	 m_sprite->setPosition(ccp(m_effectBox->getPositionX(), m_effectBox->getPositionY()));
+	 frame->addChild(m_sprite ,RZN_EFFECT);
+	checkAutoBuyMoney = dynamic_cast<CheckButton*>(frame->getChildByTag(MTN_CheckBox));
+	CC_ASSERT(checkAutoBuyMoney != NULL);
+	checkAutoBuyMoney->signalStateChanged.connect(this, &KaiBaoXiangUiLayer::onAutoBuyMoney);
+	PackageManager::getInstance()->setBoxProcess(false);
+	m_HookFont = dynamic_cast<CCSprite*>(frame->getChildByTag(MTN_HookFont));
+	setItemNameLabelVisible(false,false);
+	//this->schedule(schedule_selector(KaiBaoXiangUiLayer::updateGoldBoxTime), 1.0f);
+	this->schedule(schedule_selector(KaiBaoXiangUiLayer::updateScrollview), 0.5f);
+	frame->getChildByTag(MTN_LeftArrow)->setVisible(false);
+	frame->getChildByTag(MTN_RightArrow)->setVisible(false);
+}
+void KaiBaoXiangUiLayer::updateRoleName( int id, const std::string& name )
+{
+	for (int i = 0; i < _verticalList->getItemCount(); i++)
+	{
+		_verticalList->getItem(i)->updateRoleName(id, name);
+	}
+}
+void KaiBaoXiangUiLayer::LoadEffectBox()
+{
+	AnimationCache::createDefList(1, m_anims,false);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_24", m_anims);				//【Ji：】更改升级特效文件名称(levelUp)
+}
+void KaiBaoXiangUiLayer::IsYuanBaoInit()
+{
+	m_HookFont->setVisible(false);
+	checkAutoBuyMoney->setVisible(false);
+	m_WillGetFont->setString(GET_STR(9423).c_str());
+	m_Consume1->setString(GET_STR(9421).c_str());
+	m_Consume2->setString(GET_STR(9422).c_str());
+}
+void KaiBaoXiangUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	upDataList();
+}
+void KaiBaoXiangUiLayer::InitFrame()
+{
+	//更新背包空格信息
+	INT bagSpace = PackageManager::getInstance()->getBlankCount();
+	string strSpace;
+	std::stringstream ss;
+	ss<<bagSpace;
+	ss>>strSpace;
+	m_BagNum->setString(strSpace.c_str());
+	//更新玩家金钱
+	INT nPlayerMoney = PackageManager::getInstance()->getJinBi();
+	std::stringstream ss1;
+	string strMoney;
+	ss1<<nPlayerMoney;
+	ss1>>strMoney;
+	m_MoneyNum->setString(strMoney.c_str());
+
+	INT nPlayerYuanBao = PackageManager::getInstance()->getYuanBao();
+	std::stringstream ss2;
+	string strYuanBao;
+	ss2<<nPlayerYuanBao;
+	ss2>>strYuanBao;
+	m_YuanBaoNum->setString(strYuanBao.c_str());
+
+	//跟新玩家宝箱数
+	INT nPlayerMysteryBoxNum =0;
+	if(IsYuanBox)
+	{
+		nPlayerMysteryBoxNum = PackageManager::getInstance()->getItemNumber(EICT_Bag,MTN_YuanBao_MysteryBoxId);
+		m_BoxSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("kaibaoxiang_jinxiangzi"));
+	}
+	else
+	{
+		nPlayerMysteryBoxNum = PackageManager::getInstance()->getItemNumber(EICT_Bag,MTN_MysteryBoxId);
+		m_BoxSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("kaibaoxiang_itemxiangzi"));
+	}
+	std::stringstream ss3;
+	string strBoxNum;
+	ss3<<nPlayerMysteryBoxNum;
+	ss3>>strBoxNum;
+	m_BoxNum->setString(strBoxNum.c_str());
+}
+void KaiBaoXiangUiLayer::onAutoBuyMoney(CheckButton *checkBtn, bool check)
+{
+	if(check)
+	{
+		m_AutoBuyMoney = true;
+	}
+	else
+	{
+		m_AutoBuyMoney = false;
+	}
+}
+void KaiBaoXiangUiLayer::onExit()
+{
+	CC_SAFE_RELEASE(_showItemAry);
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	AnimationCache::getInstance()->releaseSinEffect("E1_24");	
+	m_sprite->removeFromParentAndCleanup(true);
+	CCLayer::onExit();
+	
+}
+bool KaiBaoXiangUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(button1, pTouch))
+		return false;
+	if(isTouchOnNodeContent(button2, pTouch))
+		return false;
+	if(isTouchOnNodeContent(button4, pTouch))
+		return false;
+	if(isTouchOnNodeContent(button3, pTouch))
+	{
+		if(IsYuanBox)
+		{
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+	
+	if(IsRuningAni)
+	{	
+		bCanRun = false;
+		nCanClick = true;
+		this->stopAllActions();
+		m_effectBox->setVisible(true);
+		IsRuningAni = false;
+		this->setItemNameLabelVisible(false,true,true);
+	}
+	if(_itemSupportNode10->isVisible())
+	{
+			
+		setItemNameLabelVisible(false,false,true);
+	}
+	
+	
+	
+	
+	/*if(isTouchOnNodeContent(_content, pTouch))
+		return true;*/
+	
+	CCPoint framePoint = frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+
+	if(frameRect.containsPoint(framePoint))
+	{
+		return true;
+	}
+
+	return false;
+
+}
+
+void KaiBaoXiangUiLayer::ccTouchMoved( CCTouch *pTouch, CCEvent *pEvent )
+{
+	bTouchMoved = true;
+}
+
+void KaiBaoXiangUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+
+	if (!bTouchMoved)
+	{
+		if (!isTouchOnNodeContent(_itemNodeContent,pTouch))
+			return;
+
+		CCObject * pObj = NULL;
+		CCARRAY_FOREACH(_itemNodeScrollViewContainer->getChildren(), pObj)
+		{
+
+			ItemNode * pNode = (ItemNode *)pObj;
+			pNode->ccTouchEnded(pTouch,pEvent);
+
+		}
+		
+	}
+	bTouchMoved = false;
+
+}
+
+//设置打开宝箱数据
+void KaiBaoXiangUiLayer::setOpenResult( s_net_cmd* cmd )			
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if( !player )
+		return;
+
+	_BoxItemMap.clear();
+	//_BoxItemVec.clear();
+	unsigned int byResultNum = 0;				//保存开启结果
+	//结果(DWORD)[0 = 成功+ kind(BYTE)[1=免费白银,2=免费黄金,3=钻石白银,4=元宝黄金,5=元宝白金十连抽] + Count(BYTE) + <<ItemID(DWORD)>> + RewardID(DWORD), 非0 = 错误代码]ps:第一个物品是抽中的奖励
+	WorldPacket Msg((const void*)cmd);
+	Msg >> byResultNum;							//开启结果：0成功,或者错误码
+	if (0 == byResultNum)
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(MYSTERYBOXSUCCESS);
+		unsigned int  PlayerId = 0;
+		unsigned char byKindNum = 0;			//保存开启类型
+		unsigned char byDataNum = 0;			//保存物品数量
+		unsigned int dwItemID = 0;				//保存物品ID
+		unsigned char IsNotice = 0;             //是否公告
+		unsigned int  nQuality = 0;
+		int n16Count = 0;
+		Msg >> PlayerId;
+		Msg >> byKindNum;
+		Msg >> byDataNum;						//物品数量
+
+		
+		for (int i=1; i <= (int)byDataNum; ++i)
+		{
+			tagTreasure pItem;
+			Msg >> dwItemID;
+			Msg >> n16Count;
+			Msg >> IsNotice;
+			Msg >> nQuality;
+			pItem.dwItemID = dwItemID;
+			pItem.n16Count = n16Count;
+			pItem.nQuality = nQuality; 
+
+			_BoxItemMap.push_back(pItem);
+			//_BoxItemVec.push_back(dwItemID);
+		}
+
+		//记录领取奖励索引与类型
+		this->setItemPos(byDataNum,byKindNum);
+	}
+	else
+	{
+		this->showErrorMessage(byResultNum);
+	}
+
+}
+void KaiBaoXiangUiLayer::upDataList()
+{
+	_verticalList->clear();
+	std::vector<MysteryBoxUiData> vecBoxList = PackageManager::getInstance()->getMysteryList();
+	std::vector<MysteryBoxUiData>::iterator it = vecBoxList.begin();
+	bool bNeedUpdateList = false;
+	for(;it!=vecBoxList.end();it++)
+	{
+		bNeedUpdateList = true;
+		MysteryBoxItem *item = new MysteryBoxItem;
+		item->setData(it->PlayerId,it->ItemId,it->nQuality);
+		if(it == vecBoxList.begin())
+		{
+			_verticalList->addItem(item);
+		}
+		else
+		{
+			_verticalList->insertItem(item,0,false);
+		}
+
+	}
+	if(bNeedUpdateList)
+	{
+		_verticalList->updateDisplay();
+	}
+}
+//开启白银宝箱
+void KaiBaoXiangUiLayer::onBuySilverPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{	
+	if(PackageManager::getInstance()->getBoxProcess())
+	{
+		return;
+	}
+	if(!nCanClick)
+	{
+		return;
+	}
+	nCanClick = false;
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_15);
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if(player == NULL)
+	{
+		nCanClick = true;
+		return;
+	}
+	INT bagSpace = PackageManager::getInstance()->getBlankCount();
+	INT nPlayerMoney = PackageManager::getInstance()->getJinBi();
+	INT nPlayerYuanBao = PackageManager::getInstance()->getYuanBao();
+	INT nPlayerMysteryBoxNum = 0;
+	if(IsYuanBox)
+	{
+		nPlayerMysteryBoxNum = PackageManager::getInstance()->getItemNumber(EICT_Bag,MTN_YuanBao_MysteryBoxId);
+	}
+	else
+	{
+		nPlayerMysteryBoxNum = PackageManager::getInstance()->getItemNumber(EICT_Bag,MTN_MysteryBoxId);
+	}
+	if(nPlayerMysteryBoxNum < 1)
+	{
+		ToolTip::getInstance()->push(GET_STR(9415));
+		nCanClick = true;
+		return;
+	}
+	if(bagSpace < 1)
+	{
+		ToolTip::getInstance()->push(GET_STR(2027));
+		nCanClick = true;
+		return;
+	}
+	
+	
+	if(IsYuanBox)
+	{
+		unsigned char silver = TYPE_YUANBAO_BOX;
+		if(nPlayerYuanBao < ONEBOXYUANBAO)
+		{
+			RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+			
+			nCanClick = true;
+			return;
+		}
+		else
+		{
+			PackageManager::getInstance()->setBoxProcess(true);
+			SendOneBoxMsg(silver,m_Box64Id);
+			IsFiveBox = false;
+		}
+	}
+	else
+	{
+		
+		if(m_AutoBuyMoney)
+		{
+			unsigned char silver = TYPE_MONEY_AUTO;
+			int nLackMoney = ONEBOXMONEY - nPlayerMoney;
+			if(nLackMoney > 0)
+			{
+				if(nPlayerYuanBao < 10)
+				{
+					RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+					nCanClick = true;
+					return;
+				}
+			}
+			PackageManager::getInstance()->setBoxProcess(true);
+			SendOneBoxMsg(silver,m_Box64Id);
+			IsFiveBox = false;
+		}
+		else
+		{
+			if(nPlayerMoney < ONEBOXMONEY)
+			{
+				MessageBoxUi *ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, GET_STR(9416).c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+				ui->signalOkBtnPressed.connect(this, &KaiBaoXiangUiLayer::TipOK);
+				UiMgr::getInstance()->getCurScene()->addChild(ui, WZ_POPUI);
+				nCanClick = true;
+				return;
+			}
+			else
+			{
+				unsigned char silver = TYPE_MONEY_NOAUTO;
+				PackageManager::getInstance()->setBoxProcess(true);
+				SendOneBoxMsg(silver,m_Box64Id);
+				IsFiveBox = false;
+			}
+		}
+		
+	}
+}
+void KaiBaoXiangUiLayer::TipOK()
+{
+	
+	CC_ASSERT(checkAutoBuyMoney != NULL);
+	checkAutoBuyMoney->setCheck(true);
+	m_AutoBuyMoney = true;
+}
+//开启黄金宝箱
+void KaiBaoXiangUiLayer::onBuyGoldPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if(PackageManager::getInstance()->getBoxProcess())
+	{
+		return;
+	}
+	if(!nCanClick)
+	{
+		return;
+	}
+	nCanClick = false;
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_15);
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if(player == NULL)
+	{	
+		nCanClick = true;
+		return;
+	}
+	INT bagSpace = PackageManager::getInstance()->getBlankCount();
+	INT nPlayerMoney = PackageManager::getInstance()->getJinBi();
+	INT nPlayerYuanBao = PackageManager::getInstance()->getYuanBao();
+	INT nPlayerMysteryBoxNum = 0;
+	if(IsYuanBox)
+	{
+		nPlayerMysteryBoxNum = PackageManager::getInstance()->getItemNumber(EICT_Bag,MTN_YuanBao_MysteryBoxId);
+	}
+	else
+	{
+		nPlayerMysteryBoxNum = PackageManager::getInstance()->getItemNumber(EICT_Bag,MTN_MysteryBoxId);
+	}
+	
+	if(nPlayerMysteryBoxNum < 5)
+	{
+		ToolTip::getInstance()->push(GET_STR(9415));
+		nCanClick = true;
+		return;
+	}
+	if(bagSpace < 5)
+	{
+		ToolTip::getInstance()->push(GET_STR(2027));
+		nCanClick = true;
+		return;
+	}
+
+
+	if(IsYuanBox)
+	{
+		unsigned char silver = TYPE_YUANBAO_BOX;
+		if(nPlayerYuanBao < FIVEBOXYUANBAO)
+		{
+			RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+			nCanClick = true;
+			return;
+		}
+		else
+		{
+			PackageManager::getInstance()->setBoxProcess(true);
+			FiveBoxNum = 0;
+			runMysteryBox();
+			SendFiveBoxMsg(silver,m_Box64Id);
+			IsFiveBox = true;
+		}
+	}
+	else
+	{
+
+		if(m_AutoBuyMoney)
+		{
+			unsigned char silver = TYPE_MONEY_AUTO;
+			int nLackMoney = FIVEBOXMONEY - nPlayerMoney;
+			if(nLackMoney > 0)
+			{
+				if(nPlayerYuanBao < 50)
+				{
+					RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+					nCanClick = true;
+					return;
+				}
+			}
+			
+			PackageManager::getInstance()->setBoxProcess(true);
+			FiveBoxNum = 0;
+			runMysteryBox();
+			SendFiveBoxMsg(silver,m_Box64Id);
+			IsFiveBox = true;
+		}
+		else
+		{
+			if(nPlayerMoney < FIVEBOXMONEY)
+			{
+				MessageBoxUi *ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, GET_STR(9416).c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+				ui->signalOkBtnPressed.connect(this, &KaiBaoXiangUiLayer::TipOK);
+				UiMgr::getInstance()->getCurScene()->addChild(ui, WZ_POPUI);
+				nCanClick = true;
+				return;
+			}
+			else
+			{
+				unsigned char silver = TYPE_MONEY_NOAUTO;
+				PackageManager::getInstance()->setBoxProcess(true);
+				FiveBoxNum = 0;
+				runMysteryBox();
+				SendFiveBoxMsg(silver,m_Box64Id);
+				IsFiveBox = true;
+			}
+		}
+
+	}
+}
+void KaiBaoXiangUiLayer::SendFiveBoxMsg(unsigned char silver,INT64 Box64Id)
+{
+	f_item* MyBoxItem = PackageManager::getInstance()->getItem((INT64)m_Box64Id);
+	if(MyBoxItem != NULL)
+	{
+		if(MyBoxItem->get_item_bind_status())
+		{
+			int nBindNum = 0;
+			if(IsYuanBox)
+			{
+				nBindNum = PackageManager::getInstance()->getBindItemNumber(EICT_Bag,MTN_YuanBao_MysteryBoxId);
+			}
+			else
+			{
+				nBindNum = PackageManager::getInstance()->getBindItemNumber(EICT_Bag,MTN_MysteryBoxId);
+				
+			}
+			if(nBindNum >= 5)
+			{
+				for(int i = 0; i< 5;i++)
+				{
+					WorldPacket C2G_Msg(NET_C2G_REQUEST_OPEN_TREASURE);
+					C2G_Msg << silver;
+					C2G_Msg << Box64Id;
+					TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+				}
+			}
+			else
+			{
+				for(int i = 0; i< nBindNum;i++)
+				{
+					WorldPacket C2G_Msg(NET_C2G_REQUEST_OPEN_TREASURE);
+					C2G_Msg << silver;
+					C2G_Msg << Box64Id;
+					TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+				}
+				f_item* UnBindBoxItem = NULL;
+				if(IsYuanBox)
+				{
+					UnBindBoxItem = PackageManager::getInstance()->getUnBindItem(EICT_Bag,MTN_YuanBao_MysteryBoxId);
+				}
+				else
+				{
+					UnBindBoxItem =PackageManager::getInstance()->getUnBindItem(EICT_Bag,MTN_MysteryBoxId);
+
+				}
+				if(UnBindBoxItem != NULL)
+				{
+					int UnBindNum = 0;
+					if(IsYuanBox)
+					{
+						UnBindNum = PackageManager::getInstance()->getUnBindItemNumber(EICT_Bag,MTN_YuanBao_MysteryBoxId);
+					}
+					else
+					{
+						UnBindNum = PackageManager::getInstance()->getUnBindItemNumber(EICT_Bag,MTN_MysteryBoxId);
+
+					}
+					int NeedNum = 5-nBindNum;
+					if(UnBindNum < NeedNum)
+					{
+						return;
+					}
+					Box64Id = UnBindBoxItem->get_item_id();
+					for(int i = 0; i< NeedNum;i++)
+					{
+						WorldPacket C2G_Msg(NET_C2G_REQUEST_OPEN_TREASURE);
+						C2G_Msg << silver;
+						C2G_Msg << Box64Id;
+						TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+					}
+				}
+				else
+				{
+					return;
+				}
+			}
+		}
+		else
+		{
+			int UnBindNum = 0;
+			if(IsYuanBox)
+			{
+				UnBindNum = PackageManager::getInstance()->getUnBindItemNumber(EICT_Bag,MTN_YuanBao_MysteryBoxId);
+			}
+			else
+			{
+				UnBindNum = PackageManager::getInstance()->getUnBindItemNumber(EICT_Bag,MTN_MysteryBoxId);
+
+			}
+			if(UnBindNum >= 5)
+			{
+				for(int i = 0; i< 5;i++)
+				{
+					WorldPacket C2G_Msg(NET_C2G_REQUEST_OPEN_TREASURE);
+					C2G_Msg << silver;
+					C2G_Msg << Box64Id;
+					TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+				}
+			}
+			else
+			{
+				for(int i = 0; i< UnBindNum;i++)
+				{
+					WorldPacket C2G_Msg(NET_C2G_REQUEST_OPEN_TREASURE);
+					C2G_Msg << silver;
+					C2G_Msg << Box64Id;
+					TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+				}
+				f_item* BindBoxItem = NULL;
+				if(IsYuanBox)
+				{
+					BindBoxItem = PackageManager::getInstance()->getBindItem(EICT_Bag,MTN_YuanBao_MysteryBoxId);
+				}
+				else
+				{
+					BindBoxItem =PackageManager::getInstance()->getBindItem(EICT_Bag,MTN_MysteryBoxId);
+
+				}
+				if(BindBoxItem != NULL)
+				{
+					int BindNum = 0;
+					if(IsYuanBox)
+					{
+						BindNum = PackageManager::getInstance()->getBindItemNumber(EICT_Bag,MTN_YuanBao_MysteryBoxId);
+					}
+					else
+					{
+						BindNum = PackageManager::getInstance()->getBindItemNumber(EICT_Bag,MTN_MysteryBoxId);
+
+					}
+					int NeedNum = 5-UnBindNum;
+					if(BindNum < NeedNum)
+					{
+						return;
+					}
+					Box64Id = BindBoxItem->get_item_id();
+					for(int i = 0; i< NeedNum;i++)
+					{
+						WorldPacket C2G_Msg(NET_C2G_REQUEST_OPEN_TREASURE);
+						C2G_Msg << silver;
+						C2G_Msg << Box64Id;
+						TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+					}
+				}
+				else
+				{
+					return;
+				}
+			}
+		}
+	}
+	else
+	{
+		if(IsYuanBox)
+		{
+			MyBoxItem = PackageManager::getInstance()->getItem(EICT_Bag,(unsigned int)MTN_YuanBao_MysteryBoxId);
+			if(MyBoxItem != NULL)
+			{
+				Box64Id = MyBoxItem->get_item_id();
+			}
+			else
+			{
+				return;
+			}
+		}
+		else
+		{
+			MyBoxItem = PackageManager::getInstance()->getItem(EICT_Bag,(unsigned int)MTN_MysteryBoxId);
+			if(MyBoxItem != NULL)
+			{
+				Box64Id = MyBoxItem->get_item_id();
+			}
+			else
+			{
+				return;
+			}
+		}
+		for(int i = 0; i< 5;i++)
+		{
+			WorldPacket C2G_Msg(NET_C2G_REQUEST_OPEN_TREASURE);
+			C2G_Msg << silver;
+			C2G_Msg << Box64Id;
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+		}
+	}
+}
+void KaiBaoXiangUiLayer::SendOneBoxMsg(unsigned char silver,INT64 Box64Id)
+{
+	f_item* MyBoxItem = PackageManager::getInstance()->getItem((INT64)m_Box64Id);
+	if(MyBoxItem == NULL)
+	{
+		if(IsYuanBox)
+		{
+			MyBoxItem = PackageManager::getInstance()->getItem(EICT_Bag,(unsigned int)MTN_YuanBao_MysteryBoxId);
+			if(MyBoxItem != NULL)
+			{
+				Box64Id = MyBoxItem->get_item_id();
+			}
+			else
+			{
+				return;
+			}
+		}
+		else
+		{
+			MyBoxItem = PackageManager::getInstance()->getItem(EICT_Bag,(unsigned int)MTN_MysteryBoxId);
+			if(MyBoxItem != NULL)
+			{
+				Box64Id = MyBoxItem->get_item_id();
+			}
+			else
+			{
+				return;
+			}
+		}
+
+	}
+	WorldPacket C2G_Msg(NET_C2G_REQUEST_OPEN_TREASURE);
+	C2G_Msg << silver;
+	C2G_Msg << Box64Id;
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+}
+void KaiBaoXiangUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_MysteryBoxUi);
+	PackageManager::getInstance()->SetBoxProcessState(false);
+}
+
+void KaiBaoXiangUiLayer::showErrorMessage( unsigned int errorNum )		//打开失败信息提示
+{
+	if(IsFiveBox)
+	{
+		this->stopAllActions();
+		this->setItemNameLabelVisible(false,true,true);
+		FiveBoxNum = 0;
+	}
+	PackageManager::getInstance()->setBoxProcess(false);
+	nCanClick = true;
+}
+void KaiBaoXiangUiLayer::setItemPos(unsigned char itemCount,int type)			//实体化物品并摆到转盘上
+{
+	unsigned int showItemCount = _showItemAry->count();
+	if (0 != showItemCount)
+	{
+		for (unsigned int m = 0; m < showItemCount; ++m)
+		{
+			CCNode* showingItem = dynamic_cast<CCNode*>(_showItemAry->objectAtIndex(m));
+			if(showingItem != NULL)
+				dynamic_cast<CCNode*>(_showItemAry->objectAtIndex(m))->removeFromParent();
+		}
+	}
+			
+	if(IsFiveBox)
+	{
+		if(FiveBoxNum == 0)
+		{
+			this->setItemNameLabelVisible(false,true);
+			_itemPosMap.clear();
+			_showItemAry->removeAllObjects();
+			_itemNameMap.clear();
+		}
+		else if(FiveBoxNum == 4)
+		{
+			setTreasureOddNum();
+			InitFrame();
+		}
+
+	}
+	else
+	{
+		InitFrame();
+		setTreasureOddNum();
+		this->setItemNameLabelVisible(false,false);
+		_itemPosMap.clear();
+		_showItemAry->removeAllObjects();
+		_itemNameMap.clear();
+	}
+	int itemAmount = itemCount;
+	
+	_currentItemNode = _itemSupportNode10;
+	for (int i = 0; i < itemAmount; ++i)				//获得物品图片显示
+	{
+		ItemNode* itemNode = ItemNode::create();
+		itemNode->setDataId(_BoxItemMap[i].dwItemID,_BoxItemMap[i].nQuality);
+		//itemNode->setDataId(_BoxItemVec.at(i));
+		//int itemNum = getBoxItemNum(_BoxItemVec.at(i));
+		if(_BoxItemMap[i].n16Count > 1)
+		{
+			itemNode->setNum(0,_BoxItemMap[i].n16Count);
+		}
+		else
+		{
+			itemNode->SetShowNum(false);
+		}
+		_showItemAry->addObject(itemNode);
+		
+		_itemNameMap[dynamic_cast<CCNode*>(itemNode)] = PackageManager::getInstance()->getItemTypeData(_BoxItemMap[i].dwItemID).name;		//获得itemnode对应的物品名称
+	}
+	if(IsFiveBox)
+	{
+		if(_showItemAry->count()<= (unsigned int)FiveBoxNum)
+		{
+			return;
+		}
+		CCPoint itemPt = _currentItemNode->getChildByTag(MTN_ITEM1 + FiveBoxNum)->getPosition();
+		(dynamic_cast<CCNode*>(_showItemAry->objectAtIndex(FiveBoxNum)))->setPosition(_currentItemNode->convertToNodeSpace(frame->convertToWorldSpace(frame->getChildByTag(MTN7_BaoXiangPt)->getPosition())));
+		_itemPosMap[dynamic_cast<CCNode*>(_showItemAry->objectAtIndex(FiveBoxNum))] = itemPt;
+		if(_BoxItemMap.size() == 1)
+		{
+			this->setTenItemName(dynamic_cast<CCNode*>(_showItemAry->objectAtIndex(FiveBoxNum)), MTN_ITEM1 + FiveBoxNum,_BoxItemMap[0].nQuality);
+		}
+		else
+		{
+			this->setTenItemName(dynamic_cast<CCNode*>(_showItemAry->objectAtIndex(FiveBoxNum)), MTN_ITEM1 + FiveBoxNum);
+		}
+		this->setItemColumeName(dynamic_cast<CCNode*>(_showItemAry->objectAtIndex(FiveBoxNum)), MTN7_GetStuff1+FiveBoxNum,dynamic_cast<ItemNode*>(_showItemAry->objectAtIndex(FiveBoxNum))->GetQuality());
+		if(_itemPosMap.size() == 5)
+		{
+			runBoxAni();
+		}
+		if(FiveBoxNum == 4)
+		{
+			PackageManager::getInstance()->setBoxProcess(false);
+			FiveBoxNum = 0;
+		}
+		else
+		{
+			FiveBoxNum++;
+		}
+		
+	}
+	else
+	{
+		if(_showItemAry->count() < 1)
+		{
+			return;
+		}
+		CCPoint itemPt = _currentItemNode->getChildByTag(MTN_ITEM3)->getPosition();
+		(dynamic_cast<CCNode*>(_showItemAry->objectAtIndex(0)))->setPosition(_currentItemNode->convertToNodeSpace(frame->convertToWorldSpace(frame->getChildByTag(MTN7_BaoXiangPt)->getPosition())));
+		_itemPosMap[dynamic_cast<CCNode*>(_showItemAry->objectAtIndex(0))] = itemPt;
+		this->setItemColumeName(dynamic_cast<CCNode*>(_showItemAry->objectAtIndex(0)), MTN7_GetStuff1,dynamic_cast<ItemNode*>(_showItemAry->objectAtIndex(0))->GetQuality());
+		this->setItemNameLabelVisible(true,false);
+		PackageManager::getInstance()->setBoxProcess(false);
+		nCanClick = true;
+		
+	}
+
+}
+
+void KaiBaoXiangUiLayer::runMysteryBox()
+{
+
+			//【Ji：】更改升级特效文件名称(levelUp)
+	BSAnimate *animate = m_anims[0];
+	m_effectBox->setVisible(false);
+	 m_sprite->stopAllActions();
+	 m_sprite->setVisible(true);
+	// m_sprite->runAction( CCSequence::create(animate,CCCallFunc::create(this,callfunc_selector(KaiBaoXiangUiLayer::setBoxVisibleCalback)),NULL));
+	 m_sprite->runAction(CCSequence::createWithTwoActions(animate, CCCallFuncN::create(this, SEL_CallFuncN(&KaiBaoXiangUiLayer::setBoxVisibleCalback))));
+	 this->scheduleOnce(schedule_selector(KaiBaoXiangUiLayer::UpdateRunAnimate), 1.4f);
+}
+void KaiBaoXiangUiLayer::NeedWaitMsgRunAnimate(float dt)
+{
+	if(!(m_effectBox->isVisible()))
+	{
+		if(bNeedRunAni)
+		{
+			bNeedRunAni = false;
+			setOneItemCalback(0.0);
+			unschedule(schedule_selector(KaiBaoXiangUiLayer::NeedWaitMsgRunAnimate));
+		}
+	}
+	else
+	{
+		unschedule(schedule_selector(KaiBaoXiangUiLayer::NeedWaitMsgRunAnimate));
+	}
+}
+void KaiBaoXiangUiLayer::UpdateRunAnimate(float dt)
+{
+	if(!(m_effectBox->isVisible()))
+	{
+		if(bNeedRunAni)
+		{
+			setOneItemCalback(0.0);
+			bNeedRunAni = false;
+		}
+		else
+		{
+			 schedule(schedule_selector(KaiBaoXiangUiLayer::NeedWaitMsgRunAnimate), 0.1f);
+		}
+		//setOneItemCalback(0.0);
+	}
+	
+}
+void KaiBaoXiangUiLayer::runBoxAni()
+{
+
+	AudioPlayer::getSigletonPtr()->playerSoundSceneEffect(SCENE_OPENMYSTERIOUSBOX);
+	//int nItemNum = _itemPosMap.size();
+
+	 if(_showItemAry->count() == 5)
+	{	
+		for(int i = 0; i<5;i++)
+		{
+			_itemSupportNode10->addChild(dynamic_cast<CCNode*>(_showItemAry->objectAtIndex(i)), 1);
+		}
+		
+	}
+	 if(m_effectBox->isVisible())
+	 {
+		 
+		 setOneItemCalback(0.0);
+	 }
+	 else
+	 {
+		  bNeedRunAni = true;
+	 }
+	
+}
+
+
+
+
+void KaiBaoXiangUiLayer::setOneItemCalback(float dt)
+{
+	IsRuningAni = true;
+	for (std::map<CCNode*, CCPoint>::iterator itemIter = _itemPosMap.begin(); itemIter != _itemPosMap.end(); ++itemIter)
+	{
+		CCRotateBy* itemRote = CCRotateBy::create(0.6f, 360.0f);
+		CCMoveTo* itemMov = CCMoveTo::create(0.4f, itemIter->second);
+		CCSpawn* itemAction = CCSpawn::createWithTwoActions(itemRote,itemMov);
+		itemIter->first->runAction(itemAction);
+	}
+	bCanRun = true;
+	this->scheduleOnce(schedule_selector(KaiBaoXiangUiLayer::setFiveItemCalback), 0.4f);
+}
+
+void KaiBaoXiangUiLayer::setFiveItemCalback(float dt)
+{
+	if(bCanRun)
+	{
+		_itemSupportNode10->setVisible(true);
+		_itemSupportNode10->getChildByTag(MT_ItemUnderSP)->setVisible(true);
+		
+		this->scheduleOnce(schedule_selector(KaiBaoXiangUiLayer::setFiveItemCalbackNext), 0.2f);
+	}
+	
+}
+void KaiBaoXiangUiLayer::setFiveItemCalbackNext(float dt)
+{
+	nCanClick = true;
+	if(bCanRun)
+	{
+		m_GetFont1->setVisible(true);
+		m_GetStuff1->setVisible(true);
+		m_BoxNameText1->setVisible(true);
+		_itemSupportNode10->getChildByTag(MTN_ITEM1)->setVisible(true);
+		m_GetFont2->setVisible(true);
+		m_GetStuff2->setVisible(true); 
+		m_BoxNameText2->setVisible(true);
+		_itemSupportNode10->getChildByTag(MTN_ITEM2)->setVisible(true);
+		m_GetFont3->setVisible(true);
+		m_GetStuff3->setVisible(true); 
+		m_BoxNameText3->setVisible(true);
+		_itemSupportNode10->getChildByTag(MTN_ITEM3)->setVisible(true);
+		m_GetFont4->setVisible(true);
+		m_GetStuff4->setVisible(true); 
+		m_BoxNameText4->setVisible(true);
+		_itemSupportNode10->getChildByTag(MTN_ITEM4)->setVisible(true);
+		m_GetFont5->setVisible(true);
+		m_GetStuff5->setVisible(true); 
+		m_BoxNameText5->setVisible(true);
+		_itemSupportNode10->getChildByTag(MTN_ITEM5)->setVisible(true);
+		IsRuningAni = false;
+	}
+
+}
+void KaiBaoXiangUiLayer::setBoxVisibleCalback(CCNode *node)
+{
+	m_effectBox->setVisible(true);
+	node->setVisible(false);
+	if(bNeedRunAni)
+	{
+		setOneItemCalback(0.0);
+		bNeedRunAni = false;
+	}
+}
+
+
+
+void KaiBaoXiangUiLayer::setTenItemName( CCNode* mapItem, int labelTag,int nQuality)
+{
+	ccColor3B color;
+	switch(nQuality)
+	{
+	case 0:
+		color = ccc3(0xfe,0xf8,0xd8);
+		break;
+	case 1:
+		color = ccc3(0x3f,0xd4,0x16);
+		break;
+	case 2:
+		color = ccc3(0x1d,0xad,0xe7);
+		break;
+	case 3:
+		color = ccc3(0x91,0x13,0xbc);
+		break;
+	case 4:
+		color = ccc3(0xe0,0x78,0x09);
+		break;
+	case 5:
+		color = ccc3(0xe1,0xe4,0x00);
+		break;
+	default:
+		color = ccc3(0xff,0xff,0xff);
+		break;
+	}
+	switch(labelTag)
+	{
+	case MTN_ITEM1:
+		{
+			m_BoxNameText1->setTextColor(Helper::converColor3B_2_4B(color));
+			m_BoxNameText1->setString(_itemNameMap[mapItem].c_str());
+			break;
+		}
+	case MTN_ITEM2:
+		{
+			m_BoxNameText2->setTextColor(Helper::converColor3B_2_4B(color));
+			m_BoxNameText2->setString(_itemNameMap[mapItem].c_str());
+			break;
+		}
+	case MTN_ITEM3:
+		{
+			m_BoxNameText3->setTextColor(Helper::converColor3B_2_4B(color));
+			m_BoxNameText3->setString(_itemNameMap[mapItem].c_str());
+			break;
+		}
+	case MTN_ITEM4:
+		{
+			m_BoxNameText4->setTextColor(Helper::converColor3B_2_4B(color));
+			m_BoxNameText4->setString(_itemNameMap[mapItem].c_str());
+			break;
+		}
+	case MTN_ITEM5:
+		{
+			m_BoxNameText5->setTextColor(Helper::converColor3B_2_4B(color));
+			m_BoxNameText5->setString(_itemNameMap[mapItem].c_str());
+			break;
+		}
+	}
+	
+}
+void KaiBaoXiangUiLayer::setItemColumeName( CCNode* mapItem, int labelTag ,int eQuality)
+{
+	ccColor3B color;
+	switch(eQuality)
+	{
+	case 0:
+		color = ccc3(0xfe,0xf8,0xd8);
+		break;
+	case 1:
+		color = ccc3(0x3f,0xd4,0x16);
+		break;
+	case 2:
+		color = ccc3(0x1d,0xad,0xe7);
+		break;
+	case 3:
+		color = ccc3(0x91,0x13,0xbc);
+		break;
+	case 4:
+		color = ccc3(0xe0,0x78,0x09);
+		break;
+	case 5:
+		color = ccc3(0xe1,0xe4,0x00);
+		break;
+	default:
+		color = ccc3(0xff,0xff,0xff);
+		break;
+	}
+	switch(labelTag)
+	{
+	case 11:
+		{
+			m_GetStuff1->setTextColor(Helper::converColor3B_2_4B(color));
+			m_GetStuff1->setString(_itemNameMap[mapItem].c_str());
+			break;
+		}
+	case 12:
+		{	
+			m_GetStuff2->setTextColor(Helper::converColor3B_2_4B(color));
+			m_GetStuff2->setString(_itemNameMap[mapItem].c_str());
+			break;
+		}
+	case 13:
+		{	
+			m_GetStuff3->setTextColor(Helper::converColor3B_2_4B(color));
+			m_GetStuff3->setString(_itemNameMap[mapItem].c_str());
+			break;
+		}
+	case 14:
+		{
+			m_GetStuff4->setTextColor(Helper::converColor3B_2_4B(color));
+			m_GetStuff4->setString(_itemNameMap[mapItem].c_str());
+			break;
+		}
+	case 15:
+		{
+			m_GetStuff5->setTextColor(Helper::converColor3B_2_4B(color));
+			m_GetStuff5->setString(_itemNameMap[mapItem].c_str());
+			break;
+		}
+	}
+}
+void KaiBaoXiangUiLayer::setItemNameLabelVisible( bool canSee, bool IsFiveBox,bool IsTouch)
+{
+	if(canSee)
+	{
+		if(IsFiveBox)
+		{
+			
+			_itemSupportNode10->setVisible(canSee);
+			_itemSupportNode10->getChildByTag(MT_ItemUnderSP)->setVisible(canSee);
+			m_GetFont1->setVisible(canSee);
+			m_GetStuff1->setVisible(canSee);
+			m_BoxNameText1->setVisible(canSee);
+			_itemSupportNode10->getChildByTag(MTN_ITEM1)->setVisible(canSee);
+			m_GetFont2->setVisible(canSee);
+			m_GetStuff2->setVisible(canSee); 
+			m_BoxNameText2->setVisible(canSee);
+			_itemSupportNode10->getChildByTag(MTN_ITEM2)->setVisible(canSee);
+			m_GetFont3->setVisible(canSee);
+			m_GetStuff3->setVisible(canSee); 
+			m_BoxNameText3->setVisible(canSee);
+			_itemSupportNode10->getChildByTag(MTN_ITEM3)->setVisible(canSee);
+			m_GetFont4->setVisible(canSee);
+			m_GetStuff4->setVisible(canSee); 
+			m_BoxNameText4->setVisible(canSee);
+			_itemSupportNode10->getChildByTag(MTN_ITEM4)->setVisible(canSee);
+			m_GetFont5->setVisible(canSee);
+			m_GetStuff5->setVisible(canSee); 
+			m_BoxNameText5->setVisible(canSee);
+			_itemSupportNode10->getChildByTag(MTN_ITEM5)->setVisible(canSee);
+			
+		}
+		else
+		{
+			m_GetFont1->setVisible(canSee);
+			m_GetStuff1->setVisible(canSee); 
+		}
+	}
+	
+	else
+	{
+
+		if(IsTouch)
+		{
+			if(IsFiveBox)
+			{
+				_itemSupportNode10->setVisible(canSee);
+				_itemSupportNode10->getChildByTag(MT_ItemUnderSP)->setVisible(canSee);
+
+				m_BoxNameText1->setVisible(canSee);
+				_itemSupportNode10->getChildByTag(MTN_ITEM1)->setVisible(canSee);
+
+				m_BoxNameText2->setVisible(canSee);
+				_itemSupportNode10->getChildByTag(MTN_ITEM2)->setVisible(canSee);
+
+				m_BoxNameText3->setVisible(canSee);
+				_itemSupportNode10->getChildByTag(MTN_ITEM3)->setVisible(canSee);
+
+				m_BoxNameText4->setVisible(canSee);
+				_itemSupportNode10->getChildByTag(MTN_ITEM4)->setVisible(canSee);
+
+				m_BoxNameText5->setVisible(canSee);
+				_itemSupportNode10->getChildByTag(MTN_ITEM5)->setVisible(canSee);
+				m_GetFont1->setVisible(true);
+				m_GetFont2->setVisible(true); 
+				m_GetFont3->setVisible(true); 
+				m_GetFont4->setVisible(true);
+				m_GetFont5->setVisible(true); 
+				m_GetStuff1->setVisible(true); 
+				m_GetStuff2->setVisible(true); 
+				m_GetStuff3->setVisible(true); 
+				m_GetStuff4->setVisible(true); 
+				m_GetStuff5->setVisible(true); 
+				return;
+			}
+			else
+			{
+				_itemSupportNode10->setVisible(canSee);
+				_itemSupportNode10->getChildByTag(MT_ItemUnderSP)->setVisible(canSee);
+
+				m_BoxNameText1->setVisible(canSee);
+				_itemSupportNode10->getChildByTag(MTN_ITEM1)->setVisible(canSee);
+
+				m_BoxNameText2->setVisible(canSee);
+				_itemSupportNode10->getChildByTag(MTN_ITEM2)->setVisible(canSee);
+
+				m_BoxNameText3->setVisible(canSee);
+				_itemSupportNode10->getChildByTag(MTN_ITEM3)->setVisible(canSee);
+
+				m_BoxNameText4->setVisible(canSee);
+				_itemSupportNode10->getChildByTag(MTN_ITEM4)->setVisible(canSee);
+
+				m_BoxNameText5->setVisible(canSee);
+				_itemSupportNode10->getChildByTag(MTN_ITEM5)->setVisible(canSee);
+				return;
+			}
+			
+		}
+		_itemSupportNode10->setVisible(canSee);
+		_itemSupportNode10->getChildByTag(MT_ItemUnderSP)->setVisible(canSee);
+		m_GetFont1->setVisible(canSee);
+		m_GetFont2->setVisible(canSee); 
+		m_GetFont3->setVisible(canSee); 
+		m_GetFont4->setVisible(canSee);
+		m_GetFont5->setVisible(canSee); 
+		m_GetStuff1->setVisible(canSee); 
+		m_GetStuff2->setVisible(canSee); 
+		m_GetStuff3->setVisible(canSee); 
+		m_GetStuff4->setVisible(canSee); 
+		m_GetStuff5->setVisible(canSee); 
+		for(int i = MTN_ITEM1; i <= MTN_ITEMText5; i++)
+			_itemSupportNode10->getChildByTag(i)->setVisible(canSee);
+
+	}
+	
+}
+
+
+
+void KaiBaoXiangUiLayer::setTreasureOddNum()
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if (player)
+	{ 
+		if(IsYuanBox)
+		{
+			unsigned char treasureNum1 = player->getRoleDayClearInfoTwo(ERDCT_YuanBaoBoxTimes_Num);
+			if(treasureNum1<0)
+			{
+				treasureNum1 = 0;
+			}
+			CCString* str1 = CCString::createWithFormat("%d",treasureNum1);
+			m_WillGetNum->setString(str1->getCString());
+		}
+		else
+		{
+			unsigned char treasureNum2 = player->getRoleDayClearInfoTwo(ERDCT_MoneyBoxTimes_Num);
+			if(treasureNum2<0)
+			{
+				treasureNum2 = 0;
+			}
+			CCString* str2 = CCString::createWithFormat("%d",treasureNum2);
+			m_WillGetNum->setString(str2->getCString());
+		}
+		
+		
+	}
+}
+
+void KaiBaoXiangUiLayer::SetIsYuanBox( bool bIs )
+{
+	IsYuanBox = bIs;
+	InitFrame();
+	setTreasureOddNum();
+
+	if(bIs)
+		IsYuanBaoInit();
+
+
+	// 加载可获大奖
+	if (_itemNodeScrollView == NULL)
+	{
+		initItemNodeScrollview();
+	}
+
+}
+
+void KaiBaoXiangUiLayer::initItemNodeScrollview()
+{
+	// 读取宝箱可获大奖
+	BoxType nType = IsYuanBox ? BType_Gold : BType_Equip;
+	int nID = getTableIndexByBoxType(nType);
+	std::vector<unsigned int> vItemIDs;
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM boxRewardData");
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		// 只读取对应宝箱的可获大奖
+		unsigned int idx = table->get_index("id");
+		if (table->get_integer32(idx) != nID)
+			continue;
+
+		for (int i = 1; i <= 15; ++i)
+		{
+			std::string strKey = CCString::createWithFormat("reward%d",i)->getCString();
+			idx = table->get_index(strKey);
+
+			int ItemID = table->get_integer32(idx);
+			if (ItemID != 0)
+				vItemIDs.push_back(ItemID);
+		}
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+
+	// 加载scrollview，放入宝箱可获大奖对应的itemnode
+	_itemNodeContent = frame->getChildByTag(MTN_ItemNodeScrollNode);
+	_itemNodeScrollView = createScrollViewWithContentHorizontal(_itemNodeContent);
+	_itemNodeContent->addChild(_itemNodeScrollView);
+	_itemNodeScrollViewContainer = CCNode::create();
+
+	int NodeIdx = 0;
+	ItemNode * _itemNode = NULL;
+	for (auto iter = vItemIDs.begin(); iter != vItemIDs.end(); ++iter)
+	{
+		_itemNode = ItemNode::create();
+		_itemNode->setDataId(*iter);
+		_itemNode->setClickable(false);
+		_itemNode->hideItemOpBtn();
+		_itemNode->setAnchorPoint(ccp(0.0f,0.5f));
+		_itemNode->setPosition(ccp(NodeIdx * (_itemNode->getContentSize().width + 5),_itemNodeContent->getContentSize().height / 2));
+		_itemNode->runAnimation("E1_204");
+		_itemNodeScrollViewContainer->addChild(_itemNode);
+
+		++NodeIdx;
+	}
+
+	if (_itemNode != NULL)
+	{
+		_itemNodeScrollViewContainer->setContentSize(
+			CCSize(_itemNode->getContentSize().width * vItemIDs.size() + 5 * (vItemIDs.size()-1) , 
+			_itemNodeContent->getContentSize().height));
+		_itemNodeScrollView->setContainer(_itemNodeScrollViewContainer);
+		_itemNodeScrollView->setContentSize(_itemNodeScrollViewContainer->getContentSize());
+	}
+
+}
+
+void KaiBaoXiangUiLayer::updateScrollview( float dt )
+{
+	// 判断是否需要显示左右箭头
+	CCPoint offset = _itemNodeScrollView->getContentOffset();
+
+	frame->getChildByTag(MTN_LeftArrow)->setVisible(offset.x < 0.0f);
+
+	frame->getChildByTag(MTN_RightArrow)->setVisible(
+		offset.x > _itemNodeContent->getContentSize().width - _itemNodeScrollViewContainer->getContentSize().width);
+
+}
+
+int KaiBaoXiangUiLayer::getTableIndexByBoxType( BoxType Type )
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if (player == NULL)
+		return 0;
+
+	int index = 0;
+	switch(Type)
+	{
+	case BType_Equip:
+		index = 0 + player->getAttribute(RA_ROLETYPE);
+		break;
+	case BType_Gold:
+		index = 3 + player->getAttribute(RA_ROLETYPE);
+		break;
+	}
+
+	return index;
+}

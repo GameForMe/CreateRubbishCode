@@ -1,0 +1,1786 @@
+#include "MirValuableBookUi.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "string.h"
+#include "UiManager.h"
+#include "CfgReader.h"
+#include "UiResourceMgr.h"
+#include "ToolTip.h"
+#include "CommonClient.h"
+#include "DBMgr.h"
+#include "QuestMgr.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "StringMgr.h"
+#include "RoleEquipUi.h"
+#include "World.h"
+#include "MiniMapUi.h"
+#include "ExchangeBusinessMgr.h"
+#include "ChatUi.h"
+#include "WorldPacket.h"
+#include "CommonMsgDefine.h"
+#include "TCPClient.h"
+#include "ForgingDecomUI.h"
+#include "BossPKMgr.h"
+#include "Helper.h"
+#include "f_data_set.h"
+#include "SkillManager.h"
+#include "HuoYueUi.h"
+
+/***************************************
+
+			MVB_Common_Item
+
+****************************************/
+MVB_Common_Item* MVB_Common_Item::CreateCSUI_Item()
+{
+	std::set<std::string> _loadSpriteSheet;
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["ChangeStrongthItemUiLayer"] = UiSpriteLoader<MVB_Common_Item>::loader();
+	CCNode* pNode = readUiFromCCBI("changeStrongthItem", nodeLoaders, _loadSpriteSheet);
+
+	return dynamic_cast<MVB_Common_Item*>(pNode);
+}
+
+void MVB_Common_Item::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_pIcon = (CCSprite*)getChildByTag(0);
+	m_Title = (CCLabelTTF*)getChildByTag(1);
+	m_Desc = (CCLabelTTF*)getChildByTag(2);
+	m_Level = (CCLabelTTF*)getChildByTag(4);
+	promoteSprite=(CCSprite*)getChildByTag(6);
+	promoteSprite->setVisible(false);//可提升图标先屏蔽
+	btn = (CCControlButton*)getChildByTag(3);
+	m_progBg = (CCSprite*)getChildByTag(9);
+	m_progImg = (CCSprite*)m_progBg->getChildByTag(0);
+	m_progImg->setAnchorPoint(ccp(0, 0.5));
+	m_progImg->setPositionX(m_progImg->getPositionX()-m_progImg->getContentSize().width*0.5);
+	m_judge = (CCLabelTTF *)getChildByTag(8);
+	m_isStrongItem = false;
+}
+
+cocos2d::extension::SEL_CCControlHandler MVB_Common_Item::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGoToPressedBtn", MVB_Common_Item::onGoToPressed);
+
+	return NULL;
+}
+
+void MVB_Common_Item::SetData(const CommonItemData &data)
+{
+	m_judge->setVisible(false);
+
+	m_eState = data;
+	m_Title->setString(m_eState.title.c_str());
+	m_Desc->setString(m_eState.content.c_str());
+
+	char sl[256];
+	sprintf(sl,"%d",m_eState.openLv);
+	m_Level->setString(sl);
+
+	if (!m_eState.spriteName.empty())
+	{
+		CCSpriteFrame* pFrame = PackageManager::getInstance()->getIconFrameByName(m_eState.spriteName.c_str());
+		m_pIcon->initWithSpriteFrame(pFrame);
+	}
+	setPromote(m_eState.openLv);
+}
+
+void MVB_Common_Item::SetData(const StrongItemData &data)
+{
+	m_isStrongItem = true;
+
+	for (int i = 4; i <= 7; ++i) {
+		getChildByTag(i)->setVisible(false);
+	}
+	m_Desc->setVisible(false);
+	m_progBg->setVisible(true);
+	m_judge->setVisible(true);
+
+	m_strongItemData = data;
+	m_Title->setString(m_strongItemData.title.c_str());
+
+	CCSpriteFrame* pFrame = PackageManager::getInstance()->getIconFrameByName(m_strongItemData.spriteName.c_str());
+	m_pIcon->initWithSpriteFrame(pFrame);
+	setPromote(m_strongItemData.openLv);
+	StrengthRatioData* nowLPInfo = MirValuableBookMgr::getInstance()->getStrengthRadio();
+	if(nowLPInfo == NULL)
+		return;
+
+	double rate = 0.5;
+	switch (m_strongItemData.id) {
+	case E_MVB_Inlay:
+		{
+			PackageManager::ItemMap *itemMap = PackageManager::getInstance()->getItemMap(EICT_Equip);
+			double gemFightNums = 0;
+			for(int i = EEP_Equip_Start; i < ROLEEQUIPUIITEMEND; ++i){
+				f_equipment* equipTemp = (f_equipment*)PackageManager::getInstance()->getItem(*itemMap, (short)i);
+				if(equipTemp == NULL)
+					continue;
+
+				const EquipTypeData* equipTypeData = PackageManager::getInstance()->getEquipTypeData(equipTemp->get_item_type_id());    //【ji】获取此种装备的类型数据
+				CC_ASSERT(equipTypeData);
+				if(equipTypeData->gemHole){
+					//宝石
+					for (int j = 0; j < MAX_EQUIPHOLE_NUM; ++j){
+						unsigned int id = equipTemp->get_equip_hold_gem_id(j);
+						if(id != (unsigned int) -1 && id != (unsigned int) 0){
+							gemFightNums += MirValuableBookMgr::getInstance()->getGemFightNums(id);
+						}else{
+							continue;
+						}
+					}
+				}else{
+					continue;
+				}
+			}
+			rate = gemFightNums / (double)(nowLPInfo->power_gem);
+		}
+		break;
+	case E_MVB_Skill:
+		{
+			double allSkillPower = SkillManager::getInstance()->getAllSkillPower();
+			rate = allSkillPower / (double)(nowLPInfo->power_skill);
+		}
+		break;
+	case E_MVB_Zuoqi:
+		{
+			unsigned int curRideLv = RoleManager::getInstance()->getLocalPlayer()->getRideLv();//角色当前的坐骑等级
+			RoleManager::RideData const* curRideData_ptr = RoleManager::getInstance()->getRideData(curRideLv);
+			RoleManager::RideData const& curRideData = *curRideData_ptr;
+			rate = (double)(curRideData.battlePt) / (double)(nowLPInfo->power_ride);
+		}
+		break;
+	case E_MVB_EquipLvUP:
+		{
+			PackageManager::ItemMap *itemMap = PackageManager::getInstance()->getItemMap(EICT_Equip);
+			double equipStarsNums = 0;
+			for(int i = EEP_Equip_Start; i < ROLEEQUIPUIITEMEND; ++i){
+				f_equipment* equipTemp = (f_equipment*)PackageManager::getInstance()->getItem(*itemMap, (short)i);
+				if(equipTemp == NULL)
+					continue;
+				equipStarsNums += equipTemp->get_star_num();
+			}
+			rate = equipStarsNums / (double)(nowLPInfo->power_shengji);
+		}
+		break;
+	case E_MVB_EquipStrongth:
+		{
+			PackageManager::ItemMap *itemMap = PackageManager::getInstance()->getItemMap(EICT_Equip);
+			double equipQianghuaNums = 0;
+			for(int i = EEP_Equip_Start; i < ROLEEQUIPUIITEMEND; ++i){
+				f_equipment* equipTemp = (f_equipment*)PackageManager::getInstance()->getItem(*itemMap, (short)i);
+				if(equipTemp == NULL)
+					continue;
+				equipQianghuaNums += equipTemp->get_equip_consolidate_level();
+			}
+			rate = equipQianghuaNums / (double)(nowLPInfo->power_qianghua);
+		}
+		break;
+	case E_MVB_EquipFusion:
+		{
+			PackageManager::ItemMap *itemMap = PackageManager::getInstance()->getItemMap(EICT_Equip);
+			double equipQualityNums = 0;
+			for(int i = EEP_Equip_Start; i < ROLEEQUIPUIITEMEND; ++i){
+				f_equipment* equipTemp = (f_equipment*)PackageManager::getInstance()->getItem(*itemMap, (short)i);
+				if(equipTemp == NULL)
+					continue;
+				equipQualityNums += equipTemp->get_item_quality();
+			}
+			rate = equipQualityNums / (double)(nowLPInfo->power_jinjie);
+		}
+		break;
+	case E_MVB_EquipGet:
+		{
+			PackageManager::ItemMap *itemMap = PackageManager::getInstance()->getItemMap(EICT_Equip);
+			double equipGetNums = 0;
+			for(int i = EEP_Equip_Start; i < ROLEEQUIPUIITEMEND; ++i){
+				f_equipment* equipTemp = (f_equipment*)PackageManager::getInstance()->getItem(*itemMap, (short)i);
+				if(equipTemp == NULL || !MIsEquipment(equipTemp->get_item_type_id()))
+					continue;
+				equipGetNums += MirValuableBookMgr::getInstance()->getEquipGradeNums(equipTemp->get_item_type_id());
+			}
+			rate = equipGetNums / (double)(nowLPInfo->equip_get);
+		}
+		break;
+	}
+
+	rate = rate < 1 ? rate : 1;
+	StrongItemJudgeData judgeData;
+	const MirValuableBookMgr::J_DataVector& jDataVector =  MirValuableBookMgr::getInstance()->getJudgeDataFromDB();
+	for (size_t i = 0; i < jDataVector.size(); ++i) {
+		if (i == 0 && rate < jDataVector[i].rate) {
+			judgeData = jDataVector[i];
+			break;
+		}
+		if (i+1 < jDataVector.size()) {
+			if (rate >= jDataVector[i].rate && rate < jDataVector[i+1].rate) {
+				judgeData = jDataVector[i];
+				break;
+			}
+		}
+		else {
+			if (rate >= jDataVector[i].rate) {
+				judgeData = jDataVector[i];
+				break;
+			}
+		}
+	}
+	
+	m_judge->setString(judgeData.state.c_str());
+	const ccColor3B color = hexStringToColor(judgeData.font_color);
+	m_judge->setColor(color);
+	m_progImg->setScaleX(rate);
+	m_progImg->setColor(color);
+}
+
+bool MVB_Common_Item::checkLevelLimit()
+{
+	int nCurLevel = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+
+	if (nCurLevel < m_eState.openLv)
+		return false;
+
+	return true;
+}
+
+void MVB_Common_Item::onGoToPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if (m_isStrongItem) {
+		switch (m_strongItemData.id) {
+		case E_MVB_Inlay:
+			PackageManager::getInstance()->FindEquipWithMVB(E_MVB_Inlay);
+			break;
+		case E_MVB_Skill:
+			OPEN_UI(WCT_SKILLUI);
+			break;
+		case E_MVB_Zuoqi:
+			OPEN_UI(WCT_MountUi);
+			break;
+		case E_MVB_EquipLvUP:
+			PackageManager::getInstance()->FindEquipWithMVB(E_MVB_EquipLvUP);
+			break;
+		case E_MVB_EquipStrongth:
+			PackageManager::getInstance()->FindEquipWithMVB(E_MVB_EquipStrongth);
+			break;
+		case E_MVB_EquipFusion:
+			PackageManager::getInstance()->FindEquipWithMVB(E_MVB_EquipFusion);
+			break;
+		case E_MVB_EquipGet:
+			{
+				MirValuableBookUiLayer* uiLayer = getUiNodeByTag<MirValuableBookUiLayer>(WCT_MirValuableBookUi);
+				if(uiLayer){
+					uiLayer->setSelectLeftBtn(E_MVB_GetEquip);
+				}
+			}
+			break;
+		}
+		return;
+	}
+
+
+	int index = m_eState.id;
+	//播放音效
+	switch(index) {
+	case E_MVB_MaoXian:
+	case E_MVB_Dink:
+	case E_MVB_DayNeed:
+	case E_MVB_MoBai:
+	case E_MVB_FubenDuoren:
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);//vv
+		break;
+	default:
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);//vv
+		break;
+	}
+
+	//检查等级限制
+	if (!checkLevelLimit())
+		return;
+
+	switch(index) {
+	case E_MVB_MysteryBox:
+		break;
+	case E_MVB_TuMo:
+	case E_MVB_DiGongChangLang:
+	case E_MVB_ShouWeiTianGuan:
+		{
+			QuestMgr::getInstance()->onSelectRunNpc(1007001);
+			CLOSE_UI(WCT_MirValuableBookUi);
+		}
+		break;
+	case E_MVB_BiQi:
+	case E_MVB_Huan:
+		{
+			QuestMgr::getInstance()->onSelectRunNpc(1002001);
+			CLOSE_UI(WCT_MirValuableBookUi);
+		}
+		break;
+	case E_MVB_DecomEquip:
+		{
+			ForgingDecomUI *forgingDecomUI = (ForgingDecomUI*)OPEN_UI(WCT_ForgingDecomUI);
+			if (forgingDecomUI) {
+				ForgingDecomUILayer *uiLayer = dynamic_cast<ForgingDecomUILayer*>(forgingDecomUI->getUiLayer());
+				uiLayer->showFrame(ForgingDecomUILayer::T_Decompose);
+				uiLayer->updateDecomChoose();
+				uiLayer->updateDecomPackage();
+			}
+		}
+		break;
+	case E_MVB_ForgingEquip:
+		OPEN_UI(WCT_ForgingDecomUI);
+		CLOSE_UI(WCT_MirValuableBookUi);
+		break;
+	case E_MVB_MaoXian:
+		QuestMgr::getInstance()->onSelectRunNpc(1003008);
+		CLOSE_UI(WCT_MirValuableBookUi);
+		break;
+	case E_MVB_Dink:
+		{
+			QuestMgr::getInstance()->onSelectRunNpc(1840001);
+			CLOSE_UI(WCT_MirValuableBookUi);
+		}
+		break;
+	case E_MVB_DayNeed:
+		QuestMgr::getInstance()->onSelectRunNpc(1007010);
+		CLOSE_UI(WCT_MirValuableBookUi);
+		break;
+	case E_MVB_GuildXiang:
+		{
+			if (RoleManager::getInstance()->getLocalPlayer()->getGuildID() == 0xffffffff) {
+				ToolTip::getInstance()->push("\xE6\x82\xA8\xE6\x9C\xAA\xE5\x8A\xA0\xE5\x85\xA5\xE4\xBB\xBB\xE4\xBD\x95\xE5\x85\xAC\xE4\xBC\x9A\x2E");
+				return;
+			}
+			OPEN_UI(WCT_GuildFrameUi);
+		}
+		break;
+	case E_MVB_MoBai:
+		{
+			int nNpcID = 0;
+			LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+			if(!pLP)
+				return;
+
+			//女
+			switch (pLP->getRoleType()) {
+			case RT_MWARRIOR:
+				nNpcID = 2910192;
+				break;
+			case RT_WWARRIOR:
+				nNpcID = 2910195;
+				break;
+			case RT_MMAGE:
+				nNpcID = 2910193;
+				break;
+			case RT_WMAGE:
+				nNpcID = 2910196;
+				break;
+			case RT_MTAOIST:
+				nNpcID = 2910194;
+				break;
+			case RT_WTAOIST:
+				nNpcID = 2910197;
+				break;
+			}
+			QuestMgr::getInstance()->onSelectRunNpc(nNpcID);
+			CLOSE_UI(WCT_MirValuableBookUi);
+		}
+		break;
+	case E_MVB_FubenSingle:
+		OPEN_UI(WCT_FubenUI);
+		break;
+	case E_MVB_FubenDuoren:
+		QuestMgr::getInstance()->onSelectRunNpc(1002008);
+		CLOSE_UI(WCT_MirValuableBookUi);
+		break;
+	case E_MVB_Boss:
+		{
+			WorldPacket C2G_Msg(NET_C2G_REQUEST_BOSS_LIST);
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+			BossPKMgr::getInstance()->setOpenBossUi(true);
+		}
+		break;
+	case E_MVB_Area:
+		OPEN_UI(WCT_ARENAMAINUI);
+		break;
+	case E_MVB_ShuangXiu:
+		MVB_UITips::Init(E_MVB_ShuangXiu);
+		break;
+	case E_MVB_SongMeiGui:
+		MVB_UITips::Init(E_MVB_SongMeiGui);
+		break;
+	case E_MVB_ShiTu:
+		MVB_UITips::Init(E_MVB_ShiTu);
+		break;
+	case E_MVB_JieHun:
+		MVB_UITips::Init(E_MVB_JieHun);
+		break;
+	case E_MVB_HaiTian:
+		{
+			OPEN_UI(WCT_HuoyueUi);
+			HuoYueUiFrame* uiLayer = getUiNodeByTag<HuoYueUiFrame>(WCT_HuoyueUi);
+			if(uiLayer != NULL){
+				uiLayer->setSelectDayAct(true);
+			}
+		}
+		break;
+	case E_MVB_XuanShang:
+		OPEN_UI(WCT_RewardQuestUi);
+		break;
+	case E_MVB_YuanBao:
+		OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+		break;
+	case E_MVB_BuyGold:
+		OPEN_UI(WCT_STOREUI);
+		break;
+	}
+}
+
+void MVB_Common_Item::setPromote(int openLv)
+{
+	if (!checkLevelLimit()) {
+		promoteSprite->setVisible(false);
+		btn->setEnabled(false);
+	}
+}
+
+/***************************************
+
+			GrowthPathItem
+
+****************************************/
+GrowthPathItem::GrowthPathItem( GrowthPathItemData const*itemData /*= NULL*/ )
+{
+	CCNodeLoaderLibrary *ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("BaoDianUiItemFrame", GrowthPathItemLoader::loader());
+	CCBReader *ccbReader = new CCBReader(ccNodeLoaderLibrary);
+	_uiFrame = dynamic_cast<GrowthPathItemFrame*>(ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "baodianitem.ccbi").c_str()));
+	_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+	UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+	ccbReader->release();
+	if(_uiFrame != NULL)
+	{
+		_uiFrame->retain();
+		_uiFrame->updateContent(itemData);
+	}
+}
+GrowthPathItem::~GrowthPathItem()
+{
+	CC_SAFE_RELEASE(_uiFrame);
+}
+void GrowthPathItem::setRedPointShow(bool isShow)
+{
+	CCSprite* sprite = dynamic_cast<CCSprite*>(_uiFrame->getChildByTag(RED_POINT));
+	if(sprite != NULL)
+	{
+		sprite->setVisible(isShow);
+	}
+}
+bool GrowthPathItem::getRedPointShow()
+{
+	CCSprite* sprite = dynamic_cast<CCSprite*>(_uiFrame->getChildByTag(RED_POINT));
+	if(sprite != NULL)
+	{
+		return sprite->isVisible();
+	}
+	return false;
+}
+void GrowthPathItem::setItemData( GrowthPathItemData *itemData )
+{
+
+}
+GrowthPathItemData GrowthPathItem::getPathItemData()
+{
+	if(_uiFrame)
+	{
+		return _uiFrame->getItemData();
+	}
+
+	return GrowthPathItemData();
+}
+void GrowthPathItem::setPosition( CCPoint point )
+{
+	_uiFrame->setPosition(point);
+}
+
+
+/***************************************
+
+		  GrowthPathItemFrame
+
+****************************************/
+cocos2d::SEL_MenuHandler GrowthPathItemFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler GrowthPathItemFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onViewBtnPressed", GrowthPathItemFrame::onViewBtnPressed);
+	return NULL;
+}
+
+void GrowthPathItemFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+	setAllChildernButtonPriority(this, -1);
+}
+
+bool GrowthPathItemFrame::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	return true;
+}
+
+void GrowthPathItemFrame::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+
+}
+
+void GrowthPathItemFrame::onViewBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	LocalPlayer *localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if (localPlayer->getLevel() < _itemData.openLv)
+	{
+		ToolTip::getInstance()->push(GET_STR(7274).c_str());
+		return;
+	}
+	switch(_itemData.btnType)
+	{
+	case 1:
+		{
+			if ((eWroldChildTag)_itemData.btnFunction == WCT_RewardQuestUi)
+			{
+				World::getInstance()->getMiniMapUi()->onXuanshangPressed(NULL, NULL);
+				break;
+			}
+			//OPEN_UI((eWroldChildTag)_itemData.btnFunction);
+			//人物装备ui需要有人物id才能正确显示，所以做特殊处理
+			if ((eWroldChildTag)_itemData.btnFunction == WCT_ROLEEQUIPUI)
+			{
+				GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPlayerId(RoleManager::getInstance()->getLocalPlayer()->getId());
+			}
+			if (_itemData.btnFunction==E_MVB_SongMeiGui)
+			{
+				MVB_UITips::Init(E_MVB_SongMeiGui);
+			}
+		}
+		break;
+	case 2:
+		if (localPlayer->isInRoleStateAny(RA_ShuangXiu))
+		{
+			ToolTip::getInstance()->push(GET_STR(2101));
+			return;
+		}
+		if (localPlayer->isInRoleStateAny(RA_Stall))
+		{
+			ToolTip::getInstance()->push(GET_STR(2102));
+			return;
+		}
+		if (localPlayer->isInRoleStateAny(RA_Exchange))
+		{
+			ExchangeBusinessMgr::getInstance()->CancleExchange();
+			return;
+		}
+		else
+		{
+			QuestMgr::getInstance()->onSelectRunNpc(_itemData.btnFunction);
+			CLOSE_UI(WCT_MirValuableBookUi);
+		}
+		break;
+	case 3:
+		if (localPlayer->isInRoleStateAny(RA_ShuangXiu))
+		{
+			ToolTip::getInstance()->push(GET_STR(2101));
+			return;
+		}
+		if (localPlayer->isInRoleStateAny(RA_Stall))
+		{
+			ToolTip::getInstance()->push(GET_STR(2102));
+			return;
+		}
+		if (localPlayer->isInRoleStateAny(RA_Exchange))
+		{
+			ExchangeBusinessMgr::getInstance()->CancleExchange();
+			return;
+		}
+		else
+		{
+			int roleId = 0;
+			switch(localPlayer->getRoleType())
+			{
+			case RT_MWARRIOR:
+				roleId = 2910192;
+				break;
+			case RT_WWARRIOR:
+				roleId = 2910195;
+				break;
+			case RT_MMAGE:
+				roleId = 2910193;
+				break;
+			case RT_WMAGE:
+				roleId = 2910196;
+				break;
+			case RT_WTAOIST:
+				roleId = 2910197;
+				break;
+			case RT_MTAOIST:
+				roleId = 2910194;
+				break;
+			default:
+				roleId = 2910192;
+				break;
+			}
+			QuestMgr::getInstance()->onSelectRunNpc(roleId);
+			CLOSE_UI(WCT_MirValuableBookUi);
+		}
+		break;
+	case 4:
+		PackageManager::getInstance()->FindEquipWithMVB((Enum_MVB_Item)_itemData.btnFunction);
+		break;
+	default:
+		break;
+	}
+}
+
+void GrowthPathItemFrame::updateContent( GrowthPathItemData const*gpData )
+{
+	if (gpData == NULL)
+		return;
+
+	_itemData = *gpData;
+	CCLabelTTF *titleLabel = dynamic_cast<CCLabelTTF*>(this->getChildByTag(GrowthPathItem::GP_Title));
+	if (titleLabel)
+	{
+		LabelFT *labelttf = Helper::replaceLabelTTFWithLabelFTAndRemove(titleLabel);
+		if(labelttf != NULL)
+		{
+			labelttf->setString(_itemData.lv.c_str());
+		}
+	}
+	CCLabelTTF *contentLabel = dynamic_cast<CCLabelTTF*>(this->getChildByTag(GrowthPathItem::GP_Content));
+	if (contentLabel)
+	{
+		LabelFT* labelttf = Helper::replaceLabelTTFWithLabelFTAndRemove(contentLabel);
+		if(labelttf != NULL)
+		{
+			labelttf->setString(_itemData.content.c_str());
+		}
+	}
+	if (_itemData.btnType)
+	{
+		CCLabelTTF *btnLable = dynamic_cast<CCLabelTTF*>(this->getChildByTag(GrowthPathItem::GP_ViewBtnNode)->getChildByTag(1));
+		if (btnLable)
+		{
+			LabelFT* labelttf = Helper::replaceLabelTTFWithLabelFTAndRemove(btnLable);
+			if(labelttf != NULL)
+			{
+				labelttf->setString(_itemData.btnContent.c_str());
+			}
+			CCControlButton* viewBtn = dynamic_cast<CCControlButton*>(this->getChildByTag(GrowthPathItem::GP_ViewBtnNode)->getChildByTag(GrowthPathItem::GP_ViewBtn));
+			if(viewBtn)
+			{
+				int lpLevel = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+				if (lpLevel < _itemData.openLv)
+				{
+					viewBtn->setEnabled(false);
+					viewBtn->setGray();
+					labelttf->setGray();
+				}
+			}
+		}
+	}else
+	{
+		this->getChildByTag(GrowthPathItem::GP_ViewBtnNode)->setVisible(false);
+	}
+}
+
+
+/***************************************
+
+		       MVB_UITips
+
+****************************************/
+MVB_UITips* MVB_UITips::Init(Enum_MVB_Item e)
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["strongthUiLayer"] = UiLayerLoader<MVB_UITips>::loader();
+	std::set<std::string> _loadSpriteSheet;
+	CCNode* node = readUiFromCCBI("strongthui", nodeLoaders, _loadSpriteSheet);
+
+	MVB_UITips* pUI = NULL;
+	if(node)
+	{
+		pUI = (MVB_UITips*)node;
+		pUI->m_loadSpriteSheet = _loadSpriteSheet;
+		UiResourceMgr::getInstance()->retainPlistFile(pUI->m_loadSpriteSheet);
+		pUI->SetData(e);
+		World::getInstance()->getScene()->addChild(pUI, WZ_POPUI, WCT_MirValuableBookTips);
+	}
+
+	return pUI;
+}
+
+void MVB_UITips::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_frame = getChildByTag(0);
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -1, true);
+	setAllChildernButtonPriority(this, -1);
+}
+
+cocos2d::extension::SEL_CCControlHandler MVB_UITips::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", MVB_UITips::onOkBtnPressed);
+	return NULL;
+}
+
+void MVB_UITips::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	UiResourceMgr::getInstance()->releasePlistFile(m_loadSpriteSheet);
+	CCLayer::onExit();
+}
+
+void MVB_UITips::SetData( Enum_MVB_Item e )
+{
+	CCSprite* pSprite = (CCSprite*)(getChildByTag(0)->getChildByTag(1));
+	CCSprite* pPicSprite = (CCSprite*)(getChildByTag(0)->getChildByTag(0));
+
+	switch(e)
+	{
+	case E_MVB_ShuangXiu:
+		pSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("strongthui_picture3"));
+		pPicSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("strongthui_picture33"));
+		break;
+	case E_MVB_SongMeiGui:
+		pSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("strongthui_picture4"));
+		pPicSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("strongthui_picture44"));
+		break;
+	case E_MVB_ShiTu:
+		pSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("strongthui_picture2"));
+		pPicSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("strongthui_picture22"));
+		break;
+	case E_MVB_JieHun:
+		pSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("strongthui_picture1"));
+		pPicSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("strongthui_picture11"));
+		break;
+	}
+}
+
+void MVB_UITips::onOkBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);//vv
+	removeFromParent();
+}
+
+bool MVB_UITips::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_frame, pTouch))
+		return true;
+
+	return false;
+}
+
+
+/***************************************
+
+          MirValuableBookMgr
+
+****************************************/
+MirValuableBookMgr* MirValuableBookMgr::getInstance()
+{
+	static MirValuableBookMgr mgr;
+	return &mgr;
+}
+
+void MirValuableBookMgr::loadDataFromDB()
+{
+	SQL_START_WITH_DATA(baodian, GrowthPathItemData, GPitemData);
+	SQL_EXTRA_STRING(GPitemData.lv, lv);
+	SQL_EXTRA_STRING(GPitemData.content, content);
+	SQL_EXTRA_INT(GPitemData.btnType, btntype);
+	SQL_EXTRA_STRING(GPitemData.btnContent, btncontent);
+	SQL_EXTRA_INT(GPitemData.btnFunction, function);
+	SQL_EXTRA_INT(GPitemData.openLv, openlv);
+	SQL_EXTRA_INT(GPitemData.openyesno,openyesno);
+	_gpDataVector.push_back(GPitemData);
+	SQL_END;
+}
+
+void MirValuableBookMgr::loadJudgeDataFromDB()
+{
+	SQL_START_WITH_DATA(gamesec3, StrongItemJudgeData, jData);
+	SQL_EXTRA_INT(jData.id, id);
+	SQL_EXTRA_DOUBLE(jData.rate, rate);
+	SQL_EXTRA_STRING(jData.state, state);
+	SQL_EXTRA_STRING(jData.font_color, font_color);
+	_jDataVector.push_back(jData);
+	SQL_END;
+}
+
+void MirValuableBookMgr::loadStrenthRadioFromXML()
+{
+	_gemDataMap.clear();
+	_equipGrapeData.clear();
+
+	f_data_set dataset;
+	std::list<std::string> fields;
+	bool ret = dataset.load("Config/bianqiang.xml","lv",&fields);
+	CC_ASSERT(ret);
+
+	_srDataMap.clear();
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& oneStr)
+	{
+		StrengthRatioData* srData = new StrengthRatioData;
+		srData->lv			   = dataset.get_int("lv", oneStr.c_str(), 1);
+		srData->power_ss	   = dataset.get_int("power_ss", oneStr.c_str());
+		srData->power_s		   = dataset.get_int("power_s", oneStr.c_str());
+		srData->power_a		   = dataset.get_int("power_a", oneStr.c_str());
+		srData->power_b		   = dataset.get_int("power_b", oneStr.c_str());
+		srData->power_c		   = dataset.get_int("power_c", oneStr.c_str());
+		srData->power_d		   = dataset.get_int("power_d", oneStr.c_str());
+		srData->power_gem	   = dataset.get_int("power_gem", oneStr.c_str());
+		srData->power_skill	   = dataset.get_int("power_skill", oneStr.c_str());
+		srData->power_ride	   = dataset.get_int("power_ride", oneStr.c_str());
+		srData->power_shengji  = dataset.get_int("equip_shengji", oneStr.c_str());
+		srData->power_qianghua = dataset.get_int("equip_qianghua", oneStr.c_str());
+		srData->power_jinjie   = dataset.get_int("equip_jinjie", oneStr.c_str());
+		srData->equip_get	   = dataset.get_int("equip_get", oneStr.c_str());
+
+		_srDataMap.insert(std::make_pair(srData->lv, srData));
+	});
+
+	loadStrongItemDataFromDB();
+}
+
+void MirValuableBookMgr::loadStrongItemDataFromDB()
+{
+	_changeStrongNums = 0;
+	_isChangeStrongRed = false;
+	_changeStrongGroup.clear();
+	SQL_START_WITH_DATA(gamesec2, StrongItemData, strongItemData);
+	SQL_EXTRA_INT(strongItemData.id, id);
+	SQL_EXTRA_STRING(strongItemData.title, title);
+	SQL_EXTRA_INT(strongItemData.openLv, showlevel);
+	SQL_EXTRA_STRING(strongItemData.spriteName, spriteName);
+	_changeStrongGroup.push_back(strongItemData);
+	SQL_END;
+}
+
+void MirValuableBookMgr::initChangeStrongNums()
+{
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if(lp == NULL || _changeStrongGroup.size() <= 0){
+		_changeStrongNums = 0;
+	}else{
+		std::vector<StrongItemData>::iterator iter = _changeStrongGroup.begin();
+		for(; iter != _changeStrongGroup.end(); ++iter){
+			StrongItemData data = *iter;
+			if(data.openLv <= lp->getLevel())
+				++_changeStrongNums;
+		}
+	}
+}
+
+StrengthRatioData* MirValuableBookMgr::getStrengthRadio()
+{
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if(_srDataMap.size() <= 0 || lp == NULL)
+		return NULL;
+
+	std::map<int, StrengthRatioData*>::iterator iterTemp = _srDataMap.find(lp->getLevel());
+	if(iterTemp != _srDataMap.end())
+		return iterTemp->second;
+
+	return NULL;
+}
+
+int MirValuableBookMgr::getGemFightNums(unsigned int id)//获取宝石的战斗力
+{
+	int rubyFightLi = 0;
+	if (!PackageManager::getInstance()->IsAddItem(id)){
+		return rubyFightLi;
+	}
+
+	std::map<unsigned int, int>::iterator iterTemp = _gemDataMap.find(id);
+	if(iterTemp != _gemDataMap.end()){
+		rubyFightLi = iterTemp->second;
+		return rubyFightLi;
+	}
+
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EnchaseData WHERE id = ?1");
+	cmd->set_integer32(1 , id);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("power");
+		rubyFightLi = table->get_integer32(idx);
+	}
+
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	_gemDataMap.insert(std::make_pair(id, rubyFightLi));
+
+	return rubyFightLi;
+}
+
+int MirValuableBookMgr::getEquipGradeNums(unsigned int id)//获取装备权值 EquipData中equipGrade
+{
+	int equipGrade = 0;
+
+	std::map<unsigned int, int>::iterator iterTemp = _equipGrapeData.find(id);
+	if(iterTemp != _equipGrapeData.end()){
+		equipGrade = iterTemp->second;
+		return equipGrade;
+	}
+	const EquipTypeData* t_data = PackageManager::getInstance()->getEquipTypeDataPointer(id);
+	if (t_data != NULL)
+	{
+		equipGrade = t_data->equipGrade;
+	}
+//已完成 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 	cmd->set_integer32(1, id);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("equipGrade");
+// 		equipGrade = table->get_integer32(idx);
+// 	}
+// 
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	_equipGrapeData.insert(std::make_pair(id, equipGrade));
+
+	return equipGrade;
+}
+
+MirValuableBookMgr::~MirValuableBookMgr()
+{
+	std::for_each(	_srDataMap.begin(),
+					_srDataMap.end(),
+					[](SR_DataMap::value_type& kv)
+					{
+						if(kv.second) delete kv.second;
+					});
+
+	_srDataMap.clear();
+}
+
+/***************************************
+
+          MirValuableBookUi
+
+****************************************/
+MirValuableBookUi::MirValuableBookUi(void)
+{
+	isShowRedPoint = false;
+}
+
+MirValuableBookUi::~MirValuableBookUi(void)
+{
+}
+
+CCNode* MirValuableBookUi::openUi()
+{
+	map<string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["BaoDianUiLayer"] = UiLayerLoader<MirValuableBookUiLayer>::loader();
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+	CCNode *pNode = readUiFromCCBI("baodian-android", nodeLoaders, _loadSpriteSheet);
+#elif (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	CCNode *pNode = readUiFromCCBI("baodian-ios", nodeLoaders, _loadSpriteSheet);
+#else
+	CCNode *pNode = readUiFromCCBI("baodian-ios", nodeLoaders, _loadSpriteSheet);
+#endif
+	return pNode;
+}
+
+void MirValuableBookUi::closeUI()
+{
+	UiInterface::closeUI();
+	CCNode* tipsNode = World::getInstance()->getScene()->getChildByTag(WCT_MirValuableBookTips);
+	if(tipsNode)
+	{
+		tipsNode->removeFromParentAndCleanup(true);
+	}
+}
+
+void MirValuableBookUi::setIsShowRedPoint(bool isShow)
+{
+	isShowRedPoint = isShow;
+}
+
+
+/***************************************
+
+         MirValuableBookUiLayer
+
+****************************************/
+cocos2d::SEL_MenuHandler MirValuableBookUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler MirValuableBookUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", MirValuableBookUiLayer::onCloseBtnPressed);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChangeStrongBtnPressed", MirValuableBookUiLayer::onChangeStrongBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGetEquipBtnPressed", MirValuableBookUiLayer::onGetEquipBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGameSecBtnPressed", MirValuableBookUiLayer::onGameSecBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChengZhangBtnPressed", MirValuableBookUiLayer::onChengZhangBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onEarnMoneyBtnPressed", MirValuableBookUiLayer::onEarnMoneyBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBoringBtnPressed", MirValuableBookUiLayer::onBoringBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onShowEquipBtnPressed", MirValuableBookUiLayer::onShowEquipBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGameInfoBtnPressed", MirValuableBookUiLayer::onGameInfoBtnPressed);
+	return NULL;
+}
+
+void MirValuableBookUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	_bg = this->getChildByTag(0);
+	setAllChildernButtonPriority(_bg, -1);
+
+	_leftContentNode = _bg->getChildByTag(1);
+	_rightContentNode = _bg->getChildByTag(2);
+	_changeStrongBar = _bg->getChildByTag(9);
+	_csBarLv = dynamic_cast<CCSprite*>(_changeStrongBar->getChildByTag(1));
+	_csBarLocalFightNums = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_changeStrongBar->getChildByTag(2)));
+	_csBarFightNums = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_changeStrongBar->getChildByTag(3)));
+	_changeStrongBar->setVisible(false);
+	
+	_infoContainerNode = CCNode::create();
+	_infoContainerNode->setContentSize(_rightContentNode->getContentSize());
+	
+	_infoScrollView = createScrollViewWithContent(_rightContentNode);
+	_infoScrollView->setContainer(_infoContainerNode);
+
+	_rightContentNode->addChild(_infoScrollView);
+
+	_curSelectButton = NULL;
+
+	vector<CCNode*> leftBtnVector;
+	for (int i = E_MVB_ChangeStrong; i <= E_MVB_KEFU_MESSAGE; i++) {
+		CCControlButton * btn = dynamic_cast<CCControlButton*>(_bg->getChildByTag(i));
+		leftBtnVector.push_back(btn);
+	}
+
+	setupNodes(leftBtnVector, AlignComponent::ead_vertical);
+	loadCommonItemDataFromDB();
+	loadStrongItemDataFromDB();
+	_infoScrollView->update_child_touch_clip_rect();
+}
+
+void MirValuableBookUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	CCControlButton * strongBtn = dynamic_cast<CCControlButton*>(_bg->getChildByTag(E_MVB_ChangeStrong));
+	_curSelectButton = strongBtn;
+	setSelectBtn(strongBtn);
+	setStrongMVBGroupData(_changeStrongGroup);
+
+	if (GET_UI(MirValuableBookUi,WCT_MirValuableBookUi)->getIsShowRedPoint()) {
+		CCSprite* spriteRed = CCSprite::createWithSpriteFrameName("baodian_tishihongdian");
+		CCControlButton * gropBtn = dynamic_cast<CCControlButton*>(_bg->getChildByTag(E_MVB_GrowUp));
+		if(spriteRed && gropBtn){
+			gropBtn->addChild(spriteRed, 1, RED_POINT);
+			spriteRed->setPosition(ccp(gropBtn->getContentSize().width - 5, gropBtn->getContentSize().height - 3));
+		}
+	}
+	if(MirValuableBookMgr::getInstance()->getChangeStrongRed()){
+		CCSprite* spriteRed = CCSprite::createWithSpriteFrameName("baodian_tishihongdian");
+		CCControlButton * changeStrongBtn = dynamic_cast<CCControlButton*>(_bg->getChildByTag(E_MVB_ChangeStrong));
+		if(spriteRed && changeStrongBtn){
+			changeStrongBtn->addChild(spriteRed, 1, RED_POINT);
+			spriteRed->setPosition(ccp(changeStrongBtn->getContentSize().width - 5, changeStrongBtn->getContentSize().height - 3));
+		}
+		MirValuableBookMgr::getInstance()->setChangeStrongRed(false);
+	}
+}
+
+void MirValuableBookUiLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+
+	ReleaseAllItemVector();
+	GET_UI(MirValuableBookUi,WCT_MirValuableBookUi)->setIsShowRedPoint(false);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_qianghua");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_shengxing");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_hecheng");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_xiangqian");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_cangjingge");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_zuoqi");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_skillup");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_shenmibaoxiang");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_tumo");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_taoyuan");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_maoxian");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_yinjiu");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_dayneed");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_shangxiang");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_mobai");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_cangbaoge");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_shengji");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_danrenfuben");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_duorenfuben");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_boss");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_arena");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_shuangxiu");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_songmeigui");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_shitu");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("c_jiehun");
+
+	CCLayer::onExit();
+}
+
+bool MirValuableBookUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (isTouchOnNodeContent(_bg, pTouch))
+	{
+		return true;
+	}
+	return false;
+}
+
+void MirValuableBookUiLayer::loadCommonItemDataFromDB()
+{
+	SQL_START_WITH_DATA(gamesec, CommonItemData, commonItemData);
+	SQL_EXTRA_INT(commonItemData.id, id);
+	SQL_EXTRA_INT(commonItemData.group, group);
+	SQL_EXTRA_STRING(commonItemData.title, title);
+	SQL_EXTRA_STRING(commonItemData.content, content);
+	SQL_EXTRA_INT(commonItemData.openLv, openlevel);
+	SQL_EXTRA_STRING(commonItemData.spriteName, spriteName);
+	switch (commonItemData.group) {
+	case E_MVB_Group_GetEquip:
+		_getEquipGroup.push_back(commonItemData);
+		break;
+	case E_MVB_Group_Upgrade:
+		_upgradeGroup.push_back(commonItemData);
+		break;
+	case E_MVB_Group_EarnMoney:
+		_earnMoneyGroup.push_back(commonItemData);
+		break;
+	case E_MVB_Group_Boring:
+		_boringGroup.push_back(commonItemData);
+		break;
+	default:
+		break;
+	}
+	SQL_END;
+}
+
+void MirValuableBookUiLayer::loadStrongItemDataFromDB()
+{
+	SQL_START_WITH_DATA(gamesec2, StrongItemData, strongItemData);
+	SQL_EXTRA_INT(strongItemData.id, id);
+	SQL_EXTRA_STRING(strongItemData.title, title);
+	SQL_EXTRA_INT(strongItemData.openLv, showlevel);
+	SQL_EXTRA_STRING(strongItemData.spriteName, spriteName);
+	_changeStrongGroup.push_back(strongItemData);
+	SQL_END;
+}
+
+void MirValuableBookUiLayer::updateItemDataVector()
+{
+	std::vector<GrowthPathItemData> const&data_vector = MirValuableBookMgr::getInstance()->getDataFromDB();
+	if(_infoContainerNode == NULL)
+		return;
+
+	std::vector<GrowthPathItemData>::const_iterator iter = data_vector.begin();
+	while(iter != data_vector.end()) {
+		GrowthPathItem *tempItem = new GrowthPathItem(&(*iter));
+		addContentItem(tempItem->getUiFrame());
+		_gpItemVector.push_back(tempItem);
+		iter++;
+	}
+	int lineCount  = data_vector.size() / 3 + (data_vector.size() % 3 == 0 ? 0 : 1);
+	if (GET_UI(MirValuableBookUi,WCT_MirValuableBookUi)->getIsShowRedPoint()) {
+		showRedPoint();
+		bool BOOST_LOCAL_FUNCTION(GrowthPathItem* rhs, GrowthPathItem* rhs2)
+		{
+			return rhs->getRedPointShow();
+
+		} BOOST_LOCAL_FUNCTION_NAME(sortItem);
+		std::sort(_gpItemVector.begin(),_gpItemVector.end(),sortItem);
+	}
+	//得到总高度;
+	float height = MVB_ITEM_HEIGHT * lineCount + MVB_ITEM_SPACE * (lineCount - 1);
+	if (height < getContentLayerHeight())
+		height = getContentLayerHeight();
+
+	CCSize containerSize = _infoContainerNode->getContentSize();
+	_infoContainerNode->setContentSize(CCSize(containerSize.width, height));
+
+	int index = 0;
+	for(GP_ItemVector::iterator iter = _gpItemVector.begin(); iter != _gpItemVector.end(); ++iter)
+	{
+		GrowthPathItem *item = *iter;
+		int posX = (index % 3) * (MVB_ITEM_WIDTH + MVB_ITEM_SPACE) + MVB_ITEM_SPACE;
+		int posY = height - (index / 3) * (MVB_ITEM_HEIGHT + MVB_ITEM_SPACE);
+		item->setPosition(ccp(posX, posY));
+		index ++;
+	}
+	_infoScrollView->setContentSize(_infoContainerNode->getContentSize());
+	_infoScrollView->setContentOffset(_infoScrollView->minContainerOffset());
+	_infoScrollView->update_child_touch_clip_rect();
+}
+
+float MirValuableBookUiLayer::getContentLayerHeight()
+{
+	if(_infoContainerNode != NULL)
+	{
+		return _infoContainerNode->getContentSize().height;
+	}
+	return 0;
+}
+
+void MirValuableBookUiLayer::addContentItem( CCNode *item )
+{
+	CC_ASSERT(_infoContainerNode != NULL && item != NULL);
+	_infoContainerNode->addChild(item);
+}
+
+void MirValuableBookUiLayer::removeContentItem( CCNode *item )
+{
+	CC_ASSERT(_infoContainerNode != NULL && item != NULL);
+	_infoContainerNode->removeChild(item);
+}
+
+void MirValuableBookUiLayer::onCloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CLOSE_UI(WCT_MirValuableBookUi);
+}
+
+void MirValuableBookUiLayer::onChangeStrongBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if (isPressedSelf(pSender))
+		return;
+
+	setSelectBtn(pSender);
+	setStrongMVBGroupData(_changeStrongGroup);
+}
+
+void MirValuableBookUiLayer::onGetEquipBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if (isPressedSelf(pSender))
+		return;
+
+	setSelectBtn(pSender);
+	setMVBGroupData(_getEquipGroup);
+}
+
+void MirValuableBookUiLayer::onGameSecBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if (isPressedSelf(pSender))
+		return;
+
+	setSelectBtn(pSender, false);
+	setMVBGroupData(_upgradeGroup);
+}
+
+void MirValuableBookUiLayer::onEarnMoneyBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if (isPressedSelf(pSender))
+		return;
+
+	setSelectBtn(pSender);
+	setMVBGroupData(_earnMoneyGroup);
+}
+
+void MirValuableBookUiLayer::onBoringBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	if (isPressedSelf(pSender))
+		return;
+
+	setSelectBtn(pSender);
+	setMVBGroupData(_boringGroup);
+}
+
+void MirValuableBookUiLayer::onChengZhangBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	if (isPressedSelf(pSender))
+		return;
+
+	setSelectBtn(pSender);
+
+	_infoContainerNode->removeAllChildrenWithCleanup(true);
+	ReleaseAllItemVector();
+// 	std::vector<GrowthPathItemData>_gpDataVector = MirValuableBookMgr::getInstance()->getDataFromDB();
+// 	std::vector<GrowthPathItemData>::iterator iter = _gpDataVector.begin();
+// 	while (iter != _gpDataVector.end()) {
+// 		iter->isAdded = false;
+// 		iter++;
+// 	}
+	updateItemDataVector();
+}
+
+void MirValuableBookUiLayer::onShowEquipBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if (isPressedSelf(pSender))
+		return;
+
+	setSelectBtn(pSender);
+	CLOSE_UI(WCT_MirValuableBookUi);
+	OPEN_UI(WCT_EquipShowUi);
+}
+
+void MirValuableBookUiLayer::onGameInfoBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	setSelectBtn(pSender, false);
+	C_ItemDataVector emptyGroup;
+	setMVBGroupData(emptyGroup);
+}
+
+void MirValuableBookUiLayer::setSelectBtn( CCObject *pSender,bool isHighlighted/* = true*/)
+{
+	CCControlButton *temp = dynamic_cast<CCControlButton*>(pSender);
+	if (_curSelectButton != temp) {
+		_curSelectButton->setHighlighted(false);
+	}
+	_curSelectButton = temp;
+	_curSelectButton->setHighlighted(true);
+	_changeStrongBar->setVisible(temp->getTag() == int(E_MVB_ChangeStrong));
+	
+	LabelFT* kefu_label = Helper::getLabelFTByParentAndTag(_bg, E_MVB_KEFU_MESSAGE);
+	kefu_label->setVisible(temp->getTag() == int(E_MVB_MESSAGE));
+}
+
+void MirValuableBookUiLayer::setupNodes( std::vector<CCNode*> const& input,eAlignDirection ed )
+{
+	/*CC_ASSERT(!input.empty());
+	mvecNodes = input;
+	meDir = ed;
+
+	mptOriStart = mvecNodes[0]->getPosition();
+	if (input.size() >1) {
+		if (isHorz()) {
+			mfGap =  input.size() > 1 ? mvecNodes[1]->getPositionX() - mvecNodes[0]->getPositionX() : 0.0f; 
+		}
+		if (isVertical()) {
+			mfGap =  input.size() > 1 ? mvecNodes[1]->getPositionY() - mvecNodes[0]->getPositionY() : 0.0f; 
+		}
+	}
+	arrange();*/
+}
+
+void MirValuableBookUiLayer::arrange()
+{
+	size_t pos = 0;
+	for (size_t i = 0; i <  mvecNodes.size(); ++i) {
+		CCNode* node = mvecNodes[i];
+		if (node->isVisible()) { //可见的按顺序排 
+			CCPoint newPos  = mptOriStart;
+			if (isVertical()) {
+				//这里做了一些特殊处理，方法有些笨，后期会做优化
+				if (node->getTag() == E_MVB_MESSAGE) {
+					newPos.y = mptOriStart.y + pos*mfGap - 13;
+				}
+				else if (node->getTag() >= E_MVB_ShowEquip) {
+					newPos.y = mptOriStart.y + pos*mfGap - 22;
+				}
+				else {
+					newPos.y = mptOriStart.y + pos*mfGap;
+				}
+			}
+			else {
+				newPos.x = mptOriStart.x + pos*mfGap;
+			}
+			++pos;
+			node->setPosition(newPos);
+		}
+		else {	//不可见的排在原位
+			CCPoint newPos  = mptOriStart;
+			newPos.x = mptOriStart.x + i* mfGap;
+			node->setPosition(newPos);
+		}
+	}
+}
+
+void MirValuableBookUiLayer::setMVBItemData(const CommonItemData & comItemData, MVB_Common_Item* pMVB_Item)
+{
+	if (pMVB_Item==NULL)
+		return;
+
+// 	switch(eItem)
+// 	{
+// 	case E_MVB_Skill:
+// 	//技能升级
+// 		pCS_Item->SetData(E_MVB_Skill
+// 			,"\xE6\x8A\x80\xE8\x83\xBD\xE5\x8D\x87\xE7\xBA\xA7"
+// 			,"\xE6\x8A\x80\xE8\x83\xBD\xE6\xAF\x8F\xE6\x8F\x90\xE5\x8D\x87\x31\xE7\xBA\xA7\x2C\xE9\x83\xBD\xE5\x8F\xAF\xE5\xB8\xA6\xE6\x9D\xA5\xE5\xAE\x9E\xE6\x88\x98\xE6\x8F\x90\xE5\x8D\x87\x2C\xE6\x8A\x80\xE8\x83\xBD\xE5\x8A\xA0\xE6\x88\x90\x2C\xE5\xA8\x81\xE5\x8A\x9B\xE5\x80\x8D\xE5\xA2\x9E"
+// 			,"c_skillup");
+// 		break;
+// 	case E_MVB_Zuoqi:
+// 		//坐骑培养
+// 		pCS_Item->SetData(E_MVB_Zuoqi
+// 			,"\xE5\x9D\x90\xE9\xAA\x91\xE5\x9F\xB9\xE5\x85\xBB"
+// 			,"\xE5\x9F\xB9\xE5\x85\xBB\xE7\xBB\x88\xE6\x9E\x81\xE5\x9D\x90\xE9\xAA\x91\xE7\xA5\x9E\xE5\x85\xBD\x2C\xE9\xBA\x92\xE9\xBA\x9F\xE5\xA4\xA9\xE9\xBE\x99\x2C\xE5\x8A\xA9\xE4\xBD\xA0\xE5\xBE\x81\xE6\x88\x98\xE5\xA4\xA9\xE4\xB8\x8B\x2C\xE5\x82\xB2\xE8\xA7\x86\xE5\x9B\x9B\xE6\x96\xB9"
+// 			,"c_zuoqi");
+// 		break;
+// 	case E_MVB_EquipStrongth:
+// 		//装备强化
+// 		pCS_Item->SetData(E_MVB_EquipStrongth
+// 			,"\xE8\xA3\x85\xE5\xA4\x87\xE5\xBC\xBA\xE5\x8C\x96"
+// 			,"\xE5\xBC\xBA\xE5\x8C\x96\xE8\xA3\x85\xE5\xA4\x87\xE5\x8F\xAF\xE4\xBB\xA5\xE5\xA4\xA7\xE5\xB9\x85\xE6\x8F\x90\xE5\x8D\x87\xE8\xA3\x85\xE5\xA4\x87\xE5\x9F\xBA\xE7\xA1\x80\xE5\xB1\x9E\xE6\x80\xA7\x2C\xE5\xBC\xBA\xE5\x8C\x96\xE5\x88\xB0\xE9\xA1\xB6\x2C\xE8\xAE\xA9\xE4\xBD\xA0\xE7\x9A\x84\xE8\xA3\x85\xE5\xA4\x87\xE5\x8D\x8E\xE4\xB8\xBD\xE9\x97\xAA\xE5\x85\x89\xE5\x90\xA7"
+// 			,"c_qianghua");
+// 		break;
+// 	case E_MVB_Inlay:
+// 		//宝石镶嵌
+// 		pCS_Item->SetData(E_MVB_Inlay
+// 			,"\xE5\xAE\x9D\xE7\x9F\xB3\xE9\x95\xB6\xE5\xB5\x8C"
+// 			,"\xE4\xB8\xBA\xE8\xA3\x85\xE5\xA4\x87\xE9\x95\xB6\xE5\xB5\x8C\xE5\xAE\x9D\xE7\x9F\xB3\x2C\xE8\x8E\xB7\xE5\xBE\x97\xE5\xB7\xA8\xE9\xA2\x9D\xE5\xB1\x9E\xE6\x80\xA7\xE5\x8A\xA0\xE6\x88\x90\x2C\xE5\xAE\x9D\xE7\x9F\xB3\xE7\xA0\xB8\xE8\xB5\xB7\xE6\x9D\xA5\x2C\xE7\x99\xBD\xE8\xA3\x85\xE4\xB9\x9F\xE8\x83\xBD\xE5\x8F\x98\xE7\xA5\x9E\xE8\xA3\x85"
+// 			,"c_xiangqian");
+// 		break;
+// 	case E_MVB_Wuxue:
+// 		//武学藏经阁
+// 		pCS_Item->SetData(E_MVB_Wuxue
+// 			,"\xE6\xAD\xA6\xE5\xAD\xA6\xE8\x97\x8F\xE7\xBB\x8F\xE9\x98\x81"
+// 			,"\xE8\xBF\x9B\xE5\x85\xA5\xE8\x97\x8F\xE7\xBB\x8F\xE9\x98\x81\x2C\xE5\xAF\xBB\xE6\x89\xBE\xE6\xAD\xA6\xE5\xAD\xA6\xE5\xAE\x9D\xE5\x85\xB8\x2C\xE4\xBF\xAE\xE8\xA1\x8C\xE7\xBB\x9D\xE4\xB8\x96\xE7\xA5\x9E\xE5\x8A\x9F\x2C\xE6\x8F\x90\xE5\x8D\x87\xE7\xBB\x9D\xE5\xAF\xB9\xE7\xA1\xAC\xE5\xAE\x9E\xE5\x8A\x9B"
+// 			,"c_cangjingge");
+// 		break;
+// 	case E_MVB_EquipFusion:
+// 		//装备熔炼
+// 		pCS_Item->SetData(E_MVB_EquipFusion
+// 			,"\xE8\xA3\x85\xE5\xA4\x87\xE8\xBF\x9B\xE9\x98\xB6"
+// 			,"\xE8\xA3\x85\xE5\xA4\x87\xE5\x93\x81\xE8\xB4\xA8\xE5\xBD\xB1\xE5\x93\x8D\xE9\x99\x84\xE5\x8A\xA0\xE5\xB1\x9E\xE6\x80\xA7\x2C\xE6\x8B\xA5\xE6\x9C\x89\xE5\x8F\xB2\xE8\xAF\x97\x2C\xE6\x88\x90\xE4\xB8\xBA\xE4\xBC\xA0\xE8\xAF\xB4\x2C\xE6\x89\x93\xE9\x80\xA0\xE9\x87\x91\xE8\xA3\x85\xE6\x88\x98\xE7\xA5\x9E\xE6\x97\xA0\xE6\x95\x8C\xE4\xBA\x8E\xE5\xA4\xA9\xE4\xB8\x8B"
+// 			,"c_hecheng");
+// 		break;
+// 	/*case E_MVB_EquipStar:
+// 		//装备升星
+// 		pCS_Item->SetData(E_MVB_EquipStar
+// 			,"\xE8\xA3\x85\xE5\xA4\x87\xE5\x8D\x87\xE6\x98\x9F"
+// 			,"\xE5\x8D\x87\xE6\x98\x9F\xE5\x90\x8E\xE8\xA3\x85\xE5\xA4\x87\xE6\x8B\xA5\xE6\x9C\x89\xE6\x9B\xB4\xE5\xA4\x9A\xE7\x9A\x84\xE5\xB1\x9E\xE6\x80\xA7\x2C\xE6\x88\x98\xE6\x96\x97\xE6\xB2\xA1\xE6\x9C\x89\xE7\x9F\xAD\xE6\x9D\xBF\x2C\x33\xE6\x98\x9F\xE7\xA5\x9E\xE8\xA3\x85\xE8\xAE\xA9\xE4\xBD\xA0\xE6\x97\xA0\xE6\x87\x88\xE5\x8F\xAF\xE5\x87\xBB"
+// 			,"c_shengxing");
+// 		break;
+// */
+// 	case E_MVB_MysteryBox:
+// 		//神秘宝箱
+// 		pCS_Item->SetData(E_MVB_MysteryBox
+// 			,"\xE7\xA5\x9E\xE7\xA7\x98\xE5\xAE\x9D\xE7\xAE\xB1"
+// 			,"\xE6\x9C\x89\xE5\xAE\x9D\x2C\xE6\x9C\x89\xE9\x92\xB1\x2C\xE6\x9C\x89\xE7\xBB\x8F\xE9\xAA\x8C\x2C\xE7\xA5\x9E\xE7\xA7\x98\xE5\xAE\x9D\xE7\xAE\xB1\xE6\x83\x8A\xE5\x96\x9C\xE4\xB8\x8D\xE6\x96\xAD\x2C\xE8\x8E\xB7\xE5\x8F\x96\xE9\xAB\x98\xE7\xBA\xA7\xE8\xA3\x85\xE5\xA4\x87\xE6\x9D\x90\xE6\x96\x99\x2C\xE6\xA0\xB9\xE6\x9C\xAC\xE5\x81\x9C\xE4\xB8\x8D\xE4\xB8\x8B\xE6\x9D\xA5"
+// 			,"c_shenmibaoxiang");
+// 		break;
+// 	case E_MVB_TuMo:
+// 		//屠魔圣地(经验本)
+// 		pCS_Item->SetData(E_MVB_TuMo
+// 			,"\xE5\xB1\xA0\xE9\xAD\x94\xE5\x9C\xA3\xE5\x9C\xB0\x28\xE7\xBB\x8F\xE9\xAA\x8C\xE6\x9C\xAC\x29"
+// 			,"\xE5\x86\x92\xE9\x99\xA9\xE8\x80\x85\xE7\x9A\x84\xE4\xBF\xAE\xE8\xA1\x8C\xE5\x9C\xA3\xE5\x9C\xB0\x2C\xE5\x88\xB7\xE6\x80\xAA\xE9\xAB\x98\xE5\x80\x8D\xE7\xBB\x8F\xE9\xAA\x8C\x2C\xE7\x88\xBD\xE5\x88\xB0\xE4\xB8\x8D\xE8\xA1\x8C"
+// 			,"c_tumo");
+// 		break;
+// // 	case E_MVB_TaoYuan:
+// // 	//桃源秘境(金钱本)
+// // 	pCS_Item->SetData(E_MVB_TaoYuan
+// // 		,"\xE6\xA1\x83\xE6\xBA\x90\xE7\xA7\x98\xE5\xA2\x83\x28\xE9\x87\x91\xE9\x92\xB1\xE6\x9C\xAC\x29"
+// // 		,"\xE5\x8D\x81\xE6\xAD\xA5\xE4\xB8\x80\xE6\x9D\x80\x2C\xE6\xAF\x8F\xE6\xAD\xA5\xE5\xBF\x85\xE7\x88\x86\x2C\xE9\x87\x91\xE5\xB8\x81\xE7\x88\x86\xE4\xB8\x80\xE5\x9C\xB0\x2C\xE6\x8D\xA1\xE5\x88\xB0\xE6\x89\x8B\xE8\xBD\xAF"
+// // 		,"c_taoyuan");
+// // 		break;
+// 	case E_MVB_DayNeed:
+// 		//每日军需
+// 		pCS_Item->SetData(E_MVB_DayNeed
+// 			,"\xE6\xAF\x8F\xE6\x97\xA5\xE5\x86\x9B\xE9\x9C\x80"
+// 			,"\xE5\x9C\x9F\xE5\x9F\x8E\xE9\x95\x87\xE5\x8C\x97\xE5\xA4\xA7\xE5\x86\x9B\xE4\xBA\x8B\xE5\x8A\xA1\xE7\xB9\x81\xE9\x87\x8D\x2C\xE8\xAF\xB7\xE4\xBD\xA0\xE5\x8D\x8F\xE5\x8A\xA9\xE5\xAE\x8C\xE6\x88\x90\xE6\xAF\x8F\xE6\x97\xA5\xE5\x86\x9B\xE9\x9C\x80\x2C\xE5\x8F\xAF\xE8\x8E\xB7\xE5\xBE\x97\xE9\xAB\x98\xE9\xA2\x9D\xE7\xBB\x8F\xE9\xAA\x8C"
+// 			,"c_dayneed");
+// 		break;
+// 	case E_MVB_MaoXian:
+// 		//练级冒险
+// 		pCS_Item->SetData(E_MVB_MaoXian
+// 			,"\xE7\xBB\x83\xE7\xBA\xA7\xE5\x86\x92\xE9\x99\xA9"
+// 			,"\xE4\xB8\x96\xE7\x95\x8C\xE5\x86\x92\xE9\x99\xA9\xE8\x80\x85\xE9\xBD\x90\xE8\x81\x9A\xE4\xB9\x8B\xE5\x9C\xB0\x2C\xE5\x9C\xB0\xE5\xAE\xAB\xE6\x8E\xA2\xE9\x99\xA9\x2C\xE5\xA5\x8B\xE6\x88\x98\xE5\x88\xB0\xE5\xA4\xA9\xE4\xBA\xAE"
+// 			,"c_maoxian");
+// 		break;
+// 	case E_MVB_Dink:
+// 		//饮酒
+// 		pCS_Item->SetData(E_MVB_Dink
+// 			,"\xE9\xA5\xAE\xE9\x85\x92"
+// 			,"\xE5\x89\x8D\xE5\xBE\x80\xE9\x93\xB6\xE6\x9D\x8F\xE5\xB1\xB1\xE5\xBA\x84\x2C\xE5\x9C\xA8\xE7\xAF\x9D\xE7\x81\xAB\xE6\x97\x81\xE7\x83\xA7\xE9\x85\x92\xE8\xB0\x88\xE5\xA4\xA9\x2C\xE8\xB1\xAA\xE9\xA5\xAE\xE7\xBB\x8F\xE9\xAA\x8C\x2C\xE7\xBE\x8E\xE4\xBA\x8B\xE4\xB8\x80\xE6\xA1\xA9"
+// 			,"c_yinjiu");
+// 		break;
+// 	case E_MVB_GuildXiang:
+// 		//行会上香
+// 		pCS_Item->SetData(E_MVB_GuildXiang
+// 			,"\xE8\xA1\x8C\xE4\xBC\x9A\xE4\xB8\x8A\xE9\xA6\x99"
+// 			,"\xE4\xB8\xBA\xE8\xA1\x8C\xE4\xBC\x9A\xE4\xB8\x8A\xE9\xA6\x99\x2C\xE5\xA2\x9E\xE5\x8A\xA0\xE8\xA1\x8C\xE4\xBC\x9A\xE8\xB4\xA1\xE7\x8C\xAE\x2C\xE8\x8E\xB7\xE5\xBE\x97\xE9\xAB\x98\xE9\xA2\x9D\xE7\xBB\x8F\xE9\xAA\x8C\xE4\xB8\x8E\xE9\x87\x91\xE5\xB8\x81\xE5\xA5\x96\xE5\x8A\xB1"
+// 			,"c_shangxiang");
+// 		break;
+// 	case E_MVB_MoBai:
+// 		//英雄膜拜
+// 		pCS_Item->SetData(E_MVB_MoBai
+// 			,"\xE8\x8B\xB1\xE9\x9B\x84\xE8\x86\x9C\xE6\x8B\x9C"
+// 			,"\xE6\xAF\x8F\xE6\x97\xA5\xE8\x86\x9C\xE6\x8B\x9C\xE7\x8E\x8B\xE5\x9F\x8E\xE8\x8B\xB1\xE9\x9B\x84\xE9\x9B\x95\xE5\x83\x8F\x2C\xE5\x8F\xAF\xE5\x90\xB8\xE5\x8F\x96\xE8\x8B\xB1\xE9\x9B\x84\xE8\x83\xBD\xE9\x87\x8F\x2C\xE5\xA4\xA7\xE5\xB9\x85\xE5\xA2\x9E\xE5\x8A\xA0\xE7\xBB\x8F\xE9\xAA\x8C\xE7\xBC\xA9\xE7\x9F\xAD\xE4\xB8\x8E\xE8\x8B\xB1\xE9\x9B\x84\xE5\xB7\xAE\xE8\xB7\x9D"
+// 			,"c_mobai");
+// 		break;
+// 	case E_MVB_Treasure:
+// 		//藏宝阁
+// 		pCS_Item->SetData(E_MVB_Treasure
+// 			,"\xE8\x97\x8F\xE5\xAE\x9D\xE9\x98\x81"
+// 			,"\xE9\xAB\x98\xE9\x98\xB6\xE6\x8A\x80\xE8\x83\xBD\xE4\xB9\xA6\x2C\xE7\xA5\x9E\xE7\xA7\x98\xE7\x89\xB9\xE6\x88\x92\x2C\xE9\xAB\x98\xE9\x98\xB6\xE7\xBF\x85\xE8\x86\x80\x2C\xE5\x8F\xB2\xE8\xAF\x97\xE8\xA3\x85\xE5\xA4\x87\x2C\xE5\xB0\xBD\xE5\x9C\xA8\xE8\x97\x8F\xE5\xAE\x9D\xE9\x98\x81\x2C\xE9\x97\xAF\xE5\x85\xB3\xE5\xA4\xBA\xE5\xAE\x9D\x2C\xE8\x83\x9C\xE4\xBA\xBA\xE4\xB8\x80\xE7\xAD\xB9"
+// 			,"c_cangbaoge");
+// 		break;
+// 	case E_MVB_EquipLvUP:
+// 		//装备升级
+// 		pCS_Item->SetData(E_MVB_EquipLvUP
+// 			,"\xE8\xA3\x85\xE5\xA4\x87\xE5\x8D\x87\xE7\xBA\xA7"
+// 			,"\xE6\x8B\xA5\xE6\x9C\x89\xE6\x9B\xB4\xE7\x82\xAB\xE9\x85\xB7\xE7\x9A\x84\xE5\xA4\x96\xE5\xBD\xA2\x2C\xE6\x9B\xB4\xE9\x9C\xB8\xE6\xB0\x94\xE7\x9A\x84\xE6\xAD\xA6\xE5\x99\xA8\x2C\xE6\x9B\xB4\xE5\xBC\xBA\xE7\x9A\x84\xE6\x88\x98\xE5\x8A\x9B\xE5\xB1\x9E\xE6\x80\xA7\x2C\xE5\xB0\xB1\xE6\x9D\xA5\xE5\x8D\x87\xE7\xBA\xA7\xE5\xA5\x97\xE8\xA3\x85\xE5\x90\xA7"
+// 			,"c_shengji");
+// 		break;
+// 	case E_MVB_FubenSingle:
+// 		//战役副本(单)
+// 		pCS_Item->SetData(E_MVB_FubenSingle
+// 			,"\xE6\x88\x98\xE5\xBD\xB9\xE5\x89\xAF\xE6\x9C\xAC\x28\xE5\x8D\x95\x29"
+// 			,"\xE6\x88\x98\xE5\xBD\xB9\xE6\x8E\x89\xE8\x90\xBD\xE6\x89\x80\xE6\x9C\x89\xE8\xA3\x85\xE5\xA4\x87\xE5\x8D\x87\xE7\xBA\xA7\xE6\x89\x80\xE9\x9C\x80\xE6\x9D\x90\xE6\x96\x99\x2C\xE6\xAF\x8F\xE6\x97\xA5\xE5\xBF\x85\xE5\x81\x9A\x2C\xE4\xB8\x8D\xE5\x8F\xAF\xE9\x94\x99\xE8\xBF\x87"
+// 			,"c_danrenfuben");
+// 		break;
+// 	case E_MVB_FubenDuoren:
+// 		//多人副本(多)
+// 		pCS_Item->SetData(E_MVB_FubenDuoren
+// 			,"\xE5\xA4\x9A\xE4\xBA\xBA\xE5\x89\xAF\xE6\x9C\xAC\x28\xE5\xA4\x9A\x29"
+// 			,"\xE7\xBA\xA6\xE4\xB8\x8A\xE5\xA5\xBD\xE5\x8F\x8B\x2C\xE6\x8C\x91\xE6\x88\x98\xE5\xA4\x9A\xE4\xBA\xBA\xE5\x89\xAF\xE6\x9C\xAC\x2C\xE5\xA4\xA7\xE9\x87\x8F\xE8\xA3\x85\xE5\xA4\x87\xE5\xAE\x9D\xE7\x89\xA9\xE7\xAD\x89\xE4\xBD\xA0\xE6\x8B\xBF"
+// 			,"c_duorenfuben");
+// 		break;
+// 	case E_MVB_Boss:
+// 		//挑战BOSS
+// 		pCS_Item->SetData(E_MVB_Boss
+// 			,"\xE6\x8C\x91\xE6\x88\x98\x42\x4F\x53\x53"
+// 			,"\xE5\x87\xBB\xE6\x9D\x80\xE4\xB8\x96\xE7\x95\x8C\x42\x4F\x53\x53\x2C\xE9\xAB\x98\xE7\xBA\xA7\xE6\x88\x90\xE5\x93\x81\xE5\xA5\x97\xE8\xA3\x85\x2C\xE6\x8A\x80\xE8\x83\xBD\xE4\xB9\xA6\xE7\x88\x86\xE4\xB8\x80\xE5\x9C\xB0\x2C\xE8\xBF\x98\xE7\xAD\x89\xE4\xBB\x80\xE4\xB9\x88\x2C\xE5\xBF\xAB\xE6\x9D\xA5\xE6\x8A\xA2"
+// 			,"c_boss");
+// 		break;
+// 	case E_MVB_Area:
+// 		//竞技场
+// 		pCS_Item->SetData(E_MVB_Area
+// 			,"\xE7\xAB\x9E\xE6\x8A\x80\xE5\x9C\xBA"
+// 			,"\xE6\x9D\xA5\xE7\xAB\x9E\xE6\x8A\x80\xE5\x9C\xBA\xE4\xB8\x8E\xE9\xAB\x98\xE6\x89\x8B\xE4\xB8\x80\xE5\x86\xB3\xE9\xAB\x98\xE4\xB8\x8B\x2C\xE4\xB8\x8D\xE6\xB1\x82\xE9\x97\xAE\xE9\xBC\x8E\xE5\xA4\xA9\xE4\xB8\x8B\x2C\xE5\x8F\xAA\xE6\xB1\x82\xE7\x8B\xAC\xE5\xAD\xA4\xE6\xB1\x82\xE8\xB4\xA5"
+// 			,"c_arena");
+// 		break;
+// 	case E_MVB_ShuangXiu:
+// 		//双修
+// 		pCS_Item->SetData(E_MVB_ShuangXiu
+// 			,"\xE5\x8F\x8C\xE4\xBF\xAE"
+// 			,"\xE5\x81\x9A\xE6\x83\xB3\xE5\x81\x9A\xE7\x9A\x84\xE4\xBA\x8B\x2C\xE4\xBD\x95\xE5\xBF\x85\xE6\x8B\x98\xE6\x9D\x9F\x2C\xE5\x8F\x8C\xE4\xBF\xAE\xE5\x85\xB1\xE8\xBF\x9B\x2C\xE7\xBB\x8F\xE9\xAA\x8C\xE9\xA3\x9E\xE5\x8D\x87"
+// 			,"c_shuangxiu");
+// 		break;
+// 	case E_MVB_ShiTu:
+// 		//拜师收徒
+// 		pCS_Item->SetData(E_MVB_ShiTu
+// 			,"\xE6\x8B\x9C\xE5\xB8\x88\xE6\x94\xB6\xE5\xBE\x92"
+// 			,"\xE5\xB8\x88\xE5\xBE\x92\xE6\x98\xAF\xE4\xB8\x80\xE5\x9C\xBA\xE9\x82\x82\xE9\x80\x85\x2C\xE6\x9B\xB4\xE6\x98\xAF\xE4\xB8\x80\xE7\xA7\x8D\xE4\xBE\x9D\xE8\xB5\x96\x2C\xE6\x83\x85\xE8\xB0\x8A\xE4\xBB\x8E\xE6\xAD\xA4\xE5\xBC\x80\xE5\xA7\x8B"
+// 			,"c_shitu");
+// 		break;
+// 	case E_MVB_JieHun:
+// 		//结婚
+// 		pCS_Item->SetData(E_MVB_JieHun
+// 			,"\xE7\xBB\x93\xE5\xA9\x9A"
+// 			,"\xE4\xB8\x8E\xE7\xBE\x8E\xE7\x9B\xB8\xE4\xBC\xB4\xEF\xBC\x8C\xE5\x8F\x8C\xE5\xAE\xBF\xE5\x8F\x8C\xE9\xA3\x9E\xEF\xBC\x8C\xE7\xBB\x93\xE5\xA9\x9A\xE5\x90\x8E\xE5\x8F\xAF\xE8\x8E\xB7\xE8\xB5\xA0\xE6\x96\xB0\xE5\xA9\x9A\xE7\xA4\xBC\xE5\x8C\x85\xE7\xA5\x9D\xE7\xA6\x8F"
+// 			,"c_jiehun");
+// 		break;
+// 	case E_MVB_SongMeiGui:
+// 		//送玫瑰
+// 		pCS_Item->SetData(E_MVB_SongMeiGui
+// 			,"\xE9\x80\x81\xE7\x8E\xAB\xE7\x91\xB0"
+// 			,"\xE7\x88\xB1\xE5\xB0\xB1\xE8\xA6\x81\xE8\xAF\xB4\xE5\x87\xBA\xE6\x9D\xA5\x2C\xE5\x8B\x87\xE6\x95\xA2\xE7\x9A\x84\xE8\xA1\xA8\xE7\x99\xBD\xE5\x90\xA7"
+// 			,"c_songmeigui");
+// 		break;
+// 	}
+}
+
+void MirValuableBookUiLayer::setMVBGroupData(C_ItemDataVector &itemDataGroup)
+{
+	_infoContainerNode->removeAllChildren();
+	const int nCount = itemDataGroup.size();
+	
+	//每项size 516,86
+	MVB_Common_Item* pCS_Item = NULL;
+	float fHeigth = 80.0f;
+	float fY = fHeigth * nCount;
+	_infoContainerNode->setContentSize(CCSize(_rightContentNode->getContentSize().width, fY));
+	_infoScrollView->setContentOffset(_infoScrollView->minContainerOffset());
+	_infoScrollView->setContentSize(_infoContainerNode->getContentSize());
+
+	sort(itemDataGroup.begin(), itemDataGroup.end(),[](const CommonItemData& lh, const CommonItemData& rh){
+		return lh.openLv < rh.openLv;
+	});
+
+	for (int i = 0; i < nCount; i++) {
+		fY -= fHeigth;
+		pCS_Item = MVB_Common_Item::CreateCSUI_Item();
+		pCS_Item->setAnchorPoint(ccp(0.0f, 0.0f));
+		pCS_Item->setPositionY(fY);
+		_infoContainerNode->addChild(pCS_Item);
+		pCS_Item->SetData(itemDataGroup[i]);
+	}
+	_infoScrollView->update_child_touch_clip_rect();
+}
+
+void MirValuableBookUiLayer::setStrongMVBGroupData(vector<StrongItemData> &itemDataGroup)
+{
+	_infoContainerNode->removeAllChildren();
+	const int nCount = itemDataGroup.size();
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if(lp == NULL)
+		return;
+	setStrongBarInfo();
+	int itemShowCount = 0;
+	for(int i = 0; i < nCount; i++){
+		if(itemDataGroup[i].openLv <= lp->getLevel())
+			++itemShowCount;
+	}
+
+	//每项size 516,86
+	MVB_Common_Item* pCS_Item = NULL;
+	float fHeigth = 80.0f;
+	float fY = fHeigth * itemShowCount;
+	_infoContainerNode->setContentSize(CCSize(_rightContentNode->getContentSize().width, fY));
+	_infoScrollView->setContentOffset(_infoScrollView->minContainerOffset());
+	_infoScrollView->setContentSize(_infoContainerNode->getContentSize());
+
+	CCControlButton * strongBtn = dynamic_cast<CCControlButton*>(_bg->getChildByTag(E_MVB_ChangeStrong));
+	if (_curSelectButton == strongBtn) {
+		float barHeight = _changeStrongBar->getContentSize().height;
+		float rightContentNodeWidth = _rightContentNode->getContentSize().width;
+		_infoContainerNode->setContentSize(CCSize(rightContentNodeWidth, fY + barHeight));
+		_infoScrollView->setContentOffset(_infoScrollView->minContainerOffset());
+		_infoScrollView->setContentSize(_infoContainerNode->getContentSize());
+	}
+
+	sort(itemDataGroup.begin(), itemDataGroup.end(),[](const StrongItemData& lh, const StrongItemData& rh){
+		return lh.openLv < rh.openLv;
+	});
+
+	for (int i = 0; i < nCount; i++) {
+		if(itemDataGroup[i].openLv <= lp->getLevel()){
+			fY -= fHeigth;
+			pCS_Item = MVB_Common_Item::CreateCSUI_Item();
+			pCS_Item->setAnchorPoint(ccp(0.0f, 0.0f));
+			pCS_Item->setPositionY(fY);
+			_infoContainerNode->addChild(pCS_Item);
+			pCS_Item->SetData(itemDataGroup[i]);
+		}
+	}
+	_infoScrollView->update_child_touch_clip_rect();
+}
+
+void MirValuableBookUiLayer::setStrongBarInfo()
+{
+	int localFightNums = RoleManager::getInstance()->getLocalPlayer()->getAttribute(RA_BATTLE_POINT);
+	localFightNums = localFightNums > 0 ? localFightNums : 1;
+	char sl[256];
+	sprintf(sl,"%d", localFightNums);
+	_csBarLocalFightNums->setString(sl);
+
+	StrengthRatioData* nowLvData = MirValuableBookMgr::getInstance()->getStrengthRadio();
+	char s2[256];
+	sprintf(s2,"%d", nowLvData->power_a);
+	_csBarFightNums->setString(s2);
+
+	CCSpriteFrame* nowShowSP = NULL;
+	CCSpriteFrameCache* spriteFrameCache = CCSpriteFrameCache::sharedSpriteFrameCache();
+	if(localFightNums >= nowLvData->power_ss){
+		nowShowSP = spriteFrameCache->spriteFrameByName("baodian_ss");
+	}else if(localFightNums >= nowLvData->power_s){
+		nowShowSP = spriteFrameCache->spriteFrameByName("baodian_s");
+	}else if(localFightNums >= nowLvData->power_a){
+		nowShowSP =spriteFrameCache->spriteFrameByName("baodian_a");
+	}else if(localFightNums >= nowLvData->power_b){
+		nowShowSP = spriteFrameCache->spriteFrameByName("baodian_b");
+	}else if(localFightNums >= nowLvData->power_c){
+		nowShowSP = spriteFrameCache->spriteFrameByName("baodian_c");
+	}else{
+		nowShowSP = spriteFrameCache->spriteFrameByName("baodian_d");
+	}
+	if(nowShowSP != NULL){
+		_csBarLv->setDisplayFrame(nowShowSP);
+	}
+}
+
+bool MirValuableBookUiLayer::isPressedSelf( CCObject *pSender )
+{
+	CCControlButton *button = dynamic_cast<CCControlButton*>(pSender);
+	
+	//remove red point
+	CCNode* redNode = button->getChildByTag(RED_POINT);
+	if(redNode)
+		redNode->removeFromParentAndCleanup(true);
+
+	if (_curSelectButton->getTag() == button->getTag()) {
+		_curSelectButton->setHighlighted(true);
+		return true;
+	}
+	return false;
+}
+
+void MirValuableBookUiLayer::ReleaseAllItemVector()
+{
+	std::for_each(_gpItemVector.begin(),_gpItemVector.end(),[](GrowthPathItem* one){delete one;});
+	_gpItemVector.clear();
+}
+
+void MirValuableBookUiLayer::showRedPoint()
+{
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if(!lp) return;
+
+	std::vector<GrowthPathItemData>const& data_vector = MirValuableBookMgr::getInstance()->getDataFromDB();
+	std::vector<GrowthPathItemData>::const_iterator iter = data_vector.begin();
+	int mHighestRank = 0;//当前已开启的宝典内容中所需最高的等级
+	while (iter != data_vector.end()) {
+		GrowthPathItemData const& data = *iter;
+		if (data.openLv <= lp->getLevel()) {
+			mHighestRank = mHighestRank > data.openLv ? mHighestRank : data.openLv;
+		}
+		++iter;
+	}
+	if ((mHighestRank != 0) && (mHighestRank <= lp->getLevel())) {
+		GP_ItemVector::iterator itemIter = _gpItemVector.begin();
+		while (itemIter != _gpItemVector.end()) {
+			GrowthPathItem* item = *itemIter;
+			if (item != NULL) {
+				GrowthPathItemData data = item->getPathItemData();
+				if ((data.openLv == mHighestRank) && data.openyesno) {
+					item->setRedPointShow(true);
+				}
+				else {
+					item->setRedPointShow(false);
+				}
+			}
+			++itemIter;
+		}
+	}
+}
+
+void MirValuableBookUiLayer::setSelectLeftBtn(int btnTag)
+{
+	if(btnTag < E_MVB_ChangeStrong || btnTag > E_MVB_MESSAGE)
+		return;
+
+	CCControlButton* tempBtn = dynamic_cast<CCControlButton*>(_bg->getChildByTag(btnTag));
+	switch (btnTag)
+	{
+		case E_MVB_ChangeStrong:
+			onChangeStrongBtnPressed(tempBtn, CCControlEventTouchDown);
+			break;
+		case E_MVB_GetEquip:
+			onGetEquipBtnPressed(tempBtn, CCControlEventTouchDown);
+			break;
+		case E_MVB_Upgrade:
+			onGameSecBtnPressed(tempBtn, CCControlEventTouchDown);
+			break;
+		case E_MVB_EarnMoney:
+			onEarnMoneyBtnPressed(tempBtn, CCControlEventTouchDown);
+			break;
+		case E_MVB_Boring:
+			onBoringBtnPressed(tempBtn, CCControlEventTouchDown);
+			break;
+		case E_MVB_GrowUp:
+			onChengZhangBtnPressed(tempBtn, CCControlEventTouchDown);
+			break;
+		case E_MVB_ShowEquip:
+			onShowEquipBtnPressed(tempBtn, CCControlEventTouchDown);
+			break;
+		case E_MVB_MESSAGE:
+			onGameInfoBtnPressed(tempBtn, CCControlEventTouchDown);
+			break;
+		default:
+			break;
+	}
+}

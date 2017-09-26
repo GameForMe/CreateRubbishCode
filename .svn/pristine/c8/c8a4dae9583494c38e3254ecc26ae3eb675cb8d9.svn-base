@@ -1,0 +1,278 @@
+#include "LevelUpGuideShow.h"
+#include "NewFuncGuider.h"
+#include "SystemUi.h"
+#include "UiManager.h"
+#include "CommonView.h"
+#include "CommonClient.h"
+#include "UiTools.h"
+//#include "QuickConfig.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "MiniMapUi.h"
+#include "RoleManager.h"
+#include "Role.h"
+#include "LocalPlayer.h"
+#include "NewPlayerGuide.h"
+#include "MapManager.h"
+#include "QuestMgr.h"
+
+LevelUpGuideShowLayer::LevelUpGuideShowLayer()
+	:mpMgr(NULL)
+{
+
+}
+
+LevelUpGuideShowLayer::~LevelUpGuideShowLayer()
+{
+
+}
+
+void LevelUpGuideShowLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+
+}
+
+bool LevelUpGuideShowLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,mpIcon);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,mpEftRoot);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,mpFlyingNode);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,mpRootNode);
+
+	return false;
+}
+
+void LevelUpGuideShowLayer::onEnter()
+{
+	NormalLayer::onEnter();
+}
+
+void LevelUpGuideShowLayer::onExit()
+{
+	NormalLayer::onExit();
+
+	CC_SAFE_RELEASE_NULL(mpMgr);
+}
+
+void LevelUpGuideShowLayer::show( int nIndex)
+{
+	mnIndex = nIndex;
+	//mcb = cb;
+	float fDelay =0.0f;
+	setup(fDelay);
+
+	if (fDelay != 0)
+	{
+		this->schedule(schedule_selector(LevelUpGuideShowLayer::realShow),0,0,fDelay);
+	}
+	else
+		playAni();
+
+	popShow();
+
+}
+
+void LevelUpGuideShowLayer::realShow( float )
+{
+	this->unschedule(schedule_selector(LevelUpGuideShowLayer::realShow));
+
+	playAni();
+}
+
+void LevelUpGuideShowLayer::setAniMgr( CCBAnimationManager* pMgr )
+{
+	CC_SAFE_RELEASE_NULL(mpMgr);
+	mpMgr = pMgr;
+	CC_SAFE_RETAIN(mpMgr);
+}
+
+void LevelUpGuideShowLayer::playAni()
+{
+	mpRootNode->setVisible(true);
+	
+	if (mpMgr)
+	{
+		mpMgr->runAnimations("play");
+	}
+}
+
+void LevelUpGuideShowLayer::playFlying()
+{
+	NewFuncGuider* guider = NewFuncGuider::get_singleton_ptr();
+	int nDir = guider->getDir(mnIndex);
+	switch (nDir)
+	{
+	case NewFuncGuider::eDirLower:
+		{
+			int pos  = guider->getFuncPos(mnIndex);
+
+			SystemUiLoaderLayer *layer = getUiNodeByTag<SystemUiLoaderLayer>(WCT_SystemUi);
+			if(layer != NULL)
+			{
+				CCNode* btn = layer->getBtnNode(pos);
+				flyingToNode(btn);
+				mcb = boost::bind(&SystemUiLoaderLayer::showCurBtn,layer);
+			}
+		}
+		break;
+	case NewFuncGuider::eDirUpper:
+		{
+			int pos  = guider->getFuncPos(mnIndex);
+			CCNode* node = World::getInstance()->getMiniMapUi()->getMinimapUILoaderLayer()->getAlignNode(pos);
+			if(NULL != node)
+				flyingToNode(node);
+		}
+		break;
+	case NewFuncGuider::eDirTarget:
+		{
+			CCNode* target = NULL;
+			int nTargetType = guider->getTargetType(mnIndex);
+			if (nTargetType==  NewFuncGuider::eTargetSignNode)
+			{
+				target = World::getInstance()->getMiniMapUi()->getSignBtn();
+				if(NULL != target)
+					flyingToNode(target);
+
+				mcb = boost::bind(&CCNode::setVisible,target,true);
+			}
+			else if (nTargetType ==  NewFuncGuider::eTargetAct)
+			{
+				//int pos  = guider->getFuncPos(mnIndex);
+
+				MiniMapUi* ui = World::getInstance()->getMiniMapUi();
+				target = ui->getActBtn();
+				if(NULL != target)
+					flyingToNode(target);
+
+				//mcb = boost::bind(&MiniMapUi::enableGroupBtn,ui,pos,true);
+			}
+			else if (nTargetType ==  NewFuncGuider::eTargetNPC)
+			{
+				Role* role = RoleManager::getInstance()->findRoleByProtoTypeID(1002008);
+				if(NULL != role)
+				{
+					target = role->getRoleNode();
+					if(NULL != target)
+						flyingToNode(target);
+				}
+			}
+		}
+		break;
+	}
+}
+
+void LevelUpGuideShowLayer::setup(float& fDelay)
+{
+	NewFuncGuider* guider = NewFuncGuider::get_singleton_ptr();
+	stGuideModelData const* data  = guider->getModelData(mnIndex);
+	if (data)
+	{
+		mpIcon->initWithSpriteFrameName(data->strPic.c_str());	
+	}
+	
+	int nDir = guider->getDir(mnIndex);
+	switch (nDir)
+	{
+	case NewFuncGuider::eDirLower:
+		{
+			SystemUi *systemUi = dynamic_cast<SystemUi*>(OPEN_UI(WCT_SystemUi));
+			if (systemUi)
+			{
+				systemUi->playShiftAction(guider->getFuncPos(mnIndex),data->nIndex==1,fDelay);//第一个引导要显示技能
+			}
+		}
+		break;
+	}
+
+	if (guider->getTargetType(mnIndex) ==NewFuncGuider::eTargetSignNode )
+	{
+		MiniMapUi* pUI = World::getInstance()->getMiniMapUi();
+		pUI->playShift(guider->getFuncPos(mnIndex));
+	}
+}
+
+void LevelUpGuideShowLayer::flyingEnd()
+{
+	if (mcb)
+	{
+		mcb();
+	}
+
+	continueGuideWhenFinished();
+
+	mpRootNode->stopAllActions();
+	mpRootNode->setVisible(false);
+
+	closeWithDelay(0.1f);
+}
+
+LevelUpGuideShowLayer* LevelUpGuideShowLayer::createFromCCB( const char* szFile,CCObject* pOwner )
+{
+	CCNodeLoaderLibrary* lib =CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+
+	std::string uiFile =CFGReader::instance()->get_ui_ccbi_filepath(szFile);
+	CCNode * node = reader->readNodeGraphFromFile(uiFile.c_str(),pOwner);
+	CC_ASSERT(node);
+	LevelUpGuideShowLayer* layer = dynamic_cast<LevelUpGuideShowLayer*>(node);
+	layer->setAniMgr(reader->getAnimationManager());
+	layer->setPlistFilePath(reader->getLoadedSpriteSheet());
+	
+	reader->getAnimationManager()->setDelegate(layer);
+	return layer;
+}
+
+void LevelUpGuideShowLayer::flyingToNode( CCNode* node)
+{
+	CCPoint ptTo = CCPointZero;
+	CCCamera* c = node->getParent()->getCamera();
+	if(c)
+	{
+		float camx;
+		float camy;
+		float z;
+		c->getEyeXYZ(&camx,&camy,&z);
+
+		CCPoint ptNew = node->getPosition();
+		ptNew.x -= camx;
+		ptNew.y -= camy;
+
+		ptTo  = convert_point_to_node_space(node->getParent(),ptNew,mpFlyingNode->getParent());
+	}
+	else
+	{
+		ptTo  = convert_point_to_node_space(node->getParent(),node->getPosition(),mpFlyingNode->getParent());
+	}
+	float fFlyingTime = CFG(float,"flying_time",0.5f);
+
+	CCDelayTime* delay  = CCDelayTime::create(fFlyingTime);
+	CCCallFunc* func = CCCallFunc::create(this,callfunc_selector(LevelUpGuideShowLayer::flyingEnd));
+	CCMoveTo* act = CCMoveTo::create(fFlyingTime,ptTo);
+	CCSequence* seq = CCSequence::create(act,delay,func,NULL);
+
+	mpFlyingNode->runAction(seq);
+}
+
+void LevelUpGuideShowLayer::completedAnimationSequenceNamed( const char *name )
+{
+	if(std::string(name)== "play")
+	{
+		playFlying();
+	}
+}
+
+void LevelUpGuideShowLayer::continueGuideWhenFinished()
+{
+	stGuideModelData const* data = NewFuncGuider::get_singleton().getModelData(mnIndex);
+	if (data && data->nType == 2)
+	{
+		//NewPlayerGuider::getInstance()->RunNewPlayerGuilde();
+		QuestMgr::getInstance()->_sigFinishQuest.emit(data->nParam);
+	}
+	else if (data && data->nIndex == 1)//第一个引导继续技能提示
+	{
+		NewFuncGuider::get_singleton().continueSkillGuide();
+	}
+}

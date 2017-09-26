@@ -1,0 +1,682 @@
+#include "RechargeUi.h"
+#include "World.h"
+#include "UiResourceMgr.h"
+#include "CfgReader.h"
+#include "UiLoader.h"
+#include "BaseDefine.h"
+#include "ItemNode.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "DBMgr.h"
+#include "PackageManager.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ItemTip.h"
+#include "EquipTipUi.h"
+#include "StoreRechargeUi.h"
+#include "StringMgr.h"
+#include "RewardMgr.h"
+#include "ReceiveRewardUi.h"
+//#include "ChongZhiActivityFarmeUI.h"
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+#include "wzolJni.h"
+#endif
+
+CCNode * RechargeUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["RechargeUiFrame"] = UiSpriteLoader<RechargeUiFrame>::loader();
+	CCNode *uiNode = readUiFromCCBI("rechargeui", nodeLoaders, _loadSpriteSheet);
+	if(uiNode != NULL)
+	{
+		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+		uiNode->setPosition(ccp(winSize.width / 2.0f , winSize.height / 2.0f + 25.0f));
+	}
+	return uiNode;
+}
+
+RechargeUiFrame * RechargeUi::getUiLayer()
+{
+	return getUiNodeByTag<RechargeUiFrame>(WCT_RechargeUi);
+}
+
+void RechargeUi::setDesc( const std::string &title )
+{
+	RechargeUiFrame *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		ui->setDesc(title);
+	}
+}
+
+void RechargeUi::setMoneyPross( int money, int maxMoney )
+{
+	RechargeUiFrame *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		ui->setMoneyPross(money , maxMoney);
+	}
+}
+
+
+void RechargeUi::updateData()
+{
+	RechargeUiFrame *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		ui->updateDisplay();
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////////
+RechargeUiFrame::RechargeUiFrame()
+	:_moneyProgress(NULL)
+	, _rechargeEffect(NULL)
+{
+
+}
+
+RechargeUiFrame::~RechargeUiFrame()
+{
+	if(_moneyProgress != NULL)
+		delete _moneyProgress;
+}
+
+
+cocos2d::SEL_MenuHandler RechargeUiFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler RechargeUiFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", RechargeUiFrame::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChongZhiBtnPressed", RechargeUiFrame::onChongZhiBtnPressed);
+	return NULL;
+}
+
+void RechargeUiFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+
+	for(int i = NT_ItemBegin; i < NT_ItemNum; i ++)
+	{
+		CCNode* n = this->getChildByTag(i);
+		CC_ASSERT(n != NULL);
+		_itemPos[i] = n->getPosition();
+
+		ItemNode * node = ItemNode::create();
+		node->setPosition(_itemPos[i]);
+		node->setTag(NT_ItemNodeBegin + i);
+		node->setBlank();
+		addChild(node,1);
+// 
+		if ( i == NT_ItemBegin)
+		{
+			//rewardBagOpen(NT_BagBegin);
+			_bagInfo = getChargeInfoByIndex(0);
+		}
+	}
+
+	for(int i = NT_BagBegin; i < NT_BagNum; i++)
+	{
+		//CCNode* n = this->getChildByTag(i);
+		CCSprite *sprite = CCSprite::create();
+		CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(CCString::createWithFormat("rechargeui_0%d", i+1)->getCString());
+		CC_ASSERT(spriteFrame != NULL);
+		sprite->setDisplayFrame(spriteFrame);
+		sprite->setPosition(_itemPos[i]);
+		addChild(sprite, 1);
+
+		CCSprite *lqsprite = CCSprite::create();
+		lqsprite->setPosition(_itemPos[i]);
+		lqsprite->setTag(NT_ItemNodeBegin * 3 + i);
+		lqsprite->setVisible(false);
+		addChild(lqsprite,1);
+	}
+
+	for ( int i = NT_MaskBegin; i< NT_MaskEnd ; i++)
+	{
+		CCSprite* mask = dynamic_cast<CCSprite *>(getChildByTag(i));
+		mask->setVisible(false);
+		mask->setZOrder(3);
+	}
+
+	CCSprite *moneySprite = dynamic_cast<CCSprite*>(getChildByTag(NT_RechargeProgress));
+	CC_ASSERT(moneySprite != NULL);
+	_moneyProgress = new ProgressBar;
+	_moneyProgress->initBarWithSprite(moneySprite,16);
+	_moneyProgress->addToParent(this);
+
+	_rechargeBtn = dynamic_cast<CCControlButton*>(getChildByTag(NT_RechargeBtn));
+	CC_ASSERT(_rechargeBtn != NULL);
+	runAnimation();
+
+	updateDisplay();
+
+	_selectSprite = CCSprite::createWithSpriteFrameName("rechargeui_selectrect");
+	this->addChild(_selectSprite,0);
+	_selectSprite->setVisible(false);
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void RechargeUiFrame::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	stopAnimation();
+	CLOSE_UI(WCT_RechargeUi);
+
+}
+
+void RechargeUiFrame::onChongZhiBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+// #ifndef WIN32
+// 	WzolJni::getInstance()->payJni();
+// #endif
+	if (IS_UI_OPEN(WCT_ChongZhiActivityFarmeUI))
+	{
+		CLOSE_UI(WCT_RechargeUi);
+		GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer()->selectTab(CZA_ChongZhi);
+	}else
+	{
+		OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+	}
+}
+
+void RechargeUiFrame::setMoneyPross( int money, int maxMoney )
+{
+	CC_ASSERT(_moneyProgress != NULL);
+	_moneyProgress->setProgress(money, maxMoney);
+	//_moneyProgress->setFontSize(16.0f);
+	_moneyProgress->setFontColor(0xfe, 0xf8, 0xd8);
+}
+
+void RechargeUiFrame::setDesc( const std::string &title )
+{
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_Desc));
+	CC_ASSERT(label != NULL);
+	label->setString(title.c_str());
+}
+
+
+int RechargeUiFrame::getItemUnderPoint( const CCPoint &point )
+{
+	for(int i =NT_ItemBegin ; i <NT_ItemNum; i ++)
+	{
+		float x = _itemPos[i].x;
+		float y = _itemPos[i].y;
+		CCRect rect(x - ITEMNODE_CONTENTWIDTH / 2, y - ITEMNODE_CONTENTHEIGHT / 2, ITEMNODE_CONTENTWIDTH, ITEMNODE_CONTENTHEIGHT);
+		if(rect.containsPoint(point))
+		{
+			return i;
+		}
+	}
+	return -1;
+}
+
+bool RechargeUiFrame::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint framePoint = this->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = this->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		int index = getItemUnderPoint(framePoint);
+		if ( index == -1 )
+		{
+			return true;
+		}
+		if (index >= NT_BagBegin && index < NT_BagNum)
+		{
+// 			if (!getChildByTag(NT_MaskBegin + index)->isVisible())
+// 			{
+				setItemSelect(index);
+				_bagInfo = getChargeInfoByIndex(index);
+				updateDisplay();
+/*			}*/
+			
+		}
+		if (index >= NT_BagNum && index < NT_ItemNum)
+		{
+			//CCSize size = CCDirector::sharedDirector()->getWinSize();
+			setItemSelect(index);
+			if(MIsEquipment(_bagInfo.ItemId[index - NT_BagNum]))
+			{
+				EquipTipUiLayer *ui = EquipTipUi::create();
+				ui->showUi(framePoint,_bagInfo.ItemId[index - NT_BagNum]);
+			}
+			else
+			{
+				ItemTip::getInstace()->open();
+				ItemTip::getInstace()->setPosition(_itemPos[index]);
+				ItemTip::getInstace()->setDataId(_bagInfo.ItemId[index - NT_BagNum]);
+				ItemTip::getInstace()->hideOpBtn();
+			}
+		}
+		return true;
+	}
+	return false;
+}
+
+void RechargeUiFrame::updateDisplay()
+{
+	int myYuanbao = PackageManager::getInstance()->getTotalChargeYuanBao();
+	for(int i = NT_BagBegin; i < NT_BagNum; i++)
+	{
+		ChargeInfo cgeinfo = getChargeInfoByIndex(i);
+		if ( cgeinfo.yuanbao != -1 )
+		{
+			if (myYuanbao >= cgeinfo.yuanbao)
+			{
+				//rewardBagOpen(i);
+				showLingQu(i);
+			}
+			else
+			{
+				setMoneyPross(myYuanbao,cgeinfo.yuanbao);
+				break;
+			}
+		}
+		else
+		{
+			setMoneyPross(myYuanbao,getChargeInfoByIndex(NT_BagNum - 2).yuanbao);
+			for (int i = NT_BagNum; i < NT_ItemNum ;  i++)
+			{
+				ItemNode * node =dynamic_cast<ItemNode *>(getChildByTag(NT_ItemNodeBegin + i));
+				CC_ASSERT(node != NULL);
+				node->setBlank();
+			}
+		}
+	}
+
+	setDesc(_bagInfo.desc.c_str());	
+
+	for (int i = NT_BagNum; i < NT_ItemNum ;  i++)
+	{
+		ItemNode * node =dynamic_cast<ItemNode *>(getChildByTag(NT_ItemNodeBegin + i));
+		CC_ASSERT(node != NULL);
+		node->setDataId(_bagInfo.ItemId[i - NT_BagNum]);
+		node->setPosition(_itemPos[i]);
+		node->setNum(_bagInfo.ItemNum[i - NT_BagNum]); //显示礼包中某些物品所需个数;
+		node->setVisible(true);
+	}
+
+}
+
+void RechargeUiFrame::onExit()
+{
+	CCSprite::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+ChargeInfo RechargeUiFrame::getChargeInfoByIndex(int index)
+{
+	ChargeInfo retInfo;
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return retInfo;
+	if (index < 0 || index > MAX_CHARGE_LEVEL)//防止异常
+	{
+		return retInfo;
+	}
+	int classType = 0;
+	int sex = 0;
+	if ( ploc->getRoleType() == RT_MWARRIOR || ploc->getRoleType() == RT_WWARRIOR)
+	{
+		classType  = 1;
+	}
+	else if (ploc->getRoleType() == RT_MMAGE || ploc->getRoleType() == RT_WMAGE)
+	{
+		classType = 2;
+	}
+	else if (ploc->getRoleType() == RT_MTAOIST || ploc->getRoleType() == RT_WTAOIST)
+	{
+		classType = 3;
+	}
+	else
+	{
+		return retInfo;
+	}
+
+	if ( ploc->getAttribute(RA_SEX) == 1)
+	{
+		sex  = 1;
+	}
+	else
+	{
+		sex = 0;
+	}
+
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM ChargeInfo WHERE Sex = ?1 AND Class = ?2 AND Level = ?3");
+	cmd->set_integer32(1,sex);
+	cmd->set_integer32(2,classType);
+	cmd->set_integer32(3,index);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("Yuanbao");
+		retInfo.yuanbao = table->get_integer32(idx);
+		idx = table->get_index("Class");
+		retInfo.classtype= table->get_integer32(idx);
+		idx = table->get_index("Sex");
+		retInfo.sex = table->get_integer32(idx);
+		idx = table->get_index("item_1");
+		retInfo.ItemId[0] = table->get_integer32(idx);
+		idx = table->get_index("num_1");
+		retInfo.ItemNum[0] = table->get_integer32(idx);
+		idx = table->get_index("item_2");
+		retInfo.ItemId[1] = table->get_integer32(idx);
+		idx = table->get_index("num_2");
+		retInfo.ItemNum[1] = table->get_integer32(idx);
+		idx = table->get_index("item_3");
+		retInfo.ItemId[2] = table->get_integer32(idx);
+		idx = table->get_index("num_3");
+		retInfo.ItemNum[2] = table->get_integer32(idx);
+		idx = table->get_index("item_4");
+		retInfo.ItemId[3] = table->get_integer32(idx);
+		idx = table->get_index("num_4");
+		retInfo.ItemNum[3] = table->get_integer32(idx);
+		idx = table->get_index("item_5");
+		retInfo.ItemId[4] = table->get_integer32(idx);
+		idx = table->get_index("num_5");
+		retInfo.ItemNum[4] = table->get_integer32(idx);
+		idx = table->get_index("item_6");
+		retInfo.ItemId[5] = table->get_integer32(idx);
+		idx = table->get_index("num_6");
+		retInfo.ItemNum[5] = table->get_integer32(idx);
+		idx = table->get_index("item_7");
+		retInfo.ItemId[6] = table->get_integer32(idx);
+		idx = table->get_index("num_7");
+		retInfo.ItemNum[6] = table->get_integer32(idx);
+		idx = table->get_index("item_8");
+		retInfo.ItemId[7] = table->get_integer32(idx);
+		idx = table->get_index("num_8");
+		retInfo.ItemNum[7] = table->get_integer32(idx);
+		idx = table->get_index("Description");
+		retInfo.desc = table->get_text(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	return retInfo;
+}
+
+int RechargeUiFrame::getCurChargeLevelIndex()
+{
+	int totalCharge = PackageManager::getInstance()->getTotalChargeYuanBao();
+	if (totalCharge < MIN_CHARGE_YUANBAO)
+	{
+		return 0;
+	}
+	if (totalCharge > MAX_CHARGE_YUANBAO)
+	{
+		return MAX_CHARGE_LEVEL-1;
+	}
+	int retValue = 0;
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT Level FROM ChargeInfo WHERE Yuanbao > ?1");
+	cmd->set_integer32(1,totalCharge);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		retValue = table->get_integer32(0);//找到第一个就跳出;
+		break;
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	return retValue;
+}
+
+ItemNode * RechargeUiFrame::getItemNode( int i )
+{
+	return dynamic_cast<ItemNode*>(this->getChildByTag(NT_ItemNodeBegin + i));
+}
+
+void RechargeUiFrame::rewardBagOpen(int bagindex)
+{
+	if (bagindex < NT_BagBegin || bagindex > NT_BagNum - 1)
+	{
+		return;
+	}
+// 	CCSprite *sprite = dynamic_cast<CCSprite *>(getChildByTag(NT_MaskBegin + bagindex));
+// 	CC_ASSERT(sprite != NULL);
+// 	sprite->setVisible(false);
+}
+
+void RechargeUiFrame::showLingQu(int index)
+{
+	CCSprite* lingqu =dynamic_cast<CCSprite*>(getChildByTag(NT_ItemNodeBegin * 3 + index));
+	CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rechargeui_lingqu");
+	CC_ASSERT(spriteFrame != NULL);
+	lingqu->setDisplayFrame(spriteFrame);
+	lingqu->setVisible(true);
+}
+
+bool RechargeUiFrame::setItemSelect( int index )
+{
+	if (index < NT_ItemBegin || index > NT_ItemNum )
+		return false;
+	ItemNode * item = getItemNode(index);
+	if (item == NULL)
+		return false;
+	_selectSprite->setPosition(_itemPos[index]);
+	if (!_selectSprite->isVisible())
+		_selectSprite->setVisible(true);
+
+	_selectindex = index;
+	return true;
+}
+
+void RechargeUiFrame::runAnimation()
+{
+	/*if (_rechargeEffect == NULL)
+	{
+		AnimationCache::AnimateList anims;
+		AnimationCache::createDefList(1, anims);
+		AnimationCache::getInstance()->getSinEffect(0,"chongzhi", anims);
+		BSAnimate *animste = anims[0];
+		_rechargeEffect = CCSprite::create();
+		CCPoint pos = _rechargeBtn->getPosition();
+		_rechargeEffect->setPosition(ccp(pos.x + 3.0f,pos.y - 5.0f));
+		_rechargeEffect->setAnchorPoint(ccp(0.0f,1.0f));
+		addChild(_rechargeEffect);
+		_rechargeEffect->runAction(CCRepeatForever::create(animste));
+	}*/
+}
+
+void RechargeUiFrame::stopAnimation()
+{
+	if (_rechargeEffect != NULL)
+	{
+		_rechargeEffect->stopAllActions();
+		_rechargeEffect->removeFromParent();
+		_rechargeEffect = NULL;
+	}
+}
+
+//-----------------------------------------以下是新充值界面部分----------------------------------------------------------------------------
+
+RechargeNewUiMgr::RechargeNewUiMgr()
+{
+	vipId = 0;
+}
+RechargeNewUiMgr::~RechargeNewUiMgr()
+{
+
+}
+RechargeNewUiMgr* RechargeNewUiMgr::GetInstance()
+{
+	static RechargeNewUiMgr mgr;
+	return &mgr;
+}
+RechargeNewUi* RechargeNewUiMgr::openRechargeNewUi(bool bIsYuanbao/*=true*/)
+{
+	if (bIsYuanbao)
+		RechargeNewUiMgr::GetInstance()->setPayMode(Silver);
+	else
+		RechargeNewUiMgr::GetInstance()->setPayMode(Diamond);
+	RechargeNewUi* ui = (RechargeNewUi*)OPEN_UI(WCT_RECHARGENEWUI);
+	return ui;
+}
+
+RechargeNewUiLayer* RechargeNewUi::getLayer()
+{
+	 RechargeNewUiLayer *ui = getUiNodeByTag<RechargeNewUiLayer>(WCT_RECHARGENEWUI);
+	 return ui;
+}
+
+RechargeNewUi::RechargeNewUi()
+{
+
+}
+
+RechargeNewUi::~RechargeNewUi()
+{
+
+}
+
+CCNode* RechargeNewUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["RechargeBoxLayer"] = UiLayerLoader<RechargeNewUiLayer>::loader();
+	nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+	CCNode* pNode = readUiFromCCBI("rechargebox", nodeLoaders, _loadSpriteSheet);
+	return pNode;
+}
+cocos2d::SEL_MenuHandler RechargeNewUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler RechargeNewUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{		
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCancelBtnPressed", RechargeNewUiLayer::onCancelBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", RechargeNewUiLayer::onOkBtnPressed); 
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRechargeboxShouchongPressed", RechargeNewUiLayer::onRechargeboxShouchongPressed); 
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRechargeboxVipPressed", RechargeNewUiLayer::onRechargeboxVipPressed);
+	return NULL;
+}
+bool RechargeNewUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	return true;
+}
+void RechargeNewUiLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	_frame = dynamic_cast<CCSprite*>(this->getChildByTag(0));
+	_lbDescribe = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(0));
+	payMode=RechargeNewUiMgr::GetInstance()->getPayMode();
+	if(payMode == Silver)
+	{
+		_lbDescribe->setString(GET_STR(164).c_str());
+	}
+	else if(payMode == Diamond)
+	{
+		_lbDescribe->setString(GET_STR(9086).c_str());
+	}
+	_btnShouChong = dynamic_cast<CCControlButton*>(_frame->getChildByTag(1));
+	_btnVip = dynamic_cast<CCControlButton*>(_frame->getChildByTag(2));
+	_spriteIcon = dynamic_cast<CCSprite*>(_frame->getChildByTag(3));
+	int yuanbaoNum=PackageManager::getInstance()->getTotalChargeYuanBao();
+	if (yuanbaoNum > 0)
+	{
+		//大于0 说明已经充过值
+		_btnShouChong->setVisible(false);
+		//modify by lpf  //暂时隐藏vip按钮
+		//_btnVip->setVisible(true);
+	}
+	else
+	{
+		// 一测隐藏
+		//_btnShouChong->setVisible(true);
+		_btnVip->setVisible(false);
+	}
+	if (RechargeNewUiMgr::GetInstance()->getCurrentRechargeState() != 0)
+	{
+		updateDisplay();
+	}	
+	int times = ReceiveRewardUiMgr::GetInstance()->getRechargeTimes();
+	if (times == 0 || times == 1)
+	{
+		ReceiveRewardUiMgr::GetInstance()->setRechargeTimes(times + 1);
+	}
+	
+	//CCLayer* layer = dynamic_cast<CCLayer*>(_frame->getParent());
+	//layer->setTouchPriority(-200);
+	setAllChildernButtonPriority(_frame,-8);
+	//setAllChildernButtonPriority(_frame,-14);
+
+	//由于其触摸优先级超过新手引导（-10），所以将其优先级由-13改为-8  modify by lpf
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -7, true);
+}
+void RechargeNewUiLayer::updateDisplay()
+{
+	_lbDescribe->setString(GET_STR(164).c_str());
+	_btnShouChong->setVisible(false);
+	_btnVip->setVisible(false);
+	CCSpriteFrame *frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("smallui_vip");
+	if (frame)
+	{		
+		_spriteIcon->setDisplayFrame(frame);
+		_spriteIcon->setScale(0.7);
+	}
+}
+void RechargeNewUiLayer::onCancelBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	ReceiveRewardUiMgr::GetInstance()->setRechargeTimes(2); //2 表示退出充值
+	signalCancelBtnPressed.emit();
+	CLOSE_UI(WCT_RECHARGENEWUI);
+	RechargeNewUiMgr::GetInstance()->setCurrentRechargeState(0);
+}
+
+void RechargeNewUiLayer::onOkBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	signalOkBtnPressed.emit();
+	CLOSE_UI(WCT_RECHARGENEWUI);
+	//modify by lpf 暂时取消确定按钮功能  一测隐藏
+ 	int yuanbaoNum=PackageManager::getInstance()->getTotalChargeYuanBao();
+ 	if (yuanbaoNum > 0)
+ 	{
+ 		//RewardMgr::getInstance()->SetGoToChongZhiHaoLi(true);
+ 		if (IS_UI_OPEN(WCT_ChongZhiActivityFarmeUI))
+ 		{
+ 			CLOSE_UI(WCT_RechargeUi);
+ 			GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer()->selectTab(CZA_ChongZhi);
+ 		}else
+ 		{
+ 			OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+ 		}
+ 	}
+ 	else
+ 	{
+ 		OPEN_UI(WCT_ShouChongUi);
+ 	}
+ 	RechargeNewUiMgr::GetInstance()->setCurrentRechargeState(0);
+}
+
+void RechargeNewUiLayer::onRechargeboxVipPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{		
+	signalRechargeboxVipPressed.emit();
+	CLOSE_UI(WCT_RECHARGENEWUI);
+	//OPEN_UI(WCT_VIPUI);暂时屏蔽vip特权界面入口(2015.09.12版本_测)
+}
+
+void RechargeNewUiLayer::onRechargeboxShouchongPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{ 
+	signalRechargeboxShouchongPressed.emit();
+	CLOSE_UI(WCT_RECHARGENEWUI);	
+	OPEN_UI(WCT_ShouChongUi);
+}
+
+void RechargeNewUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+}
+void RechargeNewUiLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+
+
+
+

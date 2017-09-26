@@ -1,0 +1,160 @@
+#ifndef UIMANAGER_H
+#define UIMANAGER_H
+
+#include "BaseDefine.h"
+#include "cocos2d.h"
+#include "Signals.h"
+using namespace cocos2d;
+
+class UiInterface;
+
+#define POSX_A_B 400.f
+
+enum eUiArea
+{
+	UA_Null = -1,
+	UA_A = 0, //界面右;
+	UA_B,  //界面左;
+	UA_AB, //大界面（铺满）;
+	UA_C,   // 游戏下方系统UI;
+	UA_TOP,   // 置顶;
+};
+
+struct UiLink
+{
+	eUiArea defaultPos;
+	eWroldChildTag linkUi;
+	eUiArea linkUiPos;
+	bool openLink;
+
+	UiLink()
+		: defaultPos(UA_AB)
+		, linkUi(WCT_Null)
+		, linkUiPos(UA_A)
+		, openLink(true)
+	{
+
+	}
+
+	UiLink(eUiArea dArea, eWroldChildTag linkUiTag = WCT_Null, eUiArea area = UA_A, bool open = true)
+		: defaultPos(dArea)
+		, linkUi(linkUiTag)
+		, linkUiPos(area)
+		, openLink(open)
+	{
+
+	}
+};
+
+class UiMgr
+{
+public:
+	UiMgr();
+	static UiMgr *getInstance();
+	void init();
+	void destroy();
+	UiInterface *openUi(eWroldChildTag uiTag, bool isbIsFadeIn = false);
+	UiInterface *openUiEx(eWroldChildTag uiTag);
+	UiInterface * openUiCallback( eWroldChildTag uiTag, unsigned char* ccbiData, unsigned long size);
+	bool isOpen(eWroldChildTag uiTag);
+	void closeUi(eWroldChildTag uiTag, bool isbIsFadeOut = true);
+	UiInterface* openUiNotCloseUi(eWroldChildTag tag);
+
+	void RemoveUi(eWroldChildTag uiTag);
+
+	template<typename UiType>
+	UiType *getUi(eWroldChildTag tag);
+	CCScene *getCurScene();
+
+	void addOpendUi(eWroldChildTag tag);
+	void removeOpendUi(eWroldChildTag tag);
+
+	void closeAllOpendUi(bool value = true);
+
+	void setNodeCenter(CCNode* pNode);
+	float getOffsetX();
+	float getOffsetY();
+
+	bool has_inited()const{return _inited;}
+
+	void open_recharge_layer();
+
+	void addMessageBoxUi(eWroldChildTag pTag, CCNode* pUi);
+	void closeLinkMessageBoxUi(eWroldChildTag tag);
+	//添加原界面Tag，目标界面Tag 在原界面关闭，打开目标界面，目标界面关闭后需要返回原界面时候使用 可以链式使用
+	void addUICloseLink(eWroldChildTag pSrc,eWroldChildTag eTar);
+	void delUIClostLink(eWroldChildTag tag);
+	
+private:
+	template<typename UiType>
+	void addUi(eWroldChildTag tag, const UiLink &uiLink = UiLink());
+	UiInterface *open(eWroldChildTag tag, eUiArea area,bool isbIsFadeIn = true);
+	UiInterface *openCallback(eWroldChildTag tag, eUiArea area, unsigned char* ccbiData, unsigned long size);
+	void moveUi(eWroldChildTag tag, eUiArea area);
+	void closeOldByArea(eUiArea area);
+	void closeOpenCloseLinkUi(eWroldChildTag eTar);
+
+	
+
+private:
+	typedef std::map<eWroldChildTag, UiInterface*> UiInstanceMap;
+	UiInstanceMap _uiMap;
+
+	typedef std::map<eWroldChildTag, UiLink> UiLinkMap;
+	UiLinkMap _linkMap;
+
+	std::vector<eWroldChildTag> _curOpendUi;
+
+	eWroldChildTag _area[3];
+
+	typedef std::vector<eWroldChildTag> UiDelayRemoveVec;
+	UiDelayRemoveVec _delayRemoveVec;
+
+	typedef std::map<eWroldChildTag,CCNode*> UiMessageBoxMap;
+	UiMessageBoxMap _mapMessageBoxUi; //用来存储MessageBoxUi对象防止异常崩溃
+
+	
+	typedef std::map<eWroldChildTag, eWroldChildTag> UiTagTagMap;
+	UiTagTagMap m_mapCloseLinkUi;
+
+	bool _inited;
+};
+
+template<typename UiType>
+UiType *UiMgr::getUi( eWroldChildTag tag )
+{
+	UiInstanceMap::iterator iter = _uiMap.find(tag);
+	if(iter != _uiMap.end())
+	{
+		UiType *ui =  dynamic_cast<UiType*>(iter->second);
+		CC_ASSERT(ui != NULL);
+		return ui;
+	}
+	CC_ASSERT(0);
+	return NULL;
+}
+
+template<typename UiType>
+inline void UiMgr::addUi( eWroldChildTag tag, const UiLink &uiLink /*= UiLink() */)
+{
+	UiInstanceMap::iterator iter = _uiMap.find(tag);
+	if(iter == _uiMap.end())
+	{
+		_uiMap[tag] = new UiType;
+	}
+
+	UiLinkMap::iterator iter2 = _linkMap.find(tag);
+	if(iter2 == _linkMap.end())
+	{
+		_linkMap[tag] = uiLink;
+	}
+}
+
+#define OPEN_UI(tag) UiMgr::getInstance()->openUi(tag)
+#define OPEN_UIEX(tag) UiMgr::getInstance()->openUiEx(tag)
+#define CLOSE_UI(tag) UiMgr::getInstance()->closeUi(tag)
+#define GET_UI(Type, tag) UiMgr::getInstance()->getUi<Type>(tag)
+#define CLOSE_ALL_UI() UiMgr::getInstance()->closeAllOpendUi()
+#define IS_UI_OPEN(tag) UiMgr::getInstance()->isOpen(tag)
+
+#endif //UIMANAGER_H

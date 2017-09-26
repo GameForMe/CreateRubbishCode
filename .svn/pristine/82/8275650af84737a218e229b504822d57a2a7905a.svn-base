@@ -1,0 +1,136 @@
+#include "OctSkillEffect.h"
+#include "AnimationCache.h"
+#include "RoleManager.h"
+#include "SkillAnimManager.h"
+#include "Role.h"
+#include "tools.h"
+#include "SkillManager.h"
+
+OctSkillEffect::OctSkillEffect()
+{
+	//for(int i = 0; i < 5; i ++)
+	//{
+	//	_animate[i] = NULL;
+	//}
+}
+
+OctSkillEffect::~OctSkillEffect()
+{
+	//for(int i = 0; i < 5; i ++)
+	//{
+	//	if(_animate[i] != NULL)
+	//	{
+	//		_animate[i]->release();
+	//		_animate[i] = NULL;
+	//	}
+	//}
+	AnimationCache::releaseDefList(_animate);
+}
+
+void OctSkillEffect::stop()
+{
+	if (!_bHasEffect)
+	{
+		return;
+	}
+	_sprite->stopAllActions();
+	_sprite->setVisible(false);
+}
+
+bool OctSkillEffect::initSkill( unsigned int skillId, const st_skill_proto &skillInfo )
+{
+	bool ret =SkillEffect::initSkill(skillId, skillInfo);
+	if (!ret)
+	{
+		return false;
+	}
+	CC_ASSERT(skillInfo.dirType == DT_OCT);
+	CC_ASSERT(!skillInfo.animFile.empty());
+
+	if (skillInfo.animFile !="0")
+	{
+		AnimationCache::createDefList(8, _animate, false);
+		AnimationCache::getInstance()->getOctEffect(skillId, skillInfo.animFile.c_str(), _animate);
+		_usedAnim.push_back(AnimsUsed(AT_Oct, skillInfo.animFile));
+	}
+
+	//CC_ASSERT(anims.size() == 5);
+	//for(int i = 0; i < 5; i ++)
+	//{
+	//	_animate[i] = BSAnimate::create(anims[i]);
+	//	_animate[i]->retain();
+	//}
+
+	if(skillInfo.type == ST_TARGET || skillInfo.type == ST_TARGETLOOP)
+	{
+		_updatePos = true;
+	}
+
+	_sprite->setVisible(false);
+	//addToMap();
+
+	return true;
+}
+
+bool OctSkillEffect::run( unsigned int targetRoleId )
+{
+	//if ( !SkillEffect::run(targetRoleId) )
+	//	return false;
+
+	if(targetRoleId == INVALID_ID)
+		return false;
+
+	if (!_bHasEffect)
+	{
+		return true;
+	}
+	CC_ASSERT(_sprite != NULL);
+	Role *role = RoleManager::getInstance()->findRole(targetRoleId);
+	if(role != NULL)
+	{
+		eOctDir dir = (eOctDir)role->getRoleDir();
+		//std::vector<CCSprite *> sprites;
+		//sprites.push_back(_sprite);
+		//flipOctDirSprite(dir, sprites);
+		//eOctDir newDir = flipOctDir(dir);
+
+		eOctDir newDir = dir;
+		std::vector<CCSprite *> sprites2;
+		sprites2.push_back(_sprite);
+		flipSprites(sprites2,false);
+
+		setPosition(role->getPosition());
+		CCSequence *sequence = CCSequence::createWithTwoActions(_animate[newDir], CCCallFuncND::create(OctSkillEffectCallback::getInstance(), SEL_CallFuncND(&OctSkillEffectCallback::onEffectFinished), this));
+		_sprite->runAction(sequence);
+		_sprite->setVisible(true);
+	}
+	return true;
+}
+void OctSkillEffect::runOnUpdate()
+{
+	if (!_bHasEffect)
+	{
+		return;
+	}
+
+	CC_ASSERT(_sprite != NULL);
+	Role *role = RoleManager::getInstance()->findRole(_targetRoleId);
+	if(role != NULL)
+	{
+		eOctDir dir = (eOctDir)role->getRoleDir();
+		std::vector<CCSprite *> sprites;
+		sprites.push_back(_sprite);
+		flipOctDirSprite(dir, sprites);
+		eOctDir newDir = flipOctDir(dir);
+
+		setPosition(role->getPosition());
+		CCSequence *sequence = CCSequence::createWithTwoActions(_animate[newDir], CCCallFuncND::create(OctSkillEffectCallback::getInstance(), SEL_CallFuncND(&OctSkillEffectCallback::onEffectFinished), this));
+		_sprite->runAction(sequence);
+		_sprite->setVisible(true);
+	}
+}
+
+void OctSkillEffect::finished()
+{
+	_sprite->setVisible(false);
+}

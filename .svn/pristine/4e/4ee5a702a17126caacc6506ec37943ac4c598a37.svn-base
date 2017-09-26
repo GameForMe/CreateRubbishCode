@@ -1,0 +1,239 @@
+#include "PenaltyUi.h"
+#include "UiTools.h"
+#include "UiResourceMgr.h"
+#include "CfgReader.h"
+#include "UiLoader.h"
+#include "StringMgr.h"
+#include "ActionProto.h"
+#include "TCPClient.h"
+#include "UiTools.h"
+#include "RoleEquipUi.h"
+#include "UiManager.h"
+#include "RemoteRoleStateMgr.h"
+#include "MapManager.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "Helper.h"
+
+cocos2d::SEL_MenuHandler PenaltyUiLayer::onResolveCCBCCMenuItemSelector( CCObject *pTarget, const char *pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler PenaltyUiLayer::onResolveCCBCCControlSelector( CCObject *pTarget, const char *pSelectorName )
+{
+	return NULL;
+}
+
+void PenaltyUiLayer::onNodeLoaded( cocos2d::CCNode *pNode, cocos2d::extension::CCNodeLoader *pNodeLoader )
+{
+	frame=dynamic_cast<CCNode*>(getChildByTag(0));
+	_contentNode=dynamic_cast<CCNode*>(frame->getChildByTag(0));
+	bgSprite=dynamic_cast<CCScale9Sprite*>(frame->getChildByTag(1));
+	std::list<penaltyInfo> _info=PenaltyManager::getInstance()->getPanaltyInfo();
+	int num=_info.size();
+	if (num>5)
+	{
+		bgSprite->setContentSize(CCSize(bgSprite->getContentSize().width,num*30));
+		bgSprite->setPreferredSize(CCSize(bgSprite->getContentSize().width,num*30));
+		_contentNode->setContentSize(CCSize(bgSprite->getContentSize().width,num*30));
+	}
+	_verticalList = new VerticalList<penaltyItem>;
+	_verticalList->addToParent(bgSprite);
+	_verticalList->setPosition(ccp(10,bgSprite->getContentSize().height-20));
+	_verticalList->setMinSize(_contentNode->getContentSize());
+	_verticalList->setEnableSelect(true);
+	updata();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void PenaltyUiLayer::onExit()
+{
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool PenaltyUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (isTouchOnNodeContent(bgSprite,pTouch))
+	{
+		return true;
+	}
+	return false;
+}
+
+void PenaltyUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+
+}
+
+PenaltyManager * PenaltyManager::getInstance()
+{
+	static PenaltyManager instance;
+	return &instance;
+}
+
+PenaltyManager::PenaltyManager()
+{
+
+}
+
+PenaltyManager::~PenaltyManager()
+{
+}
+
+void PenaltyManager::setDataInfo( std::string info )
+{
+	for(std::list<penaltyInfo>::iterator iter = _penaltyInfo.begin(); iter != _penaltyInfo.end(); ++iter)
+	{
+		penaltyInfo& list  = *iter;
+		if(list.name==info)
+		{
+			list.num=list.num+1;
+			return;
+		}
+	}
+	penaltyInfo _info;
+	_info.name=info;
+	_penaltyInfo.push_back(_info);
+}
+
+void PenaltyManager::clearPaneltyInfo()
+{
+	_penaltyInfo.clear();
+}
+
+PenaltyUi::PenaltyUi()
+{
+
+}
+
+PenaltyUi::~PenaltyUi()
+{
+
+}
+
+PenaltyUiLayer * PenaltyUi::getUiLayer()
+{
+	return getUiNodeByTag<PenaltyUiLayer>(WCT_PenaltyUi);
+}
+
+CCNode * PenaltyUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["PenaltyUiLayer"] = UiNodeLoader<PenaltyUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("die", nodeLoaders, _loadSpriteSheet);
+	CC_ASSERT(uiNode != NULL);
+	return uiNode;
+}
+
+void PenaltyUi::updateData()
+{
+
+}
+
+//void PenaltyUi::closePenaltyUi()
+//{
+//	getUiLayer()->closeUi();
+//}
+
+PenaltyUiLayer::PenaltyUiLayer()
+{
+
+}
+
+PenaltyUiLayer::~PenaltyUiLayer()
+{
+	PenaltyManager::getInstance()->clearPaneltyInfo();
+	_verticalList->clear();
+	if(_verticalList != NULL)
+	{
+		delete _verticalList;
+		_verticalList = NULL;
+	}
+}
+
+void PenaltyUiLayer::updata()
+{
+	_verticalList->clear();
+	std::list<penaltyInfo> _info=PenaltyManager::getInstance()->getPanaltyInfo();
+	for(std::list<penaltyInfo>::iterator iter = _info.begin(); iter != _info.end(); ++iter)
+	{
+		penaltyInfo &penaltyinfo = *iter;
+		penaltyItem *item=new penaltyItem();
+		item->setData(penaltyinfo.name,penaltyinfo.num);
+		_verticalList->addItem(item);
+	}
+	_verticalList->updateDisplay();
+}
+
+void PenaltyUiLayer::closeUi()
+{
+	removeFromParent();
+}
+
+penaltyItem::penaltyItem()
+{
+	TTFConfig config;
+	config.fontFilePath=  FT_FONTFACE;
+	config.fontSize = 16;
+	config.outlineSize = 1;
+	LabelFT *title = LabelFT::createWithTTF(config,"");
+	//CCLabelTTF* title=CCLabelTTF::create();
+	title->setString(GET_STR(9393).c_str());
+	//title->setColor(ccc3(251,238,171));
+	title->setTextColor(Helper::converColor3B_2_4B(ccc3(251,238,171)));
+	//title->setFontSize(16);
+	title->setTag(NT_title);
+	title->setPosition(ccp(-5,0));
+	title->setAnchorPoint(ccp(0,0));
+	_node->addChild(title);
+	/*TTFConfig config;
+	config.fontFilePath=  FT_FONTFACE;
+	config.fontSize = 16;
+	config.outlineSize = 1;*/
+	LabelFT *name = LabelFT::createWithTTF(config,"");
+	//CCLabelTTF* name=CCLabelTTF::create();
+	name->setTag(NT_Name);
+	name->setPosition(ccp(title->getContentSize().width,0));
+	name->setAnchorPoint(ccp(0,0));
+	//name->setFontSize(16);
+	name->setTextColor(Helper::converColor3B_2_4B(ccc3(241,173,75)));
+	_node->addChild(name);
+	/*TTFConfig config;
+	config.fontFilePath=  FT_FONTFACE;
+	config.fontSize = 16;
+	config.outlineSize = 1;*/
+	LabelFT *num = LabelFT::createWithTTF(config,"");
+	//CCLabelTTF* num=CCLabelTTF::create();
+	num->setTag(NT_Num);
+	num->setAnchorPoint(ccp(0,0));
+	//num->setFontSize(16);
+	num->setTextColor(Helper::converColor3B_2_4B(ccc3(241,173,75)));
+	_node->addChild(num);
+}
+
+penaltyItem::~penaltyItem()
+{
+
+}
+
+void penaltyItem::setData( std::string name,int num )
+{
+	getLabelttf(NT_Name)->setString(name.c_str());
+	if (num>1)
+	{
+		CCString *str=CCString::createWithFormat("%s%d","\x78",num);
+		getLabelttf(NT_Num)->setString(str->getCString());
+		getLabelttf(NT_Num)->setPosition(ccp(getLabelttf(NT_Name)->getPositionX()+getLabelttf(NT_Name)->getContentSize().width+5,0));
+	}
+}
+LabelFT * penaltyItem::getLabelttf( etag tag )
+{
+	return dynamic_cast<LabelFT*>(_node->getChildByTag(tag));
+}
+
+float penaltyItem::getItemHeight()
+{
+	return getContentSize().height + 28;
+}

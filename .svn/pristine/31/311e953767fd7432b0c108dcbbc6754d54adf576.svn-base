@@ -1,0 +1,205 @@
+#include "QuickSaleUI.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "ShopMgr.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "StringMgr.h"
+#include "MessageBoxUi.h"
+#include "World.h"
+#include "PackageManager.h"
+#include "ToolTip.h"
+#include "Helper.h"
+
+QuickSaleUI :: QuickSaleUI()
+{
+
+}
+QuickSaleUI :: ~QuickSaleUI()
+{
+
+}
+CCNode* QuickSaleUI :: openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["AllBuyUiLayer"] = UiLayerLoader<QuickSaleUiLayer>::loader();
+	nodeLoaders["CheckButton"] = CheckButtonLoader::loader();
+	CCNode* uiNode = readUiFromCCBI("allbuy", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+void QuickSaleUI::SetCanClick(bool IsCanClick)
+{
+	
+	QuickSaleUiLayer* uilayer = getUiNodeByTag<QuickSaleUiLayer>(WCT_QuickSale);
+	if(uilayer != NULL)
+	{
+		uilayer->SetCanClick(IsCanClick);
+	}
+	else
+	{
+		return;
+	}
+}
+QuickSaleUiLayer :: QuickSaleUiLayer()
+{
+	m_bCanClick = true;
+}
+QuickSaleUiLayer :: ~QuickSaleUiLayer()
+{
+
+}
+void QuickSaleUiLayer :: onEnter()
+{
+	CCDirector :: sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+	setAllChildernButtonPriority( this , 0 );
+	CCLayer :: onEnter();
+
+	std::for_each(_button,_button+TotalButtonNumber,[this](CheckButton* cb){
+		cb->signalStateChanged.connect(this,&QuickSaleUiLayer::onCheckBtnStateChange);
+	});
+
+}
+void QuickSaleUiLayer :: onExit()
+{
+	CCLayer :: onExit();
+	CCDirector :: sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+
+	std::for_each(_button,_button+TotalButtonNumber,[this](CheckButton* cb){
+		cb->signalStateChanged.disconnect(this,&QuickSaleUiLayer::onCheckBtnStateChange);
+	});
+}
+cocos2d :: SEL_MenuHandler QuickSaleUiLayer :: onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+cocos2d::extension :: SEL_CCControlHandler QuickSaleUiLayer :: onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", QuickSaleUiLayer::onOkButtonPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", QuickSaleUiLayer::onCloseBtnPressed);
+	return NULL;
+}
+void QuickSaleUiLayer :: onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	_frameNode = getChildByTag(0);
+	for(int i = 0; i < TotalButtonNumber; ++i)
+	{
+		_button[i] = dynamic_cast<CheckButton*>(_frameNode->getChildByTag(i + 1));
+		_button[i]->setTouchProprity( 0 );
+		if(i == 0)
+		{
+			_button[i]->setCheck(true);
+		}
+		else
+		{
+			_button[i]->setCheck(false);
+		}
+	}
+
+	replaceLabelTTF();
+
+	updateData();
+}
+void QuickSaleUiLayer :: onOkButtonPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	if(!m_bCanClick)
+	{
+		return;
+	}
+	if(_autoSellVec.size() == 0)
+	{
+		ToolTip::getInstance()->push(GET_STR(9267));
+		return;
+	}
+	ShopMgr::getInstance()->comfirmSellAll();
+	m_bCanClick = false;
+}
+void QuickSaleUiLayer :: onCloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	if(!m_bCanClick)
+	{
+		return;
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_QuickSale);
+	m_bCanClick = false;
+}
+bool QuickSaleUiLayer :: ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	return true;
+}
+void QuickSaleUiLayer :: ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+	
+}
+void QuickSaleUiLayer :: setAllAutoSell()
+{	_nSellType.clear();
+	std::vector<const tagItem*>vec;
+	PackageManager::getInstance()->getSellAll(vec);
+	for(int i = 0; i < TotalButtonNumber; ++i)
+	{
+		if(_button[i]->isCheckd())
+		{
+			bool bHaveItem = false;
+			for(std::vector<const tagItem*>::const_iterator iter = vec.begin(); iter != vec.end(); ++iter)
+			{
+				const tagItem* pItem = *iter;
+				if(pItem != NULL)
+				{
+					ItemTypeData pItemProto = PackageManager::getInstance()->getItemTypeData(pItem->dw_data_id);
+					if(pItemProto.bAutoSell == (i + 1))
+					{
+						_autoSellVec.push_back(pItem);
+						if(!bHaveItem)
+						{
+							_nSellType.push_back(i+1);
+							bHaveItem = true;
+						}
+					}
+				}
+			}
+		}
+		else
+		{
+			continue;
+		}
+	}
+}
+void QuickSaleUiLayer :: updateData()
+{
+	_autoSellVec.clear();
+	std::ostringstream ostr;
+	int nTotalNumber = 0;//×Ü¼Û
+	setAllAutoSell();
+	for(size_t i = 0; i < _autoSellVec.size(); ++i)
+	{
+		const ItemTypeData& data = PackageManager::getInstance()->getItemTypeData(_autoSellVec[i]->dw_data_id);
+		nTotalNumber += data.dwPrice * _autoSellVec[i]->n16Num;
+	}
+	ostr << nTotalNumber;
+	//CCNode *node = _frameNode->getChildByTag(6);
+	//CCLabelTTF* priceLabel = dynamic_cast<CCLabelTTF*>(_frameNode->getChildByTag(6));
+	_totalPriceLabel->setString(ostr.str().c_str());
+}
+
+void QuickSaleUiLayer::onCheckBtnStateChange( CheckButton* bt,bool bSel )
+{
+	updateData();
+}
+
+void QuickSaleUiLayer::replaceLabelTTF()
+{
+	CCNode* root  = this->getChildByTag(0);
+	CC_ASSERT(root);
+
+	for (int i = 100; i <=106  ; ++i)
+	{
+		CCLabelTTF* label  =dynamic_cast<CCLabelTTF*>(root->getChildByTag(i));
+		CC_ASSERT(label);
+		Helper::replaceLabelTTFWithLabelFTAndRemove(label);
+	}
+
+	CCLabelTTF* priceLabel  =dynamic_cast<CCLabelTTF*>(root->getChildByTag(6));
+	CC_ASSERT(priceLabel);
+	_totalPriceLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(priceLabel);
+}

@@ -1,0 +1,600 @@
+#ifndef VERTICALLIST_H
+#define VERTICALLIST_H
+
+#include "cocos2d.h"
+#include "cocos-ext.h"
+#include <vector>
+#include "UiTools.h"
+using namespace cocos2d;
+using namespace cocos2d::extension;
+
+template<typename ItemType>
+class VerticalList
+{
+public:
+	VerticalList();
+	virtual ~VerticalList();
+	void setLineSpace(float lineSpace) { _lineSpace = lineSpace; }
+	void setRowSpace(float rowSpace){ _rowSpace = rowSpace; }//设置列间距
+	void addItem(ItemType *listItem, bool update = false);
+	void insertItem(ItemType *listItem, int pos, bool update = false);
+	void removeItem(int index);
+	void clear();
+	void addToParent(CCNode *parent);
+	void addToScrollView(CCScrollView *scrollView);
+	void setMinSize(const CCSize &size) { _minSize = size; }//设置高度的最小值和宽度;
+	void updateDisplay(float forschatRecordHeight = 0.0f);
+	void updateDisplayAppose(int listnumber, float forschatRecordHeight = 0.0f);//并列显示列表时使用(每行显示listnumber个item）
+	void setItemOffsetX(float offsetX) { _offsetX = offsetX; };
+	void setItemOffsetY(float offsetY) { _offsetY = offsetY; };
+	ItemType *getItemUnderPoint(const CCPoint &point);
+	inline bool SelectIsLeftItem( CCTouch *pTouch );
+	inline bool getIsRightItem(CCTouch *pTouch);
+	inline bool SelectIsRightItem( CCTouch *pTouch );
+	inline bool getIsLeftItem(CCTouch *pTouch);
+	ItemType *getTouchdItem(CCTouch *pTouch);
+	ItemType *getItem(int index);
+	int getItemCount() const { return (int)_listItems.size(); }
+	int getVisibleItemCount();
+	ItemType *onTouch(CCTouch *pTouch);
+	void setSelectItem(int index);
+	void setSelectItem(ItemType *item);
+	//void setSelectColor(const ccColor4B &color);
+	void setEnableSelect(bool enable) { _enableSelect = enable; }
+	ItemType *getSelectItem() { return _selectItem; }
+	float getContentHieght() { return _node->getContentSize().height; }
+	void setPosition(const CCPoint &pos);
+	void setAnchorPoint(const CCPoint &point);
+	int getItemIndex(ItemType *item);
+	void setSelectSpriteFrame(const std::string &frameName);
+	float GetVisibleHeight()
+	{
+		return m_height;
+	}
+	float GetLineSpace() //获取行间距
+	{
+		return _lineSpace;
+	}
+	float GetRowSpace()//获取列间距
+	{
+		return _rowSpace;
+	}
+	CCNode* GetNode() { return _node; } 
+
+	bool bUpdateNeedMovie;
+	int getSelect(){return _selectIndex;}
+
+	void unselected();
+	float getListItemHeight(int col);//获取列表总的高度,col表示列数 2015年9月28日
+	float getListItemWidth(int col);//获取列表总的宽度,col表示列数 2015年9月28日
+protected:
+	CCNode *_node;
+	float _lineSpace;//行间距
+	float _rowSpace; //列间距
+	float _offsetX;
+	float _offsetY;
+	float m_height;
+	CCSize _minSize;
+	typedef std::vector<ItemType*> ListItems;
+	ListItems _listItems;
+	bool _enableSelect;
+	//ccColor4B _selectColor;
+	//CCLayerColor *_selectLayer;
+	ItemType *_selectItem;
+	CCSprite *_selectSprite;
+	std::string _selectFrameName;
+	int _selectIndex;
+	CCScrollView *_scrollView; 
+};
+
+template<typename ItemType>
+void VerticalList<ItemType>::unselected()
+{
+	if (_enableSelect)
+	{
+		_selectIndex = -1;
+		_selectItem = NULL;
+
+		if(_selectSprite != NULL)
+			_selectSprite->setVisible(false);
+
+	}
+}
+
+template<typename ItemType>
+int VerticalList<ItemType>::getVisibleItemCount()
+{
+	int nNum = 0;
+	for(typename ListItems::iterator iter = _listItems.begin(); iter != _listItems.end(); ++ iter)
+	{
+		ItemType *item = *iter;
+		if(item->IsVisible())
+			nNum++;
+	}
+
+	return nNum;
+}
+
+template<typename ItemType>
+inline VerticalList<ItemType>::VerticalList()
+	: _minSize(100.0f, 100.0f)
+	, _lineSpace(0.0f)
+	, _rowSpace(0.0f)
+	, _offsetX(0.0f)
+	, _offsetY(0.0f)
+	, m_height(0.0f)
+	, _enableSelect(false)
+	//, _selectLayer(NULL)
+	//, _selectColor(ccc4(255, 255, 255, 255))
+	, _selectItem(NULL)
+	, _selectSprite(NULL)
+	, bUpdateNeedMovie(true)
+	, _selectIndex(-1)
+	,_scrollView(NULL)
+{
+	_node = CCNode::create();
+	_node->retain();
+}
+
+template<typename ItemType>
+inline VerticalList<ItemType>::~VerticalList()
+{
+	CC_ASSERT(_node != NULL);
+	clear();
+	_node->removeFromParent();
+	
+	_node->release();
+	CC_SAFE_RELEASE(_selectSprite);
+}
+
+template<typename ItemType>
+void VerticalList<ItemType>::setSelectSpriteFrame( const std::string &frameName )
+{
+	CCSpriteFrame *frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName.c_str()); 
+	if(frame != NULL)
+	{
+		if(_selectSprite == NULL)
+		{
+			_selectSprite = CCSprite::create();
+			_selectSprite->retain();
+			_node->addChild(_selectSprite);
+			_selectSprite->setVisible(false);
+			_selectSprite->setAnchorPoint(ccp(0.f, 0.5f));
+		}
+		_selectSprite->setDisplayFrame(frame);
+	}
+	else
+	{
+		_selectFrameName = frameName;
+	}
+}
+
+template<typename ItemType>
+int VerticalList<ItemType>::getItemIndex( ItemType *item )
+{
+	if(item != NULL)
+	{
+		int index = 0;
+		for(typename ListItems::iterator iter = _listItems.begin(); iter != _listItems.end();  ++ iter)
+		{
+			if(item == *iter)
+			{
+				return index;
+			}
+			++index;
+		}
+	}
+
+	return -1;
+}
+
+template<typename ItemType>
+void VerticalList<ItemType>::setSelectItem( ItemType *item )
+{
+	//if(_selectItem == item)
+	//	return;
+
+	if(item != NULL)
+	{
+
+		if(_selectItem != NULL)
+			_selectItem->onSelectChanged(false);
+
+		_selectItem = item;
+		if(_selectItem != NULL)
+			_selectItem->onSelectChanged(true);
+
+		if(!_enableSelect)
+			return;
+
+		if(_selectSprite == NULL)
+		{
+			//_selectLayer = CCLayerColor::create(_selectColor);
+			//CC_ASSERT(_node != NULL);
+			//_selectLayer->setAnchorPoint(ccp(0.0f, 0.0f));
+			//_node->addChild(_selectLayer, 0);
+			//_selectLayer->setVisible(false);
+			if(!_selectFrameName.empty())
+				setSelectSpriteFrame(_selectFrameName);
+		}
+
+		if(_selectSprite != NULL)
+		{
+			//CC_ASSERT(_selectLayer != NULL);
+			//_selectSprite->setContentSize(CCSize(_minSize.width, item->getItemHeight()));
+			CCPoint pos = item->getPosition();
+			float height = item->getItemHeight();
+			_selectSprite->setPosition(ccp(pos.x, pos.y - height / 2.0f));
+			_selectSprite->setVisible(true);
+		}
+	}
+	else
+	{
+		if(_selectSprite != NULL)
+			_selectSprite->setVisible(false);
+		_selectItem = NULL;
+	}
+}
+
+//template<typename ItemType>
+//void VerticalList<ItemType>::setSelectColor( const ccColor4B &color )
+//{
+//	_selectColor = color;
+//	if(_selectLayer != NULL)
+//	{
+//		_selectLayer->setColor(ccc3(_selectColor.r, _selectColor.g, _selectColor.b));
+//		_selectLayer->setOpacity(_selectColor.a);
+//	}
+//}
+
+template<typename ItemType>
+void VerticalList<ItemType>::setSelectItem( int index )
+{
+	ItemType *item = getItem(index);
+	setSelectItem(item);
+}
+
+template<typename ItemType>
+inline void VerticalList<ItemType>::addItem( ItemType *listItem, bool update /*= false*/ )
+{
+	listItem->addToParent(_node);
+	_listItems.push_back(listItem);
+	if(update)
+		updateDisplay();
+}
+
+template<typename ItemType>
+void VerticalList<ItemType>::insertItem( ItemType *listItem, int pos, bool update /*= false*/ )
+{
+	CC_ASSERT(pos >= 0);
+	listItem->addToParent(_node);
+	typename ListItems::iterator iter = _listItems.begin() + pos;
+	_listItems.insert(iter, listItem);
+	if(update)
+		updateDisplay();
+}
+
+template<typename ItemType>
+void VerticalList<ItemType>::removeItem( int index )
+{
+	if((int)_listItems.size() > index)
+	{
+		typename ListItems::iterator iter = _listItems.begin() + index;
+		ItemType *item = *iter;
+		_listItems.erase(iter);
+		if(_selectItem == item)
+		{
+			_selectItem = NULL;
+		}
+		delete item;
+	}
+}
+
+template<typename ItemType>
+inline void VerticalList<ItemType>::clear()
+{
+	setSelectItem((ItemType*)NULL);
+	for(typename ListItems::iterator iter = _listItems.begin(); iter != _listItems.end(); ++ iter)
+	{
+		ItemType *item = *iter;
+		delete item;
+	}
+	_listItems.clear();
+}
+
+template<typename ItemType>
+inline void VerticalList<ItemType>::addToParent( CCNode *parent )
+{
+	if(parent != NULL)
+		parent->addChild(_node);
+}
+
+template<typename ItemType>
+inline void VerticalList<ItemType>::addToScrollView( CCScrollView *scrollView )
+{
+	if(scrollView != NULL)
+	{
+		_node->setContentSize(scrollView->getContentSize());
+		scrollView->setContainer(_node);
+
+		_scrollView = scrollView;
+	}
+}
+
+template<typename ItemType>
+inline void VerticalList<ItemType>::updateDisplay(float forschatRecordHeight /*= 0.0f*/)
+{
+	//记录当前的位置
+	float contentHeight = _node->getContentSize().height;
+
+	//首先获取全部的高度
+	float height = 0.f;
+	int nVisibleNum = 0;
+	for(typename ListItems::iterator iter = _listItems.begin(); iter != _listItems.end(); ++ iter)
+	{
+		ItemType *item = *iter;
+		if(item->IsVisible())
+		{
+			nVisibleNum++;
+			height += item->getItemHeight();
+		}
+	}
+
+	if(nVisibleNum)
+		height += _lineSpace * (nVisibleNum - 1);
+	else
+		height = 0;
+
+	m_height = height;
+
+	if (forschatRecordHeight > 0.0f) //by zhang (为了得到最终的高度为_minSize.height的高度)
+	{
+		height = 0;
+	}
+	if(height < _minSize.height)
+		height = _minSize.height;
+
+	CCScrollView* sv = dynamic_cast<CCScrollView*>(_node->getParent());
+	if (sv)
+		sv->setContentSize(CCSize(_minSize.width, height));
+	else
+		_node->setContentSize(CCSize(_minSize.width, height));
+
+	//按顺序排列所有的项
+	for(typename ListItems::iterator iter = _listItems.begin(); iter != _listItems.end(); ++ iter)
+	{
+		ItemType *item = *iter;
+		if(!item->IsVisible())
+			continue;
+		//把描点移动至左上
+		item->setAnchorPoint(ccp(0.0f,1.0f));
+		item->setPosition(ccp(_offsetX, height - _offsetY /*- _lineSpace*/ ));
+		height -= (item->getItemHeight() + _lineSpace);
+	}
+
+	//设置位置
+  	float contentHeight2 = _node->getContentSize().height;
+  	float posY = _node->getPositionY() + contentHeight - contentHeight2;
+  	if(posY > 0.f)
+  		posY = 0.f;
+  	if(bUpdateNeedMovie)
+  		_node->setPositionY(posY);
+
+}
+
+template<typename ItemType>
+inline void VerticalList<ItemType>::updateDisplayAppose(int listNumber ,float forschatRecordHeight/*= 0.0f*/){ //listNumber为每行要显示的条目数目
+	if(listNumber<=0){
+		return;
+	}
+	if(listNumber==1){
+		updateDisplay();
+		return;
+	}
+
+	int index = 0;
+	float height = 0;
+	for(typename ListItems::iterator iter = _listItems.begin(); iter != _listItems.end();)
+	{
+		ItemType* item=*iter;
+		for(int i=0;i<listNumber;++i){
+			ItemType *item = *iter;
+			if(!item->IsVisible())
+				continue;
+
+			item->setPosition(ccp(_offsetX+i*item->getContentSize().width * _rowSpace, height + _offsetY + _lineSpace));
+
+			if(++index >= _listItems.size())
+				goto setPos;
+
+			++iter;
+		}
+
+		height += (item->getItemHeight() + _lineSpace + _offsetY);
+	}
+
+setPos:	if(height < _minSize.height)
+		height = _minSize.height;
+
+		if (NULL != _scrollView)
+		{
+			_scrollView->setContentSize(CCSize(_minSize.width,height));
+			_scrollView->setContentOffset(_scrollView->maxContainerOffset());
+		}
+
+		_node->setContentSize(CCSize(_minSize.width,height));
+
+}
+
+template<typename ItemType>
+inline ItemType * VerticalList<ItemType>::getItemUnderPoint( const CCPoint &point )
+{
+	_selectIndex = 0;
+	for(typename ListItems::iterator iter = _listItems.begin(); iter != _listItems.end(); ++ iter)
+	{
+		ItemType *item = *iter;
+		CCPoint pos = item->getPosition();
+		float width = item->getItemWidth(); //modified by lpf
+		//float width = _minSize.width;
+		float height = item->getItemHeight() ;
+		CCPoint offpos = item->getOffPos();
+		CCRect rect(pos.x - offpos.x, pos.y - height + offpos.y, width, height);
+		if(rect.containsPoint(point))
+		{
+			return item;
+		}
+		++_selectIndex;
+	}
+	return NULL;
+}
+template<typename ItemType>
+inline bool  VerticalList<ItemType>::getIsRightItem( CCTouch *pTouch )
+{
+	CCPoint point = _node->convertTouchToNodeSpace(pTouch);
+	for(typename ListItems::iterator iter = _listItems.begin(); iter != _listItems.end(); ++ iter)
+	{
+		ItemType *item = *iter;
+		CCPoint pos = item->getPosition();
+		float width = item->getItemWidth(); //modified by lpf
+		//float width = _minSize.width;
+		float height = item->getItemHeight() ;
+		CCPoint offpos = item->getOffPos();
+		CCRect rect(pos.x - offpos.x, pos.y - height + offpos.y, width, height);
+		if(rect.containsPoint(point))
+		{
+			if(item != NULL)
+			{
+				CCNode* RightNode = item->getRightItemNode();
+				if(RightNode != NULL)
+				{
+					if(isTouchOnNodeContent(RightNode, pTouch))
+					{
+						return true;
+					}
+				}
+			}
+		}
+		
+		
+
+	}
+	return false;
+}
+template<typename ItemType>
+inline bool  VerticalList<ItemType>::getIsLeftItem( CCTouch *pTouch )
+{
+	CCPoint point = _node->convertTouchToNodeSpace(pTouch);
+	for(typename ListItems::iterator iter = _listItems.begin(); iter != _listItems.end(); ++ iter)
+	{
+		ItemType *item = *iter;
+		CCPoint pos = item->getPosition();
+		float width = item->getItemWidth(); //modified by lpf
+		//float width = _minSize.width;
+		float height = item->getItemHeight() ;
+		CCPoint offpos = item->getOffPos();
+		CCRect rect(pos.x - offpos.x, pos.y - height + offpos.y, width, height);
+		if(rect.containsPoint(point))
+		{
+			if(item != NULL)
+			{
+				CCNode* LeftNode = item->getLeftItemNode();
+				if(LeftNode != NULL)
+				{
+					if(isTouchOnNodeContent(LeftNode, pTouch))
+					{
+						return true;
+					}
+				}
+			}
+		}
+		
+		
+	}
+	return false;
+}
+
+template<typename ItemType>
+inline ItemType * VerticalList<ItemType>::getTouchdItem( CCTouch *pTouch )
+{
+	CCPoint point = _node->convertTouchToNodeSpace(pTouch);
+	return getItemUnderPoint(point);
+}
+
+template<typename ItemType>
+inline bool  VerticalList<ItemType>::SelectIsRightItem( CCTouch *pTouch )
+{
+	return getIsRightItem(pTouch);
+}
+template<typename ItemType>
+inline bool  VerticalList<ItemType>::SelectIsLeftItem( CCTouch *pTouch )
+{
+	return getIsLeftItem(pTouch);
+}
+template<typename ItemType>
+inline ItemType* VerticalList<ItemType>::onTouch( CCTouch *pTouch )
+{
+	ItemType *item = getTouchdItem(pTouch);
+	if(item != NULL)
+	{
+		item->onTouch(pTouch);
+		if(item->showmenu)
+			setSelectItem(item);
+		else
+			item = NULL;
+	}
+	else
+	{
+		setSelectItem((ItemType*)NULL);
+	}
+	return item;
+}
+
+template<typename ItemType>
+inline ItemType * VerticalList<ItemType>::getItem( int index )
+{
+	if(index >= 0 && index < (int)_listItems.size())
+		return _listItems[index];
+
+	return NULL;
+}
+
+template<typename ItemType>
+void VerticalList<ItemType>::setPosition( const CCPoint &pos )
+{
+	_node->setPosition(pos);
+}
+
+template<typename ItemType>
+void VerticalList<ItemType>::setAnchorPoint( const CCPoint &point )
+{
+	_node->setAnchorPoint(point);
+}
+template<typename ItemType>
+float VerticalList<ItemType>::getListItemHeight(int col){ //获取列表总的高度，col表示列数
+	if(col == 0){
+		return NULL;
+	}
+	float height;
+	typename ListItems::iterator iter = _listItems.begin();
+	ItemType* item = *iter;
+	if(item == NULL){
+		return NULL;
+	}
+	if(_listItems.size()%col == 0){
+		height = _listItems.size()/col*item->getContentSize().height + (_listItems.size()/col - 1) * _lineSpace;
+	}else{
+		height = (_listItems.size()/col + 1)*item->getContentSize().height + _listItems.size()/col * _lineSpace;
+	}
+	return height;
+}
+template<typename ItemType>
+float VerticalList<ItemType>::getListItemWidth(int col){ //获取列表总的宽度col表示列数
+	typename ListItems::iterator iter = _listItems.begin();
+	ItemType* item = *iter;
+	if(item == NULL){
+		return NULL;
+	}
+	float width = item->getContentSize().width * col + _rowSpace * (col - 1);
+	return width;
+}
+#endif //VERTICALLIST_H

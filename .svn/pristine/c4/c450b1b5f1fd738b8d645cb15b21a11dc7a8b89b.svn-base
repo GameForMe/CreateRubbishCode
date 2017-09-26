@@ -1,0 +1,442 @@
+#ifndef TOOLS_H
+#define TOOLS_H
+
+#include "BaseDefine.h"
+#include "cocos2d.h"
+#include "StringMgr.h"
+#include "SocialProto.h"
+#include "ItemDefine.h"
+#include "NumericalIniMgr.h"
+#include <vector>
+using namespace cocos2d;
+
+inline CCPoint getNewPosition(const CCPoint &curPos, const CCPoint &dir, float speed, float dt)
+{
+	CCPoint tmp = dir;
+	tmp = ccpNormalize(tmp);
+	CCPoint ret = ccp(curPos.x + tmp.x * speed * dt, curPos.y + tmp.y * speed * dt);
+	return ret;
+}
+
+inline void flipSprites(std::vector<CCSprite*> sprites, bool flip)
+{
+	if(flip)
+	{
+		std::vector<CCSprite*>::iterator it = sprites.begin();
+		while(it != sprites.end())
+		{
+			CCSprite *sprite = *it;
+			sprite->setFlipX(true);
+			//sprite->setAnchorPoint(ccp(1.0, 1.0));  //[bing] 死神方式plist不需要算偏移量
+			++ it;
+		}
+	}
+	else
+	{
+		std::vector<CCSprite*>::iterator it = sprites.begin();
+		while(it != sprites.end())
+		{
+			CCSprite *sprite = *it;
+			sprite->setFlipX(false);
+			//sprite->setAnchorPoint(ccp(0.0, 1.0));	//[bing] 死神方式plist不需要算偏移量
+			++ it;
+		}
+	}
+}
+
+inline void flipSprites(CCSprite* sprite, bool flip)
+{
+	if (sprite)
+		sprite->setFlipX(flip);
+}
+
+inline eOctDir flipOctDir( eOctDir dir )
+{
+	CC_ASSERT(dir >= OD_UP && dir < OD_Num);
+	switch(dir)
+	{
+	case OD_UR:
+	case OD_RIGHT:
+	case OD_DR:
+		return (eOctDir)(8 - dir);
+		break;
+	default:
+		return dir;
+		break;
+	}
+	return dir;
+}
+
+inline eOctDir flipOctDirWing( eOctDir dir )
+{
+	CC_ASSERT(dir >= OD_UP && dir < OD_Num);
+	switch(dir)
+	{
+	case OD_UL:
+	case OD_LEFT:
+	case OD_DL:
+		return (eOctDir)(8 - dir);
+		break;
+	default:
+		return dir;
+		break;
+	}
+	return dir;
+}
+
+inline void flipOctDirSprite(eOctDir dir, std::vector<CCSprite*> sprites)
+{
+	//eOctDir newDir = flipOctDir(dir);
+	//flipSprites(sprites, newDir != dir);
+
+	//[bing] 判断是否使用镜像 现在是左边3个方向使用镜像
+	switch(dir)
+	{
+		case OD_UP:
+		case OD_DOWN:
+		case OD_DR:
+		case OD_RIGHT:
+		case OD_UR:
+			flipSprites(sprites, false);
+			break;
+
+		case OD_UL:
+		case OD_LEFT:
+		case OD_DL:
+			flipSprites(sprites, true);
+			break;
+	}
+}
+
+inline eFourDir flipFourDir( eFourDir dir )
+{
+	CC_ASSERT(dir >= FD_DOWN && dir < FD_Num);
+	switch(dir)
+	{
+	case FD_RIGHT:
+		return (eFourDir)(FD_Num - dir);
+		break;
+	default:
+		return dir;
+		break;
+	}
+	return dir;
+}
+
+inline void flipFourDirSprite(eFourDir dir, std::vector<CCSprite*> sprites)
+{
+	eFourDir newDir = flipFourDir(dir);
+	flipSprites(sprites, newDir != dir);
+}
+
+inline eFourDirEx flipFourDir( eFourDirEx dir )
+{
+	CC_ASSERT(dir >= FDE_UL && dir < FDE_Num);
+	switch(dir)
+	{
+	case FDE_UR:
+	case FDE_DR:
+		return (eFourDirEx)(FDE_Num - dir - 1);
+		break;
+	default:
+		return dir;
+		break;
+	}
+	return dir;
+}
+
+inline void flipFourDirSprite(eFourDirEx dir, std::vector<CCSprite*> sprites)
+{
+	eFourDirEx newDir = flipFourDir(dir);
+	flipSprites(sprites, newDir != dir);
+}
+
+inline bool equal(const CCPoint& p1 , const CCPoint& p2)
+{
+	if(fabs(p1.x - p2.x) < 2.f &&fabs(p1.y - p2.y) < 2.f)
+		return true;
+	else
+		return false;
+}
+
+inline float getAngle(eOctDir dir)
+{
+	float angle = 0.0f;
+	switch(dir)
+	{
+	case OD_UP:
+		angle = 90.0f;
+		break;
+	case OD_UL:
+		angle = 135.0f;
+		break;
+	case OD_LEFT:
+		angle = 180.0f;
+		break;
+	case OD_DL:
+		angle = 225.0f;
+		break;
+	case OD_DOWN:
+		angle = 270.0f;
+		break;
+	case OD_DR:
+		angle = 315.0f;
+		break;
+	case OD_RIGHT:
+		angle = 0.0f;
+		break;
+	case OD_UR:
+		angle = 45.0f;
+		break;
+	default:
+		angle = 0.0f;
+		break;
+	}
+	return angle * PI / 180.f;
+}
+
+inline int getConsolidateAtt(int nAttValue, unsigned char byConsolidate)
+{
+	if (byConsolidate<=0 || byConsolidate > MAX_STRENGTHEN_LEVEL)
+		return 0;
+
+	int nParam[] = {300, 600, 900, 1400, 1900, 2400, 2900, 3500, 4100, 4700, 5300, 5900, 6500, 7200, 8000, 9000};
+
+	return MAX(byConsolidate, nAttValue * (nParam[byConsolidate - 1] / 10000.0));
+}
+
+inline std::string getRoleTypeStr(eRoleType roleType)
+{
+	switch(roleType)
+	{
+	case RT_MWARRIOR:
+	case RT_WWARRIOR:
+		return GET_STR(8);
+		break;
+	case RT_MMAGE:
+	case RT_WMAGE:
+		return GET_STR(9);
+		break;
+	case RT_MTAOIST:
+	case RT_WTAOIST:
+		return GET_STR(10);
+		break;
+	}
+	return "";
+}
+
+inline std::string getRoleTypeStr(EClassType roleType)
+{
+	switch(roleType)
+	{
+	case EV_Warrior:
+		return GET_STR(8);
+		break;
+	case EV_Mage:
+		return GET_STR(9);
+		break;
+	case EV_Taoist:
+		return GET_STR(10);
+		break;
+	default:
+		return "";
+		break;
+	}
+}
+
+inline std::string getRoleSexStr(int sex)
+{
+	if(sex == 0)//女
+		return "\xE5\xA5\xB3";
+	else if(sex == 1)//男
+		return "\xE7\x94\xB7";
+	else
+		return "";
+}
+
+inline std::string getGuanzhiStr(int knowledge)
+{
+	if(knowledge < 500)
+		return GET_STR(73);
+	else if(knowledge < 2000)
+		return GET_STR(63);
+	else if(knowledge < 5000)
+		return GET_STR(64);
+	else if(knowledge < 12500)
+		return GET_STR(65);
+	else if(knowledge < 31250)
+		return GET_STR(66);
+	else if(knowledge < 78125)
+		return GET_STR(67);
+	else if(knowledge < 195313)
+		return GET_STR(68);
+	else if(knowledge < 488281)
+		return GET_STR(69);
+	else if(knowledge < 1220703)
+		return GET_STR(70);
+	else if(knowledge < 3051758)
+		return GET_STR(71);
+	else
+		return GET_STR(72);
+}
+
+inline std::string getXingzuoString(EnumVCardConstellation xingzuo)
+{
+	switch(xingzuo)
+	{
+	case EVC_Aries:
+		return GET_STR(51);
+	case EVC_Taurus:
+		return GET_STR(52);
+	case EVC_Gemini:
+		return GET_STR(53);
+	case EVC_Cancer:
+		return GET_STR(54);
+	case EVC_Leo:
+		return GET_STR(55);
+	case EVC_Virgo:
+		return GET_STR(56);
+	case EVC_Libra	:
+		return GET_STR(57);
+	case EVC_Scorpio:
+		return GET_STR(59);
+	case EVC_Sagittarius:
+		return GET_STR(58);
+	case EVC_Capricorn:
+		return GET_STR(60);
+	case EVC_Aquarius:
+		return GET_STR(61);
+	case EVC_Pisces:
+		return GET_STR(62);
+	default:
+		return GET_STR(73);
+	}
+}
+
+//获取装备当前耐久度
+inline int GetEquipNewness(EEquipPos pos, int useTimes, int maxUseTimes)
+{
+	if (pos == EEP_RightHand)
+	{
+		int abrasionTimes = NumericalIniMgr::getInstance()->Get_Weapon_Abrasion_Times();
+		return maxUseTimes - useTimes / abrasionTimes;
+	}
+	else
+	{
+		int abrasionTimes = NumericalIniMgr::getInstance()->Get_Equip_Abrasion_Times();
+		return maxUseTimes - useTimes / abrasionTimes;
+	}
+}
+
+inline CCPoint getPosFromDirection(const CCPoint &pos1, const CCPoint &pos2, float dt, float speed)
+{
+	return getNewPosition(pos1, ccpSub(pos2, pos1), speed, dt);
+}
+
+inline CCPoint getPosFromAngle(const CCPoint &st, float angle, float l)
+{
+	float x = l * cos(angle);
+	float y = l * sin(angle);
+	return ccpAdd(st, ccp(x, y));
+}
+
+inline CCPoint getPosFromDir(const CCPoint &st, eOctDir dir, float radiu)
+{
+	float angle = getAngle(dir);
+	return getPosFromAngle(st, angle, radiu);
+}
+
+inline std::string trimStr(const std::string &str)
+{
+	int n = (int)str.find_last_not_of('\r');
+	if(n != -1)
+		return str.substr(0, n + 1);
+	else
+		return str;
+}
+
+inline eOctDir convertDir(eFourDir fourDir)
+{
+	switch(fourDir)
+	{
+	case FD_DOWN:
+		return OD_DOWN;
+	case FD_LEFT:
+		return OD_LEFT;
+	case FD_RIGHT:
+		return OD_RIGHT;
+	case FD_UP:
+		return OD_UP;
+	default:
+		return OD_RIGHT;
+	}
+
+	return OD_RIGHT;
+}
+
+inline eOctDir convertDir(eFourDirEx fourDir)
+{
+	switch(fourDir)
+	{
+	case FDE_DL:
+		return OD_DL;
+	case FDE_DR:
+		return OD_DR;
+	case FDE_UL:
+		return OD_UL;
+	case FDE_UR:
+		return OD_UR;
+	default:
+		return OD_UL;
+	}
+
+	return OD_UL;
+}
+
+//[bing] 释放vector占用的内存
+template <class T>
+void ClearVector( std::vector<T>& vt )
+{
+	std::vector<T> veTemp;
+	veTemp.swap(vt);
+}
+
+
+#ifndef WIN32
+
+class Timer
+{
+public:
+	timeval m_tv;
+	unsigned int t1;
+	unsigned int t2;
+	std::string _str;
+
+	Timer(const std::string str)
+		: _str(str)
+	{
+
+	}
+
+	unsigned int gettime()
+	{
+		gettimeofday(&m_tv, 0);
+		return (unsigned int)(m_tv.tv_sec * 1000) + (m_tv.tv_usec / 1000);
+	}
+
+	inline void begin()
+	{
+		t1 = gettime();
+	}
+
+	inline void profiler(int i)
+	{
+		t2 = gettime();
+		CCLog("%d , %s %u" ,i, _str.c_str(), t2-t1);
+		t1 = gettime();
+	}
+};
+
+#endif
+
+#endif //TOOLS_H

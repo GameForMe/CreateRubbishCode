@@ -1,0 +1,1038 @@
+#include "Auto_ActionMgr.h"
+#include "LocalPlayer.h"
+#include "TCPClient.h"
+#include "Base.h"
+#include "DBMgr.h"
+#include "PackageProto.h"
+#include "PlayerState.h"
+#include "PackageManager.h"
+#include "TeamMgr.h"
+#include "ChatMgr.h"
+#include "StringMgr.h"
+#include "HookSetUi.h"
+#include "ToolTip.h"
+#include "ExchangeBusinessMgr.h"
+#include "World.h"
+#include "MiniMapUi.h"
+#include "QuestMgr.h"
+#include "MessageDispatcher.h"
+#include "NewPlayerGuide.h"
+#include "Monster.h"
+#include "GameEventDefine.h"
+
+#include <boost/range/algorithm_ext/push_back.hpp>
+#include <boost/range/adaptor/transformed.hpp>
+#include <boost/range/adaptor/map.hpp>
+#include <boost/range/adaptor/filtered.hpp>
+
+static const float MAX_PICK_RANG = 300.f;
+static const float MAX_ZHUIJI_RANG = 600.f;
+
+AutoActionMgr::AutoActionMgr()
+	:b_auto_action(false) 
+	,m_atk_target_id(INVALID)
+	,IsTaskFinish(false)
+	,m_usQuestId(0)
+	,m_iCompleteTaskId(0)
+	,IsShowTip(true)
+	,_interval_time(0)/*,_questMonst(INVALID)*/
+	,m_last_target(-1)
+{
+// #if 1	//lzz
+// 	struct timeval tv;
+// 	gettimeofday(&tv , 0);
+// 	m_LastHitMonsterTime = tv.tv_sec*1000;
+// #else
+// 	m_LastHitMonsterTime = clock();
+// #endif
+	//m_Kill_Radius = AUTO_KILL_RADIUS_MAX;
+	//memset(m_AutoPickupMark,0,sizeof(short)*EAPI_End);
+
+	m_pickup_opt.reset();
+}
+AutoActionMgr::~AutoActionMgr()
+{
+}
+AutoActionMgr* AutoActionMgr::getInstance()
+{
+	static AutoActionMgr mgr;
+	return &mgr;
+}
+void AutoActionMgr::Destroy()
+{
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_role_dead", this, &AutoActionMgr::onServerMonsterKilled);
+
+	UNREGISTER_EVENT(select_enemy_immediately,AutoActionMgr,on_event_sel_enemy_immediately);
+
+
+	if (Get_Auto_Action())
+	{
+		Set_Auto_Action(false);
+	}
+	IsShowTip = false;
+
+	return;
+}
+void AutoActionMgr::Init()
+{
+	TCP_CLIENT->register_net_cmd("NET_SIS_role_dead", this, &AutoActionMgr::onServerMonsterKilled);
+
+	REGISTER_EVENT(select_enemy_immediately,AutoActionMgr,on_event_sel_enemy_immediately);
+}
+void AutoActionMgr::JustBeginAutoFight()  
+{
+	//若当前是摆摊，交易，双修，点击挂机按钮应该	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(ploc))
+	{
+		return;
+	}
+		
+	if (ploc->isInRoleStateAny(RA_ShuangXiu) || ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))
+	{
+		if (ploc->isInRoleStateAny(RA_Exchange))
+		{
+			ExchangeBusinessMgr::getInstance()->CancleExchange();
+		}
+		return;
+	}
+	//若挂机未开启，则当前应是开启挂机
+	if (!Get_Auto_Action())
+	{
+		IsShowTip = false;
+		bool bRet = CanStartAutoKill();
+		IsShowTip = true;
+		if (!bRet)
+		{
+			return;
+		}
+		
+		Set_Auto_Action(true);
+		//World::getInstance()->getMiniMapUi()->StartAutoFight();
+		m_PlayerPos = RoleManager::getInstance()->getLocalPlayer()->getPosition();
+		//是否需要让玩家立即停止移动
+		//LocalPlayer* pLocPlayer = RoleManager::getInstance()->getLocalPlayer();//本地玩家
+		//pLocPlayer->stand();
+	}
+	
+}
+void AutoActionMgr::BeginOrEnd()    
+{
+	//若当前是摆摊，交易，双修，点击挂机按钮应该无效
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(ploc))
+		return;
+	if (ploc->isInRoleStateAny(RA_ShuangXiu) || ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))
+	{
+		if (ploc->isInRoleStateAny(RA_Exchange))
+		{
+			ExchangeBusinessMgr::getInstance()->CancleExchange();
+		}
+		return;
+	}
+	//若挂机未开启，则当前应是开启挂机
+	if (!Get_Auto_Action())
+	{
+		bool bRet = CanStartAutoKill();
+		if (!bRet)
+			return;
+		Set_Auto_Action(true);
+		//Set_Auto_Action(false);
+		//Set_Auto_Action(true);
+		m_PlayerPos = RoleManager::getInstance()->getLocalPlayer()->getPosition();
+		//是否需要让玩家立即停止移动
+		//LocalPlayer* pLocPlayer = RoleManager::getInstance()->getLocalPlayer();//本地玩家
+		//pLocPlayer->stand();
+	}
+	//若挂机已经开启，则当前应是关闭挂机
+	else
+	{
+		Set_Auto_Action(false);
+	}
+	return;
+}
+void AutoActionMgr::Set_Auto_Action(bool bflag)
+{
+	if (bflag  == b_auto_action) return;
+
+	if (bflag)
+	{
+		b_auto_action = true;
+		MapManager::getInstance()->setRandPos(false);
+		//需要提示玩家“已开启自动打怪”
+		/*s_receive_chat_info info;
+		info.send_channel = ESCC_System;
+		info.chat_text = GET_STR(151);
+		ChatMgr::getInstance()->ShowInfoByChatChannel(info);*/
+		generate_pickup_points();
+		RoleManager::getInstance()->getLocalPlayer()->setEnterAutoAttack();
+		//RoleManager::getInstance()->getLocalPlayer()->setEnterAttackState();
+		send_begin_kill_monster();
+
+		//UpdateTodo();
+	}
+	else
+	{
+		b_auto_action = false;
+
+		m_points.clear();
+		SetIsLastTaskFinish(false);
+		setCurrentQuestID(INVALID,TraceTarget());
+
+		SetTaskQuestId(0);
+		SetCompleteTaskId(0);
+		//需要提示玩家“已取消自动打怪”
+		/*s_receive_chat_info info;
+		info.send_channel = ESCC_System;
+		info.chat_text = GET_STR(152);
+		ChatMgr::getInstance()->ShowInfoByChatChannel(info);*/
+		RoleManager* mgr = RoleManager::getInstance();
+		LocalPlayer* ploc =mgr->getLocalPlayer();
+		if (ploc)
+		{
+			ploc->setExitAutoAttack();
+			mgr->set_select_role_id(INVALID);
+			mgr->SetTargetRole(NULL);
+			send_end_kill_monster();
+		}
+// 		MiniMapUi* ui = World::getInstance()->getMiniMapUi();
+// 		if (ui)
+// 		{
+// 			World::getInstance()->getMiniMapUi()->stopAutoFight();
+// 		}
+	}
+	
+	refresh_auto_btn evt;
+	evt.auto_act = b_auto_action;
+	SEND_EVENT(&evt);
+}
+void AutoActionMgr::send_begin_kill_monster()
+{
+	NET_SIC_Auto_Kill_Start cmd;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_CRITICAL , false);//将消息等级提升
+	return;
+}
+void AutoActionMgr::send_end_kill_monster()
+{
+	NET_SIC_Auto_Kill_End cmd;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+	return;
+}
+//没用到
+unsigned int AutoActionMgr::onServerBegin_Kill_Monster(s_net_cmd *cmd)
+{
+	NET_SIS_Auto_Kill_Start *msg = (NET_SIS_Auto_Kill_Start*)cmd;
+	if (msg->dwErrorCode == E_Success)
+	{
+		Set_Auto_Action(true);
+		m_PlayerPos = RoleManager::getInstance()->getLocalPlayer()->getPosition();
+		//是否需要让玩家立即停止移动
+		//LocalPlayer* pLocPlayer = RoleManager::getInstance()->getLocalPlayer();//本地玩家
+		//pLocPlayer->stand();
+	}
+	else
+	{
+		//do nothing
+	}
+	return 0;
+}
+unsigned int AutoActionMgr::onServerEnd_Kill_Monster(s_net_cmd *cmd)
+{
+	NET_SIS_Auto_Kill_End *msg = (NET_SIS_Auto_Kill_End*)cmd;
+	if (msg->dwErrorCode == E_Success)
+	{
+		Set_Auto_Action(false);
+	}
+	return 0;
+}
+
+// bool AutoActionMgr::IsMonsterInDistance(const CCPoint &monsterPos,float &outDis)
+// {
+// 	//float dis = fabs(m_PlayerPos.x - monsterPos.x)*fabs(m_PlayerPos.x - monsterPos.x) + fabs(m_PlayerPos.y-monsterPos.y)*fabs(m_PlayerPos.y-monsterPos.y);
+// 	CCPoint locPos = RoleManager::getInstance()->getLocalPlayer()->getPosition();//获取玩家当前所处位置
+// 	//outDis = fabs(locPos.x - monsterPos.x)*fabs(locPos.x - monsterPos.x) + fabs(locPos.y-monsterPos.y)*fabs(locPos.y-monsterPos.y);//计算当前怪物与玩家的距离
+// 	float killRadius = GetAutoKillScope();
+// 
+// 	float dis = ccpDistance(m_PlayerPos,monsterPos);
+// 	outDis = ccpDistance(locPos,monsterPos);
+// 	float judegDis = dis;
+// 	if ( MapManager::getInstance()->IsInstance() )
+// 		judegDis = outDis;
+// 	if (judegDis < killRadius+1)
+// 	{
+// 		return true;
+// 	}
+// 	else
+// 	{
+// 		return false;
+// 	}
+// }
+
+void AutoActionMgr::Update(float dt)
+{
+	_interval_time += dt;
+	if (_interval_time < 0.2f) return;	
+	_interval_time = 0;
+
+	//若处于非自动打怪状态
+	if (!b_auto_action)
+		return;
+	//若玩家已死亡
+
+	LocalPlayer* pLocPlayer = RoleManager::getInstance()->getLocalPlayer();//本地玩家
+	if (1 == pLocPlayer->getAttribute(RA_DEAD))
+	{
+		Set_Auto_Action(false);//死亡则不再继续挂机
+		return;
+	}
+	
+	//UpdatePicking(dt);
+// 	if (!hasPriorityListAll())
+// 	{
+// 		update_select_enemy();
+// 	}
+
+	if(!UpdateTodo(pLocPlayer))
+	{
+		update_select_enemy();
+	}
+}
+
+void AutoActionMgr::update_select_enemy()
+{
+	//若正在移动到怪物进行打击，则不继续更新
+	RoleManager* role_mgr = RoleManager::getInstance();
+	LocalPlayer* lp = role_mgr->getLocalPlayer();//本地玩家
+	if (!IS_VALID_PTR(lp))
+		return;
+
+	unsigned int sel_target_id = role_mgr->get_select_role_id();
+	float distance =0.0f;
+	Role* target_role = role_mgr->findRole(sel_target_id);
+	if (target_role && common_check_auto_atk_target(target_role,distance))
+	{
+		set_auto_target(target_role);
+		return;
+	}
+
+// 	if (_cache_target.is_valid_atk_target())
+// 	{
+// 		target_role = role_mgr->findRoleByProtoTypeID(_cache_target.target_id);
+// 		if(!target_role)
+// 		{
+// 			set_auto_target(NULL);
+// 			return;
+// 		}
+// 	}
+
+	const RoleManager::RoleMap &all_remote_role = RoleManager::getInstance()->getAllRemoteRole();
+	if (all_remote_role.empty())
+	{
+		set_auto_target(NULL);
+		return;
+	}
+
+	valid_target_list list;
+	
+	std::function<bool(Role*)> filter = 
+		[this,&distance](Role* role)
+		{
+			return role && common_check_auto_atk_target(role,distance);
+		};
+	
+	std::function<AutoActionMgr::st_valid_target(Role* role)> tranform = 
+		[&distance](Role* role)
+		{
+			return AutoActionMgr::st_valid_target(role,distance);
+		};
+	//RoleManager::RoleMap::const_iterator iter  = all_remote_role.begin();
+	//RoleManager::RoleMap::const_iterator end  = all_remote_role.end();
+
+	//float distance_reused=0.0f;
+
+	boost::range::push_back(list,
+							all_remote_role | boost::adaptors::map_values
+											| boost::adaptors::filtered(filter)
+											| boost::adaptors::transformed(tranform));
+
+// 	BOOST_FOREACH (Role* role , all_remote_role|boost::adaptors::map_values)
+// 	{
+// 		//target_role  = iter->second;
+// 		if (role && common_check_auto_atk_target(role,distance))
+// 		{
+// 			list.push_back(st_valid_target(target_role,distance));
+// 		}
+// 	}
+
+	if (list.empty())
+	{
+		set_auto_target(NULL);
+		return;
+	}
+
+	std::sort(	list.begin(),
+				list.end(),
+				[](st_valid_target const& lh,st_valid_target const& rh)
+	{
+		return lh.distance < rh.distance;
+	});
+
+	target_role =peek_target_from_list(list,lp->getAttribute(RA_BATTLEMODE));
+	CC_ASSERT(target_role);
+	set_auto_target(target_role);
+}
+
+bool AutoActionMgr::UpdateTodo(LocalPlayer* lp)
+{
+	pickup_point_ptr cur_point = peek_next_point(lp->getPosition());
+	bool ret = cur_point.get() != nullptr;	
+	if (cur_point)
+	{
+		if(lp->stateMachine()->CurrentState()
+			== LocalPlayerStateStand::getInstance())
+		{
+			lp->runPathTo(cur_point->pt);
+			return ret;
+			//m_last_target = cur_point->id;
+		}
+	}
+	else
+	{
+		if(!IsTaskFinish)
+		{
+			bool pre = lp->stateMachine()->CurrentState() == LocalPlayerStatePreAttack::getInstance()?true:false;
+			bool run = lp->stateMachine()->CurrentState() == LocalPlayerStateRun::getInstance()?true:false;
+			bool running = lp->getAutoRunState();
+			if (!pre && !run &&!running)
+			{	 
+				if (!IS_VALID(m_atk_target_id))
+					return ret;
+
+				//lp->setEnterAttackState();
+				lp->attackTo(m_atk_target_id);
+			}
+		}
+		else
+		{
+			QuestMgr::getInstance()->AutoFindPath(m_usQuestId,m_iCompleteTaskId);
+			IsTaskFinish = false;
+		}
+	}
+
+	return ret;
+}
+
+/*以下函数的功能是为了实现自动拾取*/
+//没用到
+// void AutoActionMgr::SetAutoPickMark(char index,short value)
+// {
+// 	if (index <= EAPI_NULL || index >=EAPI_End)
+// 		return;
+// 	m_AutoPickupMark[index] = value;
+// 	return;
+// }
+
+// void AutoActionMgr::SelectPickItem(INT64 id)
+// {
+// 	m_PickItem.id = id;
+// }
+
+unsigned int AutoActionMgr::OnServerItemPickUp(s_net_cmd *cmd)
+{
+	NET_SIS_role_pickup_item *msg = (NET_SIS_role_pickup_item*)cmd;
+	//不考虑拾取失败的情况
+	//tiaoshi
+	if (msg->dw_error_code != E_Success)
+	{
+		if (E_Loot_BAG_NOT_ENOUGH_SPACE == msg->dw_error_code)
+		{
+		}
+		else if (E_Loot_Item_Not_Found == msg->dw_error_code || E_Loot_Role_Not_Found == msg->dw_error_code)
+		{
+
+		}
+		else if( E_Loot_Belong_To_Teammate == msg->dw_error_code ) //小队其他成员的物品，不可拾取
+		{
+			ToolTip::getInstance()->push(GET_STR( 7153 ));				
+		}
+		else
+		{
+			//do nothingS
+		}
+
+	}
+	else
+	{
+		GroundItemManager::getInstance()->releaseItem(msg->n64_serial);
+	}
+
+	return 0;
+}
+unsigned int AutoActionMgr::OnServerItemDisapper(s_net_cmd *cmd)
+{
+	return 0;
+}
+bool AutoActionMgr::is_special_ground_role(unsigned int typeID)const
+{
+ 	for (int i = 0;i<MONSTER_CANNTHIT_NUM;++i)
+ 	{
+ 		if (typeID == g_MonsterCanntHit[i])
+ 		{
+ 			return true;
+ 		}
+ 	}
+ 	return false;
+}
+
+bool AutoActionMgr::CanStartAutoKill()
+{
+	LocalPlayer* pLoc = RoleManager::getInstance()->getLocalPlayer();
+	if (pLoc == NULL)
+	{
+		return false;
+	}
+	s_receive_chat_info info;
+	info.send_channel = ESCC_System;
+	
+	/*玩家自身状态检测*/
+	//若玩家已死亡
+	if (1 == pLoc->getAttribute(RA_DEAD))
+	{
+		/*info.chat_text = GET_STR(150);
+		ChatMgr::getInstance()->ShowInfoByChatChannel(info);*/
+		if(IsShowTip)
+		{
+			ToolTip::getInstance()->push(GET_STR(150));
+		}
+		return false;
+	}
+	/*玩家社交状态检测*/
+	//双修
+	if (pLoc->getAttribute(RA_ShuangXiu) != 0)
+	{
+		/*info.chat_text = GET_STR(150);
+		ChatMgr::getInstance()->ShowInfoByChatChannel(info);*/
+		if(IsShowTip)
+		{
+			ToolTip::getInstance()->push(GET_STR(150));
+		}
+		//提示：当前状态无法进行自动打怪
+		return false;
+	}
+	if (pLoc->getAttribute(RA_Stall) != 0)
+	{
+		/*info.chat_text = GET_STR(150);
+		ChatMgr::getInstance()->ShowInfoByChatChannel(info);*/
+		//提示：当前状态无法进行自动打怪
+		if(IsShowTip)
+		{
+			ToolTip::getInstance()->push(GET_STR(150));
+		}
+	}
+	return true;
+}
+
+// void AutoActionMgr::SetAutoKillScope( short nPercent /*= 100*/ )
+// {
+// 	if (nPercent < 0 || nPercent > 100)
+// 		return;
+// 	//m_Kill_Radius = AUTO_KILL_RADIUS_MIN + (float)nPercent/100.0 * AUTO_KILL_RADIUS_MIN;
+// }
+
+bool AutoActionMgr::CanPickUpCurItem(unsigned int ownerID,unsigned int teamID)const
+{
+	unsigned int localPlayerID = RoleManager::getInstance()->getLocalPlayer()->getId();
+	//若指定了归属玩家
+	if (IS_VALID(ownerID))
+	{
+		if (localPlayerID == ownerID)
+		{
+			return true;
+		}
+	}
+	else
+	{
+		//若指定了归属小队
+		if (IS_VALID(teamID))
+		{
+			if (TeamMgr::getInstance()->get_team_id() == teamID)
+			{
+				return true;
+			}
+		}
+		else
+		{
+			return true;
+		}
+	}
+	return false;
+}
+bool AutoActionMgr::CanItemUse(unsigned int typeID)
+{
+	for (int i = 0;i < ITEM_ITERRUPT_AUTOKILL;i++)
+	{
+		if (g_ItemIterruptAutoKill[i] == typeID)
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+// float AutoActionMgr::GetAutoKillScope()
+// {
+// 	//获取UI保存的数据
+// 	const HookSetData &tmpData = GET_UI(HookSetUi, WCT_HookSetUi)->getHookSetData();
+// 	int nScope = tmpData.attackRange;
+// 	if (nScope <= 0 || nScope > 100)
+// 		return (float)AUTO_KILL_RADIUS_MIN;
+// 	return (float)(AUTO_KILL_RADIUS_MIN + (float)nScope/100.f * AUTO_KILL_RADIUS_MIN);
+// }
+
+void AutoActionMgr::SetAutoPickOption()
+{
+	//获取UI保存的数据
+	const AutoSetData &tmpData = GET_UI(HookSetUi, WCT_HookSetUi)->getAutoSetData();
+// 	m_AutoPickupMark[EAPI_Gold] = (true == tmpData.data[3])?1:0;
+// 	m_AutoPickupMark[EAPI_Medicine] = (true == tmpData.data[4])?1:0;
+// 	m_AutoPickupMark[EAPI_Equip] = (true == tmpData.data[5])?1:0;
+// 	m_AutoPickupMark[EAPI_Skill] = (true == tmpData.data[6])?1:0;
+// 	m_AutoPickupMark[EAPI_Treasure] = (true == tmpData.data[7])?1:0;
+// 	m_AutoPickupMark[EAPI_Consume] = (true == tmpData.data[8])?1:0;
+// 	//add by lpf 2015-08-29
+// 	m_AutoPickupMark[EAPI_ChatButton] = (true == tmpData.data[9])?1:0;
+// 	m_AutoPickupMark[EAPI_WorldVoice] = (true == tmpData.data[10])?1:0;
+// 	m_AutoPickupMark[EAPI_GuildVoice] = (true == tmpData.data[11])?1:0;
+// 	m_AutoPickupMark[EAPI_TeamVoice] = (true == tmpData.data[12])?1:0;
+// 	m_AutoPickupMark[EAPI_Material] = (true == tmpData.data[13])?1:0;
+// 	m_AutoPickupMark[EAPI_Other] = (true == tmpData.data[14])?1:0;
+
+	m_pickup_opt[EAPI_Gold] = (true == tmpData.data[3])?1:0;
+	m_pickup_opt[EAPI_Medicine] = (true == tmpData.data[4])?1:0;
+	m_pickup_opt[EAPI_Equip] = (true == tmpData.data[5])?1:0;
+	m_pickup_opt[EAPI_Skill] = (true == tmpData.data[6])?1:0;
+	m_pickup_opt[EAPI_Treasure] = (true == tmpData.data[7])?1:0;
+	m_pickup_opt[EAPI_Consume] = (true == tmpData.data[8])?1:0;
+	//add by lpf 2015-08-29
+	m_pickup_opt[EAPI_ChatButton] = (true == tmpData.data[9])?1:0;
+	m_pickup_opt[EAPI_WorldVoice] = (true == tmpData.data[10])?1:0;
+	m_pickup_opt[EAPI_GuildVoice] = (true == tmpData.data[11])?1:0;
+	m_pickup_opt[EAPI_TeamVoice] = (true == tmpData.data[12])?1:0;
+	m_pickup_opt[EAPI_Material] = (true == tmpData.data[13])?1:0;
+	m_pickup_opt[EAPI_Other] = (true == tmpData.data[14])?1:0;
+}
+
+bool AutoActionMgr::IsAutoPickUpItem( unsigned int typeID )
+{
+	if (!IS_VALID(typeID))
+		return false;
+
+	ItemTypeData const* item_data =
+		PackageManager::getInstance()->get_item_proto_ptr(typeID);
+	if (!item_data)	return false;
+
+	if (!is_valid_pickup_type((int)item_data->spcialType))
+		return false;
+
+	return is_in_pickup_option(typeID,(int)item_data->spcialType);
+}
+
+void AutoActionMgr::setCurrentQuestID(UINT id, TraceTarget const&  mid)
+{
+	/*if (id != 1002)
+		_questID = id;*/
+	_questID = id;
+	//_questMonst = mid;
+
+	_cache_target = mid;
+}
+
+UINT AutoActionMgr::getCurrentQuestID()
+{
+	return _questID;
+}
+
+bool AutoActionMgr::getCurrentMonsterID(unsigned int& id)
+{
+	id = _cache_target.target_id;
+	return _cache_target.is_valid_atk_target();
+}
+
+void AutoActionMgr::remove_if_send_pickup(INT64 id)
+{
+	m_points.erase(std::remove_if(
+		m_points.begin(),
+		m_points.end(),
+		[id](pickup_point_ptr const& one)
+		{
+			return one->id == id;
+		})
+	,m_points.end());
+}
+
+UINT AutoActionMgr::onServerMonsterKilled(s_net_cmd *cmd)
+{
+	NET_SIS_role_dead* msg = (NET_SIS_role_dead*)cmd;
+	if (IS_VALID(m_atk_target_id) && msg->dw_role_id == m_atk_target_id)
+	{
+		m_atk_target_id = INVALID;
+		if (AutoActionMgr::getInstance()->Get_Auto_Action())
+		{
+			LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+			MessageDispatcher::Instance()->DispatchMsg(-1.0, NULL, lp, M_LpStand, NULL);
+			generate_pickup_points();//触发一次拾取
+		}
+		
+
+		if (_questID != INVALID)
+		{
+			INT state = QuestMgr::getInstance()->checkQuestStateByID(_questID);
+			if (state == AQ_NOT_EXIST)
+			{
+				setCurrentQuestID(INVALID,TraceTarget());
+			}
+			else if ((state == AQ_READY_FINISH)&&(_questID == 1002)) //如果是杀鸡任务，则在此执行自动寻路交任务，否则，在QuestMgr中的onServerUpdateQuest函数中执行自动寻路交任务，否则会有bug
+			{
+				QuestMgr::getInstance()->onQuestTraceSelect(_questID);
+			}
+		}
+
+// #if 1 //lzz
+// 		struct timeval tv;
+// 		gettimeofday(&tv , 0);
+// 		m_LastHitMonsterTime = tv.tv_sec*1000;
+// #else
+// 		m_LastHitMonsterTime = clock();
+// #endif
+	}
+	return 0;
+}
+
+
+void AutoActionMgr::set_auto_target( Role* target )
+{
+	if (target)
+	{
+		m_atk_target_id = target->getId();
+		RoleManager::getInstance()->SetTargetRole(target);
+		RoleManager::getInstance()->set_select_role_id(m_atk_target_id);
+	}
+	else
+	{
+		m_atk_target_id = INVALID;
+		RoleManager::getInstance()->SetTargetRole(NULL);
+		RoleManager::getInstance()->set_select_role_id(INVALID);
+	}
+
+}
+
+bool AutoActionMgr::common_check_auto_atk_target( Role* role,float& out_distance ) const
+{
+	return check_target_by_role_type(role)
+		&& check_distance(role,out_distance)
+		&&!MapManager::getInstance()->isBlockByAStar(role->getPosition())
+		&&RoleManager::getInstance()->canAttack(role);
+}
+
+bool AutoActionMgr::check_target_by_role_type( Role* role ) const
+{
+	eCreatureType type = role->getCreatureType();
+	unsigned int model_id = role->getTypeID();
+	bool is_pet  = IS_PET(model_id);
+	bool is_guard = model_id == 2007013;
+	bool is_special_ground_item  = is_special_ground_role(model_id);
+	return (type==CT_PLAYER || type==CT_MONSTER) && !is_pet&&!is_guard && !is_special_ground_item;
+}
+
+bool AutoActionMgr::check_distance( Role* target ,float& out_distance) const
+{
+	LocalPlayer* lp  = RoleManager::getInstance()->getLocalPlayer();
+	float distance  = ccpDistance(lp->getPosition(),target->getPosition());
+
+	bool ret = distance< MAX_ZHUIJI_RANG;
+	if (ret)
+	{
+		out_distance = distance;
+	}
+	return ret;
+}
+
+Role* AutoActionMgr::peek_target_from_list( valid_target_list& target_list,int policy )
+{
+	CC_ASSERT(target_list.size());
+	//先找任务缓存目标
+	if (_cache_target.is_valid_atk_target())
+	{
+		auto finder = std::find_if(target_list.begin()
+			,target_list.end()
+			,[&](st_valid_target const& one)->bool
+		{
+			return one.target->getTypeID()== _cache_target.target_id;
+		});
+
+		if (finder != target_list.end())
+		{
+			return (*finder).target; 
+		}
+	}
+	//再根据目标策略寻找
+	if (policy == ERolePK_Justice)
+	{
+		//最优先红名玩家
+		auto finder = std::find_if(target_list.begin()
+			,target_list.end()
+			,[](st_valid_target const& one)->bool
+		{
+			return one.target->getCreatureType()== CT_PLAYER;
+		});
+		//其次boss
+		if (finder != target_list.end())
+		{
+			return (*finder).target;
+		}
+		else
+		{
+			finder  = std::find_if(target_list.begin()
+				,target_list.end()
+				,[](st_valid_target const& one)->bool
+			{
+				Monster* mon = dynamic_cast<Monster*>(one.target);
+				return mon && mon->isBoss();
+			});
+			//最次是普通怪物
+			if (finder != target_list.end())
+			{
+				return (*finder).target;
+			}
+			else
+				return target_list.front().target;
+		}
+	}
+	else
+	{
+		return target_list.front().target;
+	}
+}
+
+void AutoActionMgr::on_event_sel_enemy_immediately( select_enemy_immediately* evt )
+{
+	update_select_enemy();
+}
+
+void AutoActionMgr::cancel_auto_action()
+{
+	if (Get_Auto_Action())
+	{
+		Set_Auto_Action(false);
+	}
+}
+
+void AutoActionMgr::generate_pickup_points()
+{
+	//从所有的地物里面拿取
+	GroundItemManager* ground_mgr = GroundItemManager::getInstance();
+	const GroundItemManager::UsedItemMap& items_in_ground =ground_mgr->getGroundItemMaps();
+	if (items_in_ground.empty()) return;
+
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	CCPoint lp_pos = lp->getPosition();
+
+	PackageManager* package_mgr = PackageManager::getInstance();
+
+
+	std::function<bool(GroundItemManager::UsedItemMap::value_type const&)> filter =
+		[ground_mgr,lp_pos,package_mgr,this](GroundItemManager::UsedItemMap::value_type const& kv)->bool
+	{
+		GroundItem * gi = kv.second;
+		INT64  gi_id=  kv.first;
+
+		int state = ground_mgr->getPickState(gi_id);
+		if (GroundItemManager::PS_SEND == state) return false;
+
+		CCPoint gi_pos = gi->getPosition();
+		float dis = ccpDistance(gi_pos,lp_pos);
+		//距离是否符合
+		if(dis > MAX_PICK_RANG)  return false;
+
+		//查看拾取列表中的信息是否符合
+		int item_type_id = gi->getTypeID();
+		ItemTypeData const* item_data  = package_mgr->get_item_proto_ptr(item_type_id);
+		if(!item_data) return false;; 
+		//int type_id = gi->getTypeID();
+		//int ret = this->GetTableByTypeId(type_id,tbl);
+		if (item_data->spcialType == -1) return false;
+		//检测是否为合理的拾取物品
+		if(!this->is_valid_pickup_type((int)item_data->spcialType)) return false;
+		//检测是否在自动拾取的勾选选项当中
+		if(!this->is_in_pickup_option(item_type_id,(int)item_data->spcialType)) return false;
+		//根据本地玩家情况看能否拾取
+		if (!this->CanPickUpCurItem(gi->getOwnerID(),gi->GetItemTeamId())) return false;
+		//一个金币的特例
+		if ( (unsigned int)ITEM_SLIVER_TYPE_ID ==item_type_id
+			&& PackageManager::getInstance()->getJinBi() > MAX_GOLD_DISPLAY)
+		{
+			return false;
+		}
+		//下面都是应该拾取的
+		std::function<bool(AutoActionMgr::pickup_point_ptr const& one)> find_id_equal 
+			=[gi_id](AutoActionMgr::pickup_point_ptr const& one){return one->id == gi_id;};
+
+
+		auto finder= std::find_if(m_points.begin()
+			,m_points.end()
+			,find_id_equal);
+
+		return finder == m_points.end();
+	};
+
+
+	std::function< AutoActionMgr::pickup_point_ptr (GroundItemManager::UsedItemMap::value_type const&) > transform_func=
+		[this](GroundItemManager::UsedItemMap::value_type const& kv)->AutoActionMgr::pickup_point_ptr
+	{ 
+		GroundItem * gi = kv.second;
+		INT64  gi_id=  kv.first;
+
+		int type_id = gi->getTypeID();
+		ItemTypeData const* item_data = PackageManager::getInstance()->get_item_proto_ptr(type_id);
+		CC_ASSERT(item_data);
+
+		GroundItemManager::getInstance()->addPickMap(gi_id);
+
+		return AutoActionMgr::pickup_point_ptr( new st_pickup_point(gi->getPosition() 
+			,convert_to_priority(item_data->spcialType)
+			,gi_id
+			,type_id));
+	};
+
+	std::vector<int> test;
+	boost::range::push_back(m_points,
+		items_in_ground |boost::adaptors::filtered(filter)
+		|boost::adaptors::transformed(transform_func));
+
+	/*
+	GroundItemManager::UsedItemMap::const_iterator iter =\
+	items_in_ground.begin(),end = items_in_ground.end();
+	for(;iter!= end;++iter)
+	{
+	GroundItem * gi = iter->second;
+	INT64  gi_id=  iter->first;
+	//地物的发送状态
+	int state = ground_mgr->getPickState(gi_id);
+	if (GroundItemManager::PS_SEND == state) continue;
+
+	CCPoint gi_pos = gi->getPosition();
+	float dis = ccpDistance(gi_pos,lp_pos);
+	//距离是否符合
+	if(dis > MAX_PICK_RANG)  continue;
+
+	//查看拾取列表中的信息是否符合
+	int item_type_id = gi->getTypeID();
+	ItemTypeData const* item_data  = package_mgr->get_item_proto_ptr(item_type_id);
+	if(!item_data) continue; 
+	//int type_id = gi->getTypeID();
+	//int ret = this->GetTableByTypeId(type_id,tbl);
+	if (item_data->spcialType == -1) continue;
+	//检测是否为合理的拾取物品
+	if(!this->is_valid_pickup_type((int)item_data->spcialType)) continue;
+	//检测是否在自动拾取的勾选选项当中
+	if(!this->is_in_pickup_option(item_type_id,(int)item_data->spcialType)) continue;
+	//根据本地玩家情况看能否拾取
+	if (!this->CanPickUpCurItem(gi->getOwnerID(),gi->GetItemTeamId())) continue;
+	//一个金币的特例
+	if ( (unsigned int)ITEM_SLIVER_TYPE_ID ==item_type_id
+	&& PackageManager::getInstance()->getJinBi() > MAX_GOLD_DISPLAY)
+	{
+	continue;
+	}
+	//看相关容器是不是满了,包括堆叠
+	// 		bool is_soul = (item_data->type == PIT_KungfuExp ||item_data->type == PIT_Kungfu );
+	// 		int space=  package_mgr->getBlankCount(is_soul?EICT_KungfuBag : EICT_Bag);
+	// 		if(is_soul && 0== space) 
+	// 			continue;
+	// 		else
+	// 		{
+	// 			if (0== space && package_mgr->stack_is_full(EICT_Bag,item_type_id))
+	// 				continue;
+	// 		}
+	//下面都是应该拾取的
+	auto finder= std::find_if(m_points.begin()
+	,m_points.end()
+	,[gi_id](pickup_point_ptr const& one)->bool
+	{
+	return one->id == gi_id;
+	});
+	//没有的才插入
+	if (finder == m_points.end())
+	{
+	m_points.push_back(
+	pickup_point_ptr(
+	new st_pickup_point(gi->getPosition() 
+	,convert_to_priority(item_data->spcialType)
+	,gi_id
+	,item_type_id)));
+	}
+
+	GroundItemManager::getInstance()->addPickMap(gi_id);
+	}
+	*/
+
+	std::sort(m_points.begin(),m_points.end(),
+		[](pickup_point_ptr const& lh,pickup_point_ptr const& rh)->bool
+	{
+		return lh->priority < rh->priority;
+	});
+}
+
+bool AutoActionMgr::is_valid_pickup_type( int type ) const
+{
+	return !(type < PICK_GOLD
+		||(type > PICK_CONSUME && type < PICK_MATERIAL)
+		||type > PICK_OTHERS);
+}
+
+bool AutoActionMgr::is_in_pickup_option(int item_type_id,int type ) const
+{
+	bool is_in_pickup_opt = true; 
+	if( b_auto_action )
+	{
+		is_in_pickup_opt = m_pickup_opt.test((size_t)type);//m_AutoPickupMark[type];
+		//强制金币的类型为0，DB经常被修改为5，金币拾取错误基本都是这个原因
+		if (item_type_id == ITEM_SLIVER_TYPE_ID)
+			is_in_pickup_opt = m_pickup_opt.test(PICK_GOLD);/*m_AutoPickupMark->[PICK_GOLD];*/
+	}
+
+	return is_in_pickup_opt;
+}
+
+AutoActionMgr::ePickUpPriority AutoActionMgr::convert_to_priority( int specail_type )
+{
+	switch (specail_type)
+	{
+	case PICK_GOLD: return PUP_GOLD;
+	case PICK_MEDICINE: return PUP_MEDICINE;
+	case PICK_EQUIP: return PUP_EQUIP;
+	case PICK_SKILL: return PUP_SKILL;
+	case PICK_TREASURE: return PUP_TREASURE;
+	case PICK_CONSUME: return PUP_CONSUME;
+	case PICK_MATERIAL: return PUP_MATERAIL;
+	case PICK_OTHERS: return PUP_OTHER;
+	}
+
+	return PUP_OTHER;
+}
+
+AutoActionMgr::pickup_point_ptr AutoActionMgr::peek_next_point(CCPoint const& lp_pos)
+{
+	//选下一点的时候，需要判断寻路和背包空间
+	auto finder= std::find_if(m_points.begin()
+		,m_points.end()
+		,[lp_pos](pickup_point_ptr const& one)->bool
+	{
+		return PackageManager::getInstance()->have_enough_space_for_picking(one->type_id)&&
+			MapManager::getInstance()->test_pathfind(lp_pos,one->pt);
+	});
+
+	return finder != m_points.end()? *finder: pickup_point_ptr();
+}
+
+

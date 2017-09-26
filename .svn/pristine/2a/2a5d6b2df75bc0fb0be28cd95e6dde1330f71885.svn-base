@@ -1,0 +1,304 @@
+/**************************************************************************************/
+//   Copyright (C) 2009-2012 Marilyn Dafa
+//   This file is part of the "Overdrive2D Engine".
+//   For conditions of distribution and use, see copyright notice in config.h
+/**************************************************************************************/
+#include "Response.h"
+
+
+#ifndef WIN32
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <errno.h>
+#endif
+
+#ifdef WIN32
+#include <winsock2.h>
+#define vsnprintf _vsnprintf
+#endif
+#include <cstdio>
+#include <cstring>
+#include <cstdarg>
+#include <assert.h>
+#include <string>
+#include <vector>
+#include <string>
+#include <algorithm>
+
+
+using namespace std;
+
+
+c_response::c_response(const char* method_, const char* localfile_)
+	:m_localfile(localfile_) ,
+	m_state(HS_STATUSLINE) ,
+	m_method(method_) ,
+	m_file(NULL) , 
+	m_version(0) ,
+	m_status(0) ,
+	m_bytes_read(0) ,
+	m_chunk_left(0) ,
+	m_length(-1) ,
+	m_chunked(false) ,
+	m_will_close(false)
+{}
+//--------------------------------------------------------
+c_response::~c_response(){}
+//--------------------------------------------------------
+int c_response::pump(const unsigned char* data_, int datasz_)
+{
+	assert(datasz_ != 0);
+	int count = datasz_;
+	while(count > 0 && m_state != HS_COMPLETE)
+	{
+		if(m_state == HS_STATUSLINE ||
+			m_state == HS_HEADERS ||
+			m_state == HS_TRAILERS ||
+			m_state == HS_CHUNKLEN ||
+			m_state == HS_CHUNKEND)
+		{
+			while(count > 0)
+			{
+				char c = (char)*data_++;
+				--count;
+				if(c == '\n')
+				{
+					switch(m_state)
+					{
+					case HS_STATUSLINE:
+						_process_status_line(m_line_buf);
+						break;
+					case HS_HEADERS:
+						_process_header_line(m_line_buf);
+						break;
+					case HS_TRAILERS:
+						_process_trailer_line(m_line_buf);
+						break;
+					case HS_CHUNKLEN:
+						_process_chunk_lenline(m_line_buf);
+						break;
+					case HS_CHUNKEND:
+						assert(m_chunked == true);
+						m_state = HS_CHUNKLEN;
+						break;
+					default:
+						break;
+					}
+					m_line_buf.clear();
+					break;
+				}
+				else
+				{
+					if(c != '\r')
+						m_line_buf += c;
+				}
+			}
+		}
+		else if(m_state == HS_BODY)
+		{
+			int bytesused = 0;
+			if(m_chunked)
+				bytesused = _process_data_chunked(data_, count);
+			else
+				bytesused = _process_data_non_chunked(data_, count);
+			data_ += bytesused;
+			count -= bytesused;
+		}
+	}
+	return datasz_ - count;
+}
+//--------------------------------------------------------
+void c_response::close()
+{
+	if(m_state == HS_COMPLETE)
+		return;
+	if(m_state == HS_BODY &&!m_chunked &&m_length == -1)
+		_finish();
+	else
+		fclose(m_file);
+}
+//--------------------------------------------------------
+const char* c_response::_get_header(const char* name_) const
+{
+	std::string lname(name_);
+	std::map<std::string, std::string>::const_iterator it = m_headers.find(lname);
+	if(it == m_headers.end())
+		return NULL;
+	else
+		return it->second.c_str();
+}
+//--------------------------------------------------------
+void c_response::_flush_header()
+{
+	if(m_header_accum.empty())
+		return;
+	const char* p = m_header_accum.c_str();
+	std::string header;
+	std::string value;
+	while(*p && *p != ':')
+		header += tolower(*p++);
+	if(*p)
+		++p;
+	while(*p && (*p ==' ' || *p=='\t'))
+		++p;
+	value = p;
+	m_headers[header] = value;
+	m_header_accum.clear();
+}
+//--------------------------------------------------------
+bool c_response::_process_status_line(std::string const& line_)
+{
+	const char* p = line_.c_str();
+	while(*p && *p == ' ')
+		++p;
+	while(*p && *p != ' ')
+		m_version_str += *p++;
+	while(*p && *p == ' ')
+		++p;
+	std::string status;
+	while(*p && *p != ' ')
+		status += *p++;
+	while(*p && *p == ' ')
+		++p;
+	while(*p)
+		m_reason += *p++;
+	m_status = atoi(status.c_str());
+	if(m_status < 100 || m_status > 999)
+		return false;
+	if(m_version_str == "HTTP:/1.0")
+		m_version = 10;
+	else if(0==m_version_str.compare(0,7,"HTTP/1."))
+		m_version = 11;
+	else
+		return false;
+	m_state = HS_HEADERS;
+	m_header_accum.clear();
+	return true;
+}
+//--------------------------------------------------------
+void c_response::_process_header_line(std::string const& line_)
+{
+	const char* p = line_.c_str();
+	if(line_.empty())
+	{
+		_flush_header();
+		if(m_status == 100)
+			m_state = HS_STATUSLINE;
+		else
+			_begin_body();
+		return;
+	}
+	if(isspace(*p))
+	{
+		++p;
+		while(*p && isspace(*p))
+			++p;
+		m_header_accum += ' ';
+		m_header_accum += p;
+	}
+	else
+	{
+		_flush_header();
+		m_header_accum = p;
+	}
+}
+//--------------------------------------------------------
+void c_response::_process_trailer_line(std::string const& line_)
+{
+	if(line_.empty())
+		_finish();
+}
+//--------------------------------------------------------
+void c_response::_process_chunk_lenline(std::string const& line_)
+{
+	m_chunk_left = strtol(line_.c_str(), NULL, 16);	
+	if(m_chunk_left == 0)
+	{
+		m_state = HS_TRAILERS;
+		m_header_accum.clear();
+	}
+	else
+	{
+		m_state = HS_BODY;
+	}
+}
+//--------------------------------------------------------
+int c_response::_process_data_chunked(const unsigned char* data_, int count_)
+{
+	assert(m_chunked);
+	int n = count_;
+	if(n>m_chunk_left)
+		n = m_chunk_left;
+	fwrite(data_, sizeof(unsigned char) , n , m_file);
+	m_bytes_read += n;
+	m_chunk_left -= n;
+	assert(m_chunk_left >= 0);
+	if(m_chunk_left == 0)
+		m_state = HS_CHUNKEND;
+	return n;
+}
+//--------------------------------------------------------
+int c_response::_process_data_non_chunked(const unsigned char* data_, int count_)
+{
+	int n = count_;
+	if(m_length != -1)
+	{
+		int remaining = m_length - m_bytes_read;
+		if(n > remaining)
+			n = remaining;
+	}
+	fwrite(data_, sizeof(unsigned char) , n , m_file);
+	m_bytes_read += n;
+	if(m_length != -1 && m_bytes_read == m_length)
+		_finish();
+	return n;
+}
+//--------------------------------------------------------
+void c_response::_begin_body()
+{
+	m_chunked = false;
+	m_length = -1;
+	m_will_close = false;
+	const char* trenc = _get_header("transfer-encoding");
+	if(trenc && 0==strcmp(trenc, "chunked"))
+	{
+		m_chunked = true;
+		m_chunk_left = -1;
+	}
+	m_will_close = _check_close();
+	const char* contentlen = _get_header("content-length");
+	if(contentlen && !m_chunked)
+		m_length = atoi(contentlen);
+	if(m_status == 204 || m_status == 304 || (m_status >= 100 && m_status < 200) || 	m_method == "HEAD")
+		m_length = 0;
+	if(!m_will_close && !m_chunked && m_length == -1)
+		m_will_close = true;
+	m_file = fopen(m_localfile.c_str() , "wb");
+	if(m_chunked)
+		m_state = HS_CHUNKLEN;
+	else
+		m_state = HS_BODY;
+}
+//--------------------------------------------------------
+bool c_response::_check_close()
+{
+	if(m_version == 11)
+	{
+		const char* conn = _get_header("connection");
+		if(conn && 0==strcmp(conn, "close"))
+			return true;
+		else
+			return false;
+	}
+	if(_get_header( "keep-alive"))
+		return false;
+	return true;
+}
+//--------------------------------------------------------
+void c_response::_finish()
+{
+	m_state = HS_COMPLETE;
+	fclose(m_file);
+}

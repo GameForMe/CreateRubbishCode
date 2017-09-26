@@ -1,0 +1,674 @@
+#include "SelectRoleUi.h"
+#include "TouchSprite.h"
+#include "SelectRoleViewNode.h"
+#include "CfgReader.h"
+#include "UiManager.h"
+#include "UiTools.h"
+#include "tools.h"
+#include "ToolTip.h"
+#include "SelectRole.h"
+#include "ServerListUi.h"
+#include "Login.h"
+#include "CreateRole.h"
+#include "UiResourceMgr.h"
+#include "GameActionNode.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "BSAnimate.h"
+#include "ClientUpdate.h"
+#include "Helper.h"
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+#include "wzolJni.h"
+#endif
+
+
+SelectRoleUi::SelectRoleUi()
+{
+/*
+	for(int i = 0; i < 1; i ++)
+	{
+		_roleView[i] = NULL;
+	}*/
+}
+
+SelectRoleUi::~SelectRoleUi()
+{
+
+}
+
+bool SelectRoleUi::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	return true;
+}
+
+bool SelectRoleUi::init()
+{
+	if(!CCLayer::init())
+		return false;
+
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("SelectRoleUiLoaderLayer", SelectRoleUiLoader::loader());
+	ccNodeLoaderLibrary->registerCCNodeLoader("SelectRoleViewNode", SelectRoleViewNodeLoader::loader());
+	ccNodeLoaderLibrary->registerCCNodeLoader("TouchSprite", TouchSpriteLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode * node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "selectroleui2.ccbi").c_str());
+
+	std::set<std::string>& resList = ccbReader->getLoadedSpriteSheet();
+	_plist = resList;
+
+	ccbReader->release();
+	//获取人物框的层
+	//_frame = dynamic_cast<CCSprite*>(getChildByTag(0));
+	//CCSpriteFrameCache* cache=CCSpriteFrameCache::sharedSpriteFrameCache();
+	//cache->addSpriteFramesWithFile("X_02.plist");
+
+	if(node != NULL) {
+
+		setPositionX(getPositionX() + UiMgr::getInstance()->getOffsetX());
+		setPositionY(getPositionY() + UiMgr::getInstance()->getOffsetY());
+
+		addChild(node);
+		m_SelectAcNode = dynamic_cast<GameActionNode*>(node->getChildByTag(RSP_SETag));
+		seNode1 = node->getChildByTag(35);
+		RoleInfoUiAttrs* roleInfos = SelectRole::getInstance()->getRoleAttr();
+		for(int i = 0; i < RSP_NUM; i ++)
+		{
+			roleInfos->roleInfo[i].name = NULL;
+			roleInfos->roleInfo[i].sex = NULL;
+			roleInfos->roleInfo[i].job = NULL;
+			roleInfos->roleInfo[i].level = NULL;
+			roleInfos->roleInfo[i].playerIcon = NULL;
+
+			roleInfos->roleInfo[i].selectBtn = (CCSprite*)node->getChildByTag(i * 20 + 20);
+			roleInfos->roleInfo[i].selectBtn->setZOrder(2);
+			roleInfos->roleInfo[i].name= Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(node->getChildByTag(i * 5 + 2)));
+			roleInfos->roleInfo[i].name->setZOrder(2);
+			roleInfos->roleInfo[i].sex = (CCLabelTTF*)node->getChildByTag(i * 5 + 3);
+			roleInfos->roleInfo[i].job = (CCLabelTTF*)node->getChildByTag(i * 5 + 4);
+			roleInfos->roleInfo[i].level=Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(node->getChildByTag(i * 5 + 5)));
+			roleInfos->roleInfo[i].level->setZOrder(2);
+			roleInfos->roleInfo[i].playerIcon = (CCSprite*)node->getChildByTag(i * 5 + 6);
+			roleInfos->roleInfo[i].playerIcon->setZOrder(2);
+			//vvv 增加创建角色 2014.10.11
+		    roleInfos->roleInfo[i].createrole=(CCSprite*)node->getChildByTag(i+1001);
+			roleInfos->roleInfo[i].createrole->setZOrder(2);
+			roleInfos->roleInfo[i].createrole->setVisible(true);
+			//vvv  2014.10.11
+			roleInfos->roleInfo[i].line=(CCSprite*)node->getChildByTag(i+998);
+			roleInfos->roleInfo[i].line->setZOrder(2);
+			roleInfos->roleInfo[i].line->setVisible(false);
+			roleInfos->roleInfo[i].jobnew=(CCSprite*)node->getChildByTag(i*35+35);//vvv
+			roleInfos->roleInfo[i].jobnew->setZOrder(3);
+			roleInfos->roleInfo[i].name->setString(" ");
+			roleInfos->roleInfo[i].sex->setString(" ");
+			roleInfos->roleInfo[i].job->setString(" ");
+			roleInfos->roleInfo[i].level->setString(" ");
+			//_roleView2[i]->signalRoleImgTouched.connect(this, &SelectRoleUi::onRoleSelected);
+		}
+		//加载玩家全身像
+		roleBody = (CCSprite*)node->getChildByTag(30);
+		roleBody->setPositionX(400.0f);
+		m_pActionNode = GameActionNode::create();
+		m_pShadow = CCSprite::create();
+		m_pShadow->setZOrder(-1);
+		m_pActionNode->addChild(m_pShadow);
+
+		
+		roleBody->removeFromParentAndCleanup(true);
+		ding = dynamic_cast<CCSprite*>(node->getChildByTag(55));
+		ding->setZOrder(1);
+		CCSprite *zhao1= dynamic_cast<CCSprite*>(node->getChildByTag(57));
+		zhao1->setZOrder(1);
+		CCSprite *zhao2= dynamic_cast<CCSprite*>(node->getChildByTag(58));
+		zhao2->setZOrder(1);
+		CCSprite *ding2= dynamic_cast<CCSprite*>(node->getChildByTag(56));
+		ding2->setZOrder(1);
+		CCSprite *selectrole= dynamic_cast<CCSprite*>(node->getChildByTag(59));
+		selectrole->setZOrder(2);
+		
+		//调整界面上图片的显示层次  vv.2014.9.2
+		CCControlButton *button1= dynamic_cast<CCControlButton*>(node->getChildByTag(200));
+		button1->setZOrder(2);
+		CCControlButton *button2= dynamic_cast<CCControlButton*>(node->getChildByTag(201));
+		button2->setZOrder(2);
+		//火的特效
+		m_FireLiftEffect = GameActionNode::create();
+		m_FireLiftEffect->setPosition(ccp(node->getChildByTag(50)->getPosition().x,node->getChildByTag(50)->getPosition().y + 30));
+		m_FireRightEffect = GameActionNode::create();
+		m_FireRightEffect->setPosition(ccp(node->getChildByTag(51)->getPosition().x,node->getChildByTag(51)->getPosition().y + 30));
+	    node->addChild(m_FireLiftEffect,0);
+		node->addChild(m_FireRightEffect,0);
+		//加载俩边的火焰特效
+		std::string uiDirFire = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+		std::string uiDirPathFire = uiDirFire + "login_e_fire.plist";
+
+		m_FireLiftEffect->InitWithPList(uiDirPathFire.c_str(), "login_e_fire");
+		m_FireRightEffect->InitWithPList(uiDirPathFire.c_str(), "login_e_fire");
+
+		m_FireLiftEffect->BeginAction(0.03f, true);
+		m_FireRightEffect->BeginAction(0.03f, true);
+		//[bing] 加载3个职业动态图片从plist
+		std::string uiDir = CFGReader::instance()->get_profile_string("Art", "Role", "");
+
+		std::string uiDirPath = uiDir + "male_zhanshi.plist";
+		_plist.insert(uiDirPath);
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(uiDirPath.c_str());
+
+		uiDirPath = uiDir + "female_zhanshi.plist";
+		_plist.insert(uiDirPath);
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(uiDirPath.c_str());
+
+		uiDirPath = uiDir + "male_daoshi.plist";
+		_plist.insert(uiDirPath);
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(uiDirPath.c_str());
+
+		uiDirPath = uiDir + "female_daoshi.plist";
+		_plist.insert(uiDirPath);
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(uiDirPath.c_str());
+
+		uiDirPath = uiDir + "male_fashi.plist";
+		_plist.insert(uiDirPath);
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(uiDirPath.c_str());
+
+		uiDirPath = uiDir + "female_fashi.plist";
+		_plist.insert(uiDirPath);
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(uiDirPath.c_str());
+
+		UiResourceMgr::getInstance()->retainPlistFile(_plist);
+
+		AnimationCache::createDefList(1, m_pAnimateFireM, false);
+		AnimationCache::createDefList(1, m_pAnimateFireW, false);
+		AnimationCache::getInstance()->getSinEffect(0, "E1_174", m_pAnimateFireM);
+		AnimationCache::getInstance()->getSinEffect(1, "E1_175", m_pAnimateFireW);
+
+#ifdef WIN32
+/*
+		CCControlButton *enterXiaomiBBS = dynamic_cast<CCControlButton *>(node->getChildByTag(RSP_XiaoMiBBS));
+		CC_ASSERT(enterXiaomiBBS != NULL);
+		enterXiaomiBBS->setVisible(false);*/
+#else
+/*		if(!WzolJni::getInstance()->hasBBS())
+		{
+			CCControlButton *enterXiaomiBBS = dynamic_cast<CCControlButton *>(node->getChildByTag(RSP_XiaoMiBBS));
+			CC_ASSERT(enterXiaomiBBS != NULL);
+			if (enterXiaomiBBS)
+				enterXiaomiBBS->setVisible(false);
+		}*/
+#endif
+
+		return true;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       
+
+	}
+	return false;  
+}
+
+void SelectRoleUi::onExit()
+{
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+	_plist.clear();
+	AnimationCache::getInstance()->releaseDefList(m_pAnimateFireM);
+	AnimationCache::getInstance()->releaseDefList(m_pAnimateFireW);
+	AnimationCache::getInstance()->releaseSinEffect("E1_174",true);
+	AnimationCache::getInstance()->releaseSinEffect("E1_175",true);
+	CCLayer::onExit();
+}
+
+void SelectRoleUi::updateRolePhoto(int i)
+{
+	m_pActionNode->StopAction(true);
+	RoleInfoUiAttrs* roleInfos = SelectRole::getInstance()->getRoleAttr();
+
+	CCSprite* fa_shi_fire = dynamic_cast<CCSprite*>(m_pActionNode->getChildByTag(FA_SHI_FIRE_EFFECT_TAG));
+	if(fa_shi_fire != NULL)
+	{
+		fa_shi_fire->stopAllActions();
+		fa_shi_fire->retain();
+		fa_shi_fire->removeFromParentAndCleanup(true);
+		fa_shi_fire = NULL;
+	}
+	std::string strJob;
+	switch (roleInfos->roleInfo[i].type)
+	{
+	case RTE_MWARRIOR:
+		{
+			m_pShadow->initWithSpriteFrame( CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("nanzhanshi_shadow"));
+			strJob = "male_zhanshi_";
+			m_pActionNode->InitTextureWithSpriteFrame(strJob.c_str());
+			SelectRole::getInstance()->setrolebody(m_pActionNode);
+		}
+		break;
+	case RTE_WWARRIOR:
+		{
+			m_pShadow->initWithSpriteFrame( CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("nvzhanshi_shadow"));
+			strJob = "female_zhanshi_";
+			m_pActionNode->InitTextureWithSpriteFrame(strJob.c_str());
+			SelectRole::getInstance()->setrolebody(m_pActionNode);
+		}
+		break;
+	case RTE_MMASTER:
+		{
+			CCSprite* m_pFashiFire = CCSprite::create();
+			m_pFashiFire->setZOrder(100);
+			m_pShadow->initWithSpriteFrame( CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("nanfashi_shadow"));
+			strJob = "male_fashi_";
+			BSAnimate *animate = m_pAnimateFireM[0];
+			if (animate)
+			{
+				m_pFashiFire->runAction(CCRepeatForever::create(animate));
+				m_pFashiFire->setVisible(true);
+				m_pFashiFire->setTag(FA_SHI_FIRE_EFFECT_TAG);
+				m_pActionNode->addChild(m_pFashiFire);
+				m_pActionNode->InitTextureWithSpriteFrame(strJob.c_str());
+				SelectRole::getInstance()->setrolebody(m_pActionNode,FA_SHI_FIRE_EFFECT_TAG,0.16,0.12);
+			}
+		}
+		break;
+	case RTE_WMASTER:
+		{
+			m_pShadow->initWithSpriteFrame( CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("nvfashi_shadow"));
+			strJob = "female_fashi_";
+			BSAnimate *animate = m_pAnimateFireW[0];
+			if (animate)
+			{
+				CCSprite* m_pFashiFire = CCSprite::create();
+				m_pFashiFire->setZOrder(100);
+				m_pFashiFire->runAction(CCRepeatForever::create(animate));
+				m_pFashiFire->setVisible(true);
+				m_pFashiFire->setTag(FA_SHI_FIRE_EFFECT_TAG);
+				m_pActionNode->addChild(m_pFashiFire);
+				m_pActionNode->InitTextureWithSpriteFrame(strJob.c_str());
+				SelectRole::getInstance()->setrolebody(m_pActionNode,FA_SHI_FIRE_EFFECT_TAG,-0.18,0.09);
+			}
+		}
+		break;
+	case RTE_MTAOIST:
+		{
+			m_pShadow->initWithSpriteFrame( CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("nandaoshi_shadow"));
+			strJob = "male_daoshi_";
+			m_pActionNode->InitTextureWithSpriteFrame(strJob.c_str());
+			SelectRole::getInstance()->setrolebody(m_pActionNode);
+		}
+		break;
+	case RTE_WTAOIST:
+		{
+			m_pShadow->initWithSpriteFrame( CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("nvdaoshi_shadow"));
+			strJob = "female_daoshi_";
+			m_pActionNode->InitTextureWithSpriteFrame(strJob.c_str());
+			SelectRole::getInstance()->setrolebody(m_pActionNode);
+		}
+		break;
+	}
+	
+}
+
+void SelectRoleUi::addRoleView(RoleInfo roleInfo)
+{ 
+	const wchar_t *Tmp = roleInfo.name;
+	RoleInfoUiAttrs* roleInfos = SelectRole::getInstance()->getRoleAttr();
+
+	roleInfos->roleInfo[roleInfo.roleNum].name->setString(convertName(Tmp).c_str());
+	roleInfos->roleInfo[roleInfo.roleNum].roleId = roleInfo.id;
+	roleInfos->roleInfo[roleInfo.roleNum].roleName = convertName(Tmp).c_str();
+	roleInfos->roleInfo[roleInfo.roleNum].roleLevel = roleInfo.level;
+	roleInfos->roleInfo[roleInfo.roleNum].type = roleInfo.type;
+	switch (roleInfo.type)
+	{
+	case RTE_MWARRIOR:
+		roleInfos->roleInfo[roleInfo.roleNum].createrole->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_createrole"));
+		roleInfos->roleInfo[roleInfo.roleNum].createrole->setVisible(false);
+		roleInfos->roleInfo[roleInfo.roleNum].line->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_line"));;//vvv 增加创建角色 2014.10.11
+		roleInfos->roleInfo[roleInfo.roleNum].line->setVisible(true);
+		roleInfos->roleInfo[roleInfo.roleNum].jobnew->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_warrior"));
+		roleInfos->roleInfo[roleInfo.roleNum].jobnew->setVisible(true);
+		roleInfos->roleInfo[roleInfo.roleNum].sex->setString("\xE7\x94\xB7");
+		roleInfos->roleInfo[roleInfo.roleNum].job->setString( GET_STR(8).c_str());
+		//roleInfos->roleInfo[roleInfo.roleNum].playerIcon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_warriornanhead"));
+		if (roleInfo.roleNum == 0)
+		{
+			//roleBody->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_warriornanphoto"));//createroleui_warriornanheadh
+		}
+		break;
+	case RTE_WWARRIOR:
+		roleInfos->roleInfo[roleInfo.roleNum].createrole->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_createrole"));
+		roleInfos->roleInfo[roleInfo.roleNum].createrole->setVisible(false);
+		roleInfos->roleInfo[roleInfo.roleNum].line->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_line"));
+		roleInfos->roleInfo[roleInfo.roleNum].line->setVisible(true);
+		roleInfos->roleInfo[roleInfo.roleNum].jobnew->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_warrior"));
+		roleInfos->roleInfo[roleInfo.roleNum].jobnew->setVisible(true);
+		roleInfos->roleInfo[roleInfo.roleNum].sex->setString("\xE5\xA5\xB3");
+		roleInfos->roleInfo[roleInfo.roleNum].job->setString(GET_STR(8).c_str());
+		//roleInfos->roleInfo[roleInfo.roleNum].playerIcon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_warriornvhead"));
+		if (roleInfo.roleNum == 0)
+		{
+			//roleBody->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_warriornvphoto"));
+		}
+		break;
+	case RTE_MMASTER:
+		roleInfos->roleInfo[roleInfo.roleNum].createrole->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_createrole"));
+		roleInfos->roleInfo[roleInfo.roleNum].createrole->setVisible(false);
+		roleInfos->roleInfo[roleInfo.roleNum].line->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_line"));
+		roleInfos->roleInfo[roleInfo.roleNum].line->setVisible(true);
+		roleInfos->roleInfo[roleInfo.roleNum].jobnew->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_mage"));
+		roleInfos->roleInfo[roleInfo.roleNum].jobnew->setVisible(true);
+		roleInfos->roleInfo[roleInfo.roleNum].sex->setString("\xE7\x94\xB7");
+		roleInfos->roleInfo[roleInfo.roleNum].job->setString(GET_STR(9).c_str());
+		//roleInfos->roleInfo[roleInfo.roleNum].playerIcon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_magenanhead"));
+		if (roleInfo.roleNum == 0)
+		{
+			//roleBody->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_magenanphoto"));
+		}
+		break;
+	case RTE_WMASTER:
+		roleInfos->roleInfo[roleInfo.roleNum].createrole->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_createrole"));
+		roleInfos->roleInfo[roleInfo.roleNum].createrole->setVisible(false);
+		roleInfos->roleInfo[roleInfo.roleNum].line->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_line"));
+		roleInfos->roleInfo[roleInfo.roleNum].line->setVisible(true);
+		roleInfos->roleInfo[roleInfo.roleNum].jobnew->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_mage"));
+		roleInfos->roleInfo[roleInfo.roleNum].jobnew->setVisible(true);
+		roleInfos->roleInfo[roleInfo.roleNum].sex->setString("\xE5\xA5\xB3");
+		roleInfos->roleInfo[roleInfo.roleNum].job->setString(GET_STR(9).c_str());
+		//roleInfos->roleInfo[roleInfo.roleNum].playerIcon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_magenvhead"));
+		if (roleInfo.roleNum == 0)
+		{
+		//	roleBody->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_magenvphoto"));
+		}
+		break;
+	case RTE_MTAOIST:
+		roleInfos->roleInfo[roleInfo.roleNum].createrole->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_createrole"));
+		roleInfos->roleInfo[roleInfo.roleNum].createrole->setVisible(false);
+		roleInfos->roleInfo[roleInfo.roleNum].line->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_line"));
+		roleInfos->roleInfo[roleInfo.roleNum].line->setVisible(true);
+		roleInfos->roleInfo[roleInfo.roleNum].jobnew->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_taoist"));
+		roleInfos->roleInfo[roleInfo.roleNum].jobnew->setVisible(true);
+		roleInfos->roleInfo[roleInfo.roleNum].sex->setString("\xE7\x94\xB7");
+		roleInfos->roleInfo[roleInfo.roleNum].job->setString(GET_STR(10).c_str());
+		//roleInfos->roleInfo[roleInfo.roleNum].playerIcon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_taoistnanhead"));
+		if (roleInfo.roleNum == 0)
+		{
+			//roleBody->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_taoistnanphoto"));
+		}
+		break;
+	case RTE_WTAOIST:
+		roleInfos->roleInfo[roleInfo.roleNum].createrole->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_createrole"));
+		roleInfos->roleInfo[roleInfo.roleNum].createrole->setVisible(false);
+		roleInfos->roleInfo[roleInfo.roleNum].line->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_line"));
+		roleInfos->roleInfo[roleInfo.roleNum].line->setVisible(true);
+		roleInfos->roleInfo[roleInfo.roleNum].jobnew->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("selectroleui_taoist"));
+		roleInfos->roleInfo[roleInfo.roleNum].jobnew->setVisible(true);
+		roleInfos->roleInfo[roleInfo.roleNum].sex->setString("\xE5\xA5\xB3");
+		roleInfos->roleInfo[roleInfo.roleNum].job->setString(GET_STR(10).c_str());
+	//	roleInfos->roleInfo[roleInfo.roleNum].playerIcon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_taoistnvhead"));
+		if (roleInfo.roleNum == 0)
+		{
+			//roleBody->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_taoistnvphoto"));
+		}
+		break;
+	}
+	roleInfos->roleInfo[roleInfo.roleNum].level->setString(CCString::createWithFormat("%d",roleInfo.level)->getCString());
+
+//	CCPoint outScreenPos = ccp(-CCDirector::sharedDirector()->getWinSize().width, -CCDirector::sharedDirector()->getWinSize().height);
+	if(seNode1->isVisible())
+	{
+		if(!m_SelectAcNode->isVisible())
+		{
+			m_SelectAcNode->setVisible(true);
+			m_SelectAcNode->BeginAction(0.12f, true);
+		}
+	}
+
+	/*
+	static bool bIsLoad = false;
+	if(!bIsLoad)
+	{
+		bIsLoad = true;
+	*/
+	if(roleInfo.roleNum == 0)
+		updateRolePhoto(0);
+	//}
+}
+void SelectRoleUi::removeRoleView()
+{
+/*
+
+	for(int i = 0; i < 1; i++)
+	{
+		_roleView[i]->setState(0);
+	}*/
+}
+
+int SelectRoleUi::getSelectRoleId()
+{
+
+	for(int i = 0; i < 1; i ++)
+	{
+		if(_roleView[i]->getState() == 2)
+			return _roleView[i]->getRoleId();
+	}
+	return -1;
+}
+
+int SelectRoleUi::getSelectRoleLevel()
+{
+
+	for(int i = 0; i < 1; i ++)
+	{
+		if(_roleView[i]->getState() == 2)
+			return _roleView[i]->getRoleLevel();
+	}
+	return -1;
+}
+
+std::string SelectRoleUi::getSelectRoleName()
+{
+
+	for(int i = 0; i < 1; i ++)
+	{
+		if(_roleView[i]->getState() == 2)
+			return _roleView[i]->getRoleName();
+	}
+	return NULL;
+}
+
+void SelectRoleUi::onRoleSelected( SelectRoleViewNode *roleView )
+{
+
+	for(int i = 0; i < 1; i ++)
+	{
+		if(_roleView[i]->getState() == 2 && roleView != _roleView[i])
+		{
+			_roleView[i]->setState(1);
+		}
+	}
+
+	if(roleView->getState() == 1)
+	{
+		roleView->setState(2);
+	}
+
+	if(roleView->getState() == 0)
+	{
+		signalCreateRoleBtn.emit();
+		//CreateRole::getInstance()->open();
+	}
+}
+
+
+
+//////////////////////////////////////////////////////////////////////////
+
+bool SelectRoleUiLoaderLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	CCPoint framePoint = this->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize1 = SelectRole::getInstance()->getRoleAttr()->roleInfo[0].selectBtn->getContentSize();
+	const CCSize &frameSize2 = SelectRole::getInstance()->getRoleAttr()->roleInfo[1].selectBtn->getContentSize();
+	const CCSize &frameSize3 = SelectRole::getInstance()->getRoleAttr()->roleInfo[2].selectBtn->getContentSize();
+	CCRect frameRect1(SelectRole::getInstance()->getRoleAttr()->roleInfo[0].selectBtn->getPositionX(),SelectRole::getInstance()->getRoleAttr()->roleInfo[0].selectBtn->getPositionY(), frameSize1.width, frameSize1.height);
+	CCRect frameRect2(SelectRole::getInstance()->getRoleAttr()->roleInfo[1].selectBtn->getPositionX(),SelectRole::getInstance()->getRoleAttr()->roleInfo[1].selectBtn->getPositionY(), frameSize2.width, frameSize2.height);
+	CCRect frameRect3(SelectRole::getInstance()->getRoleAttr()->roleInfo[2].selectBtn->getPositionX(),SelectRole::getInstance()->getRoleAttr()->roleInfo[2].selectBtn->getPositionY(), frameSize3.width, frameSize3.height);
+	SelectRoleUi* roleUi = SelectRole::getInstance()->getSelectRoleUi();
+	if(roleUi == NULL)
+	{
+		return false;
+	}
+	if(frameRect1.containsPoint(framePoint))
+	{   
+		_selectAcNode->setPosition(_selectPosMap[1]);
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+		int roleId = SelectRole::getInstance()->getRoleAttr()->roleInfo[0].roleId;
+		int roleLevel = SelectRole::getInstance()->getRoleAttr()->roleInfo[0].roleLevel;
+		std::string roleName = SelectRole::getInstance()->getRoleAttr()->roleInfo[0].roleName;
+		SelectRole::getInstance()->setRoleIndex(0);
+		if (roleId == -1 || roleLevel == -1 || roleName.empty())
+		{
+			ClientUpdate::getInstance()->safeReplaceToCreateRoleScene();
+		}
+		else
+		{
+			roleUi->updateRolePhoto(0);
+		}
+		return true;
+	}
+	if(frameRect2.containsPoint(framePoint))
+	{
+		CCPoint p = _selectAcNode->getPosition();
+		_selectAcNode->setPosition(_selectPosMap[2]);
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+		int roleId = SelectRole::getInstance()->getRoleAttr()->roleInfo[1].roleId;
+		int roleLevel = SelectRole::getInstance()->getRoleAttr()->roleInfo[1].roleLevel;
+		std::string roleName = SelectRole::getInstance()->getRoleAttr()->roleInfo[1].roleName;
+		SelectRole::getInstance()->setRoleIndex(1);
+		if (roleId == -1 || roleLevel == -1 || roleName.empty())
+		{
+			ClientUpdate::getInstance()->safeReplaceToCreateRoleScene();
+
+		}else
+		{
+			roleUi->updateRolePhoto(1);
+		}
+		return true;
+	}
+	if(frameRect3.containsPoint(framePoint))
+	{
+		CCPoint p = _selectAcNode->getPosition();
+		_selectAcNode->setPosition(_selectPosMap[3]);
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+		int roleId = SelectRole::getInstance()->getRoleAttr()->roleInfo[2].roleId;
+		int roleLevel = SelectRole::getInstance()->getRoleAttr()->roleInfo[2].roleLevel;
+		std::string roleName = SelectRole::getInstance()->getRoleAttr()->roleInfo[2].roleName;
+		SelectRole::getInstance()->setRoleIndex(2);
+		if (roleId == -1 || roleLevel == -1 || roleName.empty())
+		{
+			ClientUpdate::getInstance()->safeReplaceToCreateRoleScene();
+		}
+		else
+		{
+			roleUi->updateRolePhoto(2);
+		}
+		return true;
+	}
+
+	return true;
+}
+
+void SelectRoleUiLoaderLayer::onExit()
+{
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+}
+
+cocos2d::SEL_MenuHandler SelectRoleUiLoaderLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler SelectRoleUiLoaderLayer::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "changeServerBtnPressed", SelectRoleUiLoaderLayer::changeServerBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "beginGameBtnPressed", SelectRoleUiLoaderLayer::beginGameBtnPressed);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onEnterXiaomiBBSPressed", SelectRoleUiLoaderLayer::onEnterXiaomiBBSPressed);
+/*
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBackBtnPressed", SelectRoleUiLoaderLayer::onBackBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onNextBtnPressed", SelectRoleUiLoaderLayer::onNextBtnPressed);*/
+	return NULL;
+}
+
+bool SelectRoleUiLoaderLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+
+void SelectRoleUiLoaderLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect","");
+	std::string sSESelect = sSEDir + "E1_89.plist";
+	std::string sSEBegin = sSEDir + "E1_80.plist";
+
+	_selectAcNode = GameActionNode::create();
+	_selectAcNode->InitWithPList(sSESelect.c_str(), "E1_89");
+	_selectAcNode->setTag(RSP_SETag);
+	_selectAcNode->setPosition(this->getChildByTag(35)->getPosition());
+	this->addChild(_selectAcNode, RZN_EFFECT);
+	_selectAcNode->setVisible(false);
+	for (int i = 1; i < 4; ++i)
+	{
+		this->getChildByTag(35*i)->setVisible(false);
+		_selectPosMap[i] = this->getChildByTag(35*i)->getPosition();
+	}
+
+	//增加开始按钮特效
+	_beginAcNode = GameActionNode::create();
+	_beginAcNode->InitWithPList(sSEBegin.c_str(), "E1_80");
+	CCPoint sePos = this->getChildByTag(201)->getPosition();
+	_beginAcNode->setPosition(sePos);
+	this->addChild(_beginAcNode, RZN_EFFECT);
+	_beginAcNode->setScaleX(0.8f);
+	_beginAcNode->BeginAction(0.08f, true);
+
+	SelectRole::getInstance()->setRoleIndex(0);
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	return;
+}
+
+void SelectRoleUiLoaderLayer::changeServerBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//Login::getInstance()->setisFirstLogin(true);//切换服务器
+	//RoleInfoUiAttrs* roleInfos = SelectRole::getInstance()->getRoleAttr();
+	SelectRoleUi *parent = (SelectRoleUi*)getParent();
+	//CC_SAFE_DELETE(roleInfos);
+	CC_ASSERT(parent != NULL);
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	parent->signalChangeServerBtn.emit();
+}
+
+void SelectRoleUiLoaderLayer::beginGameBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	SelectRoleUi *parent = (SelectRoleUi*)getParent();
+	CC_ASSERT(parent != NULL);
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_3);
+	parent->signalBeginGameBtn.emit();
+}
+
+void SelectRoleUiLoaderLayer::onEnterXiaomiBBSPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+#ifndef WIN32
+	//WzolJni::getInstance()->openBBS();
+#endif
+}
+
+void SelectRoleUiLoaderLayer::onBackBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//返回上页;
+	SelectRoleUi *parent = (SelectRoleUi*)getParent();
+	CC_ASSERT(parent != NULL);
+	parent->signalBackBtn.emit();
+}
+
+void SelectRoleUiLoaderLayer::onNextBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//下一页;
+	SelectRoleUi *parent = (SelectRoleUi*)getParent();
+	CC_ASSERT(parent != NULL);
+	parent->signalNextBtn.emit();
+}
+

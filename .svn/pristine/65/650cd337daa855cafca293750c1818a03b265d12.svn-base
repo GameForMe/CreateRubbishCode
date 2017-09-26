@@ -1,0 +1,1022 @@
+#include "SystemMsg.h"
+#include "cocos2d.h"
+using namespace cocos2d;
+#include "World.h"
+#include "BaseDefine.h"
+#include "CfgReader.h"
+#include "AnimationCache.h"
+#include "BSAnimate.h"
+#include "UiTools.h"
+#include "UiResourceMgr.h"
+#include "MiniMapUi.h"
+
+SystemMsg::SystemMsg()
+	: _lastLabel1(NULL)
+	, _lastLabel2(NULL)
+	, _lastLabel3(NULL)
+{
+	CCDirector::sharedDirector()->getScheduler()->scheduleUpdateForTarget(this, 0, false);
+
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	std::string spriteName = uiDir + "system_msg_back.png";
+
+	_lab1Back = CCSprite::create(spriteName.c_str());
+	_lab2Back = CCSprite::create(spriteName.c_str());
+	spriteName = uiDir + "jiehun_ditu.png";
+	_lab3Back = CCSprite::create(spriteName.c_str());
+	_lab1Back->retain();
+	_lab2Back->retain();
+	_lab3Back->retain();
+
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	_lab1Back->setPosition(ccp(winSize.width / 2.0f, winSize.height - SYSTEM_MSG_POS1 - 11));
+	_lab2Back->setPosition(ccp(winSize.width / 2.0f, winSize.height - SYSTEM_MSG_POS2));
+	_lab3Back->setPosition(ccp(winSize.width / 2.0f, winSize.height*0.8));
+	isLab2Finsh = true;
+	isLab3Finsh = true;
+
+}
+
+SystemMsg::~SystemMsg()
+{
+	CC_SAFE_RELEASE(_lab1Back);
+	CC_SAFE_RELEASE(_lab2Back);
+	CC_SAFE_RELEASE(_lab3Back);
+
+	CCDirector::sharedDirector()->getScheduler()->unscheduleUpdateForTarget(this);
+}
+
+SystemMsg * SystemMsg::getInstance()
+{
+	static SystemMsg instance;
+	return &instance;
+}
+
+void SystemMsg::runBackgroundEffect()
+{
+	//加载特效资源
+	m_sBlingSEName = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_123.plist";
+	_jiehunAcNode = GameActionNode::create();
+	_jiehunAcNode->InitWithPList(m_sBlingSEName.c_str(), "E1_123");
+	_jiehunAcNode->setPosition(ccp(220,40));	
+	_lab3Back->addChild(_jiehunAcNode);
+	_jiehunAcNode->BeginAction(0.2, true);
+}
+void SystemMsg::ChangeSpriteBackGround(bool isJiehun)
+{
+	CCSpriteFrame* _spriteFrame;
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	std::string spriteName = "";
+	_lab3Back->removeAllChildrenWithCleanup(true);
+	if (isJiehun)
+	{
+		spriteName = uiDir + "system_msg_back.png";		
+	}
+	else
+	{		
+		spriteName = uiDir + "jiehun_ditu.png";			
+	}
+	_spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(spriteName.c_str());
+	if(_spriteFrame == NULL)
+	{
+		CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addImage(spriteName.c_str());
+		_spriteFrame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(_spriteFrame, spriteName.c_str());
+	}
+	_lab3Back->initWithSpriteFrame(_spriteFrame);
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	_lab3Back->setPosition(ccp(winSize.width / 2.0f, winSize.height *0.5));
+	
+}
+void SystemMsg::runMsg( const std::string &msg, eMsgType msgType /*= MT_Sys1*/ )
+{
+	if(msg.empty() || msg.find_last_not_of(" ") == -1)
+	{
+		//int n = 0;
+	}
+
+	if(msgType == MT_Sys1)
+	{
+		if (_msgList1.size() > 20)
+		{
+			_msgList1.erase(_msgList1.begin());
+			//_msgList1.pop_front();
+			
+		}
+		_msgList1.push_back(msg);
+	}
+	else if(msgType == MT_Sys2)
+	{
+/*
+		if(_lastLabel2 == NULL)
+		{
+			runMsg2(msg);
+		}
+		else
+		{*/
+			_msgList2.push_back(msg);
+		//}
+	}
+	else if (msgType == MT_Sys3)
+	{
+		_msgList3 .push_back(msg);
+	}
+}
+
+void SystemMsg::callback1( CCNode *node )
+{
+//	if(node == _lastLabel1)
+//	{
+		_lab1Back->removeFromParent();
+		_lastLabel1->removeFromParentAndCleanup(true);
+		_lastLabel1 = NULL;
+//	}
+
+	node->getParent()->removeFromParent();
+}
+
+void SystemMsg::callback2( CCNode *node )
+{
+/*
+	if(node == _lastLabel2)
+	{*/
+		_lab2Back->removeFromParent();
+		_lab2Back->removeAllChildren();
+		_lastLabel2->removeFromParentAndCleanup(true);
+		_lastLabel2 = NULL;
+/*
+		if(!_msgList2.empty())
+		{
+			std::string msg = _msgList2.front();
+			_msgList2.pop_front();
+			runMsg2(msg);
+		}*/
+	//}
+	isLab2Finsh = true;
+	if (node->getParent())
+	{
+		node->getParent()->removeFromParent();
+	}else
+	{
+		node->removeFromParent();
+	}
+	RoleHeadUi* ui = World::getInstance()->getRoleHeadUi();
+	if (ui)
+	{
+		ui->SysMsgSetCelebrateShow(true);
+	}
+}
+void SystemMsg::callback3(CCNode *node)
+{
+	_jiehunAcNode->StopAction(true);
+	_lab3Back->removeFromParent();
+	_lab3Back->removeAllChildren();
+	_lastLabel3->removeFromParentAndCleanup(true);
+	_lastLabel3 = NULL;
+	isLab3Finsh = true;
+	node->getParent()->removeFromParent();
+}
+
+CCLabelTTF * SystemMsg::createLabel( const std::string &str )
+{
+	CCLabelTTF *label = CCLabelTTF::create();
+	label->setFontSize(20);
+	label->setAnchorPoint(ccp(0.f, 0.5f));
+	label->setString(str.c_str());
+	label->setColor(ccc3(0xfe,0xf8,0xd8));
+	return label;
+}
+
+LabelFT* SystemMsg::createLabFT(const std::string &str)
+{
+	TTFConfig fc;
+	fc.fontFilePath = FT_FONTFACE;
+	fc.fontSize = 20;
+	fc.outlineSize = 1;
+
+	LabelFT* labFT = LabelFT::createWithTTF(fc,"");
+	labFT->setAnchorPoint(ccp(0.f, 0.5f));
+	labFT->setString(str.c_str());
+	labFT->setTextColor(ccc4(0xfe,0xf8,0xd8, 255));
+	return labFT;
+}
+
+void SystemMsg::runMsg1( const std::string &msg )
+{
+	//CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	_lastLabel1 = createLabFT(msg);
+	std::string baseString = msg; 
+	MsgList msgListData;
+	MsgList msgListColor;
+	//std::string::size_type index = 0;
+	//std::string::size_type index2 = 0;
+
+	parse_msg_string(baseString,msgListData,msgListColor);
+
+// 	while(true)
+// 	{
+// 		index = baseString.find("<");
+// 		if (index != std::string::npos)
+// 		{
+// 			msgListColor.push_back(baseString.substr(index + 1,index + 2));
+// 			baseString = baseString.substr(index + 3,baseString.size());
+// 			index2 = baseString.find("<");
+// 			if (index2 != -1)
+// 			{
+// 				msgListData.push_back(baseString.substr(0,index2).c_str());
+// 				baseString = baseString.substr(index2,baseString.size());
+// 			}
+// 			else
+// 			{
+// 				msgListData.push_back(baseString.substr(0,baseString.size()).c_str());
+// 				break;
+// 			}
+// 			//index = -1;
+// 		}else{
+// 			break;
+// 		}
+// 	}
+	//ChangeSpriteBackGround(true);
+	createMSG(msgListData,msgListColor);
+
+
+
+//	float x = winSize.width;
+//	float y = winSize.height - SYSTEM_MSG_POS1;
+//	CCPoint start = ccp(SYSTEM_MSG1_BEGINPOS, y);
+//	//CCPoint end = ccp(SYSTEM_MSG1_ENDPOS - _lastLabel1->getContentSize().width, y);
+//
+//	float tempMsgDatawidth = start.x;
+//
+//
+//	std::list<CCLabelTTF*> laberList;//待拼接的cclabelttf
+//	int msgDataCount = msgListData.size();
+//	for (int i = 0;i < msgDataCount;++i)
+//	{
+//		CCLabelTTF* tempLaber = CCLabelTTF::create();
+//		tempLaber->setString(msgListData.front().c_str());
+//		tempLaber->setFontSize(16);
+//		msgListData.pop_front();
+//		tempLaber->setColor(getChangeColor(msgListColor.front()));
+//		msgListColor.pop_front();
+//		tempLaber->setAnchorPoint(ccp(0,0.0));
+//		tempLaber->setPosition(ccp(tempMsgDatawidth,start.y+17));
+//		tempMsgDatawidth += tempLaber->getContentSize().width;
+//		laberList.push_back(tempLaber);
+//	}
+//
+//	CCPoint end = ccp(SYSTEM_MSG1_ENDPOS - (tempMsgDatawidth-start.x), y + 17);
+//
+//	CCScene *scene = World::getInstance()->getScene();
+//	scene->addChild(_lastLabel1,20);
+//	if(scene != NULL)
+//	{
+//		//CCNode *mask = createMsg1Mask();
+//		//mask->setPosition(ccp(0.f , y));
+//		//CCClippingNode *clipNode = CCClippingNode::create(mask);
+//
+//		CCClippingNode *clipNode = CCClippingNode::create();
+//		clipNode->setContentSize(  CCSizeMake(560, 34) );
+//		//clipNode->setAnchorPoint(  ccp(0.0, 0.5) );
+//
+//		CCDrawNode *stencil = CCDrawNode::create();
+//		stencil->setPosition(ccp(120.f , y));
+//		stencil->setAnchorPoint(  ccp(0.0, 0.5) );
+//		CCPoint rectangle[4];
+//		rectangle[0] = ccp(0, 0);
+//		rectangle[1] = ccp(clipNode->getContentSize().width, 0);
+//		rectangle[2] = ccp(clipNode->getContentSize().width, clipNode->getContentSize().height);
+//		rectangle[3] = ccp(0, clipNode->getContentSize().height);
+//    
+//		ccColor4F white = {1, 1, 1, 1};
+//		stencil->drawPolygon(rectangle, 4, white, 1, white);
+//		clipNode->setStencil(stencil);
+//
+//		_lab1Back->setAnchorPoint(ccp(0.5,0.0));
+//		clipNode->addChild(_lab1Back);
+//
+//		CCClippingNode *clipNodelaberlist = CCClippingNode::create();
+//		clipNodelaberlist->setContentSize(  CCSizeMake(300, 34) );
+//
+//		CCDrawNode *stencilelaberlist = CCDrawNode::create();
+//		stencilelaberlist->setPosition(ccp(240.f , y));
+//		stencilelaberlist->setAnchorPoint(  ccp(0.0, 0.5) );
+//		CCPoint rectangleelaberlist[4];
+//		rectangleelaberlist[0] = ccp(0, 0);
+//		rectangleelaberlist[1] = ccp(clipNodelaberlist->getContentSize().width, 0);
+//		rectangleelaberlist[2] = ccp(clipNodelaberlist->getContentSize().width, clipNodelaberlist->getContentSize().height);
+//		rectangleelaberlist[3] = ccp(0, clipNodelaberlist->getContentSize().height);
+//
+//		stencilelaberlist->drawPolygon(rectangleelaberlist, 4, white, 1, white);
+//		clipNodelaberlist->setStencil(stencilelaberlist);
+//		for (int i = 0;i < msgDataCount;++i)
+//		{
+//			clipNodelaberlist->addChild(laberList.front());
+//			laberList.push_back(laberList.front());
+//			laberList.pop_front();
+//		}
+//		_lastLabel1->setVisible(false);
+//		//clipNode->setAlphaThreshold(0.5f);
+//		if(_lab1Back->getParent() == NULL)
+//		{
+//			scene->addChild(_lab1Back, WZ_SystemMsg);
+//		}
+//		scene->addChild(clipNode, WZ_SystemMsg);
+//		scene->addChild(clipNodelaberlist, WZ_SystemMsg);
+//	}
+//	//test01->setPosition(ccp(start.x + _lastLabel1->getContentSize().width,start.y));
+//	
+//	float dt = 0.0f;
+//	//action
+//	for (int j = 0;j < msgDataCount;++j)
+//	{
+//		dt = ccpDistance(laberList.front()->getPosition(), end) / 70.f;
+//		CCMoveTo *moveTo = CCMoveTo::create(dt, end);
+//		if (j == 0)//第一个需要添加动画播完关闭方法
+//		{
+//			CCCallFuncN *callfunc = CCCallFuncN::create(this, SEL_CallFuncN(&SystemMsg::callback1));
+//			CCSequence *action = CCSequence::createWithTwoActions(moveTo, callfunc);
+//			laberList.front()->runAction(action);
+//		}
+//		else
+//		{
+//			laberList.front()->runAction(moveTo);
+//		}
+//// 		_lastLabel1->setPosition(ccp(-1000,-1000));//暂时放在屏幕外,结束后需要这个控件释放挂在他下面的其他控件 //add by vvv 2014.11.12
+//// 		scene->addChild(_lastLabel1,20);
+//		laberList.pop_front();
+//	}
+}
+
+ccColor3B SystemMsg::getChangeColor(std::string const& str)
+{
+	ccColor3B color={0xff,0xff,0xff};//11种颜色
+	if (str.compare("c1") == 0)
+	{
+		color = ccc3(255,255,255);
+	}
+	else if (str.compare("c2") == 0)
+	{
+		color = ccc3(192,0,0);
+	}
+	else if (str.compare("c3") == 0)
+	{
+		color = ccc3(255,0,0);
+	}
+	else if (str.compare("c4") == 0)
+	{
+		color = ccc3(255,192,0);
+	}
+	else if (str.compare("c5") == 0)
+	{
+		color = ccc3(255,255,0);
+	}
+	else if (str.compare("c6") == 0)
+	{
+		color = ccc3(146,208,80);
+	}
+	else if (str.compare("c7") == 0)
+	{
+		color = ccc3(0,176,80);
+	}
+	else if (str.compare("c8") == 0)
+	{
+		color = ccc3(0,176,240);
+	}
+	else if (str.compare("c9") == 0)
+	{
+		color = ccc3(0,112,192);
+	}
+	else if (str.compare("c10") == 0)
+	{
+		color = ccc3(0,32,96);
+	}
+	else if (str.compare("c11") == 0)
+	{
+		color = ccc3(112,48,160);
+	}
+	return color;
+}
+
+void SystemMsg::runMsg2( const std::string &msg )
+{
+	CCScene *scene = World::getInstance()->getScene();
+	if (scene==NULL)
+	{
+		return;
+	}
+	//CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	_lastLabel2 = createLabFT(msg);
+	//_lastLabel2->setSystemFontSize(16);//16
+	std::string baseString = msg; 
+	MsgList msgListData;
+	MsgList msgListColor;
+	int index = 0;
+	int index2 = 0;
+	while(true)
+	{
+		index = baseString.find("<");
+		if (index != -1)
+		{
+			msgListColor.push_back(baseString.substr(index + 1,index + 2));
+			baseString = baseString.substr(index + 3,baseString.size());
+			index2 = baseString.find("<");
+			if (index2 != -1)
+			{
+				msgListData.push_back(baseString.substr(0,index2).c_str());
+				baseString = baseString.substr(index2,baseString.size());
+			}
+			else
+			{
+				msgListData.push_back(baseString.substr(0,baseString.size()).c_str());
+				break;
+			}
+			//index = -1;
+		}else{
+			msgListData.push_back(msg);
+			msgListColor.push_back("c5");
+			if (msg.length() / 3 > 25)
+			{
+				createMSG2(msgListData, msgListColor);
+				return;
+			}
+			break;
+		}
+	}
+	//ChangeSpriteBackGround(true);
+	CCSize labelSize = _lastLabel2->getContentSize();
+	//float x = (winSize.width / 2 - (_lastLabel2->getContentSize().width / 2));
+	//float y = winSize.height - SYSTEM_MSG_POS2;
+
+	float tempMsgDatawidth = 0.0f;
+
+	//std::list<CCLabelTTF*> laberList;//待拼接的cclabelttf
+	std::list<LabelFT*> laberList; //待拼接的
+	size_t msgDataCount = msgListData.size();
+	CCNode *tempNode = CCNode::create();
+	tempNode->setAnchorPoint(ccp(0,0.5));
+
+	TTFConfig fc;
+	fc.fontFilePath = FT_FONTFACE;
+	fc.fontSize = 16;
+	fc.outlineSize = 1;
+
+	for (size_t i = 0;i < msgDataCount;++i)
+	{
+		//CCLabelTTF* tempLaber = CCLabelTTF::create();
+		//tempLaber->setFontSize(16);
+		LabelFT* tempLaber = LabelFT::createWithTTF(fc, "");
+		tempLaber->setString(msgListData.at(i).c_str());
+		//msgListData.pop_front();
+		tempLaber->setColor(getChangeColor(msgListColor.at(i)));
+		//msgListColor.pop_front();
+		tempLaber->setAnchorPoint(ccp(0, 0.5));
+		tempLaber->setPosition(ccp(tempMsgDatawidth, _lab2Back->getContentSize().height / 2));//vvv 500 500   1000 1000
+		tempNode->addChild(tempLaber);
+		tempMsgDatawidth += tempLaber->getContentSize().width;
+		laberList.push_back(tempLaber);
+	}
+
+	CCSize lab2Size = _lab2Back->getContentSize();
+	tempNode->setPosition(ccp((lab2Size.width - tempMsgDatawidth) / 2, 0));
+	_lab2Back->addChild(tempNode);
+	scene->addChild(_lab2Back, 19);
+	scene->addChild(_lastLabel2,20);
+	_lastLabel2->setVisible(false);
+	RoleHeadUi* ui = World::getInstance()->getRoleHeadUi();
+	if (ui)
+	{
+		ui->SysMsgSetCelebrateShow(false);
+	}
+	CCDelayTime *delay = CCDelayTime::create(7.0f);
+	CCCallFuncN *callfunc = CCCallFuncN::create(this, SEL_CallFuncN(&SystemMsg::callback2));
+	CCSequence *action = CCSequence::createWithTwoActions(delay, callfunc);
+	_lab2Back->runAction(action);
+}
+
+void SystemMsg::runMsg3(const std::string &msg)
+{
+	//CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	_lastLabel3 = createLabFT(msg);
+	std::string baseString = msg; 
+	MsgList msgListData;
+	MsgList msgListColor;
+	std::string::size_type index = 0;
+	std::string::size_type index2 = 0;
+	while(true)
+	{
+		index = baseString.find("<");
+		if (index != std::string::npos)
+		{
+			msgListColor.push_back(baseString.substr(index + 1,index + 2));
+			baseString = baseString.substr(index + 3,baseString.size());
+			index2 = baseString.find("<");
+			if (index2 != -1)
+			{
+				msgListData.push_back(baseString.substr(0,index2).c_str());
+				baseString = baseString.substr(index2,baseString.size());
+			}
+			else
+			{
+				msgListData.push_back(baseString.substr(0,baseString.size()).c_str());
+				break;
+			}
+			//index = -1;
+		}else{
+			break;
+		}
+	}
+
+	//ChangeSpriteBackGround(false);
+	createMSGForMarry(msgListData,msgListColor);		
+}
+
+void SystemMsg::update( float dt )
+{
+	CCScene *scene = World::getInstance()->getScene();
+	if (scene==NULL)
+	{
+		return;
+	}
+
+	if(!_msgList1.empty())
+	{
+		if(_lastLabel1 == NULL)
+		{
+			std::string msg = _msgList1[0];
+			_msgList1.erase(_msgList1.begin());
+			//_msgList1.pop_front();
+			runMsg1(msg);
+		}
+		else
+		{
+			CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+			CCSize labelSize = _lastLabel1->getContentSize();
+			CCPoint labelPos = _lastLabel1->getPosition();
+			if(SYSTEM_MSG1_BEGINPOS - SYSTEM_MSG1_ENDPOS - (labelSize.width + labelPos.x) > winSize.width / 4.0f)
+			{
+				std::string msg = _msgList1.front();
+				_msgList1.erase(_msgList1.begin());
+				//_msgList1.pop_front();
+				runMsg1(msg);
+			}
+		}
+	}
+
+	if(!_msgList2.empty())
+	{
+		if (isLab2Finsh)
+		{
+			runMsg2(_msgList2.front());
+			_msgList2.erase(_msgList2.begin());
+			isLab2Finsh = false;
+		}
+	}
+	if(!_msgList3.empty())
+	{
+		if (isLab3Finsh)
+		{
+			runMsg3(_msgList3.front());
+			_msgList3.erase(_msgList3.begin());
+			isLab3Finsh = false;
+		}
+	}
+}
+
+CCNode * SystemMsg::createMsg1Mask()
+{
+	CCSprite *sprite = CCSprite::create();
+	sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_systemmsgmask"));
+	sprite->setAnchorPoint(ccp(0.0f, 0.5f));
+	return sprite;
+}
+
+void SystemMsg::clear()
+{
+	_lastLabel1 = NULL;
+	_lastLabel2 = NULL;
+	_lastLabel3 = NULL;
+	_msgList1.clear();
+	_msgList2.clear();
+	_msgList3.clear();
+}
+
+void SystemMsg::createMSG(MsgList const& msgListData ,MsgList const& msgListColor)
+{
+	CC_ASSERT(msgListData.size() == msgListColor.size());
+
+	if(msgListData.size() <= 0)
+	{
+		_lastLabel1 = NULL;
+		return;
+	}
+
+	CCScene *scene = World::getInstance()->getScene();
+	if (scene==NULL)
+	{
+		return;
+	}
+
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	//float x = winSize.width;
+	float y = winSize.height - SYSTEM_MSG_POS1 - 11;
+	CCPoint start = ccp(SYSTEM_MSG1_BEGINPOS, y);
+	//CCPoint end = ccp(SYSTEM_MSG1_ENDPOS - _lastLabel1->getContentSize().width, y);
+
+	float tempMsgDatawidth = start.x;
+
+
+	//std::list<CCLabelTTF*> laberList;//待拼接的cclabelttf
+	std::list<LabelFT*> laberList; //待拼接的
+	size_t msgDataCount = msgListData.size();
+
+	TTFConfig fc;
+	fc.fontFilePath = FT_FONTFACE;
+	fc.fontSize = 16 * 1.3;
+	fc.outlineSize = 1;
+
+
+	for (size_t i = 0;i < msgDataCount;++i)
+	{
+		//CCLabelTTF* tempLaber = CCLabelTTF::create();
+		//tempLaber->setFontSize(16);
+		LabelFT* tempLaber = LabelFT::createWithTTF(fc, "");
+		tempLaber->setString(msgListData[i].c_str());
+		//msgListData.pop_front();
+		tempLaber->setColor(getChangeColor(msgListColor[i]));
+		//msgListColor.pop_front();
+		tempLaber->setAnchorPoint(ccp(0,0.0));
+		tempLaber->setPosition(ccp(tempMsgDatawidth,start.y + 3));
+		tempMsgDatawidth += tempLaber->getContentSize().width;
+		laberList.push_back(tempLaber);
+	}
+
+	CCPoint end = ccp(SYSTEM_MSG1_ENDPOS - (tempMsgDatawidth-start.x), y + 6);
+
+	
+	if(scene != NULL)
+	{
+		scene->addChild(_lastLabel1,20);
+		//CCNode *mask = createMsg1Mask();
+		//mask->setPosition(ccp(0.f , y));
+		//CCClippingNode *clipNode = CCClippingNode::create(mask);
+
+		CCClippingNode *clipNode = CCClippingNode::create();
+		clipNode->setContentSize(_lab1Back->getContentSize());
+		//clipNode->setAnchorPoint(  ccp(0.0, 0.5) );
+		
+		CCDrawNode *stencil = CCDrawNode::create();
+		stencil->setPosition(ccp((winSize.width - _lab1Back->getContentSize().width) / 2, y));
+		stencil->setAnchorPoint(  ccp(0.0, 0.5) );
+		CCPoint rectangle[4];
+		rectangle[0] = ccp(0, 0);
+		rectangle[1] = ccp(clipNode->getContentSize().width, 0);
+		rectangle[2] = ccp(clipNode->getContentSize().width, clipNode->getContentSize().height);
+		rectangle[3] = ccp(0, clipNode->getContentSize().height);
+
+		ccColor4F white = {1, 1, 1, 1};
+		stencil->drawPolygon(rectangle, 4, white, 1, white);
+		clipNode->setStencil(stencil);
+
+		_lab1Back->setAnchorPoint(ccp(0.5,0.0));
+		clipNode->addChild(_lab1Back);
+
+		for (size_t i = 0;i < msgDataCount;++i)
+		{
+			clipNode->addChild(laberList.front());
+			laberList.push_back(laberList.front());
+			laberList.pop_front();
+		}
+		_lastLabel1->setVisible(false);
+		//clipNode->setAlphaThreshold(0.5f);
+		if(_lab1Back->getParent() == NULL)
+		{
+			scene->addChild(_lab1Back, WZ_SystemMsg);
+		}
+		scene->addChild(clipNode, WZ_SystemMsg);
+	}
+	//test01->setPosition(ccp(start.x + _lastLabel1->getContentSize().width,start.y));
+
+	float dt = 0.0f;
+	//action
+	for (size_t j = 0;j < msgDataCount;++j)
+	{
+		dt = ccpDistance(laberList.front()->getPosition(), end) / 70.f;
+		CCMoveTo *moveTo = CCMoveTo::create(dt, end);
+		if (j == 0)//第一个需要添加动画播完关闭方法
+		{
+			CCCallFuncN *callfunc = CCCallFuncN::create(this, SEL_CallFuncN(&SystemMsg::callback1));
+			CCSequence *action = CCSequence::createWithTwoActions(moveTo, callfunc);
+			laberList.front()->runAction(action);
+		}
+		else
+		{
+			laberList.front()->runAction(moveTo);
+		}
+		// 		_lastLabel1->setPosition(ccp(-1000,-1000));//暂时放在屏幕外,结束后需要这个控件释放挂在他下面的其他控件 //add by vvv 2014.11.12
+		// 		scene->addChild(_lastLabel1,20);
+		laberList.pop_front();
+	}
+}
+
+void SystemMsg::createMSG2(MsgList const& msgListData ,MsgList const& msgListColor )
+{
+	CC_ASSERT(msgListData.size() == msgListColor.size());
+
+	if(msgListData.size() <= 0)
+	{
+		_lastLabel2 = NULL;
+		return;
+	}
+
+	CCScene *scene = World::getInstance()->getScene();
+	if (scene==NULL)
+	{
+		return;
+	}
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	//float x = winSize.width;
+	float y = winSize.height - SYSTEM_MSG_POS2;
+	CCPoint start = ccp(SYSTEM_MSG1_BEGINPOS - 20, y);
+
+	float tempMsgDatawidth = start.x;
+
+
+	//std::list<CCLabelTTF*> laberList;//待拼接的cclabelttf
+	std::list<LabelFT*> laberList; //待拼接的
+	size_t msgDataCount = msgListData.size();
+
+	TTFConfig fc;
+	fc.fontFilePath = FT_FONTFACE;
+	fc.fontSize = 16 * 1.3;
+	fc.outlineSize = 1;
+
+	for (size_t i = 0;i < msgDataCount;++i)
+	{
+		//CCLabelTTF* tempLaber = CCLabelTTF::create();
+		//tempLaber->setFontSize(16);
+		LabelFT* tempLaber = LabelFT::createWithTTF(fc, "");
+		tempLaber->setString(msgListData[i].c_str());
+		//msgListData.pop_front();
+		tempLaber->setColor(getChangeColor(msgListColor[i]));
+		//msgListColor.pop_front();
+		tempLaber->setAnchorPoint(ccp(0,0.0));
+		tempLaber->setPosition(ccp(tempMsgDatawidth,start.y + 3));
+		tempMsgDatawidth += tempLaber->getContentSize().width;
+		laberList.push_back(tempLaber);
+	}
+
+	CCPoint end = ccp(SYSTEM_MSG1_ENDPOS + 20 - (tempMsgDatawidth - start.x), y + 6);
+
+	RoleHeadUi *ui = World::getInstance()->getRoleHeadUi();
+	if (ui)
+	{
+		ui->SysMsgSetCelebrateShow(false);
+	}
+	if(scene != NULL)
+	{
+		scene->addChild(_lastLabel2,20);
+
+		CCClippingNode *clipNode = CCClippingNode::create();
+		clipNode->setContentSize(_lab2Back->getContentSize());
+		clipNode->setAnchorPoint(ccp(0.0, 0.5));
+
+		CCDrawNode *stencil = CCDrawNode::create();
+		stencil->setAnchorPoint(ccp(0.0, 0.5));
+		stencil->setPosition(ccp((winSize.width - clipNode->getContentSize().width) / 2, y));
+		CCPoint rectangle[4];
+		rectangle[0] = ccp(0, 0);
+		rectangle[1] = ccp(clipNode->getContentSize().width, 0);
+		rectangle[2] = ccp(clipNode->getContentSize().width, clipNode->getContentSize().height);
+		rectangle[3] = ccp(0, clipNode->getContentSize().height);
+
+		//ccColor4F white = {1, 1, 1, 1};
+		ccColor4F red = {1, 0, 0, 1};
+		ccColor4F green = {0, 1, 0, 1};
+		stencil->drawPolygon(rectangle, 4, red, 1, green);
+
+		clipNode->setStencil(stencil);
+
+		for (size_t i = 0;i < msgDataCount;++i)
+		{
+			clipNode->addChild(laberList.front());
+			laberList.push_back(laberList.front());
+			laberList.pop_front();
+		}
+		_lastLabel2->setVisible(false);
+		scene->addChild(_lab2Back, WZ_SystemMsg);
+		scene->addChild(clipNode, WZ_SystemMsg);
+	}
+	float dt = 0.0f;
+	//action
+	for (size_t j = 0;j < msgDataCount;++j)
+	{
+		dt = ccpDistance(laberList.front()->getPosition(), end) / 70.f;
+		CCMoveTo *moveTo = CCMoveTo::create(dt, end);
+		if (j == 0)//第一个需要添加动画播完关闭方法
+		{
+			CCCallFuncN *callfunc = CCCallFuncN::create(this, SEL_CallFuncN(&SystemMsg::callback2));
+			CCSequence *action = CCSequence::createWithTwoActions(moveTo, callfunc);
+			laberList.front()->runAction(action);
+		}
+		else
+		{
+			laberList.front()->runAction(moveTo);
+		}
+		// 		_lastLabel1->setPosition(ccp(-1000,-1000));//暂时放在屏幕外,结束后需要这个控件释放挂在他下面的其他控件 //add by vvv 2014.11.12
+		// 		scene->addChild(_lastLabel1,20);
+		laberList.pop_front();
+	}
+}
+
+void SystemMsg::createMSGForMarry(MsgList const& msgListData, MsgList const& msgListColor)
+{
+	CC_ASSERT(msgListData.size() == msgListColor.size());
+	if(msgListData.size() <= 0)
+	{
+		_lastLabel3 = NULL;
+		return;
+	}
+
+	CCScene *scene = World::getInstance()->getScene();
+	if (scene==NULL)
+	{
+		return;
+	}
+
+	//先给背景加特效
+	runBackgroundEffect();
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	//float x = winSize.width;
+	float y = winSize.height *0.8;
+	//float y = winSize.height ;
+	CCPoint start = ccp(SYSTEM_MSG1_BEGINPOS, y);
+	//CCPoint end = ccp(SYSTEM_MSG1_ENDPOS - _lastLabel1->getContentSize().width, y);
+
+	float tempMsgDatawidth = start.x;
+
+
+	//std::list<CCLabelTTF*> laberList;//待拼接的cclabelttf
+	std::list<LabelFT*> laberList; //待拼接的
+	size_t msgDataCount = msgListData.size();
+
+	TTFConfig fc;
+	fc.fontFilePath = FT_FONTFACE;
+	fc.fontSize = 16 * 1.3;
+	fc.outlineSize = 1;
+
+	for (size_t i = 0;i < msgDataCount;++i)
+	{
+		//CCLabelTTF* tempLaber = CCLabelTTF::create();
+		//tempLaber->setFontSize(16);
+		LabelFT* tempLaber = LabelFT::createWithTTF(fc, "");
+		tempLaber->setString(msgListData[i].c_str());
+		//msgListData.pop_front();
+		tempLaber->setColor(getChangeColor(msgListColor[i]));
+		//msgListColor.pop_front();
+		tempLaber->setAnchorPoint(ccp(0,0.0));
+		tempLaber->setPosition(ccp(tempMsgDatawidth,start.y + 14));
+		tempMsgDatawidth += tempLaber->getContentSize().width;
+		laberList.push_back(tempLaber);
+	}
+
+	CCPoint end = ccp(SYSTEM_MSG1_ENDPOS - (tempMsgDatawidth-start.x), y + 19);
+
+	if(scene != NULL)
+	{
+		scene->addChild(_lastLabel3,20);
+		//CCNode *mask = createMsg1Mask();
+		//mask->setPosition(ccp(0.f , y));
+		//CCClippingNode *clipNode = CCClippingNode::create(mask);
+
+		CCClippingNode *clipNode = CCClippingNode::create();
+		clipNode->setContentSize(  CCSizeMake(560, 54) );
+		//clipNode->setAnchorPoint(  ccp(0.0, 0.5) );
+
+		CCDrawNode *stencil = CCDrawNode::create();
+		stencil->setPosition(ccp(120.f , y));
+		stencil->setAnchorPoint(  ccp(0.0, 0.5) );
+		CCPoint rectangle[4];
+		rectangle[0] = ccp(0, 0);
+		rectangle[1] = ccp(clipNode->getContentSize().width, 0);
+		rectangle[2] = ccp(clipNode->getContentSize().width, clipNode->getContentSize().height);
+		rectangle[3] = ccp(0, clipNode->getContentSize().height);
+
+		ccColor4F white = {1, 1, 1, 1};
+		stencil->drawPolygon(rectangle, 4, white, 1, white);
+		clipNode->setStencil(stencil);
+
+		_lab3Back->setAnchorPoint(ccp(0.5,0.0));
+		clipNode->addChild(_lab3Back);
+
+		CCClippingNode *clipNodelaberlist = CCClippingNode::create();
+		clipNodelaberlist->setContentSize(  CCSizeMake(330, 54) );
+
+		CCDrawNode *stencilelaberlist = CCDrawNode::create();
+		stencilelaberlist->setPosition(ccp(235.f , y));
+		stencilelaberlist->setAnchorPoint(  ccp(0.0, 0.5) );
+		CCPoint rectangleelaberlist[4];
+		rectangleelaberlist[0] = ccp(0, 0);
+		rectangleelaberlist[1] = ccp(clipNodelaberlist->getContentSize().width, 0);
+		rectangleelaberlist[2] = ccp(clipNodelaberlist->getContentSize().width, clipNodelaberlist->getContentSize().height);
+		rectangleelaberlist[3] = ccp(0, clipNodelaberlist->getContentSize().height);
+
+		stencilelaberlist->drawPolygon(rectangleelaberlist, 4, white, 1, white);
+		clipNodelaberlist->setStencil(stencilelaberlist);
+		for (size_t i = 0;i < msgDataCount;++i)
+		{
+			clipNodelaberlist->addChild(laberList.front());
+			laberList.push_back(laberList.front());
+			laberList.pop_front();
+		}
+		_lastLabel3->setVisible(false);
+		//clipNode->setAlphaThreshold(0.5f);
+		if(_lab3Back->getParent() == NULL)
+		{
+			scene->addChild(_lab3Back, WZ_SystemMsg);
+		}
+		scene->addChild(clipNode, WZ_SystemMsg);
+		scene->addChild(clipNodelaberlist, WZ_SystemMsg);
+	}
+	//test01->setPosition(ccp(start.x + _lastLabel1->getContentSize().width,start.y));
+
+	float dt = 0.0f;
+	//action
+	for (size_t j = 0;j < msgDataCount;++j)
+	{
+		dt = ccpDistance(laberList.front()->getPosition(), end) / 70.f;
+		CCMoveTo *moveTo = CCMoveTo::create(dt, end);
+		if (j == 0)//第一个需要添加动画播完关闭方法
+		{
+			CCCallFuncN *callfunc = CCCallFuncN::create(this, SEL_CallFuncN(&SystemMsg::callback3));
+			CCSequence *action = CCSequence::createWithTwoActions(moveTo, callfunc);
+			laberList.front()->runAction(action);
+		}
+		else
+		{
+			laberList.front()->runAction(moveTo);
+		}
+		// 		_lastLabel1->setPosition(ccp(-1000,-1000));//暂时放在屏幕外,结束后需要这个控件释放挂在他下面的其他控件 //add by vvv 2014.11.12
+		// 		scene->addChild(_lastLabel1,20);
+		laberList.pop_front();
+	}
+}
+
+void SystemMsg::delayDestroy()
+{
+	_lastLabel1 = NULL;
+	_lastLabel2 = NULL;
+	_lastLabel3 = NULL;
+	_msgList1.clear();
+	_msgList2.clear();
+	_msgList3.clear();
+}
+
+void SystemMsg::parse_msg_string( std::string& msg,MsgList& msg_list,MsgList& color_list )
+{
+	std::string::size_type index = msg.find("<");
+	std::string::size_type index2 = 0;
+
+	if (index != std::string::npos)
+	{
+		//<c的错误匹配,去掉<的字串就是输出字串
+		if ( index +1  == std::string::npos || index +2 == std::string::npos)
+		{
+			msg.erase(index);
+			msg_list.push_back(msg);
+			color_list.push_back("c1");
+			return;
+		}
+		//<cx出现在末尾
+		if (index +3 == std::string::npos)
+		{
+			msg = msg.substr(0,index);
+			msg_list.push_back(msg);
+			color_list.push_back("c1");
+			return;
+		}
+		
+		color_list.push_back(msg.substr(index+1,index+2));
+		msg= msg.substr(index+3,msg.size());
+		index2 = msg.find("<");
+		if (index2 != std::string::npos)
+		{
+			msg_list.push_back(msg.substr(0,index2));
+			msg = msg.substr(index2,msg.size());
+
+			parse_msg_string(msg,msg_list,color_list);
+		}
+		else
+		{
+			msg_list.push_back(msg);
+			//color_list.push_back("c1");
+			return;
+		}
+	}
+	else
+	{
+		msg_list.push_back(msg);
+		color_list.push_back("c1");
+	}
+}
+

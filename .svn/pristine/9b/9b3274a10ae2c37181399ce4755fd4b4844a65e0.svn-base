@@ -1,0 +1,300 @@
+#include "TextEditBox.h"
+#include "World.h"
+#include "CfgReader.h"
+#include "BaseDefine.h"
+#include "UiResourceMgr.h"
+#include "UiTools.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "StringMgr.h"
+
+TextEditBox * TextEditBox::getInstace()
+{
+	static TextEditBox instance;
+	return &instance;
+}
+
+TextEditBox::TextEditBox()
+	: _signalBtnPressed(NULL)
+{
+
+}
+
+TextEditBox::~TextEditBox()
+{
+
+}
+
+void TextEditBox::open()
+{
+	if(isOpen())
+		return;
+
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+		ccNodeLoaderLibrary->registerCCNodeLoader("TextEditBoxLayer", TextEditBoxLoader::loader());
+		cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+		CCNode *node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "texteditui.ccbi").c_str());
+		_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+		UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+		ccbReader->release();
+		if(node != NULL) {
+			scene->addChild(node, WZ_POPUI, WCT_TextEditBox);
+			setAllChildernButtonPriority(node, -1);
+		}
+	}
+}
+
+void TextEditBox::close()
+{
+	if(!isOpen())
+		return;
+	TextEditBoxLayer *uiNode = getUiLayer();
+	if(uiNode != NULL)
+	{
+		uiNode->SetAnroindKeyBoardClose();
+	}
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		scene->removeChildByTag(WCT_TextEditBox);
+	}
+
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+
+	if(_signalBtnPressed != NULL)
+	{
+		delete _signalBtnPressed;
+		_signalBtnPressed = NULL;
+	}
+	
+}
+
+bool TextEditBox::isOpen()
+{
+	return (getUiLayer() != NULL);
+}
+
+TextEditBoxLayer * TextEditBox::getUiLayer()
+{
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		TextEditBoxLayer *uiNode = dynamic_cast<TextEditBoxLayer*>(scene->getChildByTag(WCT_TextEditBox));
+		if(uiNode != NULL)
+			return uiNode;
+	}
+
+	return NULL;
+}
+
+void TextEditBox::setTitle( const std::string &title )
+{
+	TextEditBoxLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setTitle(title);
+	}
+}
+
+void TextEditBox::setMessage( const std::string &msg )
+{
+	TextEditBoxLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setText(msg);
+	}
+}
+
+void TextEditBox::setPlaceHolder( const std::string &text )
+{
+	TextEditBoxLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setPlaceHolder(text);
+	}
+}
+
+c_signal<void, bool, std::string> * TextEditBox::getBtnSignal()
+{
+	if(_signalBtnPressed == NULL)
+		_signalBtnPressed = new c_signal<void, bool, std::string>;
+
+	return _signalBtnPressed;
+}
+
+void TextEditBox::emitBtnSignal( bool isOk, const std::string &str )
+{
+	if(_signalBtnPressed != NULL)
+		_signalBtnPressed->emit(isOk, str);
+}
+
+void TextEditBox::setEnableEdit( bool enable )
+{
+	TextEditBoxLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->_enableEdit = enable;
+	}
+}
+
+//param maxInputNum 最多可以输入多少个汉字，一个utf8汉字为3字节
+void TextEditBox::setMaxInputNum( int maxInputNum )
+{
+	TextEditBoxLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setMaxInputNum(maxInputNum * 3);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler TextEditBoxLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler TextEditBoxLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", TextEditBoxLayer::onOkBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCancelBtnPressed", TextEditBoxLayer::onCancelBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", TextEditBoxLayer::onCloseBtnPressed);
+	return NULL;
+}
+
+void TextEditBoxLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_curInputNum = 0;
+	_maxInputNum = 150;
+	_enableEdit = true;
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(NT_Frame));
+	CC_ASSERT(_frame != NULL);
+	_titleLabel = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_Title));
+	CC_ASSERT(_titleLabel != NULL);
+	CCNode *textNode = _frame->getChildByTag(NT_Input);
+	_inputText = createInputWithContent(textNode);
+	_inputText->setDimensions(textNode->getContentSize());
+	_inputText->setVerticalAlignment(kCCVerticalTextAlignmentTop);
+	_inputText->setDelegate(this);
+	CC_ASSERT(_inputText != NULL);
+	_frame->addChild(_inputText);
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -1, true);
+}
+
+void TextEditBoxLayer::onExit()
+{
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool TextEditBoxLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(_enableEdit)
+	{
+		CCNode *node = _frame->getChildByTag(NT_Input);
+		if(node != NULL)
+		{
+			CCPoint pt = node->convertTouchToNodeSpace(pTouch);
+			const CCSize &frameSize = node->getContentSize();
+			CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+			if(frameRect.containsPoint(pt))
+			{
+				_inputText->attachWithIME();
+			}
+		}
+	}
+	return true;
+}
+
+void TextEditBoxLayer::onOkBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);//vv
+	TextEditBox::getInstace()->emitBtnSignal(true, _inputText->getString());
+	TextEditBox::getInstace()->close();
+}
+
+void TextEditBoxLayer::onCancelBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);//vv
+	TextEditBox::getInstace()->emitBtnSignal(false, _inputText->getString());
+	TextEditBox::getInstace()->close();
+}
+
+void TextEditBoxLayer::setTitle( const std::string &title )
+{
+	_titleLabel->setString(title.c_str());
+}
+
+void TextEditBoxLayer::setPlaceHolder( const std::string &text )
+{
+	CCString *str = CCString::createWithFormat("%d", _maxInputNum / 3);
+	_inputText->setPlaceHolder(replaceStr(text, "**", str->getCString()).c_str());
+}
+
+void TextEditBoxLayer::setText( const std::string &text )
+{
+	_inputText->setString(text.c_str());
+	_inputText->setColor(ccc3(0xfe, 0xf8, 0xd8));
+}
+
+void TextEditBoxLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);//vv
+	TextEditBox::getInstace()->emitBtnSignal(false, _inputText->getString());
+	TextEditBox::getInstace()->close();
+}
+
+//当用户启动虚拟键盘是的回调
+bool TextEditBoxLayer::onTextFieldAttachWithIME( CCTextFieldTTF *pSender )
+{
+	return false;
+	//return true; 不启动
+}
+
+//当用户进行输入是的回调函数
+bool TextEditBoxLayer::onTextFieldInsertText( CCTextFieldTTF *pSender, const char* text, int nLen )
+{
+	CCLog("TextField Insert text:%s, nLen:%d, _curInputNum:%d", text, nLen, _curInputNum);
+	
+	if (_curInputNum < _maxInputNum)
+	{
+		_curInputNum += nLen;
+		CCLog("TextField Insert _curInputNum:%d", _curInputNum);
+		return false;
+	}else
+	{
+		CCLog("TextField Insert _curInputNum:%d", _curInputNum);
+		return true;
+	}
+	//return true; 不输入文字
+}
+
+//当用户关闭虚拟键盘时的回调
+bool TextEditBoxLayer::onTextFieldDetachWithIME( CCTextFieldTTF * sender )
+{
+	return false;
+	//return true; 不关闭虚拟键盘
+}
+
+//当用户删除文字时的回调
+bool TextEditBoxLayer::onTextFieldDeleteBackward( CCTextFieldTTF *pSender, const char* text, int nLen )
+{
+	CCLog("TextField Delete text:%s, nLen:%d", text, nLen);
+	if (_curInputNum >= nLen)
+	{
+		_curInputNum -= nLen;
+		CCLog("TextField Delete _curInputNum:%d", _curInputNum);
+	}else
+	{
+		_curInputNum = 0;
+	}
+	return false;
+	//return true; 不删除
+}

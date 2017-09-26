@@ -1,0 +1,411 @@
+#include "SecondVerifyMgr.h"
+#include "client_common_define.h"
+#include "SecondVerifyTipUi.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "UiManager.h"
+#include "TCPClient.h"
+#include "CmdAdapter.h"
+#include "World.h"
+#include "GameEventDefine.h"
+#include "f_string_util.h"
+#include "SecondVerifyUI.h"
+#include "ToolTip.h"
+#include "ClientCfg.h"
+
+// template<class T>
+// VerifyProcessData<T>::VerifyProcessData(T* pTar,second_verify_callfunc pProcessFunc)
+// {
+// 	m_pTarget = pTar;
+// 	m_pVerifyProcessFunc = pProcessFunc;
+// }
+// 
+// template<class T>
+// void VerifyProcessData<T>::processFunc(bool isSucess)
+// {
+// 	m_pTarget->m_pVerifyProcessFunc(isSucess);
+// }
+
+VerifyProcessData::VerifyProcessData(process_result_func pProcessFunc)
+{
+	m_callFunc = pProcessFunc;
+}
+
+void VerifyProcessData::processFunc(bool isSucess)
+{
+	m_callFunc(isSucess);
+}
+
+SecondVerifyMgr* SecondVerifyMgr::getInstance()
+{
+	static SecondVerifyMgr Mgr;
+	return &Mgr;
+}
+
+SecondVerifyMgr::SecondVerifyMgr()
+	:m_pVerfiyData(NULL)
+	,m_eVerifyState(SV_Verify_UnSet)
+	,m_eCurrentSVTipType(SV_Tip_Null)
+	,m_isServerOpen(false)
+{
+
+}
+
+void SecondVerifyMgr::Init()
+{
+	m_eVerifyState = SV_Verify_UnSet;
+	m_pVerfiyData = NULL;
+	m_isServerOpen = false;
+	TCP_CLIENT->register_net_cmd("NET_SIS_SafeLockInfo", this, &SecondVerifyMgr::on_server_recv_verify_result);
+	TCP_CLIENT->register_net_cmd("NET_SIS_SafeLockChangeSuccess", this, &SecondVerifyMgr::on_server_recv_reset_success);
+	TCP_CLIENT->register_net_cmd("NET_SIS_SafeLockError", this, &SecondVerifyMgr::on_server_recv_error_code);
+	NET_c2S_SafeLockInfo send;
+	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+}
+
+void SecondVerifyMgr::Destroy()
+{
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_SafeLockInfo", this, &SecondVerifyMgr::on_server_recv_verify_result);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_SafeLockError", this, &SecondVerifyMgr::on_server_recv_error_code);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_SafeLockChangeSuccess", this, &SecondVerifyMgr::on_server_recv_reset_success);
+	m_eVerifyState = SV_Verify_UnSet;
+	m_pVerfiyData = NULL;
+	m_isServerOpen = false;
+}
+
+bool SecondVerifyMgr::try_request_safe_verify(process_result_func pProcessFunc)
+{
+	if (!m_isServerOpen)
+	{
+		pProcessFunc(true);
+		return true;
+	}
+
+	if (m_eVerifyState == SV_Verify_Success || m_eVerifyState == SV_Verify_UnSet || m_eVerifyState == SV_Verify_ServerProtectedTime || m_eVerifyState == SV_Verify_ForceAndVerifyed)
+	{
+		pProcessFunc(true);
+		return true;
+	}
+	switch(m_eVerifyState)
+	{
+	case SV_Verify_Seted:
+		{
+			openVerifyTipUIByType(SV_Tip_VerifyPwd);
+			send_request_second_verify(NEW_VERIFY_DATA(pProcessFunc));
+		}
+		break;
+	case SV_Verify_ForceAndSysLocked:
+	case SV_Verify_SysLocked:
+		{
+			openVerifyTipUIByType(SV_Tip_LockedSys);
+		}
+		break;
+	case SV_Verify_ForceUnLock:
+		{
+			//ToolTip::getInstance()->push(STRING_TABLE["second_verify_sys_locked"]);
+			openVerifyTipUIByType(SV_Tip_VerifyPwd);
+			send_request_second_verify(NEW_VERIFY_DATA(pProcessFunc));
+		}
+		break;
+// 	case SV_Verify_ServerProtectedTime:
+// 		{
+// 			ToolTip::getInstance()->push(STRING_TABLE["second_verify_error_server_protected_time"]);
+// 		}
+// 		break;
+	}
+	if (SV_Verify_Seted != m_eVerifyState && m_eVerifyState != SV_Verify_ForceUnLock)//会弹出输入框
+	{
+		pProcessFunc(false);
+	}
+	
+	return false;
+}
+
+void SecondVerifyMgr::send_request_second_verify(VerifyProcessData* pData)//请求验证信息
+{
+	CC_SAFE_DELETE(m_pVerfiyData);
+	m_pVerfiyData = pData;
+}
+
+void SecondVerifyMgr::send_request_set_verify(SetSVData pData)
+{
+	NET_c2S_SafeLockSet send;
+
+	memcpy(send.pwd1,pData.m_sPwd1.c_str(),SAFELOCK_PWD_NUM);
+	memcpy(send.pwd2,pData.m_sPwd2.c_str(),SAFELOCK_PWD_NUM);
+
+	Utf8ToUtf16(pData.m_sFatherName.c_str(), send.quest1, SAFELOCK_PWD_NUM, 0);
+	Utf8ToUtf16(pData.m_sMotherName.c_str(), send.quest2, SAFELOCK_PWD_NUM, 0);
+
+	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+}
+
+void SecondVerifyMgr::send_request_verify_pwd(string pstr)
+{
+	if (pstr.length() != MAX_PWD_NUM_COUNT) return;
+	
+	NET_c2S_SafeLockCheck send;
+	memcpy(send.pwd,pstr.c_str(),SAFELOCK_PWD_NUM);
+	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+}
+
+void SecondVerifyMgr::send_request_reset_verify_pwd(ResetSVPwdData pData)
+{
+	if (pData.oldPwd.length() != MAX_PWD_NUM_COUNT || pData.newPwd1.length() != MAX_PWD_NUM_COUNT || pData.newPwd2 .length() != MAX_PWD_NUM_COUNT)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["second_verify_pwd_length_error"]);
+		return;
+	}
+	if (pData.newPwd1.compare(pData.newPwd2 ) != 0)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["second_verify_pwd_not_equal"]);
+		return;
+	}
+	NET_c2S_SafeLockChange send;
+	memcpy(send.oldPwd,pData.oldPwd.c_str(),SAFELOCK_PWD_NUM);
+	memcpy(send.newPwd1,pData.newPwd1.c_str(),SAFELOCK_PWD_NUM);
+	memcpy(send.newPwd2,pData.newPwd2.c_str(),SAFELOCK_PWD_NUM);
+	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+}
+
+void SecondVerifyMgr::send_request_force_unlock()
+{
+	if (m_eVerifyState != SV_Verify_UnSet)
+	{
+		NET_c2S_SafeLockDrop send;
+		TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+	}
+}
+
+void SecondVerifyMgr::send_Request_cancel_force_unlock()//取消强制解锁安全锁
+{
+	if (m_eVerifyState == SV_Verify_ForceUnLock || m_eVerifyState == SV_Verify_ForceAndVerifyed || m_eVerifyState == SV_Verify_ForceAndSysLocked)
+	{
+		NET_c2S_SafeLockCancelDrop send;
+		TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+	}
+}
+
+void SecondVerifyMgr::destroyRequsetVerityData()
+{
+	CC_SAFE_DELETE(m_pVerfiyData); //删除链接数据
+}
+
+unsigned int SecondVerifyMgr::on_server_recv_verify_result(s_net_cmd *cmd)//回复验证消息
+{
+	NET_SIS_SafeLockInfo * msg = (NET_SIS_SafeLockInfo*)cmd;
+	CC_ASSERT(msg);
+	m_pSafeLockedInfo = msg->info;
+
+	m_isServerOpen = m_pSafeLockedInfo.safeLockFlag;
+
+	m_eVerifyState = SV_Verify_Null;
+	if (!msg->info.safeLockDropTime.IsTimeEmpty()) //强制解锁 
+	{
+		tagDWORDTime t_currTime = ServerTime::getInstance()->cal_current_server_dword_time();
+		bool isProtectedTime = CalcTimeDiff(t_currTime,msg->info.safeLockDropTime) > 7 * 24 *60 * 60;
+		m_eVerifyState = isProtectedTime ? SV_Verify_ServerProtectedTime : SV_Verify_ForceUnLock ;//服务器保护时间状态 : 强制取消状态
+	}
+
+	if (!msg->info.safeLockFreezeTime.IsTimeEmpty()) //冻结状态
+	{
+		m_eVerifyState = m_eVerifyState == SV_Verify_ForceUnLock ? SV_Verify_ForceAndSysLocked : SV_Verify_SysLocked;//判断是 强制解锁 + 冻结 还是单一冻结
+		if (m_pVerfiyData)
+		{
+			m_pVerfiyData->processFunc(false);//验证失败
+			CC_SAFE_DELETE(m_pVerfiyData); //删除链接数据
+		}
+	}
+	else if (msg->info.safeLockHavePwd)//判断是否设置了安全锁
+	{
+		if (msg->info.safeLockCheck)
+		{
+			if(m_pVerfiyData)
+			{
+				m_pVerfiyData->processFunc(true);
+				CC_SAFE_DELETE(m_pVerfiyData);
+			}
+			m_eVerifyState = m_eVerifyState == SV_Verify_ForceUnLock ? SV_Verify_ForceAndVerifyed : SV_Verify_Success;
+			if (m_eCurrentSVTipType == SV_Tip_SetPwd)
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["second_verify_set_success"]);
+			}
+		}
+		else
+		{
+			m_eVerifyState = m_eVerifyState == SV_Verify_ForceUnLock ? SV_Verify_ForceUnLock : SV_Verify_Seted;
+		}	
+	}
+	else
+	{
+		m_eVerifyState =  m_eVerifyState == SV_Verify_ServerProtectedTime ? SV_Verify_ServerProtectedTime : SV_Verify_UnSet;//没有设置
+	}
+	GET_UI(SecondVerifyUi, WCT_SecondVerifyUi)->refershSecondVerifyUi();
+	refershVerifyTipUI();
+	if (m_eCurrentSVTipType == SV_Tip_VerifyPwd && ( m_eVerifyState == SV_Verify_Seted || m_eVerifyState == SV_Verify_ForceUnLock))  return 0;//如果是未验证状态，开着验证界面说明密码输入错了
+	if (m_eCurrentSVTipType == SV_Tip_LockedSys && (m_eVerifyState == SV_Verify_SysLocked || m_eVerifyState == SV_Verify_ForceAndSysLocked)) return 0;
+	if (m_eCurrentSVTipType == SV_Tip_ResetPwd) return 0;
+	this->closeVerifyTipUI(); 
+	return 0;
+}
+
+unsigned int SecondVerifyMgr::on_server_recv_reset_success(s_net_cmd *cmd)
+{
+	ToolTip::getInstance()->push(STRING_TABLE["second_verify_reset_success"]);
+	if (m_eCurrentSVTipType == SV_Tip_ResetPwd)
+	{
+		this->closeVerifyTipUI(); 
+	}
+	return 0;
+}
+
+unsigned int SecondVerifyMgr::on_server_recv_error_code(s_net_cmd *cmd)//回复错误码
+{
+	NET_SIS_SafeLockError * msg = (NET_SIS_SafeLockError*)cmd;
+	CC_ASSERT(msg);
+ 	switch (msg->errorId)
+ 	{
+	case ESafeLock_drop_time_null:		// 解除密码为空
+	case ESafeLock_pwd_not_null:		// 密码不为空
+		ToolTip::getInstance()->push(STRING_TABLE["second_verify_error_pwd_null"]);
+		break;
+	case ESafeLock_pwd_set_not_equal:	// 密码设置不一样
+		ToolTip::getInstance()->push(STRING_TABLE["second_verify_pwd_not_equal"]);
+		break;
+	case ESafeLock_pwd_not_num:			// 密码不是数字
+	case ESafeLock_pwd_num_limit:			// 密码字数不对
+		ToolTip::getInstance()->push(STRING_TABLE["second_verify_pwd_length_error"]);
+		break;
+	case ESafeLock_quest_null:			// 问题字数为空
+		ToolTip::getInstance()->push(STRING_TABLE["second_verify_question_length_error"]);
+		break;
+	case ESafeLock_check_already:		// 密码已验证
+		ToolTip::getInstance()->push(STRING_TABLE["second_verify_verifyed_success"]);
+		break;
+	case ESafeLock_pwd_not_equal:			// 密码不对
+		{
+			string t_str = "";
+			safe_sprintf(t_str,STRING_TABLE["second_verify_error_pwd"],SECOND_VERIFY_TRY_TIMES - getInputErrrorCount());
+			ToolTip::getInstance()->push(t_str);
+		}
+		break;
+	case ESafeLock_check_limit:			// 密码未验证
+		ToolTip::getInstance()->push(STRING_TABLE["second_verify_unverified_tip"]);
+		break;
+	case ESafeLock_pwd_freeze:			// 冻结
+		ToolTip::getInstance()->push(STRING_TABLE["second_verify_sys_locked"]);
+		break;
+	case ESafeLock_pwd_null:				// 密码没有设置
+	case ESafeLock_drop_time_not_null:	// 解除密码列表存在
+		break;
+ 	}
+	return 0;
+}
+
+
+void SecondVerifyMgr::openVerifyTipUIByType(e_SVTipType pType)
+{
+	m_eCurrentSVTipType = pType;
+	CCScene* t_scene = World::getInstance()->getScene();
+	CCNode* t_node = t_scene->getChildByTag(WCT_SecondVerifyTipUi);
+	if (t_node == NULL)
+	{
+		SecondVerifyTipUiLayer* pLayer = SecondVerifyTipUiLayer::CreateVerifyTip();
+		pLayer->initUIBySVTipType(pType);
+		t_scene->addChild(pLayer, WZ_POPUI, WCT_SecondVerifyTipUi);
+	}
+	else
+	{
+		SecondVerifyTipUiLayer* pLayer = dynamic_cast<SecondVerifyTipUiLayer*>(t_node);
+		CC_ASSERT(pLayer);
+		pLayer->initUIBySVTipType(pType);
+	}
+	StrNumPadMgr::getInstance()->close();
+}
+
+void SecondVerifyMgr::closeVerifyTipUI()
+{
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		SecondVerifyTipUiLayer* t_layer = dynamic_cast<SecondVerifyTipUiLayer*>(scene->getChildByTag(WCT_SecondVerifyTipUi));
+		if (t_layer)
+		{
+			t_layer->close();
+		}
+	}
+	m_eCurrentSVTipType = SV_Tip_Null;
+	if (m_pVerfiyData)
+	{
+		m_pVerfiyData->processFunc(false);
+		CC_SAFE_DELETE(m_pVerfiyData);
+	}
+}
+
+void SecondVerifyMgr::refershVerifyTipUI()
+{
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		SecondVerifyTipUiLayer* t_layer = dynamic_cast<SecondVerifyTipUiLayer*>(scene->getChildByTag(WCT_SecondVerifyTipUi));
+		if (t_layer)
+		{
+			t_layer->refreshUIByVerifyState();
+		}
+	}
+}
+
+void SecondVerifyMgr::openVerifyUI()
+{
+	if (m_eVerifyState == SV_Verify_ServerProtectedTime)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["second_verify_error_server_protected_time"]);
+		return;
+	}
+	LocalPlayer* t_loc = RoleManager::getInstance()->getLocalPlayer();
+	if (t_loc->getLevel() >= SECOND_VERIFY_OPEN_LEVEL)
+	{
+		if (t_loc->getLevel() >= SECOND_VERIFY_REMIND_LV)
+		{
+			std::stringstream ss;
+			ss<<"set"<<"_"<<t_loc->getId();
+			ClientCfg::getInstance()->setInt(ss.str(), "secondVerifyFirst", 1);
+			clear_safe_verify_red_point pevt;
+			SEND_EVENT(&pevt);
+		}
+
+		OPEN_UI(WCT_SecondVerifyUi);
+	}
+	else
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["second_verify_open_level"]);
+	}
+}
+
+tagDWORDTime SecondVerifyMgr::getSuccessForceUnlockTime()
+{
+	 return IncreaseTime(m_pSafeLockedInfo.safeLockDropTime,SECOND_VERIFY_FORCE_UNLOCK_DAY * 24 * 60 * 60);
+}
+
+int SecondVerifyMgr::getSysLockedSurplusTime()
+{
+	tagDWORDTime t_targetTime = m_pSafeLockedInfo.safeLockFreezeTime;
+	int t_nTarTime  = DwordTime2UTCTime(IncreaseTime(t_targetTime,3600));
+	int t_nCurrTime  = DwordTime2UTCTime(ServerTime::getInstance()->cal_current_server_dword_time());
+	int t_surplus = t_nTarTime - t_nCurrTime;
+	return t_surplus < 0 ? 0 : t_surplus;
+}
+
+bool SecondVerifyMgr::isShowRedPointOnUi()
+{
+	if (!m_isServerOpen)
+	{
+		return false;
+	}
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	std::stringstream ss;
+	ss<<"set"<<"_"<<ploc->getId();
+	int tip = ClientCfg::getInstance()->getInt(ss.str(), "secondVerifyFirst", 0);
+
+	return tip == 0 && m_eVerifyState == SV_Verify_UnSet && ploc->getLevel() >= SECOND_VERIFY_REMIND_LV;
+}

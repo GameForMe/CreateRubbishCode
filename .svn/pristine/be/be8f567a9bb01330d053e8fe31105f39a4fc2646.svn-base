@@ -1,0 +1,785 @@
+#include "ExchangeBusinessMgr.h"
+#include "DBMgr.h"
+#include "TCPClient.h"
+#include "World.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "BaseDefine.h"
+#include "ChatMgr.h"
+#include "MessageBoxUi.h"
+#include "PackageManager.h"
+#include "TradeUi.h"
+#include "Auto_ActionMgr.h"
+#include "StringMgr.h"
+#include "UiManager.h"
+#include "ToolTip.h"
+#include "NameMgr2.h"
+#include "PackageUi.h"
+#include "NewPlayerGuide.h"
+#include "f_string_table.h"
+#include "item.h"
+#include "SecondVerifyMgr.h"
+
+ExchangeBusinessMgr::ExchangeBusinessMgr()
+{
+	Reset();
+}
+ExchangeBusinessMgr::~ExchangeBusinessMgr()
+{
+	//Reset();
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_exchange_request_result" , this , &ExchangeBusinessMgr::OnServerExchangeRequestResult);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_exchange_request" , this , &ExchangeBusinessMgr::OnServerExchangeRequest);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_add_exchange_to_src" , this , &ExchangeBusinessMgr::OnServerAddExchangeItem_Src);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_add_exchange_to_dest" , this , &ExchangeBusinessMgr::OnServerAddExchangeItem_Dest);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_cancel_exchange_item" , this , &ExchangeBusinessMgr::OnServerCancelExchangeItemAny);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_exchange_item_lock" , this , &ExchangeBusinessMgr::OnServerExchangeLock);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_exchange_cancel" , this , &ExchangeBusinessMgr::OnServerCancelExchange);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_exchange_finish" , this , &ExchangeBusinessMgr::OnServerExchangeFinish);
+}
+void ExchangeBusinessMgr::Init()
+{
+	TCP_CLIENT->register_net_cmd("NET_SIS_exchange_request_result" , this , &ExchangeBusinessMgr::OnServerExchangeRequestResult);
+	TCP_CLIENT->register_net_cmd("NET_SIS_exchange_request" , this , &ExchangeBusinessMgr::OnServerExchangeRequest);
+	TCP_CLIENT->register_net_cmd("NET_SIS_add_exchange_to_src" , this , &ExchangeBusinessMgr::OnServerAddExchangeItem_Src);
+	TCP_CLIENT->register_net_cmd("NET_SIS_add_exchange_to_dest" , this , &ExchangeBusinessMgr::OnServerAddExchangeItem_Dest);
+	TCP_CLIENT->register_net_cmd("NET_SIS_cancel_exchange_item" , this , &ExchangeBusinessMgr::OnServerCancelExchangeItemAny);
+	TCP_CLIENT->register_net_cmd("NET_SIS_exchange_item_lock" , this , &ExchangeBusinessMgr::OnServerExchangeLock);
+	TCP_CLIENT->register_net_cmd("NET_SIS_exchange_cancel" , this , &ExchangeBusinessMgr::OnServerCancelExchange);
+	TCP_CLIENT->register_net_cmd("NET_SIS_exchange_finish" , this , &ExchangeBusinessMgr::OnServerExchangeFinish);
+	return;
+}
+void ExchangeBusinessMgr::Destroy()
+{
+	Reset();
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_exchange_request_result" , this , &ExchangeBusinessMgr::OnServerExchangeRequestResult);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_exchange_request" , this , &ExchangeBusinessMgr::OnServerExchangeRequest);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_add_exchange_to_src" , this , &ExchangeBusinessMgr::OnServerAddExchangeItem_Src);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_add_exchange_to_dest" , this , &ExchangeBusinessMgr::OnServerAddExchangeItem_Dest);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_cancel_exchange_item" , this , &ExchangeBusinessMgr::OnServerCancelExchangeItemAny);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_exchange_item_lock" , this , &ExchangeBusinessMgr::OnServerExchangeLock);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_exchange_cancel" , this , &ExchangeBusinessMgr::OnServerCancelExchange);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_exchange_finish" , this , &ExchangeBusinessMgr::OnServerExchangeFinish);
+	return;
+}
+ExchangeBusinessMgr* ExchangeBusinessMgr::getInstance()
+{
+	static ExchangeBusinessMgr mgr;
+	return &mgr;
+}
+void ExchangeBusinessMgr::Reset()
+{
+	b_NetLock = false;
+	m_ExchangeRoleID = (unsigned int)INVALID;
+	b_DestLock = false;
+	b_SrcLock = false;
+	memset(m_LocalExchangeGoodsInfo,0,sizeof(m_LocalExchangeGoodsInfo));
+	memset(m_RemoteExchangeGoodsInfo,0,sizeof(m_RemoteExchangeGoodsInfo));
+	if ( exchangeEquipmentGoods.size() != 0 )
+	{
+		exchangeEquipmentGoods.clear();
+	}
+	if ( exchangeLocalEquipmentGoods.size() != 0 )
+	{
+		exchangeLocalEquipmentGoods.clear();
+	}
+}
+//邀请玩家进行交易
+void ExchangeBusinessMgr::InvitePlayerExchange(unsigned int uDesRoleID)
+{
+	//若本地玩家正在挂机状态下，则应取消挂机
+	if (AutoActionMgr::getInstance()->Get_Auto_Action())//gx add
+	{
+		AutoActionMgr::getInstance()->Set_Auto_Action(false);
+	}
+	if (!IS_VALID(uDesRoleID))
+		return;
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(ploc))
+		return;
+	if (ploc->getId() == uDesRoleID)
+		return;//非法直接退出
+	//玩家等级判断
+	if (ploc->getLevel() < Role_Exchange_Min_Level)
+	{
+		ToolTip::getInstance()->push(GET_STR(153));
+		return;
+	}
+	Role* pRole = RoleManager::getInstance()->findRole(uDesRoleID);
+	if (!IS_VALID_PTR(pRole))
+		return;
+	if (pRole->getLevel() < Role_Exchange_Min_Level)
+	{
+		ToolTip::getInstance()->push(GET_STR(153));
+		return;
+	}
+	//判断本地玩家是否交易状态冲突
+	if ((true == ploc->isInRoleStateAny(RA_Stall)) || (true == ploc->isInRoleStateAny(RA_ShuangXiu)))
+	{
+		ToolTip::getInstance()->push(GET_STR(154));
+		return;
+	}
+	//玩家之间的距离检查
+	if(ccpDistance(ploc->getPosition(),pRole->getPosition()) > Role_Exchange_Max_Distance)
+	{
+		ToolTip::getInstance()->push(GET_STR(155));
+		return;
+	}
+	m_ExchangeRoleID = uDesRoleID;//如果本地发起的交易，存储交易目标ID
+	NET_SIC_exchange_request cmd;
+	cmd.dwDstID = uDesRoleID;
+	std::function<void(bool)> func = [cmd](bool isSuccess){
+		if (isSuccess)
+		{
+			TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+		}
+	};
+	SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+/*	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);*/
+	return;
+}
+//本地玩家邀请远方玩家进行交易出现了错误信息
+unsigned int ExchangeBusinessMgr::OnServerExchangeRequestResult(s_net_cmd *cmd)
+{
+	NET_SIS_exchange_request_result* msg = (NET_SIS_exchange_request_result*)cmd;
+	LocalPlayer* local = RoleManager::getInstance()->getLocalPlayer();
+	if( !local )
+		return 0;
+	//本地等待提示隐藏
+	if(World::getInstance()->getScene()->getChildByTag(WCT_ExchangeMesBox))
+	{
+		CCNode* mesBox = World::getInstance()->getScene()->getChildByTag(WCT_ExchangeMesBox);
+		dynamic_cast<MessageBoxUi*>(mesBox)->clearSelf();
+	}
+	//需分本地玩家还是远方玩家
+	unsigned int localID = local->getId();
+	//若本地玩家是交易的发起者
+	if (localID == msg->dwSrcID)
+	{
+		if (msg->dw_error_code == E_Exchange_Accept)
+		{
+			m_ExchangeRoleID = msg->dwDstID;
+			RoleManager::getInstance()->setTradeRoleId(m_ExchangeRoleID); //写的跟屎一样，凑合给你个名字吧
+			//调用UI打开交易界面
+			OPEN_UI(WCT_TradeUi);
+			GET_UI(Package,WCT_PACKAGEUI)->setBtnShow(false);
+			if (IS_UI_OPEN(WCT_SelectFunction))
+			{
+				CLOSE_UI(WCT_SelectFunction);
+			}
+		}
+		else
+		{
+			switch (msg->dw_error_code)
+			{
+			case  E_Exchange_OutOfRange://
+				ToolTip::getInstance()->push(GET_STR(155));
+				break;
+			case E_Exchange_NotInSame_Map://
+				ToolTip::getInstance()->push(GET_STR(157));
+				break;
+			case  E_Exchange_ApplicantTgt_Change://
+				ToolTip::getInstance()->push(GET_STR(157));
+				break;
+			case E_Exchange_Refuse:
+				ToolTip::getInstance()->push(GET_STR(156));
+				break;
+			case E_Exchange_SelfBusy:
+				ToolTip::getInstance()->push(GET_STR(2145));
+				break;
+			case E_Exchange_RoleBusy:
+				ToolTip::getInstance()->push(GET_STR(2036));
+				break;
+			case E_Exchange_NotInSafearea:
+				ToolTip::getInstance()->push(GET_STR(2038));
+				break;
+			case E_Exchange_NotAnswer:
+				ToolTip::getInstance()->push(GET_STR(2148));
+				break;
+			case E_Exchange_Map_Limt:
+				ToolTip::getInstance()->push(GET_STR(9210));
+				break;
+			case E_Exchange_ComPractice:
+				{
+					ToolTip::getInstance()->push(STRING_TABLE["on_marrige_not_trade"]);   // 双修中不允许交易
+					break;
+				}
+			default:
+				break;
+			}
+
+			//取消交易 将全部物品解锁 add by XSea 2014.10.29
+			for( int i = 0; i < Role_Exchange_Max_Num; ++i )
+				PackageManager::getInstance()->unLockItem(EICT_Bag, m_LocalExchangeGoodsInfo[i].n64_Serial, true);
+
+			CLOSE_UI(WCT_TradeUi);
+			CLOSE_UI(WCT_PACKAGEUI);
+			Reset();
+			//如果在交易状态则取消交易状态
+			if( local->isInRoleStateAny(RA_Exchange) )
+				local->setAttribute(RA_Exchange,0);
+		}
+	}
+	//若本地玩家是交易的被邀请方
+	else
+	{
+		if (msg->dw_error_code == E_Exchange_Accept)
+		{
+			m_ExchangeRoleID = msg->dwSrcID;
+			RoleManager::getInstance()->setTradeRoleId(m_ExchangeRoleID); //写的跟屎一样，凑合给你个名字吧
+			//调用UI打开交易界面
+			OPEN_UI(WCT_TradeUi);
+			GET_UI(Package,WCT_PACKAGEUI)->setBtnShow(false);
+			if (IS_UI_OPEN(WCT_SelectFunction))
+			{
+				CLOSE_UI(WCT_SelectFunction);
+			}
+		}
+		else
+		{
+			switch (msg->dw_error_code)
+			{
+			case E_Exchange_SelfBusy:
+				ToolTip::getInstance()->push(GET_STR(154));
+				break;
+			case E_Exchange_RoleBusy:
+				ToolTip::getInstance()->push(GET_STR(2036));
+				break;
+			case  E_Exchange_OutOfRange://
+				ToolTip::getInstance()->push(GET_STR(155));
+				break;
+			case E_Exchange_NotInSame_Map://
+				ToolTip::getInstance()->push(GET_STR(157));
+				break;
+			case  E_Exchange_ApplicantTgt_Change://
+				ToolTip::getInstance()->push(GET_STR(157));
+				break;
+			case E_Exchange_Refuse:
+				ToolTip::getInstance()->push(GET_STR(156));
+				break;
+			case E_Exchange_NotInSafearea:
+				ToolTip::getInstance()->push(GET_STR(2038));
+				break;
+			case E_Exchange_Map_Limt:
+				ToolTip::getInstance()->push(GET_STR(9201));
+				break;
+			default:
+				break;
+			}
+			//取消交易 将全部物品解锁 add by XSea 2014.10.29
+			for( int i = 0; i < Role_Exchange_Max_Num; ++i )
+				PackageManager::getInstance()->unLockItem(EICT_Bag, m_LocalExchangeGoodsInfo[i].n64_Serial, true);
+
+			CLOSE_UI(WCT_TradeUi);
+			CLOSE_UI(WCT_PACKAGEUI);
+			Reset();
+			//如果在交易状态则取消交易状态
+			if( local->isInRoleStateAny(RA_Exchange) )
+				local->setAttribute(RA_Exchange,0);
+		}
+	}
+
+	return 0;
+}
+//远方玩家邀请本地玩家进行交易
+unsigned int ExchangeBusinessMgr::OnServerExchangeRequest(s_net_cmd *cmd)
+{
+	NET_SIS_exchange_request* msg = (NET_SIS_exchange_request*)cmd;
+	unsigned int localID = RoleManager::getInstance()->getLocalPlayer()->getId();
+	if (msg->dwSrcID != localID)
+	{
+		//如果当前被邀请方处在强类型引导中,则关闭引导（也就是跳过引导）  2016-3-17 金山
+		if (NewPlayerGuider::getInstance()->_IsGuide && NewPlayerGuider::getInstance()->getIsStrongGuide())
+		{
+			NewPlayerGuider::getInstance()->SkipNewGuide();
+		}
+
+		//先获取邀请方姓名
+		std::string srcName("");
+		if (NameMgr2::getInstance()->queryName(msg->dwSrcID,srcName))//视野内肯定能得到名字
+		{
+			m_ExchangeRoleID = msg->dwSrcID;
+			RoleManager::getInstance()->setTradeRoleId(m_ExchangeRoleID);
+			std::stringstream ss;
+			ss<<srcName<<GET_STR(158);
+			MessageBoxUi *exchangeUI = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,ss.str().c_str(), "\xE7\xA1\xAE\xE5\xAE\x9A","\xE5\x8F\x96\xE6\xB6\x88");
+			World::getInstance()->getScene()->addChild(exchangeUI, WZ_MESSAGEBOX, WCT_ExchangeMesBox);
+			exchangeUI->signalOkBtnPressed.connect(this, &ExchangeBusinessMgr::AgreeExchange);
+			exchangeUI->signalCancelBtnPressed.connect(this,&ExchangeBusinessMgr::DisagreeExchange);
+			//?若后期替换了新的弹框UI，则若玩家没有响应，也应向服务器发消息
+		}
+	}
+	//若本地玩家是交易邀请方
+	else
+	{
+		//邀请已发出，请耐心等待
+		ToolTip::getInstance()->push(STRING_TABLE["invite_send_wait_patience"]);
+		//本地玩家显示
+		MessageBoxUi* loaclExchangeUI = MessageBoxUi::createWithOneBtn(TEXT_UTF8_TISHI, GET_STR(9258).c_str(), TEXT_UTF8_QUXIAO);
+		loaclExchangeUI->signalOkBtnPressed.connect(this, &ExchangeBusinessMgr::DisagreeExchange);
+		World::getInstance()->getScene()->addChild(loaclExchangeUI, WZ_MESSAGEBOX, WCT_ExchangeMesBox);
+	}
+	return 0;
+}
+//信号连接函数
+void ExchangeBusinessMgr::AgreeExchange()
+{
+	NET_SIC_exchange_request_result cmd;
+	cmd.dwDstID = m_ExchangeRoleID;
+	cmd.dw_error_code = E_Exchange_Accept;
+	std::function<void(bool)> func = [cmd](bool isSuccess){
+		if (isSuccess)
+		{
+			TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+		}
+		
+		if (AutoActionMgr::getInstance()->Get_Auto_Action())//gx add
+		{
+			AutoActionMgr::getInstance()->Set_Auto_Action(false);
+		}
+	};
+	SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+/*	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);*/
+	//若正在挂机中，则应该取消
+	
+	return;
+}
+void ExchangeBusinessMgr::DisagreeExchange()
+{
+	NET_SIC_exchange_request_result cmd;
+	cmd.dwDstID = m_ExchangeRoleID;
+	cmd.dw_error_code = E_Exchange_Refuse;
+	std::function<void(bool)> func = [cmd](bool isSuccess){
+		if (isSuccess)
+		{
+			TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+		}
+	};
+	SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+	//TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+	return;
+}
+//添加物品到交易中
+void ExchangeBusinessMgr::AddExchangeItem(const INT64 &itemServerID)
+{
+	//若本地玩家已确认交易，则无法继续添加
+	if (b_SrcLock)
+		return;
+	if (itemServerID == -1)
+		return;
+	for (int i = 0;i < 5;++i)
+	{
+		if (m_LocalExchangeGoodsInfo[i].n64_Serial <= 0)
+		{
+			break;
+		}
+		if (i == 4)
+		{
+			return;
+		}
+	}
+	//在这里判断是否可卖
+	NET_SIC_add_exchange cmd;
+	cmd.n64_serial = itemServerID;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+	//交易放上去 将物品上锁 add by XSea 2014.09.16
+	PackageManager::getInstance()->lockItem(EICT_Bag, itemServerID, true);
+	return;
+}
+//本地玩家添加交易物品后，服务器返回的消息处理
+unsigned int ExchangeBusinessMgr::OnServerAddExchangeItem_Src(s_net_cmd *cmd)
+{
+	NET_SIS_add_exchange_to_src* msg = (NET_SIS_add_exchange_to_src*)cmd;
+	//若成功
+	if (msg->dw_error_code == 0)
+	{
+		tagStallGoodsInfo tempGoodsInfo;
+		if (msg->nIndex >= Role_Exchange_Max_Num || msg->nIndex < 0)//防止异常
+			return 0;
+		tempGoodsInfo.byIndex = msg->nIndex;//最终处于格子的序号由服务器决定
+		tempGoodsInfo.n64_Serial = msg->n64_serial;
+		
+		f_item* pItem = PackageManager::getInstance()->getItem(EICT_Bag,tempGoodsInfo.n64_Serial);
+		if (!pItem)
+		{
+			return 0;
+		}
+		tempGoodsInfo.typeID = pItem->get_item_type_id();//需判断是道具还是装备
+		if (MIsEquipment(tempGoodsInfo.typeID))
+		{
+			f_equipment *equipMent = dynamic_cast<f_equipment*>(pItem);
+			f_equipment newEquip(*equipMent);
+			if (!IS_VALID_PTR(equipMent))
+				return 0;
+			memcpy(tempGoodsInfo.equipAtt,equipMent->get_equip()->EquipAttitionalAtt,sizeof(tempGoodsInfo.equipAtt));
+			memcpy(tempGoodsInfo.dwHoleGemID,equipMent->get_equip()->dwHoleGemID,sizeof(tempGoodsInfo.dwHoleGemID));
+			tempGoodsInfo.byConsolidateLevel = equipMent->get_equip()->byConsolidateLevel;
+			tempGoodsInfo.byQuality = equipMent->get_equip()->byQuality;
+			tempGoodsInfo.nFightLi = equipMent->get_equip()->nRating;
+			tempGoodsInfo.byLuck = equipMent->m_equipex.byLuck;//武器幸运
+			tempGoodsInfo.byHoleNum = equipMent->get_equip()->byHoleNum;//孔数 gx add 2014.3.25
+			exchangeLocalEquipmentGoods.insert(std::make_pair(tempGoodsInfo.byIndex,newEquip));
+		}
+		else
+		{
+
+		}
+		tempGoodsInfo.goodsNum = pItem->get_data()->GetNum();
+		tempGoodsInfo.dwGainTime = pItem->get_gain_time();
+		m_LocalExchangeGoodsInfo[tempGoodsInfo.byIndex] = tempGoodsInfo;
+		//调用UI显示待交易物品最终放置的格子位置
+		//若远程玩家的交易界面上是锁定状态，则要解锁之
+		if (b_DestLock)
+		{
+			b_DestLock = false;
+		}
+		GET_UI(TradeUi, WCT_TradeUi)->updateData();
+	}
+	//若出现错误
+	else
+	{
+		switch (msg->dw_error_code)
+		{
+		case E_Exchange_NotInSame_Map://
+			ToolTip::getInstance()->push(GET_STR(157));
+			break;
+		case  E_Exchange_ApplicantTgt_Change://
+			ToolTip::getInstance()->push(GET_STR(157));
+			break;
+		case E_Exchange_ItemCanNot_Exchange:
+			ToolTip::getInstance()->push(GET_STR(159));
+			break;
+		case E_Exchange_NotFaceDeal:
+			ToolTip::getInstance()->push(STRING_TABLE["Trade_Item_Precious"]);
+			break;
+		case E_Exchange_HoleGem:
+			ToolTip::getInstance()->push(STRING_TABLE["need_no_gems"]);
+			break;
+		default:
+			break;
+		}
+		//交易错误将物品解锁 //add by XSea 2014.10.31
+		PackageManager::getInstance()->unLockItem(EICT_Bag, msg->n64_serial, true);
+	}
+	return 0;
+}
+//远程玩家添加交易物品后，服务器返回的消息处理
+unsigned int ExchangeBusinessMgr::OnServerAddExchangeItem_Dest(s_net_cmd *cmd)
+{
+	NET_SIS_add_exchange_to_dest* msg = (NET_SIS_add_exchange_to_dest*)cmd;
+	if (m_ExchangeRoleID != msg->dwSrcID)
+		return 0;
+	if (msg->nIndex >= Role_Exchange_Max_Num || msg->nIndex < 0)//防止异常 gx add 2013.11.25
+		return 0;
+	tagItem item;
+	memcpy(&item, msg->byData, sizeof(tagItem));
+	//需要判断是装备还是物品
+	if (MIsEquipment(item.dw_data_id))
+	{
+		tagEquip equip;
+		memcpy(&equip, msg->byData, sizeof(tagEquip));
+		tagStallGoodsInfo tempGoodsInfo;
+		tempGoodsInfo.byIndex = msg->nIndex;
+		tempGoodsInfo.n64_Serial = equip.n64_serial;
+		tempGoodsInfo.goodsNum = equip.GetNum();
+		tempGoodsInfo.typeID = equip.dw_data_id;
+		//装备特有属性
+		tempGoodsInfo.byConsolidateLevel = equip.equipSpec.byConsolidateLevel;
+		memcpy(tempGoodsInfo.equipAtt,equip.equipSpec.EquipAttitionalAtt,sizeof(equip.equipSpec.EquipAttitionalAtt));
+		memcpy(tempGoodsInfo.dwHoleGemID,equip.equipSpec.dwHoleGemID,sizeof(equip.equipSpec.dwHoleGemID));
+
+		tempGoodsInfo.byQuality = equip.equipSpec.byQuality;
+		tempGoodsInfo.nFightLi = equip.equipSpec.nRating;
+		tempGoodsInfo.byLuck = equip.equipSpec.byLuck;//幸运
+		tempGoodsInfo.byHoleNum = equip.equipSpec.byHoleNum;//孔数 gx add 2014.3.25
+		tempGoodsInfo.dwGainTime = equip.dw1stGainTime;
+		//
+		m_RemoteExchangeGoodsInfo[tempGoodsInfo.byIndex] = tempGoodsInfo;
+		exchangeEquipmentGoods.insert(std::make_pair(tempGoodsInfo.byIndex,equip));
+		//调用UI显示待交易物品最终放置的格子位置
+		GET_UI(TradeUi, WCT_TradeUi)->updateData();
+	}
+	else
+	{
+		tagStallGoodsInfo tempGoodsInfo;
+		tempGoodsInfo.byIndex = msg->nIndex;
+		tempGoodsInfo.n64_Serial = item.n64_serial;
+		tempGoodsInfo.goodsNum = item.GetNum();
+		tempGoodsInfo.typeID = item.dw_data_id;
+		tempGoodsInfo.dwGainTime = item.dw1stGainTime;
+		//
+		m_RemoteExchangeGoodsInfo[tempGoodsInfo.byIndex] = tempGoodsInfo;
+		//调用UI显示待交易物品最终放置的格子位置
+		GET_UI(TradeUi, WCT_TradeUi)->updateData();
+	}
+	
+	if (b_SrcLock)
+	{
+		b_SrcLock = false;
+		//若本地玩家已确认交易，则需要解锁本地玩家的交易界面
+		GET_UI(TradeUi, WCT_TradeUi)->updateData();
+	}
+	return 0;
+}
+void ExchangeBusinessMgr::CancelExchangeItemAny(unsigned char byIndex)
+{
+	if (byIndex < 0 || byIndex >= Role_Exchange_Max_Num || b_NetLock)
+		return;
+	//若本地玩家已经确认交易，则不允许取消物品
+	if (b_SrcLock)
+		return;
+	INT64 nServerID = m_LocalExchangeGoodsInfo[byIndex].n64_Serial;
+	if (-1 == nServerID)
+		return;
+	NET_SIC_cancel_exchange_item cmd;
+	cmd.n64_serial = nServerID;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+
+	b_NetLock = true;
+}
+unsigned int ExchangeBusinessMgr::OnServerCancelExchangeItemAny(s_net_cmd *cmd)
+{
+	b_NetLock = false;
+
+	NET_SIS_cancel_exchange_item* msg = (NET_SIS_cancel_exchange_item*)cmd;
+	if (0 == msg->dw_error_code)
+	{
+		//需要在本地与远程玩家的信息数组中清除该物品
+		int i;
+		for (i = 0;i < Role_Exchange_Max_Num;i++)
+		{
+			if (m_LocalExchangeGoodsInfo[i].n64_Serial == msg->n64_serial)
+			{
+				tagStallGoodsInfo &temp = m_LocalExchangeGoodsInfo[i];
+				//memset(&temp,0,sizeof(tagStallGoodsInfo));
+				temp.Clear();
+				//调用UI清空本人交易界面的对应格子
+				GET_UI(TradeUi, WCT_TradeUi)->updateData();
+			}
+		}
+		for (i = 0;i < Role_Exchange_Max_Num;i++)
+		{
+			if (m_RemoteExchangeGoodsInfo[i].n64_Serial == msg->n64_serial)
+			{
+				tagStallGoodsInfo &temp = m_RemoteExchangeGoodsInfo[i];
+				//memset(&temp,0,sizeof(tagStallGoodsInfo));
+				temp.Clear();
+				//调用UI清空对方交易界面的对应格子
+				GET_UI(TradeUi, WCT_TradeUi)->updateData();
+			}
+		}
+		//若对方交易界面是锁定状态,则需要解锁
+		if (b_DestLock)
+		{
+			b_DestLock = false;
+			GET_UI(TradeUi, WCT_TradeUi)->updateData();
+		}
+
+		//若玩家交易界面是锁定状态，则需要解锁
+		if (b_SrcLock)
+		{
+			b_SrcLock = false;
+			GET_UI(TradeUi, WCT_TradeUi)->updateData();
+		}
+		//从交易栏拿下来 将物品解锁 add by XSea 2014.09.16
+		PackageManager::getInstance()->unLockItem(EICT_Bag, msg->n64_serial, true);
+	}
+	//若发生错误
+	else
+	{
+		switch (msg->dw_error_code)
+		{
+		case E_Exchange_NotInSame_Map://
+			ToolTip::getInstance()->push(GET_STR(157));
+			break;
+		case  E_Exchange_ApplicantTgt_Change://
+			ToolTip::getInstance()->push(GET_STR(157));
+			break;
+		case E_Exchange_ItemCanNot_Exchange:
+			ToolTip::getInstance()->push(GET_STR(159));
+			break;
+		default:
+			break;
+		}
+		//交易错误将物品解锁 //add by XSea 2014.10.31
+		PackageManager::getInstance()->unLockItem(EICT_Bag, msg->n64_serial, true);
+	}
+	return 0;
+}
+void ExchangeBusinessMgr::ExchangeItemLock()
+{
+	NET_SIC_exchange_item_lock cmd;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_IDLE,false);
+	return;
+}
+unsigned int ExchangeBusinessMgr::OnServerExchangeLock(s_net_cmd *cmd)
+{
+	NET_SIS_exchange_item_lock* msg = (NET_SIS_exchange_item_lock*)cmd;
+	unsigned int uLocID = RoleManager::getInstance()->getLocalPlayer()->getId();
+	if (msg->dw_error_code == 0)
+	{
+		//若是对方确认了交易
+		if (msg->dwSrcID == m_ExchangeRoleID)
+		{
+			b_DestLock = true;
+			//调用UI锁定对方的交易界面
+			GET_UI(TradeUi, WCT_TradeUi)->updateData();
+		}
+		//若是本方确认了交易
+		else if (uLocID == msg->dwSrcID)
+		{
+			b_SrcLock = true;
+			//调用UI锁定本方的交易界面
+			GET_UI(TradeUi, WCT_TradeUi)->updateData();
+		}
+	}
+	else
+	{
+		switch (msg->dw_error_code)
+		{
+		case E_Exchange_NotInSame_Map://
+			ToolTip::getInstance()->push(GET_STR(157));
+			break;
+		case  E_Exchange_ApplicantTgt_Change://
+			ToolTip::getInstance()->push(GET_STR(157));
+			break;
+		default:
+			break;
+		}
+	}
+	return 0;
+}
+//取消交易
+void ExchangeBusinessMgr::CancleExchange()
+{
+	if( b_NetLock ) return;
+
+	for (int i = 0;i < Role_Exchange_Max_Num;++i)
+	{
+		PackageManager::getInstance()->unLockItem(EICT_Bag, m_LocalExchangeGoodsInfo[i].n64_Serial, true);
+	}
+	NET_SIC_exchange_cancel cmd;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+
+	b_NetLock = true;
+}
+unsigned int ExchangeBusinessMgr::OnServerCancelExchange(s_net_cmd *cmd)
+{	
+	b_NetLock = false;
+
+	//NET_SIS_exchange_cancel* msg = (NET_SIS_exchange_cancel*)cmd;
+	ToolTip::getInstance()->push(GET_STR(162));
+	//本地等待提示隐藏
+	if(World::getInstance()->getScene()->getChildByTag(WCT_ExchangeMesBox))
+	{
+		CCNode* mesBox = World::getInstance()->getScene()->getChildByTag(WCT_ExchangeMesBox);
+		dynamic_cast<MessageBoxUi*>(mesBox)->clearSelf();
+	}
+	//取消交易 将全部物品解锁 add by XSea 2014.10.29
+	for( int i = 0; i < Role_Exchange_Max_Num; ++i )
+		PackageManager::getInstance()->unLockItem(EICT_Bag, m_LocalExchangeGoodsInfo[i].n64_Serial, true);
+	//若交易界面还在，则关闭之
+	CLOSE_UI(WCT_TradeUi);
+	CLOSE_UI(WCT_PACKAGEUI);
+	Reset();
+	
+	return 0;
+}
+//确认交易
+void ExchangeBusinessMgr::ExchangeVertify()
+{
+	NET_SIC_exchange_verify cmd;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_IDLE,false);
+	return;
+}
+unsigned int ExchangeBusinessMgr::OnServerExchangeFinish(s_net_cmd *cmd)
+{
+	b_NetLock = false;
+
+	NET_SIS_exchange_finish* msg = (NET_SIS_exchange_finish*)cmd;
+	if (0 == msg->dw_error_code)
+	{
+		ToolTip::getInstance()->push(GET_STR(160));
+		Reset();
+		//调用UI关闭交易界面
+		CLOSE_UI(WCT_TradeUi);
+		GET_UI(Package,WCT_PACKAGEUI)->setBtnShow(true);
+	}
+	else if (E_Exchange_NotEnough_BagSpace == msg->dw_error_code)
+	{
+		ToolTip::getInstance()->push(GET_STR(161));
+		//若本地玩家确认了交易
+		if (b_SrcLock)
+		{
+			b_SrcLock = false;
+			GET_UI(TradeUi, WCT_TradeUi)->updateData();
+			//调用UI解锁本方交易界面
+		}
+		else if (b_DestLock)
+		{
+			b_DestLock = false;
+			//调用UI解锁远方交易界面
+			GET_UI(TradeUi, WCT_TradeUi)->updateData();
+		}
+		else
+		{
+			//do nothing
+		}
+	}
+	else
+	{
+		switch (msg->dw_error_code)
+		{
+		case E_Exchange_NotInSame_Map://
+			ToolTip::getInstance()->push(GET_STR(157));
+			break;
+		case  E_Exchange_ApplicantTgt_Change://
+			ToolTip::getInstance()->push(GET_STR(157));
+			break;
+		case  E_Exchange_OutOfRange://
+			ToolTip::getInstance()->push(GET_STR(155));
+			break;
+		case E_Exchange_NotInSafearea:
+			ToolTip::getInstance()->push(GET_STR(2038));
+			break;
+		case E_Exchange_Map_Limt:
+			ToolTip::getInstance()->push(GET_STR(9201));
+			break;
+		default:
+			break;
+		}
+		//取消交易 将全部物品解锁 add by XSea 2014.10.29
+		for( int i = 0; i < Role_Exchange_Max_Num; ++i )
+			PackageManager::getInstance()->unLockItem(EICT_Bag, m_LocalExchangeGoodsInfo[i].n64_Serial, true);
+		Reset();
+		//调用UI关闭交易界面
+		CLOSE_UI(WCT_TradeUi);
+	}
+	return 0;
+}
+void ExchangeBusinessMgr::MakeExchange()
+{
+	//若远方玩家已确认交易，则本地玩家是确认交易
+	/*if (b_DestLock)
+	{
+	ExchangeVertify();
+	return;
+	}
+	ExchangeItemLock();*/
+	//gx modify 2013.8.20 客户端不主动确认是否远程玩家确认了交易
+	ExchangeVertify();
+	return;
+}
+
+tagEquip const & ExchangeBusinessMgr::getRemoteExchangeEquipment(int index) const 
+{
+	auto itor = exchangeEquipmentGoods.find(index);
+	CC_ASSERT(itor != exchangeEquipmentGoods.end());
+	return itor->second;
+}
+
+f_equipment& ExchangeBusinessMgr::getLocalExchangeEquipment(int index)
+{
+	auto itor = exchangeLocalEquipmentGoods.find(index);
+	CC_ASSERT(itor != exchangeLocalEquipmentGoods.end());
+	return itor->second;
+}

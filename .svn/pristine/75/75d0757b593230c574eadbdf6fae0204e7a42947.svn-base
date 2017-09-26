@@ -1,0 +1,189 @@
+#ifndef	CONSUMPTIONUI_H
+#define CONSUMPTIONUI_H
+
+#include "cocos2d.h"
+#include "cocos-ext.h"
+#include "UiInterface.h"
+
+using namespace cocos2d;
+using namespace cocos2d::extension;
+
+#define INVALID_STOREITEM_ID (unsigned int)(-1)
+#define CONSUMPTIONUI_ITEM_SPACE 3
+#define CONSUMPTIONUI_ITEM_WIDTH 420
+#define CONSUMPTIONUI_ITEM_HEIGHT 57
+
+#define  COSTITEMNUM 8
+#define  ITEMNODENUM 2
+
+struct CostInfo
+{
+	std::string iconname;
+	int cost;
+	int state;
+	unsigned int ItemId[ITEMNODENUM];
+	int ItemNum[ITEMNODENUM];
+	CostInfo()
+		:iconname("")
+		,cost(0)
+		,state(-1)
+	{
+		memset(ItemId, 0, sizeof(ItemId));
+		memset(ItemNum, 0, sizeof(ItemNum));
+	}
+};
+
+class ConsumptionUiItemFrame;
+
+class ConsumptionUiItem
+{
+	friend class ConsumptionUiItemFrame;
+
+	enum eConsumptionUiItemTag
+	{
+		CUIT_CostNumNode = 0,
+		CUIT_Item1 ,
+		CUIT_Item2,
+		CUIT_ReciveBtn,
+		CUIT_CostSprite,
+		CUIT_ItemNodeBegin = 100,
+		CUIT_End
+	};
+public:
+	ConsumptionUiItem();
+	~ConsumptionUiItem();
+	static ConsumptionUiItem *getInstace();
+	CCSize getContentSize();
+	ConsumptionUiItemFrame *getUiFrame() { return _uiFrame; }
+	void setData(const CostInfo &costinfo);
+	unsigned int getId(int i) const { return _costInfo.ItemId[i]; }
+	int getItemState() const {return _costInfo.state;}
+	void setPosition(const CCPoint &pos);
+	void showReciveIcon();
+protected:
+	void setIcon(const std::string &frameName);
+	void setItem(const CostInfo &costinfo);
+	int getItemNode1Tag() {return CUIT_Item1;}
+	int getItemNode2Tag() {return CUIT_Item2;}
+	void showItemTip(const CCPoint &pos,int tag);
+private:
+	ConsumptionUiItemFrame *_uiFrame;
+	CostInfo _costInfo;
+	std::set<std::string> _usedPlistFile;
+};
+
+class ConsumptionUiItemFrame 
+	: public CCSprite
+	, public cocos2d::extension::CCBSelectorResolver
+	, public CCTouchDelegate
+	, public cocos2d::extension::CCNodeLoaderListener
+{
+	friend class ConsumptionUiItem;
+	enum eConsumptionUiItemFrame
+	{
+		CUTF_ItemNodeBegin = 100
+	};
+public:
+	CCB_STATIC_NEW_AUTORELEASE_OBJECT_WITH_INIT_METHOD(ConsumptionUiItemFrame, create);
+	virtual SEL_MenuHandler onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName);
+	virtual SEL_CCControlHandler onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName);
+	virtual void onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader);
+
+	virtual void onEnter();
+	virtual void onExit();
+	virtual bool ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent);
+	virtual void ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent);
+	/*int getItemUnderPoint(const CCPoint &point);*/
+	CCPoint getItemPos(int tag) {return _itemPos[tag];}
+	void onReciveBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+protected:
+	ConsumptionUiItem *_item;
+	int _selectIndex;
+	CCPoint _itemPos[ITEMNODENUM];
+	CCPoint _stPt;
+};
+
+class ConsumptionUiItemLoader : public CCSpriteLoader
+{
+public:
+	CCB_STATIC_NEW_AUTORELEASE_OBJECT_METHOD(ConsumptionUiItemLoader, loader);
+protected:
+	CCB_VIRTUAL_NEW_AUTORELEASE_CREATECCNODE_METHOD(ConsumptionUiItemFrame);
+};
+
+class ConsumptionUiLayer;
+
+class ConsumptionUi : public UiInterface
+{
+public:
+	ConsumptionUi();
+	~ConsumptionUi();
+	virtual CCNode *openUi();
+	ConsumptionUiLayer* getUiLayer();
+	void updateData();
+//	void updateReciveData();
+	void updateCost();
+};
+
+class ConsumptionUiLayer
+	: public CCLayer
+	, public cocos2d::extension::CCBSelectorResolver
+	, public cocos2d::extension::CCNodeLoaderListener
+{
+	enum eConsumptionUiTag
+	{
+		CUT_Frame = 0,
+		CUT_Container,
+		CUT_Up,
+		CUT_Down,
+		CUT_CostNeed,
+	};
+	friend class ConsumptionUi;
+
+public:
+	CCB_STATIC_NEW_AUTORELEASE_OBJECT_WITH_INIT_METHOD(ConsumptionUiLayer, create);
+	virtual SEL_MenuHandler onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName);
+	virtual SEL_CCControlHandler onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName);
+	virtual void onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader);
+
+	virtual void onEnter();
+	virtual void onExit();
+	virtual bool ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent);
+
+	void onCloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onCostBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+
+	void addContentItem(CCNode *item);
+	void removeContentItem(CCNode *item);
+protected:
+	float getContentLayerHeight();
+	CCNode *getContainer();
+	void resetScrollPosition();
+	CCLabelTTF* getCostNeedLabel();
+private:
+	void addItem(ConsumptionUiItem *item);
+	void removeItem(unsigned int itemId);
+	void removeAllItem();
+	void updateList();
+	void updateData();
+//	void updateReciveData();
+	void updateCost();
+	CostInfo getCostInfo(int index);
+	void runAnimation();
+	void stopAnimation();
+private:
+	CCSprite *_frame;
+	CCLayer *_contentLayer;
+	CCNode *_container;
+	CCScrollView *_scrollView;
+
+	CCSprite* _forwardUpEffect;
+	CCSprite* _forwardDownEffect;
+	CCNode* _forwardUpSprite;
+	CCNode* _forwardDownSprite;
+	typedef std::list<ConsumptionUiItem*> ConsumptionUiItemList;
+	typedef std::vector<CostInfo> costInfoVector;
+	costInfoVector _cost;
+	ConsumptionUiItemList _items;
+};
+#endif //CONSUMPTIONUI_H

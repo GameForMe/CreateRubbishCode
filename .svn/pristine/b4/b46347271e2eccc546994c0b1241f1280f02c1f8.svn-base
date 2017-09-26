@@ -1,0 +1,138 @@
+/**
+ *	@file		TeamApplyItem.cpp
+ *	@author		guantiejun
+ *	@date		2016/07/04
+ *	@version	
+ *	@brief		∂”ŒÈ…Í«Î¡–±Ì
+ */
+
+#include "TeamApplyItem.h"
+#include "CommonClient.h"
+#include "TeamMgr.h"
+#include "CfgReader.h"
+#include "TCPClient.h"
+
+TeamApplyItem::TeamApplyItem()
+: m_name(NULL)
+, m_class(NULL)
+, m_head(NULL)
+, m_level(NULL)
+, m_war_point(NULL)
+, m_role_id(INVALID)
+{
+
+}
+
+TeamApplyItem::~TeamApplyItem()
+{
+
+}
+
+cocos2d::extension::SEL_CCControlHandler TeamApplyItem::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamApplyItem,onRefuse);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamApplyItem,onAgree);
+
+	return NULL;
+}
+
+cocos2d::SEL_MenuHandler TeamApplyItem::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+
+	return NULL;
+}
+
+bool TeamApplyItem::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_head);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_class);
+
+	return false;
+}
+
+void TeamApplyItem::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_name = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(getChildByTag(1))));
+	m_level = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(getChildByTag(3))));
+	m_war_point = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(getChildByTag(2))));
+	Helper::getLabelFTByParentAndTag(this, 4);
+}
+
+void TeamApplyItem::onRefuse(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	NET_SIC_apply_join_team_reply cmd;
+	cmd.dwDestRoleID = m_role_id;
+	cmd.bApply = 0;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+
+	TeamMgr::getInstance()->delete_other_role_apply_by_id(m_role_id);
+}
+
+void TeamApplyItem::onAgree(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	NET_SIC_apply_join_team_reply cmd;
+	cmd.dwDestRoleID = m_role_id;
+	cmd.bApply = 1;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+
+	TeamMgr::getInstance()->delete_other_role_apply_by_id(m_role_id);
+}
+
+TeamApplyItem* TeamApplyItem::create_item(const char* szFile,CCObject*pOwner,UiInterface* holder)
+{
+	CCNodeLoaderLibrary* lib  = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string strFullPath  = CFGReader::instance()->get_ui_ccbi_filepath(szFile);
+	CCNode* node = reader->readNodeGraphFromFile(strFullPath.c_str(),pOwner);
+	TeamApplyItem* item = dynamic_cast<TeamApplyItem*>(node);
+	CC_ASSERT(item);
+
+	if(holder)
+	{
+		holder->mergeSheet(reader->getLoadedSpriteSheet());
+	}
+	return item;
+}
+
+void TeamApplyItem::refresh_info( boost::shared_ptr<RespItem> const& item)
+{
+	m_role_id = item->mParam.dwID;
+
+	m_name->setString(item->mParam.strName.c_str());
+
+	std::stringstream ss1;
+	ss1<<item->mParam.nLv;
+	m_level->setString(ss1.str().c_str());
+
+	std::stringstream ss2;
+	ss2<<item->mParam.n32_Rating;
+	m_war_point->setString(ss2.str().c_str());
+
+	set_class(item->mParam.bMale, (EClassType)(item->mParam.nClass));
+}
+
+void TeamApplyItem::set_class(bool is_male, EClassType role_class)
+{
+	switch (role_class)
+	{
+	case RT_Warrior:
+		{
+			m_class->initWithSpriteFrameName("duiwu_zhan");
+			m_head->initWithSpriteFrameName(is_male?"rendui_rolezhanshiman":"rendui_rolezhanshiwoman");
+		}
+		break;
+	case RT_Mage:
+		{
+			m_class->initWithSpriteFrameName("duiwu_fa");
+			m_head->initWithSpriteFrameName(is_male?"rendui_rolefashiman":"rendui_rolefashiwoman");
+		}
+		break;
+	case RT_Taoist:
+		{
+			m_class->initWithSpriteFrameName("duiwu_dao");
+			m_head->initWithSpriteFrameName(is_male?"rendui_roledaoshiman":"rendui_roledaoshiwoman");
+		}
+		break;
+	}
+}

@@ -1,0 +1,219 @@
+#ifndef MALLPROTO_H
+#define MALLPROTO_H
+#include "BaseDefine.h"
+#include "CmdAdapter.h"
+#include "ServerTime.h"
+#pragma pack(push, 1)
+#define MAX_MALL_SHEETS		6//商城UI最多显示的sheet
+#define MALL_PACK_ITEM_NUM	5//物品包中最多物品种类数
+#define EXCHANGE_GOODS_INDEX 5//荣誉点兑换商品所在的sheet索引
+//物品包定义
+//struct Tag_MallPackInfo:Tag_MallItemInfo
+//{
+//	unsigned int dw_data_id[MALL_PACK_ITEM_NUM];	// 物品ID
+//	int	nItemPrice[MALL_PACK_ITEM_NUM];	// 各个物品价格(总价)
+//	unsigned char byItemNum[MALL_PACK_ITEM_NUM];	// 物品个数
+//	signed char	n8ItemKind;						// 物品种类(ID)个数
+//	Tag_MallPackInfo():n8ItemKind(0)
+//	{
+//		for(int i=0; i<MALL_PACK_ITEM_NUM; ++i)
+//		{
+//			dw_data_id[i] = -1;
+//			nItemPrice[i] = -1;
+//			byItemNum[i] = 0;
+//		}
+//	}
+//};
+//--------------------------------------------------------------------------------------------
+// 静态结构
+//--------------------------------------------------------------------------------------------
+struct tagMallItemProtoBase
+{
+	unsigned int	dwID;							// ID
+	int				nPrice;							// 定价
+	int				nSalePrice;						// 促销价
+	unsigned int	dwTimeSaleStart;				// 促销开始时间
+	unsigned int	dwTimeSaleEnd;					// 促销截止时间
+	unsigned int	dwSaleBegin;					// 上架时间
+	unsigned int	dwSaleEnd;						// 下架时间
+	unsigned int	dwPresentID;					// 赠品ID 
+	unsigned char	byNum;							// 待售数量 
+	unsigned char	byPresentNum;					// 赠品数量
+	unsigned char	byExAssign;						// 赠送赠点数量
+	unsigned char	byExNum;						// 需要赠点数量
+	unsigned char	bySmallGroupHeadcount;			// 小型团购人数
+	unsigned char	bySmallGroupDiscount;			// 小型团购折扣[0，100]
+	unsigned char	byMediumGroupHeadcount;			// 中型团购人数
+	unsigned char	byMediumGroupDiscount;			// 中型团购折扣
+	unsigned char	byBigGroupHeadcount;			// 大型团购人数
+	unsigned char	byBigGroupDiscount;				// 大型团购折扣
+	bool			bNew	: 1;					// 是否为新品
+	bool			bHot	: 1;					// 是否热销
+	unsigned char	byIndexInServer;				// 在服务器中的位置
+	unsigned int	dwPersistTime;					// 团购持续时间
+};
+
+
+struct tagMallItemProto: public tagMallItemProtoBase
+{
+	unsigned int	dw_data_id;						// 物品TypeID
+	signed char		n8Kind;							// 所属分类
+	unsigned char	byRank;							// 热销排名
+	unsigned char	byGroupPurchaseAmount;			// 团购数量
+	INT16			n16MsgId;
+	INT32           nIsShow;						// 是否在icon上显示特效
+	unsigned char	byDummy[1];
+};
+
+struct tagMallPackProto: public tagMallItemProtoBase
+{
+	unsigned int	dw_data_id[MALL_PACK_ITEM_NUM];	// 物品ID
+	int				nItemPrice[MALL_PACK_ITEM_NUM];	// 各个物品价格(总价)
+	unsigned char	byItemNum[MALL_PACK_ITEM_NUM];	// 物品个数
+	signed char		n8ItemKind;						// 物品种类(ID)个数
+	unsigned char	byDummy[2];
+	signed char		n8Kind;							// 所属分类
+	tagMallPackProto()
+	{
+		//ZeroMemory(this, sizeof(*this));
+		memset(this, 0, sizeof(*this));
+		for(int i=0; i<MALL_PACK_ITEM_NUM; ++i)
+		{
+			dw_data_id[i] = -1;
+		}
+	}
+};
+
+//----------------------------------------------------------------------------
+// 错误码枚举
+//----------------------------------------------------------------------------
+enum
+{
+	//E_Mall_				= ,	// 
+	E_Mall_Close						= 1,	// 商城关闭
+
+	E_Mall_Item_NotEnough				= 10,	// 物品个数不足购买个数
+	E_Mall_Pack_NotEnough				= 11,	// 礼品包个数不足购买个数
+
+	E_Mall_ID_Error						= 12,	// ID不正确
+	E_Mall_YuanBao_Error				= 13,	// 元宝单价不正确
+	E_Mall_Free_NotExist				= 14,	// 不存在免费物品
+	E_Mall_ExVolume_Error				= 15,	// 赠点单价不正确
+	E_Mall_Exchange_NotAllowable		= 16,	// 商品不可兑换
+
+	E_Mall_CreateItem_Failed			= 20,	// 商品创建失败
+	E_Mall_CreatePres_Failed			= 21,	// 赠品创建失败
+
+	E_Mall_Free_AlreadyGet				= 25,	// 免费物品已领取
+
+	// 元宝交易
+	E_Trade_BagYB_NotEnough				= 40,	// 背包中元宝不够
+	E_Trade_BagSilver_NotEnough			= 41,	// 背包中金钱不够
+	E_Trade_AccountYB_NotEnough			= 42,	// 账户中元宝不够
+	E_Trade_AccountSilver_NotEnough		= 43,	// 账户中金钱不够
+	E_Trade_SellOrder_Exit				= 44,	// 只能提交一份元宝出售订单
+	E_Trade_BuyOrder_Exit				= 45,	// 只能提交一份元宝收购订单
+	E_Trade_Tax_NotEnough				= 46,	// 交易手续费不足
+
+	// 帮派团购
+	E_GroupPurchase_NotMember			= 50,	// 不是本帮派成员
+	E_GroupPurchase_ItemNotAllowable	= 51,	// 该商品不可进行团购
+	E_GroupPurchase_NotInGuild			= 52,	// 玩家没有加入帮派
+	E_GroupPurchase_AlreadyInitiate		= 53,	// 已经对该物品发起过团购
+	E_GroupPurchase_IsInitiate			= 54,	// 不可响应自己发起的团购
+	E_GroupPurchase_AlreadyRespond		= 55,	// 已经响应过该团购
+	E_GroupPurchase_AlreadyEnd			= 56,	// 团购已经结束
+	E_GroupPurchase_NoInfo				= 57,	// 团购信息不存在
+	E_GroupPurchase_ServerBusy			= 58,	// 服务器忙
+
+	//gx modify 2013.11.22
+	E_MALL_SALE_START				= 59,	//该商品还未上架
+	E_MALL_SALE_END					= 60,	//该商品已经下架
+};
+//----------------------------------------------------------------------------
+// 消息定义
+//----------------------------------------------------------------------------
+
+//--同步数据
+struct NET_SIS_open_mall : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_open_mall)
+	unsigned int		dw_error_code;
+	unsigned int		dwMallTime;
+};
+
+//向服务器询问是否可以打开商城
+struct NET_SIC_mall_get : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_mall_get)
+};
+//--购买
+struct NET_SIC_mall_buy_item : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_mall_buy_item)
+	unsigned int		dw_data_id;				// 商城商品ID
+	int			nPrice;					// 商品价格(玩家购买时的单价)
+	short		n16BuyNum;				// 购买个数
+	unsigned char		byIndexInServer;		// 在服务器中的位置		
+};
+
+struct NET_SIS_mall_buy_item : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_mall_buy_item)
+	unsigned int		dw_error_code;
+};
+
+struct NET_SIC_mall_buy_pack : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_mall_buy_pack)
+	unsigned int		dw_data_id;				// 商城商品ID
+	int			nPrice;					// 商品价格(玩家购买时的单价)
+	short		n16BuyNum;				// 购买个数
+	unsigned char		byIndexInServer;		// 在服务器中的位置		
+};
+
+struct NET_SIS_mall_buy_pack : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_mall_buy_pack)
+	unsigned int		dw_error_code;
+};
+struct NET_SIS_mall_item : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_mall_item)
+	int			nItemNum;
+	unsigned char		byData[1];				// tagMallItemProto
+};
+
+struct NET_SIS_mall_pack : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_mall_pack)
+	int			nPackNum;
+	unsigned char		byData[1];
+};
+//通知客户端商城信息有更新 gx add 2014.2.27
+struct NET_SIS_update_mall : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_update_mall)
+};
+
+// 订单号
+struct NET_C2S_ASK_CP_ORDER : public s_net_cmd
+{
+	DECL_NETCMD(NET_C2S_ASK_CP_ORDER)
+	float pay;
+	float payScale;
+	int channle;
+	int subchannle;
+};
+
+struct NET_S2C_RECHARGE_CP_ORDER : public s_net_cmd
+{
+	DECL_NETCMD(NET_S2C_RECHARGE_CP_ORDER)
+	float pay;
+	float payscale;
+	int payway;
+	char cporder[128];
+	char timestamp[32];
+};
+#pragma pack(pop)
+#endif

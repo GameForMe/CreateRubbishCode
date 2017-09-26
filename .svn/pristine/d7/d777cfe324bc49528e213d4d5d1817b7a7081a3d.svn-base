@@ -1,0 +1,623 @@
+#include "RoleRingUi.h"
+#include "RoleEquipUi.h"
+#include "CfgReader.h"
+#include "ItemNode.h"
+#include "PackageManager.h"
+#include "CmdAdapter.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "Player.h"
+#include "DBMgr.h"
+#include "AnimationCache.h"
+#include "PackageManager.h"
+#include "EquipTipUi.h"
+#include "World.h"
+#include "TouchSprite.h"
+#include "RoleAttrUi.h"
+#include "RoleManager.h"
+#include "RemoteRoleStateMgr.h"
+#include "StrengthenUi.h"
+#include "IndifityUi.h"
+#include "UiResourceMgr.h"
+#include "InlayUi.h"
+#include "RoleInfoUi.h"
+#include "UiTools.h"
+#include "UiLoader.h"
+#include "UiManager.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "CheckButton.h"
+#include "CommonClient.h"
+
+CCNode * RoleRingUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["RoleRingUiLayer"] = UiLayerLoader<RoleRingUiLayer>::loader();
+	nodeLoaders["TouchSprite"] = TouchSpriteLoader::loader();
+	nodeLoaders["CheckButton"] = CheckButtonLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("roleringui", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+void RoleRingUi::updateEquipment()
+{
+	RoleRingUiLayer *uiLayer = getUiNodeByTag<RoleRingUiLayer>(WCT_ROLERINGUI);
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateEquipment();
+	}
+}
+
+void RoleRingUi::updateDisplay()
+{
+	RoleRingUiLayer *uiLayer = getUiNodeByTag<RoleRingUiLayer>(WCT_ROLERINGUI);
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateDisplay();
+	}
+}
+
+void RoleRingUi::setPlayerId( unsigned int id )
+{
+	RoleRingUiLayer *uiLayer = getUiNodeByTag<RoleRingUiLayer>(WCT_ROLERINGUI);
+	if(uiLayer != NULL)
+	{
+		uiLayer->setPlayerId(id);
+	}
+}
+
+unsigned int RoleRingUi::getPlayerId()
+{
+	RoleRingUiLayer *uiLayer = getUiNodeByTag<RoleRingUiLayer>(WCT_ROLERINGUI);
+	if(uiLayer != NULL)
+	{
+		return uiLayer->getPlayerId();
+	}
+	return (unsigned int) -1;
+}
+
+cocos2d::CCRect RoleRingUi::getCloseBtnPos()
+{
+	RoleRingUiLayer *uiLayer = getUiNodeByTag<RoleRingUiLayer>(WCT_ROLERINGUI);
+	if(uiLayer != NULL)
+	{
+		return uiLayer->getCloseBtnPos();
+	}
+	return CCRect();
+}
+
+/////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler RoleRingUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler RoleRingUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", RoleRingUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRoleEquipBtnPressed", RoleRingUiLayer::onRoleEquipBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRoleRingBtnPressed", RoleRingUiLayer::onRoleRingBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onshezhiBtnPressed", RoleRingUiLayer::on_option_btn_pressed);
+	return NULL;
+}
+
+bool RoleRingUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton* , m_fasion_opt_btn);
+	return false;
+}
+
+void RoleRingUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_playerId = -1;
+	_displayNode = NULL;
+	m_nTmpEquipLevel = -1;
+	setTag(0);
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(1));
+
+	memset(m_pItem, 0, sizeof(ItemNode*)* EEP_MaxEquip);
+
+
+	CCNode *n = _frame->getChildByTag(4);
+	m_pItem[4] = ItemNode::create();
+	m_pItem[4]->setPosition(ccp(n->getPosition().x, n->getPosition().y));
+	n->removeFromParentAndCleanup(true);
+	m_pItem[4]->setTag(4);
+	_frame->addChild(m_pItem[4], 1);
+
+	for(int i = EEP_Fashion; i < EEP_MaxEquip; ++i)
+	{
+		//坐骑跳过
+		if (i == EEP_Ride) continue;
+
+		n = _frame->getChildByTag(i);
+		m_pItem[i] = ItemNode::create();
+		m_pItem[i]->setPosition(ccp(n->getPosition().x, n->getPosition().y));
+		n->removeFromParentAndCleanup(true);
+		m_pItem[i]->setTag(i);
+		_frame->addChild(m_pItem[i], 1);
+	}
+
+	TouchSprite *titleTab = dynamic_cast<TouchSprite*>(_frame->getChildByTag(INT_TitleLab));
+	CC_ASSERT(titleTab != NULL);
+	titleTab->signalTouched.connect(this, &RoleRingUiLayer::onTitleTabClicked);
+
+	TouchSprite *infoTab = dynamic_cast<TouchSprite*>(_frame->getChildByTag(INT_InfoLab));
+	CC_ASSERT(infoTab != NULL);
+	infoTab->signalTouched.connect(this, &RoleRingUiLayer::onInfoTabClicked);
+
+	TouchSprite *propertyTab = dynamic_cast<TouchSprite*>(_frame->getChildByTag(INT_PROPERTYLAB));
+	CC_ASSERT(propertyTab != NULL);
+	propertyTab->signalTouched.connect(this, &RoleRingUiLayer::onPropertyTabClicked);
+	//add by vvv 2014.11.07
+	CheckButton *checkBtn = dynamic_cast<CheckButton*>(_frame->getChildByTag(INT_FashionCheck));
+	CC_ASSERT(checkBtn != NULL);
+	checkBtn->signalStateChanged.connect(this, &RoleRingUiLayer::onFashionStateChange);
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1,true);
+}
+void RoleRingUiLayer::onFashionStateChange( CheckButton *btn, bool show)
+{
+	btn->setCheck(show);
+	if(_playerId == RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		RoleManager::getInstance()->showFashion(show);
+	}
+}
+void RoleRingUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	DropDragDelegate::getInstance()->addDropLayer(this);
+}
+
+void RoleRingUiLayer::onExit()
+{
+	CCLayer::onExit();
+	DropDragDelegate::getInstance()->removeDropLayer(this);
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool RoleRingUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (isTouchOnNodeContent((CCNode*)_frame,pTouch))
+	{
+		onClicked(*pTouch);
+		return true;
+	}
+	return false;
+}
+
+void RoleRingUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_ROLERINGUI);
+}
+
+void RoleRingUiLayer::onRoleEquipBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	if (!IS_UI_OPEN(WCT_ROLEEQUIPUI))
+	{
+		unsigned int playerId = _playerId;
+		OPEN_UI(WCT_ROLEEQUIPUI);
+		GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPlayerId(playerId);
+		CLOSE_UI(WCT_ROLEATTRUI);
+	}
+}
+
+void RoleRingUiLayer::onRoleRingBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	if (!IS_UI_OPEN(WCT_ROLERINGUI))
+	{
+		unsigned int playerId = _playerId;
+		OPEN_UI(WCT_ROLERINGUI);
+		GET_UI(RoleRingUi, WCT_ROLERINGUI)->setPlayerId(playerId);
+		CLOSE_UI(WCT_ROLEEQUIPUI);
+	}
+}
+
+short RoleRingUiLayer::getItemBegin( CCTouch &touch, eGetResult &result )
+{
+	return getItem(touch, result);
+}
+
+short RoleRingUiLayer::getItemEnd( CCTouch &touch, eGetResult &result, EItemConType src, short itemIndex )
+{
+	return getItem(touch, result);
+}
+
+
+bool RoleRingUiLayer::onClicked( CCTouch &touch )
+{
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(&touch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		int index = getItemUnderPoint(framePoint);
+		if (index != -1)
+		{
+			setItemSelect(index);
+		}
+		else
+		{
+			ItemNode* pNode = NULL;
+			for(int i = 4; i < EEP_MaxEquip; i++)
+			{
+				pNode = dynamic_cast<ItemNode*>(_frame->getChildByTag(i));
+				if(pNode)
+					pNode->setSelect(false);
+			}
+		}
+
+		if(_playerId == RoleManager::getInstance()->getLocalPlayer()->getId())
+		{
+			f_item *item = PackageManager::getInstance()->getItem(EICT_Equip, (short)index);
+			f_equipment *equip = dynamic_cast<f_equipment*>(item);
+			if(equip != NULL)
+			{
+				showEquipTip(index, equip);
+			}
+			else
+			{
+				return true;
+			}
+		}
+		else
+		{
+			const tagEquipViewInfo *equipInfo = RemoteRoleStateMgr::getInstance()->GetEquipInfoByIndex((EEquipPos)index);
+			if(equipInfo!= NULL)
+			{
+				showEquipTip(index, equipInfo);
+			}
+			else
+			{
+				return true;
+			}
+		}
+
+		return true;
+	}
+	else
+	{
+
+	}
+
+	return false;
+}
+
+bool RoleRingUiLayer::onDoubleClicked( CCTouch &touch )
+{
+	if(_playerId == RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		if(isTouchOnNodeContent(_frame, &touch))
+		{
+			CCPoint framePoint = _frame->convertTouchToNodeSpace(&touch);
+			int index = getItemUnderPoint(framePoint);
+			if(index != -1)
+			{
+				int destIndex = PackageManager::getInstance()->getBlankSpace(EICT_Bag);
+				if(destIndex != -1)
+				{//卸下装备;
+					PackageManager::getInstance()->changeItemPosition((EItemConType)EICT_KungfuBag,(EItemConType)EICT_KungfuEquip, (short)index, (short)destIndex, 0);
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
+cocos2d::CCRect RoleRingUiLayer::getCloseBtnPos()
+{
+	CCSize size = _frame->getContentSize();
+	CCPoint pos = _frame->convertToWorldSpace(ccp(size.width - 10, size.height - 10));
+	return CCRect(pos.x - 23, pos.y - 23, 46, 46);
+}
+
+void RoleRingUiLayer::onPropertyTabClicked( TouchSprite *, bool )
+{
+	unsigned int playerId = _playerId;
+	OPEN_UI(WCT_ROLEATTRUI);
+	GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->setPlayerId(playerId);
+	CLOSE_UI(WCT_ROLEEQUIPUI);
+}
+
+void RoleRingUiLayer::onTitleTabClicked( TouchSprite*, bool )
+{
+	if(_playerId != RoleManager::getInstance()->getLocalPlayer()->getId())
+		return;
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	//unsigned int playerId = _playerId;
+	OPEN_UI(WCT_RoleTitleUi);
+	//GET_UI(NewRoleTitleUiRoleTitleUi, WCT_RoleTitleUi)->setRoleId(playerId);
+	CLOSE_UI(WCT_ROLEEQUIPUI);
+}
+
+void RoleRingUiLayer::onInfoTabClicked( TouchSprite*, bool )
+{
+	unsigned int playerId = _playerId;
+	OPEN_UI(WCT_RoleInfoUi);
+	GET_UI(RoleInfoUi, WCT_RoleInfoUi)->setRoleId(playerId);
+	CLOSE_UI(WCT_ROLEEQUIPUI);
+}
+
+bool RoleRingUiLayer::setItemSelect( int index )
+{
+	if(index != EEP_Body1 && (index < EEP_Fashion || index > EEP_Ilu_Weapon))
+		return false;
+
+	ItemNode* pNode = NULL;
+	for(int i = 4; i < EEP_MaxEquip; i++)
+	{
+		pNode = dynamic_cast<ItemNode*>(_frame->getChildByTag(i));
+		if(pNode && i == index)
+			pNode->setSelect(true);
+		else if(pNode)
+			pNode->setSelect(false);
+	}
+
+	/*
+	CCSprite *selectSprite = dynamic_cast<CCSprite*>(_frame->getChildByTag(INT_SELECTSPRITE));
+	if(selectSprite == NULL)
+	{
+		selectSprite = CCSprite::create();
+		selectSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(
+			PackageManager::getInstance()->getSelectFrameName().c_str()));
+		selectSprite->setTag(INT_SELECTSPRITE);
+		_frame->addChild(selectSprite);
+	}
+
+	selectSprite->setPosition(m_pItem[index]->getPosition());
+
+	if(!selectSprite->isVisible())
+		selectSprite->setVisible(true);
+	*/
+
+	return true;
+}
+
+void RoleRingUiLayer::setPlayerId( int id )
+{
+	_playerId = id;
+	updateEquipment();
+	updateDisplay();
+	setTitleRingVisile();
+
+	int lp_id = RoleManager::getInstance()->getLocalPlayer()->getId();
+	m_fasion_opt_btn->setVisible(id == lp_id);
+}
+
+ItemNode * RoleRingUiLayer::getItemNode( int i )
+{
+	return dynamic_cast<ItemNode*>(_frame->getChildByTag(INT_BEGIN + i));
+}
+
+void RoleRingUiLayer::showEquipTip( int index, const tagEquipViewInfo *equipInfo )
+{
+	CCPoint worldPos = _frame->convertToWorldSpace(m_pItem[index]->getPosition());
+
+	EquipTipUiLayer *ui = EquipTipUi::create();
+	ui->showUi(worldPos, equipInfo);
+}
+
+void RoleRingUiLayer::showEquipTip( int index, f_equipment *equip )
+{
+	_frame->convertToWorldSpace(m_pItem[index]->getPosition());
+
+	EquipTipUiLayer *ui = EquipTipUi::create();
+	ui->showSelfEquip();				//2014.11.11	【J】
+	ui->showUi(equip);					//【Ji：】
+
+	ui->setIndex(index);
+	
+}
+
+void RoleRingUiLayer::updateEquipment()
+{
+	if(_playerId == RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		for(int i = 4; i < EEP_MaxEquip; i ++)
+		{
+			//坐骑不显示
+			if (i == EEP_Ride)
+			{
+				continue;
+			}
+
+			ItemNode *node = m_pItem[i];
+			if(!node)
+				continue;
+
+			PackageManager::ItemMap *itemMap = PackageManager::getInstance()->getItemMap(EICT_Equip);
+			f_item *item = PackageManager::getInstance()->getItem(*itemMap, (short)i);
+			node->stopAnimation();
+//			node->removeQualityBox();
+			if(item == NULL)
+			{
+				node->setBlank();
+			}
+			else
+			{
+				node->initWithItem(item);
+				//装备中15级装备显示特效
+				if ( item != NULL)
+				{
+					if(MIsEquipment(item->get_item_type_id()))
+					{
+						f_equipment *equip = dynamic_cast<f_equipment*>(item);
+						CC_ASSERT(equip != NULL);
+// 						if(equip->get_equip_consolidate_level() == 15)
+// 						{
+// 							node->runAnimation("qianghua15");
+// 						}//装备中不同品质边框显示;
+						m_nTmpEquipLevel = equip->get_equip_consolidate_level();
+						if(8 <= m_nTmpEquipLevel && 12 > m_nTmpEquipLevel)
+							node->runAnimation("E1_95");
+						if(12 <= m_nTmpEquipLevel && 16 > m_nTmpEquipLevel)
+							node->runAnimation("E1_96");
+						if(m_nTmpEquipLevel == 16)
+							node->runAnimation("E1_97");
+						if (!equip->is_not_idetified())
+						{
+//							node->setQuality(equip->get_item_quality());
+// 							switch(equip->get_item_quality())
+// 							{
+// 							case 1:
+// 								node->setQualityBox("rendui_youxiu");break;
+// 							case 2:
+// 								node->setQualityBox("rendui_zhuoyue");break;
+// 							case 3:
+// 								node->setQualityBox("rendui_wanmei");break;
+// 							case 4:
+// 								node->setQualityBox("rendui_shishi");break;
+// 							case 5:
+// 								node->setQualityBox("rendui_chuanshuo");break;
+//							}
+						}
+					}
+				}
+			}
+		}
+	}
+	else
+	{
+		for(int i = 4; i < EEP_MaxEquip; i ++)
+		{
+			ItemNode *node = m_pItem[i];
+			if(!node)
+				continue;
+
+			const tagEquipViewInfo* equipInfo = RemoteRoleStateMgr::getInstance()->GetEquipInfoByIndex(EEquipPos(i));
+			node->stopAnimation();
+			if(equipInfo == NULL)
+			{
+				node->setBlank();
+			}
+			else
+			{
+				node->initWithItem(equipInfo);
+			}
+		}
+	}
+}
+
+void RoleRingUiLayer::updateDisplay()
+{
+	if(_displayNode == NULL)
+	{
+		_displayNode = RoleDisplayNode::create();
+		CCNode *node = _frame->getChildByTag(INT_DISPLAY);
+		_displayNode->setPosition(node->getPosition());
+		_frame->addChild(_displayNode,1);
+	}
+
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	if(_playerId == lp->getId())
+	{
+		for(int i = 0; i < PDA_End; i ++)
+		{
+			_displayNode->setAttrabute(ePlayerDisplayAttr(i), lp->getDisplayAttr(ePlayerDisplayAttr(i)));
+		}
+		getFashionStateBtn()->setCheck(lp->isFashion());
+		setFashionVisible(true);
+	}
+	else
+	{
+		for(int i = 0; i < PDA_End; i ++)
+		{
+			_displayNode->setAttrabute(ePlayerDisplayAttr(i), RemoteRoleStateMgr::getInstance()->getDisplayAttr(ePlayerDisplayAttr(i)));
+		}
+		setFashionVisible(false);
+	}
+	unsigned int roleId=getPlayerId();
+	_displayNode->setRoleId(roleId);
+	_displayNode->loadAnimate();
+}
+CheckButton * RoleRingUiLayer::getFashionStateBtn()
+{
+	CC_ASSERT(_frame != NULL);
+	CheckButton *checkBtn = dynamic_cast<CheckButton*>(_frame->getChildByTag(INT_FashionCheck));
+	CC_ASSERT(checkBtn != NULL);
+	return checkBtn;
+}
+short RoleRingUiLayer::getItem( CCTouch &touch, eGetResult &result )
+{
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(&touch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		result = GR_SUCCESS;
+		if(_playerId == RoleManager::getInstance()->getLocalPlayer()->getId())
+		{
+			int index = getItemUnderPoint(framePoint);
+			return index;
+		}
+		else
+		{
+			return -1;
+		}
+	}
+
+	result = GR_ERROR;
+	return -1;
+}
+
+short RoleRingUiLayer::getItemUnderPoint( const CCPoint &point )
+{
+	for(int i = 4; i < EEP_MaxEquip; i ++)
+	{
+		if(m_pItem[i] == NULL)
+			continue;
+
+		float x = m_pItem[i]->getPosition().x;
+		float y = m_pItem[i]->getPosition().y;
+		CCRect rect(x - ITEMNODE_CONTENTWIDTH / 2, y - ITEMNODE_CONTENTHEIGHT / 2, ITEMNODE_CONTENTWIDTH, ITEMNODE_CONTENTHEIGHT);
+		if(rect.containsPoint(point))
+		{
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+void RoleRingUiLayer::setFashionVisible( bool visible )
+{
+	if(_frame!=NULL)
+	{
+		CheckButton *checkBtn = dynamic_cast<CheckButton*>(_frame->getChildByTag(INT_FashionCheck));
+		CC_ASSERT(checkBtn!=NULL);
+		checkBtn->setVisible(visible);
+		CCSprite *_fashion=dynamic_cast<CCSprite*>(_frame->getChildByTag(INT_Fashion));
+		CC_ASSERT(_fashion!=NULL);
+		_fashion->setVisible(visible);
+	}
+}
+
+void RoleRingUiLayer::setTitleRingVisile()
+{
+	TouchSprite *titleSprite=dynamic_cast<TouchSprite*>(_frame->getChildByTag(INT_TitleLab));
+	if (_playerId!=RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		titleSprite->setVisible(false);
+	}
+	else
+	{
+		titleSprite->setVisible(true);
+	}
+}
+
+void RoleRingUiLayer::on_option_btn_pressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	OPEN_UI(WCT_Fasion_display_option);
+}
+
+RoleRingUiLayer::RoleRingUiLayer():m_fasion_opt_btn(NULL)
+{
+
+}
+
+

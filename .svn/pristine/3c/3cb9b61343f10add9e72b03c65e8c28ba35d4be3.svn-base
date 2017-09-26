@@ -1,0 +1,150 @@
+#ifndef TCPCLIENT_H_INCLUDE
+#define TCPCLIENT_H_INCLUDE
+
+#if (CC_TARGET_PLATFORM==CC_PLATFORM_IOS)
+#include "SafeMap.h"
+#include "SafeList.h"
+#include "Thread.h"
+#else
+#include <SafeMap.h>
+#include <SafeList.h>
+#include <Thread.h>
+#endif
+
+#include "TcpSocket.h"
+#include "CmdAdapter.h"
+#include "Platform.h"
+#include "MemPool.h"
+#include "Signals.h"
+#include <string>
+
+class c_tcp_client
+{
+private:
+	c_safe_map<unsigned int , c_signal<unsigned int , s_net_cmd*> > m_cmd_map;
+	c_safe_list<s_net_cmd*> m_send_q_nor;
+	c_safe_list<s_net_cmd*> m_send_q_cri;
+	c_safe_list<s_net_cmd*> m_send_q_ins;
+	c_safe_list<s_net_cmd*> m_send_q_idle;
+	c_safe_list<s_net_cmd*> m_recv_q;
+	c_thread* m_send_thread;
+	c_thread* m_recv_thread;
+	c_thread* m_conn_thread;
+	c_tcp_socket* m_socket;
+	c_mem_pool* m_pool;
+	char m_ip[128];
+	unsigned short m_port;
+	unsigned int m_lastsend;
+	float m_timeout;
+	bool m_connected;
+	bool m_send_lzo;
+	bool m_recv_lzo;
+	bool m_running;
+	bool m_con_failed;
+	bool m_con_failed2;
+	static c_tcp_client* _client;
+
+	c_mutex _dataMutex;
+
+	//bool m_IsCgs;	//[bing] 正在跨分流  用于判断连线是否切断
+	std::string m_strUserId;     //账号
+	std::string m_strPassWord;   //密码
+	unsigned int m_dwVersion32;    //版本号的crc32
+	std::string m_strLoginIP;		//login服务器ip
+	int m_nLoginPort;		//login服务器端口号
+	unsigned int m_nCrc32ServerName;	//登录服务器的crc32name
+
+	unsigned int m_dwGSID;	//[bing] 本分流GSID
+	unsigned int m_dwLPCharID;	//[bing] 登录后记录LP的charid 用于跨分流或掉线直连登录
+
+	unsigned int dwID_Heartbeat;//心跳协议的ID
+	unsigned int dwID_GotoNewMap;//跳转地图协议的ID
+
+	bool m_lconnecting_state; //登陆链接状态
+
+	float m_lconnecting_tl;  //登陆链接的时间长度
+SIGNALS:
+	c_signal<void> _sig_connected;
+	c_signal<void> _sig_disconnected;
+	c_signal<void> _sig_connectfailed;
+public:
+	c_tcp_client();
+	~c_tcp_client();
+public:
+	static c_tcp_client* getSingleton();
+public:
+	bool initialize(float timeout_, bool sendlzo_, bool recvlzo_);
+	void shutdown();
+	void clear();
+	void close();
+	bool connect(const char* ip_, unsigned short port_, bool bIsCgs = false);
+	bool is_connected() {return m_connected; }
+	template <typename C , typename _Func>
+	void register_net_cmd(const char* cmd_, C obj_, _Func func_);
+	template <typename C , typename _Func>
+	void unregister_net_cmd(const char* cmd_, C obj_, _Func func_);
+	void step();
+	void send_net_cmd(const s_net_cmd* cmd_, e_network_priority np_, bool overwrite_);
+
+	void SaveAccountInfo( const char* p_UID, const char* p_Pwd, unsigned int dwVersion, const char* pLoginIP, int nLoginPort, unsigned int dwCrc32ServerName );
+
+	void GetAccountInfo( char* p_UID, char* p_Pwd, unsigned int &dwVersion, std::string& strLoginIP, int &nLoginPort, unsigned int& dwCrc32ServerName);
+
+	void SetGSID( unsigned int dwID ) { m_dwGSID = dwID; }
+	unsigned int GetGSID() { return m_dwGSID; }
+
+	void SetLPCharID( unsigned int dwID ) { m_dwLPCharID = dwID; }
+	unsigned int GetLPCharID() { return m_dwLPCharID; }
+
+	void repetLoginClear();
+
+	void setLConnectingState( bool lConnectingState ) ;
+	bool getLConnectingState() { return m_lconnecting_state; }
+
+	void atuoCalLConnectingTime(const float& dt);
+
+private:
+	THREAD_FUNC _conn_thread_func(void* thread_);
+	THREAD_FUNC _recv_thread_func(void* thread_);
+	THREAD_FUNC _send_thread_func(void* thread_);
+
+public:
+	bool bCgsIsFinish;  //是否完成一次完整的跨分流操作
+};
+
+//--------------------------------------------------------
+template <typename C , typename _Func>
+void c_tcp_client::register_net_cmd(const char* cmd_, C obj_, _Func func_)
+{	
+	m_cmd_map.lock();
+	unsigned int dd = message_id_crc(cmd_);
+	c_safe_map<unsigned int , c_signal<unsigned int , s_net_cmd*> >::iterator iter = m_cmd_map.find(dd);
+	if(iter!=m_cmd_map.end())
+		iter->second.connect(obj_ , func_);
+	else
+	{
+		c_signal<unsigned int , s_net_cmd*> sig;
+		sig.connect(obj_ , func_);
+		m_cmd_map.insert(std::make_pair(message_id_crc(cmd_) , sig));
+	}
+	m_cmd_map.unlock();
+}
+
+//--------------------------------------------------------
+template <typename C , typename _Func>
+void c_tcp_client::unregister_net_cmd(const char* cmd_, C obj_, _Func func_)
+{
+	m_cmd_map.lock();
+	c_safe_map<unsigned int , c_signal<unsigned int , s_net_cmd*> >::iterator iter = m_cmd_map.find(message_id_crc(cmd_));
+	if(iter!=m_cmd_map.end())
+	{
+		iter->second.disconnect(obj_ , func_);
+		if(!iter->second.vaild())
+			m_cmd_map.erase(iter);
+	}
+	m_cmd_map.unlock();
+}
+
+#define TCP_CLIENT c_tcp_client::getSingleton()
+
+#endif

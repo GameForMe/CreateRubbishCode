@@ -1,0 +1,4755 @@
+#include "ChatUi.h"
+#include "World.h"
+#include "StringMgr.h"
+#include "ChatMgr.h"
+#include "LocalPlayer.h"
+#include "UiLoader.h"
+#include "TaskTraceUi.h"
+#include "ShortCutUi.h"
+#include "JoyStick.h"
+#include "MiniMapUi.h"
+#include "ToolTip.h"
+#include "NameMgr2.h"
+#include "SocialMgr.h"
+#include "SonghuaUi.h"
+#include "DBMgr.h"
+#include "EquipTipUi.h"
+#include "PackageManager.h"
+#include "ServerTime.h"
+#include "SystemUi.h"
+#include "UiManager.h"
+#include "GuildMgr.h"
+#include "HookSetUi.h"
+#include "ExchangeBusinessMgr.h"
+#include "Helper.h"
+#include "ItemTip.h"
+#include "UiTools.h"
+#include "UIUtil.h"
+#include "f_string_util.h"
+#include "f_zhuzai_mgr.h"
+#include "ServerListUi.h"
+
+#if ENABLE_GOTYE==1
+#include "voice/VoiceMgr.h"
+#endif
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS || CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+#include "wzolJni.h"
+#endif
+
+
+#include "GameEventDefine.h"
+
+//  [7/4/2014 pc]
+CustomTextFieldTTF::CustomTextFieldTTF():
+_dirty(false)
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	,m_isMove(false)
+	,m_isLongPress(false)
+	,m_isTouch(false)
+	,m_isschedule(false)
+	,m_pasteSprite(NULL)
+	,m_pressTime(0)
+#endif
+{
+}
+
+
+CustomTextFieldTTF::~CustomTextFieldTTF()
+{
+
+}
+
+void CustomTextFieldTTF::insertText(const char * text, int len)
+{
+	CCTextFieldTTF::insertText(text, len);
+	m_GSstr += text;
+}
+
+void CustomTextFieldTTF::deleteBackward()
+{
+	std::string strNowStr = getString();
+
+	CCTextFieldTTF::deleteBackward();	//这里会删除掉字符串 所以要在这个之前取一下字符
+
+	//[bing] 检查一下要删除的真实字符串是不是*> 若是看看是不是一个物品标签 若是标签则把整个标签删除掉
+	unsigned int dwStrLen = m_GSstr.length();
+	if(dwStrLen)
+	{
+		int nApos = m_GSstr.rfind("<i");
+		int nBpos = m_GSstr.rfind("/>");
+
+		//有可能是个物品信息
+		if( nBpos == dwStrLen - 2 && nApos != -1 )
+		{
+			std::string ItemStr = m_GSstr.substr(nApos, nBpos - nApos + 2);
+			//[bing] 然后解析id和name
+			int nTmpIdPos = ItemStr.find("id=");
+			int nTmpNamePos = ItemStr.find("na=");
+
+			if(nTmpIdPos != -1
+				&& nTmpNamePos != -1)
+			{
+				//[bing] 格式正确将整个标签字符串删除
+				m_GSstr = m_GSstr.substr(0, nApos);
+
+				//并且把显示字符串上剩余的 "[xx物品" 也干掉
+				//int namelen = ItemStr.substr(nTmpNamePos + 3, (ItemStr.size() - 3) - (nTmpNamePos + 3)).length() + 1; //取name截长度 加上一个[
+				//用ItemStr的长度 + 1( [符号 ) 减少长度吧
+				int namelen = ItemStr.substr(nTmpNamePos + 3, ItemStr.size() - 2 - (nTmpNamePos + 3)).length();
+				//ItemStr = getString();
+				ItemStr = strNowStr.substr(0, strNowStr.length() - namelen);
+				setString(ItemStr.c_str());
+
+				return;
+			}
+		}
+
+		nApos = m_GSstr.rfind("<#");
+		nBpos = m_GSstr.rfind("/>");
+		//有可能是个表情
+		if( nBpos == dwStrLen - 2 && nApos != -1 && nBpos - nApos == 4 )
+		{
+			m_GSstr = m_GSstr.substr(0, nApos);
+			setString(strNowStr.substr(0, strNowStr.length() - 3).c_str());
+
+			return;
+		}
+
+		int nDelLen = strNowStr.length();
+		strNowStr = getString();
+		nDelLen -= strNowStr.length();
+
+		m_GSstr = m_GSstr.substr(0, m_GSstr.length() - nDelLen);
+
+		/*
+		int nLastPos = 1;
+		int nStrLen = m_GSstr.length();
+		if(nStrLen >= 6)
+		{
+		for(int i = 0; i < 6; i++)
+		{
+		if((utf8_skip_data[(unsigned char)m_GSstr.c_str()[nStrLen - (6 - i)]]) == 6 - i)
+		{
+		m_GSstr = m_GSstr.substr(0, nStrLen - (6 - i));
+		return;
+		}
+		}
+		}
+		else
+		{	
+		for(int i = 0; i < nStrLen; i++)
+		{
+		if((utf8_skip_data[(unsigned char)m_GSstr.c_str()[i]]) == nStrLen - i)
+		{
+		m_GSstr = m_GSstr.substr(0, i);
+		return; 
+		}
+		}
+		}
+		*/
+	}
+}
+
+void CustomTextFieldTTF::SetGSString( std::string& GSstring )
+{
+	m_GSstr = GSstring;
+}
+
+std::string& CustomTextFieldTTF::GetGSString()
+{
+	return m_GSstr;
+}
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+void CustomTextFieldTTF::keyboardWillShow(CCIMEKeyboardNotificationInfo& info)
+{
+	CCScene * scene = CCDirector::sharedDirector()->getRunningScene();
+
+	if (scene->getPositionY() > 0) {
+		if (!_dirty) return;
+		scene->setPositionY(0.0f);
+	}
+
+	float microOffset = 4;
+	CCPoint pos = this->getParent()->convertToWorldSpace(this->getPosition());
+	float offsetY = pos.y > (info.end.size.height + microOffset) ? 1.0f : (info.end.size.height - pos.y + microOffset);
+	scene->setPositionY(offsetY);
+	_dirty = true;
+}
+void CustomTextFieldTTF::keyboardDidShow(CCIMEKeyboardNotificationInfo& info)
+{
+
+}
+void CustomTextFieldTTF::keyboardWillHide(CCIMEKeyboardNotificationInfo& info)
+{
+	CCScene * scene = CCDirector::sharedDirector()->getRunningScene();
+	scene->setPositionY(0.0f);
+	_dirty = false;
+}
+void CustomTextFieldTTF::keyboardDidHide(CCIMEKeyboardNotificationInfo& info)
+{
+
+}
+
+bool CustomTextFieldTTF::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	m_startPoint = pTouch->getLocation();
+	m_isTouch = true;
+	CCRect tempRect = this->boundingBox();
+	CCPoint tempPoint = this->convertToNodeSpace(m_startPoint);
+	if (isTouchOnNodeContent(this, pTouch))
+	{
+		this->schedule(schedule_selector(CustomTextFieldTTF::updateLongPress), 0.5f);
+		m_isschedule = true;
+	}else if (m_pasteSprite != NULL)
+	{
+		if (isTouchOnNodeContent(m_pasteSprite, pTouch))
+		{
+			if (m_pasteSprite->isVisible())
+			{
+				this->pasteStrFromOSPasteboard();
+			}
+		}else{
+			m_pasteSprite->setVisible(false);
+		}
+	}
+	return true;
+}
+
+void CustomTextFieldTTF::ccTouchMoved( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (ccpDistance(m_startPoint, pTouch->getLocation()) > 10.0f)
+		m_isMove = true;
+
+}
+
+void CustomTextFieldTTF::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	m_isTouch = false;
+	m_isMove = false;
+	if (m_isschedule)
+	{
+		this->unschedule(schedule_selector(CustomTextFieldTTF::updateLongPress));
+		m_isschedule = false;
+	}
+	if (m_isLongPress){
+		m_isLongPress = false;
+	}
+}
+
+void CustomTextFieldTTF::updateLongPress( float dt )
+{
+	if (m_isTouch)
+	{
+		m_pressTime++;
+		if (m_pressTime > 3.0f && !m_isLongPress)
+		{
+			m_isLongPress = true;
+			onLongPress();
+		}
+	}else{
+		m_pressTime = 0;
+	}
+}
+
+void CustomTextFieldTTF::onLongPress()
+{
+	if (m_pasteSprite == NULL)
+	{
+		m_pasteSprite = CCScale9Sprite::create("Art/ICON/tips.png");
+		m_pasteSprite->setAnchorPoint(ccp(0.5, 0));
+		this->addChild(m_pasteSprite);
+		LabelFT *text = Helper::createLabelFT(20, 2);
+		text->setString(STRING_TABLE["Paste"]);
+		CCSize textSize = text->getContentSize();
+		CCSize boxSize = CCSize(textSize.width + 10, textSize.height + 5);
+		m_pasteSprite->setContentSize(boxSize);
+		text->setPosition(ccp(boxSize.width / 2, boxSize.height / 2));
+		m_pasteSprite->addChild(text);
+	}
+
+	CCSize inputFildSize = this->getContentSize();
+	CCSize pasteSpriteSize = m_pasteSprite->getContentSize();
+	m_pasteSprite->setPosition(ccp(pasteSpriteSize.width / 2, inputFildSize.height + 5));
+	m_pasteSprite->setVisible(true);
+}
+
+void CustomTextFieldTTF::pasteStrFromOSPasteboard()
+{
+	m_pasteSprite->setVisible(false);
+#ifdef _USE_SDK
+	WzolJni *jni = WzolJni::getInstance();
+	std::string pasteStr;
+	jni->callPlatformWithReturn(GET_PASTEBOARD_STR, "", pasteStr);
+	this->insertText(pasteStr.c_str(), pasteStr.length());
+#endif
+}
+
+void CustomTextFieldTTF::onEnter()
+{
+	CCNode::onEnter();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -8, false);
+}
+
+void CustomTextFieldTTF::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	this->detachWithIME();
+	CCNode::onExit();
+}
+
+#endif
+
+//-------------------------------------
+
+ChatListItem::ChatListItem(float width,int i /*= 0*/):
+_excursionH(4.0f),
+	_tmpNormalStr("")
+{//i = 0 通用 i = 1聊天小窗口 i = 2 聊天大窗口
+	CCLabelTTF *label = CCLabelTTF::create();
+	//label->setFontName(FONT_NAME);
+	label->setFontSize(CHAT_FONT_SIZE); // 修改窗口一行高度~~ add by XSea  //[bing] 之前这里是21 fix 修正聊天栏发送物品信息错位问题 因为fontsize不能整除2造成的原因
+	label->setAnchorPoint(CCPointZero);
+	label->setTag(NT_Label);
+	label->setDimensions(CCSize(width, 0.0f));
+	label->setContentSize(CCSize(width, 0.0f));
+	// 	if (i == 1)
+	// 	{
+	// 		label->setPositionX(0);
+	// 		_excursionH = 0;
+	// 	}
+	// 	if (i == 2)
+	// 	{
+	// 		label->setPositionX(-5);
+	// 		_excursionH = 8;
+	// 	}
+
+	//label->setPositionY(-CHAT_FONT_SIZE*0.5f);
+	_node->setAnchorPoint(CCPointZero);
+	_node->addChild(label);
+	_marginV = 1.0f;
+	_marginH = 0.0f;
+
+	m_nRowCount = 0;
+}
+
+ChatListItem::~ChatListItem()
+{
+	_yyFuhaoMap.clear();
+
+	std::for_each(_userDatas.begin(),_userDatas.end(),[](s_Chat_UserData* p){if (p)
+	{
+		delete p;
+	}
+	});
+}
+
+cocos2d::CCSize ChatListItem::getContentSize()
+{
+	if(!_node->isVisible())
+		return CCSize(0.f, 0.f);
+	else
+		return _node->getChildByTag(NT_Label)->getContentSize();
+}
+
+void ChatListItem::setData( const s_receive_chat_info &chatInfo)
+{
+	_chatInfo = chatInfo;
+	int sexIndex = chatInfo.bySex == 0 ? 2 : 1;
+	std::string sexstr = CCString::createWithFormat("<pna=chat_e%d.png/>",sexIndex)->getCString();
+	if (chatInfo.send_role_id == -1 && chatInfo.receive_role_id == -1) {
+		sexstr = "";
+	}
+	std::string vipstr = "";
+	if(chatInfo.nVIPLv > 0 && chatInfo.nVIPLv <= 16)
+	{
+		vipstr = "";//暂时屏蔽vip显示(2015.09.12版本_测)
+		//vipstr = CCString::createWithFormat("<pna=chat_v%d.png/>",chatInfo.nVIPLv)->getCString();
+	}
+
+	std::string sexcolor = chatInfo.bySex == 0 ? "<c0xff6db9" : "<c0x699eff";	//"<c0xEB50B6" : "<c0x18E6E2"
+
+	if (chatInfo.bySex != 0 && chatInfo.bySex != 1)
+	{
+		sexstr.clear();
+		sexcolor.clear();
+	}
+
+	std::string yyStr = CCString::createWithFormat("<pna=%s.png/>","yyIn_dianchi")->getCString();
+
+	yyStr = chatInfo.gotyeId > 0 ? yyStr : "";
+
+	std::string zzzImage = "";
+	if (f_zhuzai_mgr::get_singleton_ptr()->player_is_zhuzai(chatInfo.send_role_id))
+	{
+		zzzImage = "<pna=zhuzaizhebiaozhi.png/>";
+	}
+
+	ccColor3B color;
+	std::ostringstream str;
+	switch(chatInfo.send_channel)
+	{
+	case ESCC_World:
+		color = ccc3(0xff, 0xff, 0xff);	//原颜色属性值ccc3(0xff, 0xea, 0x00)
+		str << "<c0xffffff";
+		str << GET_STR(15);
+		str << "/>";
+		str <<zzzImage;
+		str << sexstr << sexcolor << chatInfo.send_role_name << "/>" << vipstr << GET_STR(30) << yyStr << chatInfo.chat_text;
+		break;
+	case ESCC_Guild:
+		color = ccc3(0xf6, 0xe0, 0x27);	//原颜色属性值ccc3(0xff, 0xff, 0xff)
+		str << "<c0xf6e027";
+		str << GET_STR(16);
+		str << "/>";
+		str <<zzzImage;
+		//str << sexstr << sexcolor << chatInfo.send_role_name << "/>" << vipstr << GET_STR(30) << yyStr << chatInfo.chat_text;
+		if (!sexstr.empty() || !sexcolor.empty())
+			str << sexstr << sexcolor << chatInfo.send_role_name << "/>" << vipstr << GET_STR(30) << yyStr << chatInfo.chat_text;
+		else
+			str << sexstr << sexcolor << chatInfo.send_role_name << vipstr << GET_STR(30) << yyStr << chatInfo.chat_text;
+		break;
+	case ESCC_Team:
+		color = ccc3(0x60, 0xff, 0x00);	//原颜色属性值ccc3(0xff, 0xff, 0xff)
+		str << "<c0x60FF00";
+		str << GET_STR(17);
+		str << "/>";
+		str <<zzzImage;
+		str << sexstr << sexcolor << chatInfo.send_role_name << "/>" << vipstr << GET_STR(30) << yyStr << chatInfo.chat_text;
+		break;
+	case ESCC_Map:
+		color = ccc3(0x93, 0xf3, 0xf9);	//原颜色属性值ccc3(0xff, 0xff, 0xff)
+		str << "<c0x93f3f9";
+		str << GET_STR(18);
+		str << "/>";
+		str <<zzzImage;
+		str << sexstr << sexcolor << chatInfo.send_role_name << "/>" << vipstr << GET_STR(30) << chatInfo.chat_text;
+		break;
+	case ESCC_Decree:
+		color = ccc3(0xfe, 0x46, 0x15);	//原来的是蓝
+		str << "<pna=chat_t1.png/>";
+		//str << "<c0xfe4615";
+		//str << "\xE3\x80\x90\xE4\xBB\xA4\xE3\x80\x91";	//令
+		//str << "/>";
+		//std::string tianstr = CCString::createWithFormat("<pna=chat_t%d.png/>", 1)->getCString();
+		//str << "<#37";
+		//str << "/>";
+		str <<zzzImage;
+		str << sexstr << sexcolor << chatInfo.send_role_name << "/>" << vipstr << GET_STR(30) << yyStr << chatInfo.chat_text;
+		break;
+	case ESCC_Qianli:
+		color = ccc3(0xf1, 0x15, 0xff);	//原颜色属性值ccc3(0xfd, 0x48, 0xff)
+		//std::string qianstr = CCString::createWithFormat("<pna=chat_t%d.png/>", 2)->getCString();
+		str << "<pna=chat_t2.png/>";
+		//str << "<c0xf115ff";
+		//str << "\xE3\x80\x90\xE4\xBC\xA0\xE3\x80\x91";	//传
+		//str << "/>";
+		str <<zzzImage;
+		str << sexstr << sexcolor << chatInfo.send_role_name << "/>" << vipstr << GET_STR(30) << yyStr << chatInfo.chat_text;
+		break;
+	case ESCC_SiLiao:
+		color = ccc3(0x00, 0xb9, 0xfd);	//原颜色属性值ccc3(0x5c, 0xff, 0xf2)
+		if(chatInfo.send_role_id == RoleManager::getInstance()->getLocalPlayer()->getId())
+		{//自己对别人说;
+			std::string headStr = replaceStr(GET_STR(28), "***", chatInfo.receive_role_name);
+			str << sexstr << sexcolor << headStr << "/>" << yyStr << chatInfo.chat_text;
+		}
+		else
+		{
+			std::string headStr = replaceStr(GET_STR(29), "***", chatInfo.send_role_name);
+			str << sexstr <<sexcolor << headStr << "/>" << yyStr << chatInfo.chat_text;
+		}
+		break;
+	case ESCC_Affiche:
+		color = ccc3(0xfe, 0x46, 0x15);	//公告
+		str  << GET_STR(19) << GET_STR(30) << chatInfo.chat_text;
+		break;
+	default:
+		color = ccc3(0xff, 0xc9,0x24);//系统改成橘红色(原黄色)
+		str /*<< chatInfo.send_role_name*/ << GET_STR(19) << chatInfo.chat_text;
+		break;
+	}
+	str << '\0';   //[bing] 加个结束符 很重要!
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Label));
+	label->setColor(color);
+	std::string newstr = str.str();
+
+	this->strParse(newstr, chatInfo.gotyeId, chatInfo.gotyeTime);
+}
+
+void ChatListItem::addNewLabel(std::list<CCNode*>& list, const char * labelStr, const ccColor3B& color, float &curWidth, s_Chat_UserData* pData)
+{
+	if (!string(labelStr).size()) return;
+	CCLabelTTF* baseLabel = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Label));
+	float maxLineWidth = baseLabel->getDimensions().width;
+	//	string strfontname = "customfont.ttf";
+	float nFontSize = baseLabel->getFontSize();
+
+	TTFConfig config;
+	config.fontFilePath=  FT_FONTFACE;
+	config.fontSize = nFontSize;
+	config.outlineSize = 1;
+
+	LabelFT *label = LabelFT::createWithTTF(config,labelStr);
+
+
+	// 	if (curWidth + label->getContentSize().width > maxLineWidth) {
+	// 		this->moveToNewLine(list, curWidth);
+	// 	}
+
+	label->setAnchorPoint(CCPointZero/*ccp(0.0f,1.0f)*/);
+	label->setPosition(ccp(curWidth, 0));
+	label->setTextColor(Helper::converColor3B_2_4B(color));
+	//label->setFontSize(16);
+
+	// 	CCLabelTTF * label = CCLabelTTF::create(labelStr, strfontname.c_str(), nFontSize);
+	// 	if (curWidth + label->getContentSize().width > maxLineWidth) {
+	// 		this->moveToNewLine(list, curWidth);
+	// 	}
+	// 	label->setAnchorPoint(CCPointZero);
+	// 	label->setPosition(ccp(curWidth, 0));
+	// 	label->setDimensions(CCSizeZero);
+	// 	label->setColor(color);
+	baseLabel->addChild(label, NT_ChatBtn);
+	list.push_back(label);
+	curWidth += label->getContentSize().width;
+
+	if (pData != NULL) 
+	{
+		label->setUserData((void*)pData);
+		_userDatas.push_back(pData);
+	}
+
+}
+
+void ChatListItem::moveToNewLine(std::list<CCNode*>& list, float &curWidth)
+{
+	CCLabelTTF * label = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Label));
+	std::list<CCNode*>::iterator iter;
+	for (iter = list.begin(); iter != list.end(); ++iter) {
+		CCNode * node = *iter;
+		node->setPositionY(node->getPositionY()+(label->getFontSize()+_marginV/*+_excursionH*/));
+	}
+	curWidth = 0;
+	m_nRowCount++;
+}
+
+bool ChatListItem::isTeam(std::string &str, int &curPos, std::list<CCNode*> &list, float &curWidth)
+{
+	//<t id= asdf na= asdf/>
+	int nSize = str.size();
+
+	if (curPos > nSize - 10)
+		return false;
+
+	std::string prefix = str.substr(curPos, 5);
+	if (prefix != "<tid=")
+		return false;
+
+	std::string tmpStr1 = str.substr(curPos+5, -1);
+	if (tmpStr1.find("na=") == std::string::npos)
+		return false;
+
+	int idEndPos = tmpStr1.find("na=");
+	std::string idStr = tmpStr1.substr(0, idEndPos);
+
+	std::string tmpStr2 = str.substr(curPos+5+idStr.size()+3, -1);
+	if (tmpStr2.find("/>") == std::string::npos)
+		return false;
+
+	int tagEndPos = tmpStr2.find("/>");
+	std::string naStr = tmpStr2.substr(0, tagEndPos);
+	if (!naStr.size()) return false;
+
+	curPos += (idStr.size()+naStr.size()+10);
+
+	//naStr = "["+naStr+"]";
+	s_Chat_UserData* pData = new s_Chat_UserData;
+	pData->m_type = 3;
+#ifdef WIN32
+	pData->m_value = _atoi64(idStr.c_str());
+#else
+	pData->m_value = atoll(idStr.c_str());
+#endif
+	CCLabelTTF * label = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Label));
+	this->addNewLabel(list, _tmpNormalStr.c_str(), label->getColor(), curWidth, NULL);
+	this->addNewLabel(list, naStr.c_str(), ccc3(0x00, 0xff, 0x00), curWidth, pData);
+	return true;
+}
+
+bool ChatListItem::isItem(std::string &str, int &curPos, std::list<CCNode*> &list, float &curWidth)
+{
+	//<iid=blablabla na=blablabla/>
+	int nSize = str.size();
+	if (curPos > nSize - 8)
+		return false;
+
+	std::string prefix = str.substr(curPos, 5);
+	if (prefix != "<iid=")
+		return false;
+
+	std::string tmpStr = str.substr(curPos+5, -1);
+	if (tmpStr.find("na=") == std::string::npos)
+		return false;
+
+	int idEndPos = tmpStr.find("na=");
+	std::string itemIdStr = tmpStr.substr(0, idEndPos);
+	if (tmpStr.find("/>") == std::string::npos)
+		return false;
+
+	std::string naTmpStr = tmpStr.substr(itemIdStr.size()+3, -1);
+	int naEndPos = naTmpStr.find("/>");
+	string naStr = naTmpStr.substr(0, naEndPos);
+
+	curPos += (itemIdStr.size() + naStr.size()+10);
+
+	s_Chat_UserData* pData = new s_Chat_UserData;
+	pData->m_type = 1;
+#ifdef WIN32
+	pData->m_value = _atoi64(itemIdStr.c_str());
+#else
+	pData->m_value = atoll(itemIdStr.c_str());
+#endif
+	// 	long long l64id = pData->m_value;
+	// 	f_item* item = PackageManager::getInstance()->getItem(EICT_Bag, l64id);
+	// 	if (!item) item = PackageManager::getInstance()->getItem(EICT_Equip, l64id);
+
+	bool bIsEquip = false;
+	void* data = ChatMgr::getInstance()->getItemInfo(pData->m_value, bIsEquip);
+	ccColor3B color = ccc3(0xff, 0xff, 0xff);
+	if (!data) 
+	{
+		long long l64id = pData->m_value;
+		f_item* item = PackageManager::getInstance()->getItem(EICT_Bag, l64id);
+		if (!item) 
+			item = PackageManager::getInstance()->getItem(EICT_Equip, l64id);
+		if (item) 
+		{
+			f_equipment *equip = dynamic_cast<f_equipment*>(item);
+			if (equip != NULL) 
+			{
+				color = getColorByQuality(equip->get_item_quality());
+			}
+			else
+			{
+				const ItemTypeData & itemData = PackageManager::getInstance()->getItemTypeData(item->get_item_type_id());
+				color = getColorByQuality(itemData.byQuality);
+			}
+		}
+	}
+	else if (data) 
+	{
+		if (bIsEquip)
+		{
+			f_equipment* pEquip = new f_equipment(*((tagEquip*)data));
+			if (pEquip)
+			{
+				color = getColorByQuality(pEquip->get_item_quality());
+			}
+			delete(pEquip);
+		}
+		else
+		{
+			tagItem* pItem = (tagItem*)data;
+			if (pItem)
+			{
+				const ItemTypeData & itemData = PackageManager::getInstance()->getItemTypeData(pItem->dw_data_id);
+				color = getColorByQuality(itemData.byQuality);
+			}
+		}
+	}
+
+	CCLabelTTF * label = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Label));
+	this->addNewLabel(list, _tmpNormalStr.c_str(), label->getColor(), curWidth, NULL);
+
+	string itemStr = "[" + naStr + "]";
+	this->addNewLabel(list, itemStr.c_str(), color, curWidth, pData);
+	return true;
+}
+
+bool ChatListItem::isEmoji(std::string &str, int &curPos, std::list<CCNode*> &list, float &curWidth)
+{
+	//<#33/>
+	int nSize = str.size();
+	if (curPos > nSize - 6)
+		return false;
+
+	unsigned char char1 = (unsigned char)str[curPos];
+	unsigned char char2 = (unsigned char)str[curPos+1];
+	unsigned char char3 = (unsigned char)str[curPos+4];
+	unsigned char char4 = (unsigned char)str[curPos+5];
+
+	if (char1 != '<' || char2 != '#' || char3 != '/' || char4 != '>')
+		return false;
+
+	CCLabelTTF * label = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Label));
+	this->addNewLabel(list, _tmpNormalStr.c_str(), label->getColor(), curWidth, NULL);
+
+	string colorIdStr = str.substr(curPos+2, 2);
+	unsigned long long colorId = 0;
+#ifdef WIN32
+	colorId = _atoi64(colorIdStr.c_str());
+#else
+	colorId = atoll(colorIdStr.c_str());
+#endif
+
+	//CCLabelTTF * label = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Label));
+	float maxLineWidth = label->getDimensions().width;
+
+	GameActionNode* pActNode = GameActionNode::create();
+	label->addChild(pActNode, NT_ChatBtn);
+
+	S_BiaoQingData* pData = CBiaoQingData::inst().biaoqingmap[colorId];
+	CBiaoQingData::inst().SetBiaoQingTexture(pActNode, pData);
+
+	float emojiWidth = pActNode->getContentSize().width * 0.8; //0.67 + 3
+	if (curWidth + emojiWidth > maxLineWidth) {
+		this->moveToNewLine(list, curWidth);
+	}
+	//pActNode->setPosition(ccp(curWidth+12.0f, 6.0f));
+	pActNode->setPosition(ccp(curWidth+12.0f,  pActNode->getContentSize().height * 0.4));
+	curWidth += emojiWidth;
+
+	pActNode->setAnchorPoint(CCPointZero);
+	pActNode->setScale(0.8f);	
+	pActNode->BeginAction(0.2, true);
+	list.push_back(pActNode);
+	curPos += 6;
+
+	return true;
+}
+
+bool ChatListItem::isColor(std::string &str, int &curPos, std::list<CCNode*> &list, float &curWidth)
+{
+	//<c0xffffff blalblabla/>
+	int nSize = str.size();
+	if (curPos > nSize - 12)
+		return false;
+
+	std::string prefix = str.substr(curPos, 2);
+	if (prefix != "<c")
+		return false;
+
+	std::string tmpStr = str.substr(curPos+10, -1);
+	if (tmpStr.find("/>") == std::string::npos)
+		return false;
+
+	std::string colorHexStr = str.substr(curPos+2, 8);
+	unsigned int dwColor = strtol(colorHexStr.c_str(), NULL, 16);
+	ccColor3B color;
+	color.r = (dwColor >> 16) & 0xFF;
+	color.g = (dwColor >> 8) & 0xFF;
+	color.b = dwColor & 0xFF;
+
+	int endPos = tmpStr.find("/>");
+	std::string contentStr = tmpStr.substr(0, endPos);
+
+	CCLabelTTF * label = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Label));
+	this->addNewLabel(list, _tmpNormalStr.c_str(), label->getColor(), curWidth, NULL);
+
+	this->addNewLabel(list, contentStr.c_str(), color, curWidth, NULL);
+	curPos += (contentStr.size() + 12);
+
+	return true;
+}
+
+bool ChatListItem::isImage(std::string &str, int &curPos, std::list<CCNode*> &list, float &curWidth, long long yuYinID, int &_time)
+{
+	//<pna=blablabla/>
+	int nSize = str.size();
+	if (curPos > nSize - 8)
+		return false;
+
+	std::string prefix = str.substr(curPos, 5);
+	if (prefix != "<pna=")
+		return false;
+
+	std::string tmpStr = str.substr(curPos+5, -1);
+	if (tmpStr.find("/>") == std::string::npos)
+		return false;
+
+	int endPos = tmpStr.find("/>");
+	std::string picname = tmpStr.substr(0, endPos);
+	if (!picname.size()) 
+		return false;
+
+	std::string filepath = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "SingleUI/" + picname;
+	filepath = CCFileUtils::sharedFileUtils()->fullPathForFilename(filepath.c_str());
+	if (filepath.empty())
+		return false;
+
+	CCLabelTTF * label = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Label));
+	this->addNewLabel(list, _tmpNormalStr.c_str(), label->getColor(), curWidth, NULL);
+
+	//CCLabelTTF* label = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Label));
+	float maxLineWidth = label->getDimensions().width;
+	string strfontname = "customfont.ttf";
+	float nFontSize = label->getFontSize();
+
+	if (yuYinID > 0 && strcmp(picname.c_str(), "yyIn_dianchi.png") == 0) {
+		GameActionNode* pActNode = GameActionNode::create();
+		label->addChild(pActNode,NT_ChatBtn);
+
+		S_BiaoQingData* pData = CBiaoQingData::inst().biaoqingmap[37];
+		CBiaoQingData::inst().SetBiaoQingTexture(pActNode,pData);
+		pActNode->setAnchorPoint(CCPointZero);
+
+		if (curWidth + pActNode->getContentSize().width > maxLineWidth) {
+			this->moveToNewLine(list, curWidth);
+		}
+		pActNode->setPosition(ccp(curWidth + 7, nFontSize*0.5 + 2));
+		curWidth += pActNode->getContentSize().width;
+
+		pActNode->BeginActionInTime(0.2, _time / 1000, 2);
+		_yyFuhaoMap[yuYinID] = pActNode;
+		list.push_back(pActNode);	
+	}
+
+	CCSpriteFrame *frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(filepath.c_str());
+	if(frame == NULL)
+	{
+		CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addImage(filepath.c_str());
+		frame = CCSpriteFrame::createWithTexture(texture,CCRect(0.0,0.0,texture->getPixelsWide(),texture->getPixelsHigh()));
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(frame,filepath.c_str());
+	}
+
+	CCSprite* pPic = CCSprite::create();
+	pPic->setAnchorPoint(ccp(0.0f, 0.5f));
+	pPic->setDisplayFrame(frame);
+	label->addChild(pPic,NT_ChatBtn);
+	list.push_back(pPic);
+
+	if (curWidth + pPic->getContentSize().width > maxLineWidth) {
+		this->moveToNewLine(list, curWidth);
+	}
+	//pPic->setPosition(ccp(curWidth, nFontSize*0.5));
+	pPic->setPosition(ccp(curWidth, pPic->getContentSize().height/2));
+	curWidth += pPic->getContentSize().width;
+
+	if (yuYinID > 0 && strcmp(picname.c_str(), "yyIn_dianchi.png") == 0) {
+		_time = (_time + 500) / 1000;
+		std::string miao5 = CCString::createWithFormat("%d\xE7\xA7\x92", _time)->getCString();
+
+		TTFConfig config;
+		config.fontFilePath=  FT_FONTFACE;
+		config.fontSize = 12;
+		config.outlineSize = 1;
+
+		LabelFT *pMiao = LabelFT::createWithTTF(config, miao5);
+		pMiao->setPosition(ccp(pPic->getPositionX() + 15, pPic->getPositionY() - 5.5f));
+		pMiao->setAnchorPoint(CCPointZero);
+		pMiao->setTextColor(ccc4(0xff, 0xff, 0xff, 255));
+		label->addChild(pMiao, NT_GroupBtn);
+		list.push_back(pMiao);
+
+		s_Chat_UserData * pUserData = new s_Chat_UserData;
+		pUserData->m_type = 2;
+		pUserData->m_value = yuYinID;
+		pPic->setUserData((void*)pUserData);
+
+		_userDatas.push_back(pUserData);
+	}
+
+	curPos += (picname.size() + 7);
+	return true;
+}
+
+bool ChatListItem::isEnter(std::string &str, int &curPos)
+{
+	if ((size_t)curPos >= str.size()-1)
+		return false;
+
+	if (str[curPos] == 10) {
+		str[curPos] = ' ';
+		return true;
+	}
+	return false;
+}
+
+bool ChatListItem::isEnd(std::string &str, int &curPos)
+{
+	return (curPos == str.size()-1);
+}
+
+//void ChatListItem::strParse(std::string &str, long long yuYinId, int _time)
+//{
+//	if (!str.size()) return;
+//
+//	int curPos = 0;
+//	float curWidth = 0.0f;
+//	std::list<CCNode*> labelList;
+//	std::string tmpNormalStr = "";
+//	CCLabelTTF * label = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Label));
+//	label->setDimensions(CCSize(label->getDimensions().width+10, label->getDimensions().height));
+//
+//	while (curPos < str.size()) {
+//		if (this->isTeam(str, curPos, labelList, curWidth) || this->isItem(str, curPos, labelList, curWidth) ||
+//			this->isEmoji(str, curPos, labelList, curWidth) || this->isColor(str, curPos, labelList, curWidth) ||
+//			this->isImage(str, curPos, labelList, curWidth, yuYinId, _time)) {
+//		}
+//		else if (this->isEnter(str, curPos) || !this->isEnd(str, curPos)) {
+//			int oneCharSize = utf8_skip_data[(unsigned char)str[curPos]];
+//			tmpNormalStr += str.substr(curPos, oneCharSize);
+//			this->addNewLabel(labelList, tmpNormalStr.c_str(), label->getColor(), curWidth, NULL);
+//			tmpNormalStr = "";
+//			curPos += oneCharSize;
+//		}
+//		else if (this->isEnd(str, curPos)) break;
+//	}
+//	m_nRowCount++;
+//	label->setContentSize(CCSize(label->getContentSize().width, (label->getFontSize()+_vMargin)*m_nRowCount-_vMargin+_excursionH));
+//}
+
+bool ChatListItem::isOutOfWidth(const char * labelStr, float &curWidth)
+{
+	CCLabelTTF* baseLabel = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Label));
+	float maxLineWidth = baseLabel->getDimensions().width;
+	float nFontSize = baseLabel->getFontSize();
+
+	// 	TTFConfig config;
+	// 	config.fontFilePath=  FT_FONTFACE;
+	// 	config.fontSize = nFontSize;
+	// 	config.outlineSize = 1;
+
+	//std::string fullPath = CCFileUtils::sharedFileUtils()->fullPathForFilename(FT_FONTFACE);
+	float width =LabelFT::measureText(labelStr,nFontSize,FT_FONTFACE);
+
+	//LabelFT *label = LabelFT::createWithTTF(config,labelStr);
+	//float width = label->getContentSize().width;
+	if (curWidth +width > maxLineWidth) {
+
+		CCLOG("chat string out of width : %s" , labelStr);
+		return true;
+	}
+	return false;
+}
+
+void ChatListItem::strParse(std::string &str, long long yuYinId, int _time)
+{
+	if (!str.size()) return;
+
+	int curPos = 0;
+	float curWidth = 0.0f;
+	std::list<CCNode*> labelList;
+	_tmpNormalStr = "";
+	CCLabelTTF * label = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Label));
+	label->setDimensions(CCSize(label->getDimensions().width+10, label->getDimensions().height));
+
+	while ((size_t)curPos < str.size()) {
+		if (this->isTeam(str, curPos, labelList, curWidth) || this->isItem(str, curPos, labelList, curWidth) ||
+			this->isEmoji(str, curPos, labelList, curWidth) || this->isColor(str, curPos, labelList, curWidth) ||
+			this->isImage(str, curPos, labelList, curWidth, yuYinId, _time)) 
+		{
+			_tmpNormalStr = "";
+
+			CCLOG("parse no string!!!");
+		}
+		else if (this->isEnter(str, curPos) || !this->isEnd(str, curPos)) 
+		{
+			int oneCharSize = utf8_skip_data[(unsigned char)str[curPos]];
+			string tmpNewStr = str.substr(curPos, oneCharSize);
+			string tmpStr = _tmpNormalStr + tmpNewStr;
+			if (this->isOutOfWidth(tmpStr.c_str(), curWidth)) 
+			{
+				this->addNewLabel(labelList, _tmpNormalStr.c_str(), label->getColor(), curWidth, NULL);
+				this->moveToNewLine(labelList, curWidth);
+				_tmpNormalStr = tmpNewStr;
+			}
+			else 
+			{
+				_tmpNormalStr = tmpStr;
+			}
+			curPos += oneCharSize;
+
+		}
+		else if (this->isEnd(str, curPos)) {
+			this->addNewLabel(labelList, _tmpNormalStr.c_str(), label->getColor(), curWidth, NULL);
+
+			CCLOG("parse end!!!");
+			break;
+		}
+	}
+	m_nRowCount++;
+	label->setContentSize(CCSize(label->getContentSize().width, (label->getFontSize()+_marginV)*m_nRowCount-_marginV+_excursionH));
+	_node->setContentSize(label->getContentSize());
+}
+
+//[bingsone] 解析字符串
+// void ChatListItem::StrParse( std::string &str, long long yuYinID, int _time )
+// {
+// 	int nSize = str.size();
+// 	if(!nSize)
+// 		return;
+// 
+// 	//std::string strfontname = CFGReader::instance()->get_profile_string("Art", "Scene", "") + "customfont.ttf";
+// 	std::string strfontname = "customfont.ttf";
+// 
+// 	//[bing] 我就当这label是画布吧...
+// 	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Label));
+// 	int nFontSize = (int)label->getFontSize();
+// 	bool isYY = true;
+// 	//[bing] Label宽度 转换成每行最多能显示几个空格
+// 	int nOneLineNum = (int)(label->getDimensions().width / (nFontSize*0.5));
+// 
+// 	int nApos = 0;
+// 	int nBpos = 0;
+// 	int nCpos = 0;
+// 	int nDpos = 0;
+// 	int nOneCharNumber = 0;
+// 	CCLabelTTF *ItemLink = NULL;
+// 	std::list<CCNode*> LabelList;
+// 	unsigned char NowChar = 0;
+// 	int nState = 0; //1 = 物品 2 = 表情 3 = 颜色 4 = 自定义图片
+// 	unsigned long long nId = 0;
+// 	std::string picname = "";
+// 	std::string filepath = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "SingleUI/";
+// 	ccColor3B color = label->getColor();
+// 	//ccColor3B color = ccc3(0xff,0xff,0xff);
+// 	int nLabelIdx = 0;
+// 	bool nOneLineNumFlag = true;
+// 	int whileCount = 0;
+// 
+// 	while(nApos < nSize)
+// 	{
+// 		//先看看这是什么字符
+// 		switch((unsigned char)str[nApos])
+// 		{
+// 		case '<':	//是一个标签
+// 			{
+// 				if(str[nApos + 1] == 't')
+// 				{
+// 					std::string ItemStr = str.substr(nApos + 1, nSize - nApos - 1);
+// 					//[bing] 然后解析id和name
+// 					int nTmpIdPos = ItemStr.find("id=");
+// 					int nTmpNamePos = ItemStr.find("na=");
+// 
+// 					//[bing] 格式正确
+// 					if(nTmpIdPos != -1 && nTmpNamePos != -1)
+// 					{
+// #ifdef WIN32
+// 						nId = _atoi64(ItemStr.substr(nTmpIdPos + 3, (nTmpNamePos - 1) - (nTmpIdPos + 3) ).c_str());	//取ID截
+// #else
+// 						nId = atoll(ItemStr.substr(nTmpIdPos + 3, (nTmpNamePos - 1) - (nTmpIdPos + 3) ).c_str());	//取ID截
+// #endif
+// 
+// 						//ItemStr = ItemStr.substr(nTmpNamePos + 3, ItemStr.size() - nTmpNamePos - 3);
+// 						//ItemStr = "[" + ItemStr;  //增加 [name]
+// 						//ItemStr += "]";
+// 
+// 						nState = 5;	//队伍
+// 
+// 						if(nApos != nBpos)
+// 						{
+// 							//把之前的字符串加进来
+// 							CCLabelTTF* ItemLink = CCLabelTTF::create();
+// 							ItemLink->setPosition( ccp( nDpos, 0) );  //设定位置
+// 							ItemLink->setFontName( strfontname.c_str() );
+// 							ItemLink->setAnchorPoint( ccp( 0.0f, 0.0f ) );
+// 							ItemLink->setFontSize(nFontSize);
+// 							ItemLink->setDimensions(CCSize(0, 0));
+// 							ItemLink->setColor(color);
+// 							ItemLink->setString( str.substr(nBpos, nApos - nBpos) .c_str() );
+// 							nDpos += ItemLink->getContentSize().width;
+// 							label->addChild(ItemLink,NT_ChatBtn);
+// 							LabelList.push_back(ItemLink);
+// 
+// 							CCLOG("------- Chat: id=%d, posX=%f width=%f", nLabelIdx++, ItemLink->getPositionX(), ItemLink->getContentSize().width);
+// 						}
+// 
+// 						color = ccc3(0x00, 0xff, 0x00);
+// 
+// 						//跳过解析字符 取得na截
+// 						nApos = nApos + 1 + nTmpNamePos + 3;
+// 						nBpos = nApos;
+// 
+// 						continue;
+// 					}
+// 				}
+// 				else if(nApos + 1 < nSize)
+// 				{
+// 					if(str[nApos + 1] == 'i')
+// 					{
+// 						std::string ItemStr = str.substr(nApos + 1, nSize - nApos - 1);
+// 						//[bing] 然后解析id和name
+// 						int nTmpIdPos = ItemStr.find("id=");
+// 						int nTmpNamePos = ItemStr.find("na=");
+// 
+// 						//[bing] 格式正确
+// 						if(nTmpIdPos != -1 && nTmpNamePos != -1)
+// 						{
+// #ifdef WIN32
+// 							nId = _atoi64(ItemStr.substr(nTmpIdPos + 3, (nTmpNamePos - 1) - (nTmpIdPos + 3) ).c_str());	//取ID截
+// #else
+// 							nId = atoll(ItemStr.substr(nTmpIdPos + 3, (nTmpNamePos - 1) - (nTmpIdPos + 3) ).c_str());	//取ID截
+// #endif
+// 
+// 							//ItemStr = ItemStr.substr(nTmpNamePos + 3, ItemStr.size() - nTmpNamePos - 3);
+// 							//ItemStr = "[" + ItemStr;  //增加 [name]
+// 							//ItemStr += "]";
+// 
+// 							nState = 1;	//是物品
+// 
+// 							if(nApos != nBpos)
+// 							{
+// 								//把之前的字符串加进来
+// 								ItemLink = CCLabelTTF::create();
+// 								ItemLink->setPosition( ccp( nDpos, 0) );  //设定位置
+// 								ItemLink->setFontName( strfontname.c_str() );
+// 								ItemLink->setAnchorPoint( ccp( 0.0f, 0.0f ) );
+// 								ItemLink->setFontSize(nFontSize);
+// 								ItemLink->setDimensions(CCSize(0, 0));
+// 								ItemLink->setColor(color);
+// 								ItemLink->setString( str.substr(nBpos, nApos - nBpos) .c_str() );
+// 								nDpos += ItemLink->getContentSize().width;
+// 								label->addChild(ItemLink,NT_ChatBtn);
+// 								LabelList.push_back(ItemLink);
+// 
+// 								CCLOG("------- Chat: id=%d, posX=%f width=%f", nLabelIdx++, ItemLink->getPositionX(), ItemLink->getContentSize().width);
+// 							}
+// 
+// 							//根据物品品质改变ItemLink颜色
+// 							long long l64id = nId;
+// 							f_item* item = PackageManager::getInstance()->getItem(EICT_Bag, l64id);
+// 							if(!item)
+// 							{
+// 								//没找到再去装备栏找
+// 								item = PackageManager::getInstance()->getItem(EICT_Equip, l64id);
+// 							}
+// 
+// 							if( item )
+// 							{
+// 								f_equipment *equip = dynamic_cast<f_equipment*>(item);
+// 								if( equip != NULL )
+// 								{
+// 									color = getColorByQuality(equip->get_item_quality());
+// 								}
+// 								else
+// 									color = ccc3(0xff, 0xff, 0xff);
+// 							}
+// 
+// 							//跳过解析字符 取得na截
+// 							nApos = nApos + 1 + nTmpNamePos + 3;
+// 							nBpos = nApos;
+// 							continue;
+// 						}
+// 					}
+// 					else if(str[nApos + 1] == '#' && nApos + 5 < nSize)
+// 					{
+// 						std::string ItemStr = str.substr(nApos + 2, 2);
+// #ifdef WIN32
+// 						nId = _atoi64(str.substr(nApos + 2, 2).c_str());	//取ID截
+// #else
+// 						nId = atoll(str.substr(nApos + 2, 2).c_str());	//取ID截
+// #endif
+// 
+// 						if(nApos != nBpos)
+// 						{
+// 							//把之前的字符串加进来
+// 							ItemLink = CCLabelTTF::create();
+// 							ItemLink->setPosition( ccp( nDpos, 0) );  //设定位置
+// 							ItemLink->setFontName( strfontname.c_str() );
+// 							ItemLink->setAnchorPoint( ccp( 0.0f, 0.0f ) );
+// 							ItemLink->setFontSize(nFontSize);
+// 							ItemLink->setDimensions(CCSize(0, 0));
+// 							ItemLink->setColor(color);
+// 							ItemLink->setString( str.substr(nBpos, nApos - nBpos) .c_str() );
+// 							nDpos += ItemLink->getContentSize().width;
+// 							label->addChild(ItemLink,NT_ChatBtn);
+// 							LabelList.push_back(ItemLink);
+// 
+// 							CCLOG("------- Chat: id=%d, posX=%f width=%f", nLabelIdx++, ItemLink->getPositionX(), ItemLink->getContentSize().width);
+// 						}
+// 
+// 						nState = 2;
+// 
+// 						nApos += 4;
+// 						nBpos = nApos;
+// 						continue;
+// 					}
+// 					else if(nApos + 10 < nSize && str[nApos + 1] == 'c')
+// 					{
+// 						if(nApos != nBpos)
+// 						{
+// 							//将前面的文字创建一个Label写入
+// 							ItemLink = CCLabelTTF::create();
+// 							ItemLink->setPosition( ccp( nDpos, 0) );  //设定位置
+// 							ItemLink->setFontName( strfontname.c_str() );
+// 							ItemLink->setAnchorPoint( ccp( 0.0f, 0.0f ) );
+// 							ItemLink->setFontSize(nFontSize);
+// 							ItemLink->setColor(color);
+// 							ItemLink->setDimensions(CCSize(0, 0));
+// 							ItemLink->setString( str.substr(nBpos, nApos - nBpos) .c_str() );
+// 							nDpos += ItemLink->getContentSize().width;
+// 							label->addChild(ItemLink,NT_ChatBtn);
+// 							LabelList.push_back(ItemLink);
+// 
+// 							CCLOG("------- Chat: id=%d, posX=%f width=%f", nLabelIdx++, ItemLink->getPositionX(), ItemLink->getContentSize().width);
+// 						}
+// 
+// 						unsigned int dwColor = strtol(str.substr(nApos + 2, 8).c_str(), NULL, 16);
+// 						color.r = (dwColor >> 16) & 0xFF;
+// 						color.g = (dwColor >> 8) & 0xFF;
+// 						color.b = dwColor & 0xFF;
+// 
+// 						nState = 3;
+// 						nBpos = nApos + 10;
+// 						nApos += 10;
+// 						continue;
+// 					}
+// 					else if(str[nApos + 1] == 'p')
+// 					{
+// 						std::string ItemStr = str.substr(nApos + 2, -1);
+// 						int nTmpNaPos = ItemStr.find("na=");
+// 						int nTmpEndPos = ItemStr.find("/>");
+// 						if(nTmpNaPos != -1 && nTmpEndPos != -1)
+// 						{
+// 							picname = ItemStr.substr(nTmpNaPos + 3, nTmpEndPos - nTmpNaPos - 3);
+// 							picname = filepath + picname;
+// 							//找一下这个pic是否存在
+// 							if(CCFileUtils::sharedFileUtils()->isFileExist(picname.c_str()))
+// 							{
+// 								if(nApos != nBpos)
+// 								{
+// 									//将前面的文字创建一个Label写入
+// 									ItemLink = CCLabelTTF::create();
+// 									ItemLink->setPosition( ccp( nDpos, 0) );  //设定位置
+// 									ItemLink->setFontName( strfontname.c_str() );
+// 									ItemLink->setAnchorPoint( ccp( 0.0f, 0.0f ) );
+// 									ItemLink->setFontSize(nFontSize);
+// 									ItemLink->setColor(color);
+// 									ItemLink->setDimensions(CCSize(0, 0));
+// 									ItemLink->setString( str.substr(nBpos, nApos - nBpos) .c_str() );
+// 									nDpos += ItemLink->getContentSize().width;
+// 									label->addChild(ItemLink,NT_ChatBtn);
+// 									LabelList.push_back(ItemLink);
+// 
+// 									CCLOG("------- Chat: id=%d, posX=%f width=%f", nLabelIdx++, ItemLink->getPositionX(), ItemLink->getContentSize().width);
+// 								}
+// 
+// 								nState = 4;
+// 
+// 								nApos = nApos + nTmpEndPos + 2;
+// 								nBpos = nApos;
+// 								continue;
+// 							}
+// 						}
+// 					}
+// 				}
+// 			}
+// 		case '/':	//一个标签的结束
+// 			{
+// 				if(nApos + 1 < nSize && str[nApos + 1] == '>')
+// 				{
+// 					if(nState == 5)
+// 					{
+// 						if(nApos != nBpos)
+// 						{
+// 							ItemLink = CCLabelTTF::create();
+// 							ItemLink->setPosition( ccp( nDpos, 0) );  //设定位置
+// 							ItemLink->setFontName( strfontname.c_str() );
+// 							ItemLink->setAnchorPoint( ccp( 0.0f, 0.0f ) );
+// 							ItemLink->setFontSize(nFontSize);
+// 							ItemLink->setDimensions(CCSize(0, 0));
+// 							ItemLink->setColor(color);
+// 							ItemLink->setString( str.substr(nBpos, nApos - nBpos) .c_str() );
+// 							nDpos += ItemLink->getContentSize().width;
+// 							label->addChild(ItemLink,NT_ChatBtn);
+// 							LabelList.push_back(ItemLink);
+// 
+// 							CCLOG("------- Chat: id=%d, posX=%f width=%f", nLabelIdx++, ItemLink->getPositionX(), ItemLink->getContentSize().width);
+// 
+// 							s_Chat_UserData* pData = new s_Chat_UserData;
+// 							pData->m_type = 3;
+// 							pData->m_value = nId;
+// 							ItemLink->setUserData((void*)pData);		//[bing] 物品动态ID
+// 
+// 							_userDatas.push_back(pData);
+// 						}
+// 
+// 						nState = 0;
+// 						//color = ccc3(0xff,0xff,0xff);
+// 						color = label->getColor();
+// 
+// 						nApos += 2;
+// 						nBpos = nApos;
+// 						continue;
+// 					}
+// 					else if(nState == 1)
+// 					{
+// 						if(nApos != nBpos)
+// 						{
+// 							ItemLink = CCLabelTTF::create();
+// 							ItemLink->setPosition( ccp( nDpos, 0) );  //设定位置
+// 							ItemLink->setFontName( strfontname.c_str() );
+// 							ItemLink->setAnchorPoint( ccp( 0.0f, 0.0f ) );
+// 							ItemLink->setFontSize(nFontSize);
+// 							ItemLink->setDimensions(CCSize(0, 0));
+// 							ItemLink->setColor(color);
+// 							std::string itemName;
+// 							itemName += "[";
+// 							itemName += str.substr(nBpos, nApos - nBpos);
+// 							itemName += "]";
+// 							ItemLink->setString( itemName.c_str() );
+// 							nDpos += ItemLink->getContentSize().width;
+// 							label->addChild(ItemLink,NT_ChatBtn);
+// 							LabelList.push_back(ItemLink);
+// 
+// 							CCLOG("------- Chat: id=%d, posX=%f width=%f", nLabelIdx++, ItemLink->getPositionX(), ItemLink->getContentSize().width);
+// 
+// 							s_Chat_UserData* pData = new s_Chat_UserData;
+// 							pData->m_type = 1;
+// 							pData->m_value = nId;
+// 							ItemLink->setUserData((void*)pData);		//[bing] 物品动态ID
+// 
+// 							_userDatas.push_back(pData);
+// 						}
+// 
+// 						nState = 0;
+// 						//color = ccc3(0xff,0xff,0xff);
+// 						color = label->getColor();
+// 
+// 						nApos += 2;
+// 						nBpos = nApos;
+// 						continue;
+// 					}
+// 					else if(nState == 2)
+// 					{
+// 						if(nId > 0 && nId <= 37)
+// 						{
+// 							nCpos += 2;
+// 
+// 							//换行
+// 							if(nOneLineNum <= nCpos + 5)
+// 							{
+// 								nCpos = 2;
+// 								nDpos = 0;
+// 								m_nRowCount++;
+// 
+// 								//[bing] 把之前的Label上移
+// 								std::list<CCNode*>::iterator IT = LabelList.begin();
+// 								while(IT != LabelList.end())
+// 								{
+// 									CCNode *ItemLink = *IT;
+// 									ItemLink->setPositionY( ItemLink->getPositionY() + (nFontSize + _vMargin + _excursionH) );
+// 									IT++;
+// 								}
+// 							}
+// 
+// 							GameActionNode* pActNode = GameActionNode::create();
+// 							pActNode->setPosition( ccp( nDpos, 0) );  //设定位置
+// 							label->addChild(pActNode,NT_ChatBtn);
+// 
+// 							S_BiaoQingData* pData = CBiaoQingData::inst().biaoqingmap[nId];
+// 							CBiaoQingData::inst().SetBiaoQingTexture(pActNode, pData);
+// 							nDpos += pActNode->getContentSize().width * 0.67 + 3;
+// 							pActNode->setAnchorPoint( ccp( 0.0f, 0.0f ) );
+// 							pActNode->setPositionY( 8 );
+// 							pActNode->setScale(0.8f);
+// 							pActNode->setPositionX( pActNode->getPosition().x + 12 );		
+// 							pActNode->BeginAction(0.2, true);
+// 
+// 							LabelList.push_back(pActNode);
+// 
+// 							CCLOG("------- Chat: id=%d, posX=%f width=%f", nLabelIdx++, pActNode->getPositionX(), pActNode->getContentSize().width);
+// 
+// 							nState = 0;
+// 
+// 							nApos += 2;
+// 							nBpos = nApos;
+// 
+// 							continue;
+// 						}
+// 					}
+// 					else if(nState == 3)
+// 					{
+// 						if(nApos != nBpos)
+// 						{
+// 							ItemLink = CCLabelTTF::create();
+// 							ItemLink->setPosition( ccp( nDpos, 0) );  //设定位置
+// 							ItemLink->setFontName( strfontname.c_str() );
+// 							ItemLink->setAnchorPoint( ccp( 0.0f, 0.0f ) );
+// 							ItemLink->setFontSize(nFontSize);
+// 							ItemLink->setDimensions(CCSize(0, 0));
+// 							ItemLink->setColor(color);
+// 							ItemLink->setString( str.substr(nBpos, nApos - nBpos) .c_str() );
+// 							nDpos += ItemLink->getContentSize().width;
+// 							label->addChild(ItemLink,NT_ChatBtn);
+// 							LabelList.push_back(ItemLink);
+// 
+// 							CCLOG("------- Chat: id=%d, posX=%f width=%f", nLabelIdx++, ItemLink->getPositionX(), ItemLink->getContentSize().width);
+// 						}
+// 
+// 						nState = 0;
+// 						//color = ccc3(0xff,0xff,0xff);
+// 						color = label->getColor();
+// 
+// 						nApos += 2;
+// 						nBpos = nApos;
+// 						continue;
+// 					}
+// 					else if(nState == 4)
+// 					{
+// 						std::string bijiao = picname.substr(18,-1);
+// 						if (yuYinID > 0 && strcmp(bijiao.c_str(),"yyIn_dianchi.png") == 0)
+// 						{
+// 							GameActionNode* pActNode = GameActionNode::create();
+// 							label->addChild(pActNode,NT_ChatBtn);
+// 
+// 							S_BiaoQingData* pData = CBiaoQingData::inst().biaoqingmap[37];
+// 							CBiaoQingData::inst().SetBiaoQingTexture(pActNode,pData);
+// 							pActNode->setAnchorPoint(ccp(0.0f,0.0f));
+// 							nDpos += 5;
+// 							pActNode->setPosition(ccp(nDpos,nFontSize / 2));  //设定位置
+// 							nDpos += pActNode->getContentSize().width - 5;
+// 							pActNode->BeginAction(0.2,false,true);
+// 							_yyFuhaoMap[yuYinID] = pActNode;
+// 							LabelList.push_back(pActNode);
+// 						}
+// 
+// 						CCSprite* pPic = CCSprite::create(picname.c_str());
+// 						pPic->setAnchorPoint( ccp( 0.0f, 0.5f ) );
+// 						label->addChild(pPic,NT_ChatBtn);
+// 						LabelList.push_back(pPic);
+// 						pPic->setPosition(ccp( nDpos,nFontSize / 2));
+// 						nDpos += pPic->getContentSize().width;
+// 
+// 						if (yuYinID > 0 && strcmp(bijiao.c_str(),"yyIn_dianchi.png") == 0)
+// 						{
+// 							_time = (_time + 500) / 1000;
+// 							std::string miao5 = CCString::createWithFormat("%d\xE7\xA7\x92",_time)->getCString();
+// 							CCLabelTTF* pMiao = CCLabelTTF::create();
+// 							pMiao->setPosition(ccp(pPic->getPositionX() + 15,pPic->getPositionY() - 5.5));  //设定位置
+// 							pMiao->setFontName(strfontname.c_str());
+// 							pMiao->setAnchorPoint(ccp(0.0f,0.0f));
+// 							pMiao->setFontSize(12.0f);
+// 							pMiao->setString(miao5.c_str());
+// 							pMiao->setColor(ccc3(0xff,0xff,0xff));
+// 							label->addChild(pMiao,NT_GroupBtn);
+// 							LabelList.push_back(pMiao);
+// 
+// 							s_Chat_UserData* pData = new s_Chat_UserData;
+// 							pData->m_type = 2;
+// 							pData->m_value = yuYinID;
+// 							pPic->setUserData((void*)pData);
+// 
+// 							_userDatas.push_back(pData);
+// 						}
+// 
+// 						CCLOG("------- Chat: id=%d, posX=%f width=%f", nLabelIdx++, pPic->getPositionX(), pPic->getContentSize().width);
+// 
+// 						nState = 0;
+// 
+// 						nCpos = nCpos + (pPic->getContentSize().width / (nFontSize / 2));
+// 						if((int)pPic->getContentSize().width % (nFontSize / 2) != 0)
+// 							nCpos++;
+// 
+// 						nApos += 2;
+// 						nBpos = nApos;
+// 						continue;
+// 					}
+// 				}
+// 			}
+// 		case 10:	//跳过回车
+// 			{
+// 				str[nApos] = ' ';
+// 				break;
+// 			}
+// 		}
+// 
+// 		//最后一个字符是 \0 所以不用看
+// 		if(nApos == nSize - 1)
+// 		{
+// 			nApos++;
+// 			break;
+// 		}
+// 
+// 		nOneCharNumber = utf8_skip_data[(unsigned char)str[nApos]];
+// 		nCpos = nOneCharNumber > 1 ? nCpos + 2 : nCpos + 1;
+// 
+// 		//换行
+// 		if(nOneLineNum < nCpos)
+// 		{
+// 			//结束当前行
+// 			ItemLink = CCLabelTTF::create();
+// 			ItemLink->setPosition( ccp( nDpos, 0) );  //设定位置
+// 			ItemLink->setFontName( strfontname.c_str() );
+// 			ItemLink->setAnchorPoint( ccp( 0.0f, 0.0f ) );
+// 			ItemLink->setFontSize(nFontSize);
+// 			ItemLink->setDimensions(CCSize(0, 0));
+// 			ItemLink->setString( str.substr(nBpos, nApos - nBpos) .c_str() );
+// 			label->addChild(ItemLink,NT_ChatBtn);
+// 			LabelList.push_back(ItemLink);
+// 
+// 			CCLOG("------- Chat: id=%d, posX=%f posY=%f width=%f", nLabelIdx++, ItemLink->getPositionX(), ItemLink->getPositionY(), ItemLink->getContentSize().width);
+// 
+// 			ItemLink->setColor(color);
+// 
+// 			if(nState == 1)
+// 			{
+// 				s_Chat_UserData* pData = new s_Chat_UserData;
+// 				pData->m_type = 1;
+// 				pData->m_value = nId;
+// 				ItemLink->setUserData((void*)pData);		//[bing] 物品动态ID
+// 
+// 				_userDatas.push_back(pData);
+// 			}
+// 
+// 			nBpos = nApos;
+// 			nCpos = nOneCharNumber > 1 ? 2 : 1;
+// 			nDpos = 0;
+// 			m_nRowCount++;
+// 
+// 			//[bing] 把之前的Label上移
+// 			std::list<CCNode*>::iterator IT = LabelList.begin();
+// 			while(IT != LabelList.end())
+// 			{
+// 				CCNode *ItemLink = *IT;
+// 				ItemLink->setPositionY( ItemLink->getPositionY() + (nFontSize + _vMargin + _excursionH) );
+// 				IT++;
+// 			}
+// 		}
+// 
+// 		nApos += nOneCharNumber;
+// 	}
+// 
+// 	//最后一行
+// 	if(nApos != nBpos && str[nBpos] != 0)
+// 	{
+// 		ItemLink = CCLabelTTF::create();
+// 		ItemLink->setPosition( ccp( nDpos, 0 ) );  //设定位置
+// 		ItemLink->setFontName( strfontname.c_str() );
+// 		ItemLink->setAnchorPoint( ccp( 0.0f, 0.0f ) );
+// 		ItemLink->setFontSize(nFontSize);
+// 		ItemLink->setColor(color);
+// 		ItemLink->setString( str.substr(nBpos, nApos - nBpos) .c_str() );
+// 		ItemLink->setContentSize( CCSize(nCpos * (nFontSize / 2), nFontSize) );			//设定大小
+// 		label->addChild(ItemLink,NT_ChatBtn);
+// 
+// 		CCLOG("-------LAST Chat: id=%d, posX=%f posY=%f width=%f", nLabelIdx++, ItemLink->getPositionX(), ItemLink->getPositionY(), ItemLink->getContentSize().width);
+// 	}
+// 
+// 	m_nRowCount++;
+// 
+// 	label->setContentSize( CCSize(label->getContentSize().width, (nFontSize + _vMargin) * m_nRowCount - _vMargin + _excursionH) );
+// 
+// 	return;
+// }
+
+bool ChatListItem::setFilter( ESendChatChannel filter )
+{
+	/*系统提示不在综合频道显示gx modify*/
+	/*附近发言也不在综合频道显示lh modify*/
+	if((ESCC_NULL == filter && (ESCC_System != _chatInfo.send_channel) && (ESCC_Map != _chatInfo.send_channel)) || (filter == ESCC_End) || _chatInfo.send_channel == ESCC_Decree || filter == _chatInfo.send_channel || 
+		((ESCC_World == filter) && (ESCC_Qianli == _chatInfo.send_channel)) || _chatInfo.send_channel == ESCC_Affiche)//gx add 千里传音也在世界频道显示
+	{
+		_node->setVisible(true);
+		//_marginV = _vMargin;
+		return true;
+	}
+	else
+	{
+		_marginV = 0.f;
+		_node->setVisible(false);
+		return false;
+	}
+}
+
+//点击聊天框物品show出展示信息 fix by David 2014.07.09
+void ChatListItem::onTouch( CCTouch *touck )
+{
+	showmenu = true;
+	//[bing] 遍历一下它下面的元素 找Label
+	CCLabelTTF* pLabel = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Label));
+	CCArray *ChildrenArr = pLabel->getChildren();
+	if(!ChildrenArr)
+		return;
+
+	CCPoint point = _node->getChildByTag(NT_Label)->convertTouchToNodeSpace(touck);
+	CCPoint worldPoint = _node->getChildByTag(NT_Label)->convertToWorldSpace(point);
+	//if ( ChildrenArr->count() >= 4)
+	if(ChildrenArr->count() >= 3)//私聊时显示的数量为3及以上
+	{
+		int nameIndex = 0;
+		if(!(_chatInfo.receive_role_name).empty()){
+			nameIndex = 1;
+		}else{
+			nameIndex = 2;
+		}
+		CCNode* pLabel_name = dynamic_cast<CCLabelTTF*>(ChildrenArr->objectAtIndex(nameIndex));
+		//CCNode* pLabel_name = dynamic_cast<CCLabelTTF*>(ChildrenArr->objectAtIndex(2));
+		if (pLabel_name)
+		{
+			CCRect rect_name(pLabel_name->getPositionX(), pLabel_name->getPositionY() , pLabel_name->getContentSize().width, pLabel_name->getContentSize().height);
+			if( !rect_name.containsPoint(point))
+			{
+				showmenu = false;
+			}
+		}		
+	}
+
+
+	for(size_t i = 0; i < ChildrenArr->count(); ++i)
+	{
+
+		CCNode* pNode = dynamic_cast<CCNode*>(ChildrenArr->objectAtIndex(i));
+		if(!pNode || pNode->getUserData() == NULL)
+			continue;
+		//因为本身x有偏移 所以不需要/2 减偏移
+		s_Chat_UserData* pdData = (s_Chat_UserData*)(pNode->getUserData());
+		CCRect rect(pNode->getPositionX(), pNode->getPositionY() /* - (pLabel->getContentSize().height / 2) */
+			, pNode->getContentSize().width, pNode->getContentSize().height);
+		if (pdData->m_type == 2)
+		{
+			rect.origin.x -= 18;
+			rect.origin.y -= 4;
+			rect.size.width += 40;
+			rect.size.height += 8;
+		}
+		if(rect.containsPoint(point))
+		{
+			//[bing] 目前只有itemlink 所以只需要把他存的UserData取出来就行了 发送给服务器取Tips
+
+			if ( pdData->m_type == 1)
+			{
+				bool bIsEquip = 0;
+				void* pData = ChatMgr::getInstance()->getItemInfo(pdData->m_value, bIsEquip);
+				if(!pData)
+					return;
+
+				if( bIsEquip )
+				{
+					f_equipment* pEquip = new f_equipment(*((tagEquip*)pData));
+					//				CCPoint worldPos = ccp(0,0);
+					short posIndex = 0;
+
+//已完成			c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 					cmd->set_integer32(1 , pEquip->get_item_type_id());
+// 					c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 					while(table->retrieve_row())
+// 					{
+// 						unsigned int idx = table->get_index("PosIndex");
+// 						posIndex = table->get_integer32(idx);
+// 					}
+// 					c_db_manager::getSingleton()->destroy_table(table);
+// 					c_db_manager::getSingleton()->end_operation(cmd);
+					const EquipTypeData* data = PackageManager::getInstance()->getEquipTypeDataPointer(pEquip->get_item_type_id());
+					if (data != NULL)
+					{
+						posIndex = data->posIndex;
+					}
+
+					EquipTipUiLayer *ui = EquipTipUi::create();
+					//				ui->showUi(worldPos, pEquip);
+					ui->showUi(pEquip);				//【Ji：】
+					ui->setAllButtonOff();
+					ui->setIndex(posIndex);
+					//EquipTipUi *ui = EquipTipUi::create();
+					//ui->showUi(point, pEquip);
+					//ui->showEquipBtn();
+
+
+					delete(pEquip);
+				}
+				else
+				{
+					f_item* pItem = new f_item(*((tagItem*)pData));
+
+					ItemTip::getInstace()->open();
+					ItemTip::getInstace()->setPosition(worldPoint);
+					ItemTip::getInstace()->setDataId(pItem->get_item_type_id());
+					ItemTip::getInstace()->setData(pItem);
+					ItemTip::getInstace()->hideAllTipsButton();
+
+					delete(pItem);
+				}
+			}
+			else if ( pdData->m_type == 2)
+			{
+#if ENABLE_GOTYE==1
+				VoiceMgr::getSingleton()->playVoice(pdData->m_value);
+
+#endif
+				playFuhaoInYYItem(pdData->m_value);
+			}
+			else if (pdData->m_type == 3)
+			{
+				//提交组队
+				TeamMgr::getInstance()->tryToMakeTeammate(pdData->m_value,true);
+			}
+
+			showmenu = false;
+
+			return;
+		}
+	}
+	//unsigned int sendRoleId = _chatInfo.send_role_id;
+	//unsigned int recRoleId = _chatInfo.receive_role_id;
+
+	//std::string roleName;
+	//if(sendRoleId != RoleManager::getInstance()->getLocalPlayer()->getId())
+	//{
+	//	if(NameMgr2::getInstance()->queryName(sendRoleId,roleName))
+	//	{
+	//		GET_UI(ChatUi, WCT_ChatUi)->sendMessageTo(sendRoleId, roleName);
+	//	}
+	//}
+	//else
+	//{
+	//	if(recRoleId != RoleManager::getInstance()->getLocalPlayer()->getId())
+	//	{
+	//		if (NameMgr2::getInstance()->queryName(recRoleId,roleName))
+	//		{
+	//			GET_UI(ChatUi, WCT_ChatUi)->sendMessageTo(recRoleId, roleName);
+	//		}
+	//	}
+	//}
+}
+
+float ChatListItem::getItemHeight()
+{
+	//[bing] 不用了 因为从写Label了
+	/*
+	//[bing] 因为LabelTTF会自动换行 换行后少了_marginV的间距 所以加一个换行后的间距
+	int nRowNum = (int)getContentSize().height / (int)CHAT_FONT_SIZE;
+	nRowNum = nRowNum == 0 ? nRowNum = 1 : nRowNum;
+	return getContentSize().height + (_marginV * 2.0f * nRowNum);
+	*/
+	return getContentSize().height;
+}
+
+void ChatListItem::runDecreeEffect()
+{
+	return;
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Label));
+	ChatUiLayer *uiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if (uiLayer && uiLayer->getNodeE1_126())
+	{
+		if (uiLayer->getNodeE1_126()->getParent())
+		{
+			uiLayer->getNodeE1_126()->removeFromParent();
+		}
+		if (label)
+		{
+			label->addChild(uiLayer->getNodeE1_126(), NT_GroupBtn);
+			uiLayer->getNodeE1_126()->playAnimOnce(0.09f, false);
+		}
+	}
+}
+
+void ChatListItem::setDecreeBaseBoard()
+{
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Label));
+
+	std::string bgName = "ng_chatdecreeboard";
+	CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(bgName.c_str());
+	if(spriteFrame == NULL)
+	{
+		std::string fileName = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "SingleUI/" + bgName + std::string(".png");
+		CCImage image;
+		image.initWithImageFile(fileName.c_str());
+		CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addUIImage(&image, bgName.c_str());
+		spriteFrame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(spriteFrame, bgName.c_str());
+	}
+
+	CCSprite *pBGSprite = CCSprite::createWithSpriteFrame(spriteFrame);
+	pBGSprite->setAnchorPoint(ccp(0.f, 0.0f));
+	//pBGSprite->setPosition(ccp(0.f,0.0f));
+	label->addChild(pBGSprite);
+}
+
+void ChatListItem::playFuhaoInYYItem(long long id)
+{
+	std::map<long long,GameActionNode*>::iterator iter = _yyFuhaoMap.find(id);
+	if (iter != _yyFuhaoMap.end())
+	{
+		unsigned int repeatTime = iter->second->getRepeatTime();
+		iter->second->BeginActionInTime(0.2, repeatTime, 2);
+	}
+}
+
+void ChatListItem::eraseYYFuHaoInformation(long long id)
+{
+	_yyFuhaoMap.erase(id);
+}
+
+bool ChatListItem::parseTeam( std::string const& str,int& nApos,int& nBpos,int& nCpos,int& nDpos,int& nSize,int& nState,int& nId,ccColor3B& color,std::list<CCNode*>& LabelList)
+{
+
+
+	return false;
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+bool ChatOpBtnGroup::init()
+{
+	if(!CCNode::init())
+		return false;
+
+	CCControlButton *chatBtn = createControlButton("\xE7\xA7\x81\xE8\x81\x8A", "rendui_convention", "rendui_click", "rendui_convention");
+	chatBtn->setTitleColorForState(ccc3(0x00, 0xdf, 0xde), CCControlStateNormal);
+	CCControlButton *groupBtn = createControlButton("\xE7\xBB\x84\xE9\x98\x9F", "rendui_convention", "rendui_click", "rendui_convention");
+	groupBtn->setTitleColorForState(ccc3(0xA4, 0xE5, 0x00), CCControlStateNormal);
+	CCControlButton *guanzhuBtn = createControlButton("\xE5\x85\xB3\xE6\xB3\xA8", "rendui_convention", "rendui_click", "rendui_convention");
+	guanzhuBtn->setTitleColorForState(ccc3(0xff, 0x8e, 0xf0), CCControlStateNormal);
+	CCControlButton *laheiBtn = createControlButton("\xE6\x8B\x89\xE9\xBB\x91", "rendui_convention", "rendui_click", "rendui_convention");
+	laheiBtn->setTitleColorForState(ccc3(0xF8, 0x93, 0x00), CCControlStateNormal);
+	CCControlButton *songhuaBtn = createControlButton("\xE9\x80\x81\xE8\x8A\xB1", "rendui_convention", "rendui_click", "rendui_convention");
+	_bgSprite = CCSprite::create();
+	CCSpriteFrame* frame=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_jianhuframe");
+	if (frame!=NULL)
+	{
+		_bgSprite->setDisplayFrame(frame);
+		_bgSprite->setAnchorPoint(ccp(0.08f, 0.7f));
+		/*sprite->setPosition(ccp(0,-18.0f));*/
+	}
+	chatBtn->setAnchorPoint(ccp(0.f, -0.5f));
+	guanzhuBtn->setAnchorPoint(ccp(0.f, 0.5f));
+	groupBtn->setAnchorPoint(ccp(0.f, 1.5f));
+	laheiBtn->setAnchorPoint(ccp(0.f, 2.5f));
+	songhuaBtn->setAnchorPoint(ccp(0.f,3.5f));
+	chatBtn->setTouchPriority(-1);
+	groupBtn->setTouchPriority(-1);
+	guanzhuBtn->setTouchPriority(-1);
+	laheiBtn->setTouchPriority(-1);
+	songhuaBtn->setTouchPriority(-1);
+	//guanzhuBtn->setPosition(0.f, groupBtn->getPositionY() - groupBtn->getContentSize().height);
+	//laheiBtn->setPosition(0.f, guanzhuBtn->getPositionY() - guanzhuBtn->getContentSize().height);
+
+	addChild(chatBtn);
+	addChild(groupBtn);
+	addChild(guanzhuBtn);
+	addChild(laheiBtn);
+	addChild(songhuaBtn);
+	addChild(_bgSprite,-1);
+	chatBtn->addTargetWithActionForControlEvents(this, SEL_CCControlHandler(&ChatOpBtnGroup::onChatBtnPressed), CCControlEventTouchUpInside);
+	groupBtn->addTargetWithActionForControlEvents(this, SEL_CCControlHandler(&ChatOpBtnGroup::onGroupBtnPressed), CCControlEventTouchUpInside);
+	guanzhuBtn->addTargetWithActionForControlEvents(this, SEL_CCControlHandler(&ChatOpBtnGroup::onGuanzhuBtnPressed), CCControlEventTouchUpInside);
+	laheiBtn->addTargetWithActionForControlEvents(this, SEL_CCControlHandler(&ChatOpBtnGroup::onLaheiBtnPressed), CCControlEventTouchUpInside);
+	songhuaBtn->addTargetWithActionForControlEvents(this, SEL_CCControlHandler(&ChatOpBtnGroup::onSonghuaBtnPressed), CCControlEventTouchUpInside);
+
+
+	//setContentSize(CCSize(chatBtn->getContentSize().width, chatBtn->getContentSize().height));
+	//setAnchorPoint(ccp(0.f, 0.5f));
+
+	return true;
+}
+
+void ChatOpBtnGroup::setData( unsigned int roleId, const std::string &roleName )
+{
+	_roleId = roleId;
+	_roleName = roleName;
+}
+
+void ChatOpBtnGroup::onChatBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	if(_roleId != -1)
+		GET_UI(ChatUi, WCT_ChatUi)->sendMessageTo(_roleId, _roleName);
+	hideBtn();
+}
+
+void ChatOpBtnGroup::onGroupBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//todo gx组队
+	//TeamMgr::getInstance()->ApplyJoinTeam(_roleId, &_roleName);
+	TeamMgr::getInstance()->InviteRemoteRoleJoinTeam(_roleId, &_roleName);
+
+	TeamMgr::getInstance()->setChatChannelRoleId(_roleId);
+
+	hideBtn();
+}
+
+void ChatOpBtnGroup::onGuanzhuBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	SocialMgr::getInstance()->onAddFriend(_roleId, false, &_roleName);
+	hideBtn();
+}
+
+void ChatOpBtnGroup::onLaheiBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//todo 拉黑
+	SocialMgr::getInstance()->onAddBlack(_roleId, &_roleName);
+	hideBtn();
+}
+void ChatOpBtnGroup::onSonghuaBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	//todo 送花
+	//弹出送花UI
+	hideBtn();
+	OPEN_UI(WCT_SonghuaUi);
+	if (!IS_VALID(_roleId) || _roleId == 0)
+		GET_UI(SonghuaUi, WCT_SonghuaUi)->setRoleName(_roleName);
+	else
+		GET_UI(SonghuaUi, WCT_SonghuaUi)->setRoleId(_roleId);
+}
+void ChatOpBtnGroup::showBtn( const CCPoint &pt )
+{
+	CCSize size = _bgSprite->boundingBox().size;
+	float posY = 0;
+	if (pt.y - (size.height / 10 * 7) < 0)
+	{
+		posY = size.height / 10 * 7; 
+	}else
+	{
+		posY = pt.y;
+	}
+	setPosition(ccp(pt.x, posY));
+	setVisible(true);
+}
+
+void ChatOpBtnGroup::hideBtn()
+{
+	setPosition(ccp(0, -100));
+	setVisible(false);
+}
+
+bool ChatOpBtnGroup::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isVisible())
+	{
+		//if(!isTouchOnNodeContent(this, pTouch))
+		hideBtn();
+	}
+
+	return false;
+}
+
+void ChatOpBtnGroup::onEnter()
+{
+	CCNode::onEnter();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+}
+
+void ChatOpBtnGroup::onExit()
+{
+	CCNode::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+
+
+//////////////////////////////////////////////////////////////////////////
+
+CCNode* ChatUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["ChatUiLayer"] = UiLayerLoader<ChatUiLayer>::loader();
+	nodeLoaders["TouchSprite"] = TouchSpriteLoader::loader();
+	//nodeLoaders["CheckButton"] = CheckButtonLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("chatui", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+void ChatUi::appendMsg( const s_receive_chat_info &msgInfo )
+{
+	ChatUiLayer *uiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if(uiLayer != NULL)
+	{
+		uiLayer->appendMsg(msgInfo);
+	}
+}
+
+void ChatUi::deleteMsg( const s_receive_chat_info &msgInfo )
+{
+	ChatUiLayer *uiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if(uiLayer != NULL)
+	{
+		uiLayer->deleteMsg(msgInfo);
+	}
+}
+
+void ChatUi::appendDecree( const s_receive_chat_info &msgInfo )
+{
+	ChatUiLayer *uiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if(uiLayer != NULL)
+	{
+		uiLayer->appendDecree(msgInfo);
+	}
+}
+
+void ChatUi::deleteDecree( const s_receive_chat_info &msgInfo )
+{
+	ChatUiLayer *uiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if(uiLayer != NULL)
+	{
+		uiLayer->deleteDecree(msgInfo);
+	}
+}
+
+void ChatUi::showUi( bool show )
+{
+	ChatUiLayer *uiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if(uiLayer != NULL)
+	{
+		uiLayer->changeShowState(show);
+	}
+}
+void ChatUi::sendMessageTo( unsigned int id, const std::string &roleName )
+{
+	ChatUiLayer *uiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if(uiLayer != NULL)
+	{
+		uiLayer->sendMessageTo(id, roleName);
+	}
+}
+
+void ChatUi::resetShowState()
+{
+	ChatUiLayer *uiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if(uiLayer != NULL)
+	{
+		uiLayer->resetShowState();
+	}
+}
+
+void ChatUi::hideChatUi(bool isShowTask)
+{
+	ChatUiLayer *uiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if(uiLayer != NULL)
+	{
+		uiLayer->hidChatUi(isShowTask);
+	}
+}
+
+void ChatUi::setDecreeRemainTime( unsigned int timeRef,bool b_isHaveDecree /*= false*/ )
+{
+	ChatUiLayer *uiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if(uiLayer != NULL)
+	{
+		uiLayer->setDecreeRemainTime(timeRef,b_isHaveDecree);
+	}
+}
+
+void ChatUi::clearInputName(bool siliao,const std::string &text)
+{
+	ChatUiLayer *uiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if(uiLayer != NULL)
+	{
+		uiLayer->setInputAsSiliao(siliao,text);
+	}
+}
+
+void ChatUi::setPrivateId( unsigned int id )
+{
+	ChatUiLayer *uiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if(uiLayer != NULL)
+	{
+		uiLayer->setPrivateId(id);
+	}
+}
+
+void ChatUi::setChatChannel( ESendChatChannel channel )
+{
+	ChatUiLayer *uiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if(uiLayer != NULL)
+	{
+		uiLayer->setChatChannel(channel);
+	}
+}
+void ChatUi::DetachPhoneText()
+{
+	ChatUiLayer *uiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if(uiLayer != NULL)
+	{
+		uiLayer->DetachPhoneText();
+	}
+}
+void ChatUi::ClearCharText()
+{
+	ChatUiLayer *uiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if(uiLayer != NULL)
+	{
+		uiLayer->ClearCharText();
+	}
+}
+void ChatUi::resetChannelBtn()
+{
+	ChatUiLayer *uiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if(uiLayer != NULL)
+	{
+		uiLayer->resetChannelBtn();
+	}
+}
+
+void ChatUi::showVoice( bool show )
+{
+	ChatUiLayer *uilayer=getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if (uilayer!=NULL)
+	{
+		uilayer->showVoiceBtn(show);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+
+ChatUiLayer::ChatUiLayer()
+	: _chatRecordList(NULL)
+	, _decreeList(NULL)
+	, _small_chatRecordList(NULL)
+	, _small_decreeList(NULL)
+	, _autoScroll(true)
+	, _targetId((unsigned int) -1)
+	, _dragRecordFrame(false)
+	, _showState(true)
+	, _chatRecordscrollView(NULL)
+	, _chatOpBtnGroup(NULL)
+	, _isChatUiOpen(false)
+	, _chatRecordItemHeightAdd(0.f)
+	, _DecreeRemainTime(0.f)
+	, _YYBtn(NULL)
+	, _yyFrame(NULL)
+	, _yyBeginTime(0.f)
+	, _yySprite(NULL)
+	, _isCheckYY(false)
+	, _yyQuxiaoFrame(NULL)
+	, _yyFanhuiFrame(NULL)
+	,_isShowYYChatBtn(false)
+	,_small_chatRecordscrollView(NULL)
+	, pNodeE1_126(NULL)
+	,_oriPrioritySV(0)
+	,m_IsVoiceReturn(false)
+	,_small_sv_root(NULL)
+{
+
+}
+
+ChatUiLayer::~ChatUiLayer()
+{
+	if(_chatRecordList != NULL)
+		delete _chatRecordList;
+
+	if(_decreeList != NULL)
+		delete _decreeList;
+
+	if(_small_chatRecordList != NULL)
+		delete _small_chatRecordList;
+
+	if(_small_decreeList != NULL)
+		delete _small_decreeList;
+	if (pNodeE1_126)
+	{
+		if (pNodeE1_126->getParent())
+			pNodeE1_126->removeFromParentAndCleanup(true);
+		else
+			pNodeE1_126->release();
+		pNodeE1_126 = NULL;
+	}
+}
+
+
+cocos2d::SEL_MenuHandler ChatUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler ChatUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed1", ChatUiLayer::onCloseBtnPressed1);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed2", ChatUiLayer::onCloseBtnPressed2);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onDelBtnPressed", ChatUiLayer::onDelBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChannelBtnPressed", ChatUiLayer::onChannelBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSendBtnPressed", ChatUiLayer::onSendBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChatBtnPressed", ChatUiLayer::onChatBtnPressed);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHaolingBtnPressed", ChatUiLayer::onHaolingBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChuanyinBtnPressed", ChatUiLayer::onChuanyinBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onWorldBtnPressed", ChatUiLayer::onWorldBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGuildBtnPressed", ChatUiLayer::onGuildBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGroupBtnPressed", ChatUiLayer::onGroupBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onNearBtnPressed", ChatUiLayer::onNearBtnPressed);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBiaoqingBtnPressed", ChatUiLayer::onBiaoqingBtnPressed);
+
+	return NULL;
+}
+
+void ChatUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	//_oriPriorityLayer = 0;
+	_isShowYYChatBtn = GET_UI(HookSetUi, WCT_HookSetUi)->getAutoSetData().data[AutoSetData::ASD_AutoShowYYChatButton];
+
+	for(int i = 0; i < IT_btnYY; i ++)
+	{
+		if(i == 3)
+		{
+			_frame[i] = NULL;
+			continue;
+		}
+
+		_frame[i] = getChildByTag(i);
+		_frame[i]->setPositionX(_frame[i]->getPositionX() + (i < 6 ? UiMgr::getInstance()->getOffsetX() : 0));
+		_srcFramePos[i] = _frame[i]->getPosition();
+		_isFrameShow[i] = true;
+		if (i==FT_btnGuild || i==FT_btnWorld || i==FT_btnTeam)
+		{
+			if (_isFrameShow)
+				showFrame((eFrameTag)i, true, true);
+		}
+		else
+			showFrame((eFrameTag)i, false, false);
+	}
+	_yyFrame = (CCSprite*)getChildByTag(FT_Input)->getChildByTag(IT_YYBtn);
+	//fudongLabel_1 = (CCLabelTTF*)getChildByTag(3)->getChildByTag(2);
+	//fudongLabel_2 = (CCLabelTTF*)getChildByTag(3)->getChildByTag(1);
+	//fudongLabel_3 = (CCLabelTTF*)getChildByTag(3)->getChildByTag(0);
+	fudongLabel_1 = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(getChildByTag(3)->getChildByTag(2)), 14);
+	fudongLabel_2 = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(getChildByTag(3)->getChildByTag(1)), 14);
+	fudongLabel_3 = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(getChildByTag(3)->getChildByTag(0)), 14);
+	fudongLabel_1->setTextColor(ccc4(0xff,0xff,0xff, 255));
+	fudongLabel_2->setTextColor(ccc4(0xff,0xff,0xff, 255));
+	fudongLabel_3->setTextColor(ccc4(0xff,0xff,0xff, 255));
+	/*fudongLabel_1->setFontSize(14.0f);
+	fudongLabel_2->setFontSize(14.0f);
+	fudongLabel_3->setFontSize(14.0f);*/
+	fudongLabel_1->setString(" ");
+	fudongLabel_2->setString(" ");
+	fudongLabel_3->setString(" ");
+	_isCheckYYOne = YY_btnNumber;
+	showFrame(FT_btn, true, false);
+
+	_normalTab[IT_All] = "all_bg_n";
+	_normalTab[IT_World] = "world_bg_n";
+	_normalTab[IT_Guild] = "guild_bg_n";
+	_normalTab[IT_Group] = "team_bg_n";
+	_normalTab[IT_Personal] = "private_bg_n";
+	_normalTab[IT_NearBy] = "near_bg_n";
+	_normalTab[IT_System] = "system_bg_n";
+
+	_highTab[IT_All] = "all_bg_h";
+	_highTab[IT_World] = "world_bg_h";
+	_highTab[IT_Guild] = "guild_bg_h";
+	_highTab[IT_Group] = "team_bg_h";
+	_highTab[IT_Personal] = "private_bg_h";
+	_highTab[IT_NearBy] = "near_bg_h";
+	_highTab[IT_System] = "system_bg_h";
+
+	getAreaFrameTouchSprite(IT_All)->signalTouched.connect(this, &ChatUiLayer::onAllLabelTouched);
+	getAreaFrameTouchSprite(IT_World)->signalTouched.connect(this, &ChatUiLayer::onWorldLabelTouched);
+	getAreaFrameTouchSprite(IT_Guild)->signalTouched.connect(this, &ChatUiLayer::onGuildLabelTouched);
+	getAreaFrameTouchSprite(IT_Group)->signalTouched.connect(this, &ChatUiLayer::onGroupLabelTouched);
+	getAreaFrameTouchSprite(IT_NearBy)->signalTouched.connect(this, &ChatUiLayer::onNearbyTouched);
+	getAreaFrameTouchSprite(IT_Personal)->signalTouched.connect(this, &ChatUiLayer::onPersonalTouched);
+	getAreaFrameTouchSprite(IT_System)->signalTouched.connect(this, &ChatUiLayer::onSystemTouched);
+
+	_filter = ESCC_NULL;
+	setRecordFilter(ESCC_End);
+	setFilterLabelHigh(IT_All);
+	int yyLevel = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	_sendChannel = yyLevel < 10 ? ESCC_Map : ESCC_World;
+
+	_yyQuxiaoFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("yyquxiao");
+	_yyFanhuiFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("yyfanhui");
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	_yySprite = CCSprite::createWithSpriteFrame(_yyQuxiaoFrame);
+	_yySprite->setPosition(ccp(winSize.width / 2,winSize.height / 2));
+	World::getInstance()->getScene()->addChild(_yySprite,WZ_MESSAGEBOX,WCT_yySprite);
+	_yySprite->setVisible(false);
+
+	_recordContent = _frame[FT_Input]->getChildByTag(IT_RecordContent);
+	_chatRecordscrollView = createScrollViewWithContent(_recordContent);
+	//_chatRecordscrollView->setTouchPriority(1);
+	_chatRecordscrollView->setTag(12315);
+	_chatRecordscrollView->setContentSize(CCSize(_recordContent->getContentSize().width + 10,_recordContent->getContentSize().height));
+	_chatRecordscrollView->setAnchorPoint(ccp(0.0f,0.0f));
+	//_chatRecordscrollView->setPositionY(_chatRecordscrollView->getPositionY() - 5.0f);
+	_chatRecordscrollView->setContentOffset(ccp(0.0f,0.0f));
+	_recordContent->addChild(_chatRecordscrollView);
+
+	_chatRecordList = new VerticalList<ChatListItem>;
+	_chatRecordList->bUpdateNeedMovie = false;
+	_chatRecordList->setLineSpace(9.0f);
+	_chatRecordList->addToScrollView(_chatRecordscrollView);
+	//_chatRecordscrollView->getContainer()->set_enable_rect(true);
+
+	_chatRecordList->setMinSize(CCSize(_chatRecordscrollView->getContentSize().width,_chatRecordscrollView->getContentSize().height - 2));
+	_chatRecordFrameMinHeight = _recordContent->getContentSize().height;
+	//_chatRecordList->setItemOffsetY(-16);
+	//CCPoint pt = _recordContent->getPosition();
+	//_chatRecordFrameBottom = pt.y - _chatRecordFrameMinHeight / 2.0f;
+
+	_decreeList = new VerticalList<ChatListItem>;
+	_decreeList->bUpdateNeedMovie = false;
+	_decreeList->GetNode()->setContentSize(_recordContent->getContentSize());
+	_decreeList->setItemOffsetY(5);
+	_decreeList->addToParent(_recordContent);
+	_decreeList->setLineSpace(9.0f);
+	_decreeList->setMinSize(_recordContent->getContentSize());
+
+	//小窗口;
+	//_schatRecordscrollView = createScrollViewWithContent(_frame[FT_ChatRecord]);
+
+	_small_chatRecordscrollView = CCScrollView::create(/*CCSize(_frame[FT_ChatRecord]->getContentSize().width, 90.0f)*/_small_sv_root->getContentSize());//76
+	_small_chatRecordscrollView->setTouchPriority(1);
+	_small_chatRecordscrollView->setBounceable(true);
+	_small_chatRecordscrollView->setTag(100);
+	_small_chatRecordscrollView->setContentSize(/*CCSize(_frame[FT_ChatRecord]->getContentSize().width, 90.0f)*/_small_sv_root->getContentSize());//76
+	_small_chatRecordscrollView->setDirection(kCCScrollViewDirectionVertical);
+	_small_chatRecordscrollView->setContentOffset(_small_chatRecordscrollView->minContainerOffset());
+
+	//[bing] 只显示3行大小应该是74 66 + 8 2个行间距
+	//_schatRecordscrollView->setPositionY(_schatRecordscrollView->getPositionY() + 10.0f);//21
+
+	_small_chatRecordscrollView->setTouchEnabled(true);
+	//_frame[FT_ChatRecord]->addChild(_small_chatRecordscrollView);
+	UIUtil::childNodeAlign(_small_sv_root,_small_chatRecordscrollView,eha_left,eva_bottom,CCPointZero);
+
+	_small_chatRecordList = new VerticalList<ChatListItem>;
+	_small_chatRecordList->bUpdateNeedMovie = false;
+	_small_chatRecordList->setLineSpace(4.0f);
+	_small_chatRecordList->addToScrollView(_small_chatRecordscrollView);
+	_small_chatRecordList->setMinSize(_small_chatRecordscrollView->getContentSize());
+	//_schatRecordFrameMinHeight = _frame[FT_ChatRecord]->getContentSize().height/*-10*/;//vv
+	//pt = _frame[FT_ChatRecord]->getPosition();
+	//_schatRecordFrameBottom = pt.y - _schatRecordFrameMinHeight / 2.0f;
+
+	_small_decree_scrollview = CCScrollView::create(CCSize(/*_frame[FT_ChatRecord]*/_small_sv_root->getContentSize().width, 73.0f));//76
+	_small_decree_scrollview->setTouchPriority(1);
+	_small_decree_scrollview->setBounceable(true);
+	_small_decree_scrollview->setContentSize(/*CCSize(_frame[FT_ChatRecord]->getContentSize().width, 73.0f)*/_small_decree_scrollview->getViewSize());//76
+	_small_decree_scrollview->setDirection(kCCScrollViewDirectionVertical);
+	_small_decree_scrollview->setContentOffset(_small_decree_scrollview->minContainerOffset());
+	//_sDecreeScrollView->setPositionY(_sDecreeScrollView->getPositionY() + 30.0f);//21
+	_small_decree_scrollview->setTouchEnabled(false);
+	//_frame[FT_ChatRecord]->addChild(_sDecreeScrollView);
+	_small_decree_scrollview->ignoreAnchorPointForPosition(false);
+	UIUtil::childNodeAlign(/*_frame[FT_ChatRecord]*/_small_sv_root,_small_decree_scrollview,eha_center,eva_top,CCPointZero);
+
+	_small_decreeList = new VerticalList<ChatListItem>;
+	_small_decreeList->bUpdateNeedMovie = false;
+	_small_decreeList->GetNode()->setContentSize(_small_decree_scrollview->getContentSize());
+	float fTmpY = _small_decree_scrollview->getPositionY();
+	//_sdecreeList->setPosition(ccp(_sDecreeScrollView->getPositionX() + 10, fTmpY));
+	_small_decreeList->setLineSpace(3.5f);
+	_small_decreeList->addToScrollView(_small_decree_scrollview);
+	_small_decreeList->setMinSize(CCSize(_small_decree_scrollview->getContentSize()));
+
+	//input frame
+	CCNode *contentNode = _frame[FT_Input]->getChildByTag(IT_InputContent);
+
+	const CCSize &size = CCSize(contentNode->getContentSize().width,contentNode->getContentSize().height-10);//vvv
+	const CCPoint &pos = contentNode->getPosition();
+	CCSize dim = size;
+
+	_inputLabel = new CustomTextFieldTTF();
+	_inputLabel->initWithPlaceHolder("", dim, kCCTextAlignmentLeft, "", 20.0f);
+	_inputLabel->autorelease();
+	_inputLabel->setPosition(pos);
+	_inputLabel->setAnchorPoint(contentNode->getAnchorPoint());
+	_inputLabel->setContentSize(size);
+	_inputLabel->setVerticalAlignment(kCCVerticalTextAlignmentCenter);
+	_frame[FT_Input]->addChild(_inputLabel);
+
+	//操作按钮
+	_chatOpBtnGroup = ChatOpBtnGroup::create();
+	_chatOpBtnGroup->hideBtn();
+	_recordContent->addChild(_chatOpBtnGroup);
+	//默认为附近发言状态
+	_sendChannel = ESCC_Map;
+	CCControlButton *channelBtn = dynamic_cast<CCControlButton*>(_frame[FT_Input]->getChildByTag(IT_ChannelBtn));
+	channelBtn->setTitleColorForState(ccc3(0x75, 0xcd, 0xff), CCControlStateNormal);
+	//setBtnTitle(channelBtn, GET_STR(24));
+	channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("near_btn_bg_n"), CCControlStateNormal);
+	channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("near_btn_bg_h"), CCControlStateHighlighted);
+	setInputAsSiliao(false, "");
+	showFrame(FT_Channel, false);
+
+	//[bing] 表情
+	BiaoQingIcon = GameActionNode::create();
+	CC_ASSERT(BiaoQingIcon != NULL);
+	if(BiaoQingIcon == NULL)
+	{
+		return;
+	}
+	std::string biaoQingPlistPath = CFGReader::instance()->get_profile_string("Art", "ICON", "");
+	std::string biaoQingPlist = biaoQingPlistPath + "liaotianbiaoqing.plist";
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(biaoQingPlist.c_str());
+	int nCol = 0;	//单行的个数
+	int nLine = 0;	//共几行
+	int nCount = 0;	//[bing] 一行 9个	//总个数
+	S_BiaoQingData* pData = NULL;
+	for(int i = 0; i < 36; ++i)
+	{
+		if( nCount % 9 == 0 )
+		{
+			nCol = 0;
+			nLine ++;
+		}
+
+		BiaoQingIcon = GameActionNode::create();
+		BiaoQingIcon->setTag(i + 1);
+		BiaoQingIcon->setUserData((void*)(i + 1));
+		BiaoQingIcon->setPosition( CCPoint((nCol * 43.1) + 23, (nLine * 43.1) - 20.5) );
+		//BiaoQingIcon->setPosition( CCPoint((nCol * 36) + 25, (nLine * 35) + 1) );
+		//BiaoQingIcon->setAnchorPoint( ccp(0.7f,0.3f));
+
+		pData = CBiaoQingData::inst().biaoqingmap[(i + 1)];
+
+		CBiaoQingData::inst().SetBiaoQingTexture(BiaoQingIcon, pData);
+
+		BiaoQingIcon->BeginAction(0.2f, true);
+		_frame[FT_biaoqing]->addChild(BiaoQingIcon);
+		_frame[FT_biaoqing]->setScale(1.13f);
+
+		nCol++;
+		nCount++;
+	}
+
+	//天下号令特效预加载
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string sSEPlist = sSEDir + "E1_126.plist";
+
+	pNodeE1_126 = GameActionNode::create();
+	pNodeE1_126->retain();
+	pNodeE1_126->InitWithPList(sSEPlist.c_str(), "E1_126");
+	pNodeE1_126->setAnchorPoint(ccp(0.f, 0.0f));
+	pNodeE1_126->setPosition(ccp(189.f,9.0f));
+
+	m_updateMessage=true;
+	m_messageOut=false;
+	m_VoiceSendInterval.reset();
+}
+
+void ChatUiLayer::onExit()
+{
+	CCLayer::onExit();
+
+	UNREGISTER_EVENT(CoverChatUiMainSV,ChatUiLayer,onEventChangeSVPriority);
+	UNREGISTER_EVENT(show_chat_ui,ChatUiLayer,showChatUI);
+
+	std::string biaoQingPlistPath = CFGReader::instance()->get_profile_string("Art", "ICON", "");
+	std::string biaoQingPlist = biaoQingPlistPath + "liaotianbiaoqing.plist";
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFramesFromFile(biaoQingPlist.c_str());
+	//CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&ChatUiLayer::doscheduleEvent), this);
+}
+void ChatUiLayer::DetachPhoneText()
+{
+	if(_inputLabel != NULL)
+	{
+		_inputLabel->detachWithIME();
+	}
+
+}
+void ChatUiLayer::ClearCharText()
+{
+	if(_inputLabel != NULL)
+	{
+		_inputLabel->setString("");
+		_inputLabel->SetGSString("");
+	}
+
+}
+bool ChatUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	float y=_chatRecordList->GetNode()->getPositionY();
+	//CCLog("chat y %f",y);
+	if(isTouchOnNodeContent(_frame[FT_Channel], pTouch))
+	{
+		//_chatRecordscrollView->setTouchPriority(2);
+		return true;
+	}
+
+	showFrame(FT_Channel,false);
+	if(_yyFrame->isVisible() && isTouchOnNodeContent(_yyFrame,pTouch))
+	{
+		showFrame(FT_biaoqing,false);
+		if (_sendChannel == ESCC_Map || _sendChannel == ESCC_Decree || _sendChannel == ESCC_Qianli)
+		{
+			ToolTip::getInstance()->push(GET_STR(7260));
+			return true;
+		}
+
+		if (_sendChannel == ESCC_World)
+		{
+			unsigned int yyTime = ChatMgr::getInstance()->getYYChannelSpeakTimeByChannel(FT_btnWorld);
+			if (yyTime < MIN_WORLD_RESPEAK_TIME)//世界频道的语音聊天1分钟以上才可再次说话的
+			{
+				ToolTip::getInstance()->push(GET_STR(173));
+				return true;
+			}
+		}
+		_startPt =_yyFrame->convertTouchToNodeSpace(pTouch);
+		//setYYBeginTime();
+		_yySprite->setVisible(true);
+		setYYBtnSpriteFrame(_yyFrame,"yyIn_btn_h");
+		_isCheckYYOne = YY_btnYY;
+		_isCheckYY = true;
+		yyChatGo();
+		return true;
+	}
+	CCControlButton *channelBtn = dynamic_cast<CCControlButton*>(_frame[FT_Input]->getChildByTag(IT_ChannelBtn));
+
+	int allowCharLv = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	if(_frame[FT_btnWorld]->isVisible() && isTouchOnNodeContent(_frame[FT_btnWorld], pTouch))
+	{
+		if (allowCharLv < 25)
+		{
+			ToolTip::getInstance()->push(GET_STR(2370));
+			return true;
+		}
+
+		unsigned int yyTime = ChatMgr::getInstance()->getYYChannelSpeakTimeByChannel(FT_btnWorld);
+		if (yyTime < MIN_WORLD_RESPEAK_TIME)//语音聊天1分钟以上才可再次说话的
+		{
+			ToolTip::getInstance()->push(GET_STR(173));
+			return true;
+		}
+
+		_startPt =_frame[FT_btnWorld]->convertTouchToNodeSpace(pTouch);
+		//setYYBeginTime();
+		_yySprite->setVisible(true);
+		setYYBtnSpriteFrame(_frame[FT_btnWorld],"yyWorld_btn_h");
+		_sendChannel = ESCC_World;
+		_isCheckYYOne = YY_btnWorld;
+		_isCheckYY = true;
+		if (channelBtn)
+		{
+			channelBtn->setTitleColorForState(ccc3(0xff, 0xff, 0xff), CCControlStateNormal);
+			//setBtnTitle(channelBtn, GET_STR(22));
+			channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("world_btn_bg_n"), CCControlStateNormal);
+			channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("world_btn_bg_h"), CCControlStateHighlighted);
+		}
+		this->yyChatGo();
+		return true;
+	}
+	if(_frame[FT_btnGuild]->isVisible() && isTouchOnNodeContent(_frame[FT_btnGuild], pTouch))
+	{
+		//判断有没有公会
+		if (GuildMgr::getInstance()->getGuildId() <= 0)
+		{
+			ToolTip::getInstance()->push(GET_STR(2390));
+			return true;
+		}
+		_startPt =_frame[FT_btnGuild]->convertTouchToNodeSpace(pTouch);
+		//setYYBeginTime();
+		_yySprite->setVisible(true);
+		setYYBtnSpriteFrame(_frame[FT_btnGuild],"yyGuild_btn_h");
+		_sendChannel = ESCC_Guild;
+		_isCheckYYOne = YY_btnGuild;
+		_isCheckYY = true;
+		if (channelBtn)
+		{
+			channelBtn->setTitleColorForState(ccc3(0xff, 0xa2, 0x00), CCControlStateNormal);
+			//setBtnTitle(channelBtn, GET_STR(23));
+			channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("guild_btn_bg_n"), CCControlStateNormal);
+			channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("guild_btn_bg_h"), CCControlStateHighlighted);
+		}
+		this->yyChatGo();
+		return true;
+	}
+	if(_frame[FT_btnTeam]->isVisible() && isTouchOnNodeContent(_frame[FT_btnTeam], pTouch))
+	{
+		//判断有没有组队
+		if (!TeamMgr::getInstance()->is_inteam())
+		{
+			ToolTip::getInstance()->push(GET_STR(256));
+			return true;
+		}
+		_startPt =_frame[FT_btnTeam]->convertTouchToNodeSpace(pTouch);
+		//setYYBeginTime();
+		_yySprite->setVisible(true);
+		setYYBtnSpriteFrame(_frame[FT_btnTeam],"yyTeam_btn_h");
+		_sendChannel = ESCC_Team;
+		_isCheckYYOne = YY_btnTeam;
+		_isCheckYY = true;
+		if (channelBtn)
+		{
+			channelBtn->setTitleColorForState(ccc3(0x60, 0xff, 0x00), CCControlStateNormal);
+			//setBtnTitle(channelBtn, GET_STR(25));
+			channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("team_btn_bg_n"), CCControlStateNormal);
+			channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("team_btn_bg_h"), CCControlStateHighlighted);
+
+		}
+		this->yyChatGo();
+		return true;
+	}
+
+	//[bing] 有表情框
+	if(_frame[FT_biaoqing]->isVisible()
+		&& isTouchOnNodeContent(_frame[FT_biaoqing], pTouch))
+	{
+		_startPt =_frame[FT_biaoqing]->convertTouchToNodeSpace(pTouch);
+		_chatRecordscrollView->setTouchEnabled(false);
+		CCRect rect(_startPt.x - (24 / 2), _startPt.y - (24 / 2), 24, 24);
+
+		for(int i = 1; i <= 36; ++i)
+		{
+			if(rect.containsPoint(_frame[FT_biaoqing]->getChildByTag(i)->getPosition()))
+			{
+				CCString* ss = CCString::createWithFormat("<#%02d/>", i);
+				CCString* sss = CCString::createWithFormat("#%02d", i);
+				/*
+				std::stringstream ss;
+				ss << _inputLabel->getString();
+				ss << '#';
+				if(i < 10)
+				ss << 0;
+				ss << i;
+				ss << '\0';
+				*/
+				std::string& GSstr = _inputLabel->GetGSString();
+				GSstr += ss->getCString();
+
+				std::string inputstr = _inputLabel->getString();
+				inputstr += sss->getCString();
+				_inputLabel->setString(inputstr.c_str());
+			}
+		}
+		return true;
+	}
+	else {
+		_chatRecordscrollView->setTouchEnabled(true);
+	}
+
+	if(isTouchOnNodeContent(_frame[FT_Input], pTouch))
+	{
+		showFrame(FT_biaoqing,false);
+		_startPt =_recordContent->convertTouchToNodeSpace(pTouch);
+		if(isTouchOnNodeContent(_inputLabel, pTouch))
+			_inputLabel->attachWithIME();
+		// 		else
+		// 			_inputLabel->detachWithIME();
+		return true;
+	}
+
+
+	if(_chatOpBtnGroup != NULL)
+		_chatOpBtnGroup->hideBtn();
+
+
+	//聊天框中角色超链接，即点击消息，打开私聊UI;
+	//_startPt = convertTouchToNodeSpace(pTouch);
+
+	// 	if(isTouchOnNodeContent(_frame[FT_ChatRecord], pTouch))
+	// 	{
+	// 		_startPt =_frame[FT_ChatRecord]->convertTouchToNodeSpace(pTouch);
+	// 		return true;
+	// 	}
+
+	return false;
+}
+
+void ChatUiLayer::ccTouchMoved( CCTouch *pTouch, CCEvent *pEvent )
+{
+
+	if (m_messageOut)
+	{//聊天超过屏幕
+
+		float y=_chatRecordList->GetNode()->getPositionY();
+		if(y<-10)//不在最低部不更新
+		{
+			if(m_updateMessage)
+			{
+				m_updateMessage=false;
+			}
+		}
+		else//在底部就自动更新
+		{
+			if(!m_updateMessage)
+			{
+				m_updateMessage=true;
+			}
+
+		}
+	}
+
+
+	switch (_isCheckYYOne)
+	{
+	case YY_btnYY:
+		{
+			CCPoint point =_yyFrame->convertTouchToNodeSpace(pTouch);
+			if(ccpDistance(_startPt,point) > TOUCHYY_MOVE_DIS)
+			{
+				if(_yyFanhuiFrame)
+					_yySprite->setDisplayFrame(_yyFanhuiFrame);
+			}
+			else
+			{
+				if(_yyQuxiaoFrame)
+					_yySprite->setDisplayFrame(_yyQuxiaoFrame);
+			}
+		}
+		break;
+	case YY_btnWorld:
+		{
+			CCPoint point =_frame[FT_btnWorld]->convertTouchToNodeSpace(pTouch);
+			if(ccpDistance(_startPt,point) > TOUCHYY_MOVE_DIS)
+			{
+				if(_yyFanhuiFrame)
+					_yySprite->setDisplayFrame(_yyFanhuiFrame);
+			}
+			else
+			{
+				if(_yyQuxiaoFrame)
+					_yySprite->setDisplayFrame(_yyQuxiaoFrame);
+			}
+		}
+		break;
+	case YY_btnGuild:
+		{
+			CCPoint point =_frame[FT_btnGuild]->convertTouchToNodeSpace(pTouch);
+			if(ccpDistance(_startPt,point) > TOUCHYY_MOVE_DIS)
+			{
+				if(_yyFanhuiFrame)
+					_yySprite->setDisplayFrame(_yyFanhuiFrame);
+			}
+			else
+			{
+				if(_yyQuxiaoFrame)
+					_yySprite->setDisplayFrame(_yyQuxiaoFrame);
+			}
+		}
+		break;
+	case YY_btnTeam:
+		{
+			CCPoint point =_frame[FT_btnTeam]->convertTouchToNodeSpace(pTouch);
+			if(ccpDistance(_startPt,point) > TOUCHYY_MOVE_DIS)
+			{
+				if(_yyFanhuiFrame)
+					_yySprite->setDisplayFrame(_yyFanhuiFrame);
+			}
+			else
+			{
+				if(_yyQuxiaoFrame)
+					_yySprite->setDisplayFrame(_yyQuxiaoFrame);
+			}
+		}
+		break;
+	}
+}
+
+void ChatUiLayer::yyChatCancel()
+{
+#if ENABLE_GOTYE==1
+	if ( _sendChannel == ESCC_SiLiao)
+	{
+		VoiceMgr::getSingleton()->process(YYS_FRIEND, YY_CANCEL_VOICE, "");
+	}
+	else
+	{
+		VoiceMgr::getSingleton()->process(YYS_CHANNEL, YY_CANCEL_VOICE, "");
+	}
+#endif
+}
+
+void ChatUiLayer::yyChatEnd()
+{
+	setYYBtnSpriteFrame(_yyFrame,"yyIn_btn_n");
+	_yySprite->setVisible(false);
+
+	if (m_IsVoiceReturn)
+	{
+		m_IsVoiceReturn = false;
+		return;
+	}
+
+	if (m_TouchLength.get_milliseconds() <= 1000)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["voice_touch_too_short"]);
+	}
+
+	std::stringstream os;
+	if ( _sendChannel == ESCC_SiLiao)
+	{
+		os << _targetId;
+#if ENABLE_GOTYE==1
+		VoiceMgr::getSingleton()->process(YYS_FRIEND, YY_SEND_VOICE, os.str());
+#endif
+	}
+	else
+	{
+		os << _sendChannel;
+#if ENABLE_GOTYE==1
+		VoiceMgr::getSingleton()->process(YYS_CHANNEL, YY_SEND_VOICE, os.str());
+		if(_sendChannel == ESCC_World){
+			ChatMgr::getInstance()->setYYChannelBeginTimeByChannel(FT_btnWorld);
+		}
+#endif
+	}
+}
+
+void ChatUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	//_chatRecordscrollView->setTouchPriority(1);
+	_dragRecordFrame = false;
+	//判断选中的消息;
+	if(isTouchOnNodeContent(/*_frame[FT_ChatRecord]*/_small_sv_root,pTouch)){
+		CCPoint pt =/*_frame[FT_ChatRecord]*/_small_sv_root->convertTouchToNodeSpace(pTouch);
+		if(ccpDistance(_startPt, pt) < TOUCH_MOVE_DIS){
+			ChatListItem *curItem = _small_chatRecordList->onTouch(pTouch);
+			if(curItem != NULL && _chatOpBtnGroup != NULL && _filter != ESCC_System)
+			{
+				const s_receive_chat_info &chatInfo = curItem->getData();
+
+				unsigned int sendRoleId = chatInfo.send_role_id;
+				unsigned int recRoleId = chatInfo.receive_role_id;
+
+				std::string roleName;
+				if (chatInfo.send_channel != ESCC_Affiche)
+				{
+					if(sendRoleId != RoleManager::getInstance()->getLocalPlayer()->getId() && 
+						strcmp(chatInfo.send_role_name.c_str(), RoleManager::getInstance()->getLocalPlayer()->getNameUtf8().c_str()) != 0)
+					{
+						if(NameMgr2::getInstance()->queryName(sendRoleId,roleName))
+						{
+							//GET_UI(ChatUi, WCT_ChatUi)->sendMessageTo(sendRoleId, roleName);
+							_chatOpBtnGroup->setData(sendRoleId, chatInfo.send_role_name);
+							_chatOpBtnGroup->showBtn(pt);
+						}
+					}
+					else
+					{
+						if(recRoleId != 0 && recRoleId != RoleManager::getInstance()->getLocalPlayer()->getId() && recRoleId != 0xffffffff
+							&& strcmp(chatInfo.receive_role_name.c_str(), RoleManager::getInstance()->getLocalPlayer()->getNameUtf8().c_str()) != 0)
+						{
+							if (NameMgr2::getInstance()->queryName(recRoleId,roleName))
+							{
+								//GET_UI(ChatUi, WCT_ChatUi)->sendMessageTo(recRoleId, roleName);
+								_chatOpBtnGroup->setData(recRoleId, chatInfo.receive_role_name);
+								_chatOpBtnGroup->showBtn(pt);
+							}
+						}
+					}
+				}
+
+
+				return;
+			}
+			//[bing] 找天下号令的物品
+			curItem = _decreeList->onTouch(pTouch);
+		}
+	}
+
+	if (isTouchOnNodeContent(_recordContent, pTouch))
+	{
+		CCPoint pt =_recordContent->convertTouchToNodeSpace(pTouch);
+		if(ccpDistance(_startPt, pt) < TOUCH_MOVE_DIS)
+		{
+			ChatListItem *curItem = _chatRecordList->onTouch(pTouch);
+			//bug#120 
+			if(curItem==NULL)
+			{
+				curItem = _decreeList->onTouch(pTouch);
+			}
+			if(curItem != NULL && _chatOpBtnGroup != NULL && _filter != ESCC_System)
+			{
+				const s_receive_chat_info &chatInfo = curItem->getData();
+
+				unsigned int sendRoleId = chatInfo.send_role_id;
+				unsigned int recRoleId = chatInfo.receive_role_id;
+
+				std::string roleName;
+				if (chatInfo.send_channel != ESCC_Affiche && IS_VALID(chatInfo.send_role_id))
+				{
+					if(sendRoleId != RoleManager::getInstance()->getLocalPlayer()->getId() && 
+						strcmp(chatInfo.send_role_name.c_str(), RoleManager::getInstance()->getLocalPlayer()->getNameUtf8().c_str()) != 0)
+					{
+						if(NameMgr2::getInstance()->queryName(sendRoleId,roleName))
+						{
+							//GET_UI(ChatUi, WCT_ChatUi)->sendMessageTo(sendRoleId, roleName);
+							_chatOpBtnGroup->setData(sendRoleId, chatInfo.send_role_name);
+							_chatOpBtnGroup->showBtn(pt);
+						}
+					}
+					else
+					{
+						if(recRoleId != 0 && recRoleId != RoleManager::getInstance()->getLocalPlayer()->getId() && recRoleId != 0xffffffff
+							&& strcmp(chatInfo.receive_role_name.c_str(), RoleManager::getInstance()->getLocalPlayer()->getNameUtf8().c_str()) != 0)
+						{
+							if (NameMgr2::getInstance()->queryName(recRoleId,roleName))
+							{
+								//GET_UI(ChatUi, WCT_ChatUi)->sendMessageTo(recRoleId, roleName);
+								_chatOpBtnGroup->setData(recRoleId, chatInfo.receive_role_name);
+								_chatOpBtnGroup->showBtn(pt);
+							}
+						}
+					}
+				}
+
+
+				return;
+			}
+
+
+		}
+	}
+
+	if (_isCheckYY)
+	{
+		_isCheckYY = false;
+		if (isTouchOnNodeContent(_yyFrame,pTouch))
+		{
+			CCPoint point = _yyFrame->convertTouchToNodeSpace(pTouch);
+			if(ccpDistance(_startPt,point) < TOUCHYY_MOVE_DIS)
+			{
+				yyChatEnd();
+			}
+			else
+			{
+				setYYBtnSpriteFrame(_yyFrame,"yyIn_btn_n");
+				_yySprite->setVisible(false);
+				this->yyChatCancel();
+			}
+			return;
+		}
+
+		int yyLevel = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+
+		if (isTouchOnNodeContent(_frame[FT_btnWorld],pTouch) && _isCheckYYOne == YY_btnWorld)
+		{
+			CCPoint point = _frame[FT_btnWorld]->convertTouchToNodeSpace(pTouch);
+			setYYBtnSpriteFrame(_frame[FT_btnWorld],"yyWorld_btn_n");
+			_yySprite->setVisible(false);
+			if(ccpDistance(_startPt,point) < TOUCHYY_MOVE_DIS)
+			{
+				this->yyChatEnd();
+			}else{
+				this->yyChatCancel();
+			}
+			_isCheckYYOne = YY_btnNumber;
+			//			_sendChannel = yyLevel < 10 ? ESCC_Map : ESCC_World;
+			onWorldLabelTouched(NULL, false);
+			return;
+		}
+
+		if (isTouchOnNodeContent(_frame[FT_btnGuild],pTouch)&& _isCheckYYOne == YY_btnGuild)
+		{
+			CCPoint point = _frame[FT_btnGuild]->convertTouchToNodeSpace(pTouch);
+			setYYBtnSpriteFrame(_frame[FT_btnGuild],"yyGuild_btn_n");
+			_yySprite->setVisible(false);
+			if(ccpDistance(_startPt,point) < TOUCHYY_MOVE_DIS)
+			{
+				this->yyChatEnd();
+			}else{
+				this->yyChatCancel();
+			}
+			_isCheckYYOne = YY_btnNumber;
+			//			_sendChannel = yyLevel < 10 ? ESCC_Map : ESCC_World;
+			onGuildLabelTouched(NULL, false);
+			return;
+		}
+
+		if (isTouchOnNodeContent(_frame[FT_btnTeam],pTouch)&& _isCheckYYOne == YY_btnTeam)
+		{
+			CCPoint point = _frame[FT_btnTeam]->convertTouchToNodeSpace(pTouch);
+			setYYBtnSpriteFrame(_frame[FT_btnTeam],"yyTeam_btn_n");
+			_yySprite->setVisible(false);
+			if(ccpDistance(_startPt,point) < TOUCHYY_MOVE_DIS)
+			{
+				this->yyChatEnd();
+			}else
+			{
+				this->yyChatCancel();
+			}
+			_isCheckYYOne = YY_btnNumber;
+			//			_sendChannel = yyLevel < 10 ? ESCC_Map : ESCC_World;
+			onGroupLabelTouched(NULL, false);
+			return;
+		}
+
+		setYYBtnSpriteFrame(_yyFrame,"yyIn_btn_n");
+		setYYBtnSpriteFrame(_frame[FT_btnWorld],"yyWorld_btn_n");
+		setYYBtnSpriteFrame(_frame[FT_btnGuild],"yyGuild_btn_n");
+		setYYBtnSpriteFrame(_frame[FT_btnTeam],"yyTeam_btn_n");
+		if(_yyQuxiaoFrame)
+			_yySprite->setDisplayFrame(_yyQuxiaoFrame);
+		_yySprite->setVisible(false);
+		_isCheckYYOne = YY_btnNumber;
+		this->yyChatCancel();
+	}
+}
+
+void ChatUiLayer::onCloseBtnPressed1( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	hidChatUi(true);
+}
+
+void ChatUiLayer::onCloseBtnPressed2( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	showFrame(FT_Channel, false);
+}
+
+void ChatUiLayer::onChannelBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	showFrame(FT_Channel, true);
+}
+
+void ChatUiLayer::onDelBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+
+}
+
+void ChatUiLayer::onSendBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	//std::string str = _inputLabel->getString();
+	std::string& str = _inputLabel->GetGSString();	//[bing] 现在获取发给服务器的真实字符串
+	m_updateMessage=true;
+	unsigned int len = str.length();
+	if (len && _sendChannel != ESCC_SiLiao)
+	{
+		size_t fpos = str.find("@");
+		size_t epos = str.find(" ");
+		if (fpos == 0)
+		{
+			if (epos == -1)	//用户没有输入空格
+			{
+				str = str + " ";
+				epos = str.find(" ");
+			}
+			std::string str1 = str.substr(1,epos - 1);
+			if (epos + 1 >= len)
+			{
+				str = "1";
+			}
+			else
+			{
+				str = str.substr(epos+1, len);
+			}
+
+
+			ChatMgr::getInstance()->Send_Chat(str, ESCC_SiLiao, INVALID, name_crc32(convertWName(str1)));
+			std::string strtxt = replaceStr(GET_STR(27), "***", str1);
+			setInputAsSiliao(true, strtxt);
+			_sendChannel = ESCC_SiLiao;
+			_inputLabel->setString("");
+			_inputLabel->SetGSString("");
+			ChatMgr::getInstance()->setNeedPrivate(true);
+			return;
+		}
+	}
+	int allowCharLv = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	//判断输出的内容是否为空格
+	int spaceNum=GetCountChar(str.c_str(),' ');
+	int newlineNum=GetCountChar(str.c_str(),'\n');
+	int length=str.length();
+	if (length==spaceNum+newlineNum)
+	{
+		ToolTip::getInstance()->push(GET_STR(2047));
+		return;
+	}
+	if(!str.empty())
+	{
+		if (ESCC_World == _sendChannel && allowCharLv < 25)
+		{
+			ToolTip::getInstance()->push(GET_STR(2370));
+		}
+		else if(_sendChannel != ESCC_SiLiao)
+		{
+			ChatMgr::getInstance()->Send_Chat(str, _sendChannel);
+		}
+		else
+		{
+			if (_targetId == 0 && _sendChannel == ESCC_SiLiao)
+				ChatMgr::getInstance()->Send_Chat(str, ESCC_SiLiao, INVALID, name_crc32(convertWName(siLiaoName)));
+			else
+				ChatMgr::getInstance()->Send_Chat(str, _sendChannel, _targetId);
+		}
+		if(ChatMgr::getInstance()->GetIsClearText())
+		{
+			_inputLabel->setString("");
+			_inputLabel->SetGSString("");
+		}
+		ChatMgr::getInstance()->SetIsClearText(true);
+	}
+	else
+	{
+		ToolTip::getInstance()->push(GET_STR(2047));
+	}
+}
+
+void ChatUiLayer::onChatBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if (IS_UI_OPEN(WCT_TradeUi))
+	{
+		ExchangeBusinessMgr::getInstance()->CancleExchange();
+	}
+	CLOSE_ALL_UI();
+	showFrame(FT_Input, true);
+	showFrame(IT_btnYY, true);
+	showFrame(FT_ChatRecord, false);
+	showFrame(FT_btn, false);
+	showFrame(FT_btnWorld, false);
+	showFrame(FT_btnGuild, false);
+	showFrame(FT_btnTeam, false);
+
+	//隐藏相关ui;
+	World::getInstance()->getTaskTraceUi()->showUi(false);
+	World::getInstance()->getMiniMapUi()->showUi(false);
+	GET_UI(ShortCutUi, WCT_ShorCutUi)->showUi(false);
+	GET_UI(JoyStickUi, WCT_JoyStick)->showUi(false);
+	m_updateMessage=true;
+	m_messageOut=false;
+}
+
+void ChatUiLayer::onHaolingBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	_sendChannel = ESCC_Decree;
+	CCControlButton *channelBtn = dynamic_cast<CCControlButton*>(_frame[FT_Input]->getChildByTag(IT_ChannelBtn));
+	channelBtn->setTitleColorForState(ccc3(0xff, 0x4b, 0x13), CCControlStateNormal);
+	//setBtnTitle(channelBtn, GET_STR(20));
+	channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("order_btn_bg_n"), CCControlStateNormal);
+	channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("order_btn_bg_h"), CCControlStateHighlighted);
+	setInputAsSiliao(false, "");
+	showFrame(FT_Channel, false);
+}
+
+void ChatUiLayer::onChuanyinBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	_sendChannel = ESCC_Qianli;
+	CCControlButton *channelBtn = dynamic_cast<CCControlButton*>(_frame[FT_Input]->getChildByTag(IT_ChannelBtn));
+	channelBtn->setTitleColorForState(ccc3(0xfd, 0x48, 0xff), CCControlStateNormal);
+	//setBtnTitle(channelBtn, GET_STR(21));
+	channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("sound_btn_bg_n"), CCControlStateNormal);
+	channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("sound_btn_bg_h"), CCControlStateHighlighted);
+	setInputAsSiliao(false, "");
+	showFrame(FT_Channel, false);
+}
+
+void ChatUiLayer::onWorldBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	_sendChannel = ESCC_World;
+	CCControlButton *channelBtn = dynamic_cast<CCControlButton*>(_frame[FT_Input]->getChildByTag(IT_ChannelBtn));
+	channelBtn->setTitleColorForState(ccc3(0xff, 0xff, 0xff), CCControlStateNormal);
+	//setBtnTitle(channelBtn, GET_STR(22));
+	channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("world_btn_bg_n"), CCControlStateNormal);
+	channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("world_btn_bg_h"), CCControlStateHighlighted);
+	setInputAsSiliao(false, "");
+	showFrame(FT_Channel, false);
+}
+
+void ChatUiLayer::onGuildBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	_sendChannel = ESCC_Guild;
+	CCControlButton *channelBtn = dynamic_cast<CCControlButton*>(_frame[FT_Input]->getChildByTag(IT_ChannelBtn));
+	channelBtn->setTitleColorForState(ccc3(0xff, 0xa2, 0x00), CCControlStateNormal);
+	//setBtnTitle(channelBtn, GET_STR(23));
+	channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("guild_btn_bg_n"), CCControlStateNormal);
+	channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("guild_btn_bg_h"), CCControlStateHighlighted);
+	setInputAsSiliao(false, "");
+	showFrame(FT_Channel, false);
+}
+
+void ChatUiLayer::onGroupBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	_sendChannel = ESCC_Team;
+	CCControlButton *channelBtn = dynamic_cast<CCControlButton*>(_frame[FT_Input]->getChildByTag(IT_ChannelBtn));
+	channelBtn->setTitleColorForState(ccc3(0x60, 0xff, 0x00), CCControlStateNormal);
+	//setBtnTitle(channelBtn, GET_STR(25));
+	channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("team_btn_bg_n"), CCControlStateNormal);
+	channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("team_btn_bg_h"), CCControlStateHighlighted);
+	setInputAsSiliao(false, "");
+	showFrame(FT_Channel, false);
+}
+
+void ChatUiLayer::onNearBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	_sendChannel = ESCC_Map;
+	CCControlButton *channelBtn = dynamic_cast<CCControlButton*>(_frame[FT_Input]->getChildByTag(IT_ChannelBtn));
+	channelBtn->setTitleColorForState(ccc3(0x75, 0xcd, 0xff), CCControlStateNormal);
+	//setBtnTitle(channelBtn, GET_STR(24));
+	channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("near_btn_bg_n"), CCControlStateNormal);
+	channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("near_btn_bg_h"), CCControlStateHighlighted);
+	setInputAsSiliao(false, "");
+	showFrame(FT_Channel, false);
+}
+
+void ChatUiLayer::onAllLabelTouched( TouchSprite*, bool )
+{
+	setRecordFilter(ESCC_NULL);//gx modify 2013.10.9
+	setFilterLabelHigh(IT_All);
+}
+
+void ChatUiLayer::onWorldLabelTouched( TouchSprite*, bool )
+{
+	setRecordFilter(ESCC_World);
+	setFilterLabelHigh(IT_World);
+	onWorldBtnPressed(NULL, 0);
+}
+
+void ChatUiLayer::onGuildLabelTouched( TouchSprite*, bool )
+{
+	setRecordFilter(ESCC_Guild);
+	setFilterLabelHigh(IT_Guild);
+	onGuildBtnPressed(NULL, 0);
+}
+
+void ChatUiLayer::onGroupLabelTouched( TouchSprite*, bool )
+{
+	setRecordFilter(ESCC_Team);
+	setFilterLabelHigh(IT_Group);
+	onGroupBtnPressed(NULL, 0);
+}
+
+void ChatUiLayer::onNearbyTouched( TouchSprite*, bool )
+{
+	if (World::getInstance()->isHighLight(_frame[FT_Input]->getChildByTag(IT_NearBy), WT_CCSPRITE, WCT_ChatUi))
+	{
+		World::getInstance()->SetHighLight(_frame[FT_Input]->getChildByTag(IT_NearBy), WT_CCSPRITE, WCT_ChatUi, 0, false);
+	}
+	setRecordFilter(ESCC_Map);
+	setFilterLabelHigh(IT_NearBy);
+	onNearBtnPressed(NULL, 0);
+}
+
+void ChatUiLayer::onPersonalTouched( TouchSprite*, bool )
+{
+	if (World::getInstance()->isHighLight(_frame[FT_Input]->getChildByTag(IT_Personal), WT_CCSPRITE, WCT_ChatUi))
+	{
+		World::getInstance()->SetHighLight(_frame[FT_Input]->getChildByTag(IT_Personal), WT_CCSPRITE, WCT_ChatUi, 0, false);
+	}
+	setRecordFilter(ESCC_SiLiao);
+	setFilterLabelHigh(IT_Personal);
+}
+
+void ChatUiLayer::onSystemTouched( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	setRecordFilter(ESCC_System);	//TODO 修改;
+	setFilterLabelHigh(IT_System);
+}
+
+TouchSprite * ChatUiLayer::getAreaFrameTouchSprite( eInputTag tag )
+{
+	return dynamic_cast<TouchSprite*>(_frame[FT_Input]->getChildByTag(tag));
+}
+
+void ChatUiLayer::showFrame( eFrameTag tag, bool show, bool anim /*= true */)
+{
+	switch(tag)
+	{
+	case FT_ChatRecord:
+		_isFrameShow[FT_ChatRecord] = show;
+		showRecordFrame(show, false);
+		break;
+	case FT_Input:
+		if(_isFrameShow[FT_Input] != show && show && _chatRecordscrollView != NULL)
+		{
+			//float gao = _chatRecordscrollView->getContentSize().height;
+			_chatRecordscrollView->setContentOffset(_chatRecordscrollView->maxContainerOffset());
+		}
+		_isFrameShow[FT_Input] = show;
+		showInputFrame(show, anim);
+		break;
+	case FT_Channel:
+		if(show)
+			_frame[FT_Channel]->setPosition(_srcFramePos[FT_Channel]);
+		else
+			_frame[FT_Channel]->setPositionX( - CCDirector::sharedDirector()->getWinSize().width);
+		_isFrameShow[FT_Channel] = show;
+		break;
+	case FT_biaoqing:
+		_frame[FT_biaoqing]->setVisible(show);
+		break;
+	case FT_btn:
+		_isFrameShow[FT_btn] = show;
+		_frame[FT_btn]->setVisible(show);
+		break;
+	case FT_btnWorld:
+		if (!_isShowYYChatBtn)
+		{
+			show = _isShowYYChatBtn;
+		}
+		_isFrameShow[FT_btnWorld] = show;
+		_frame[FT_btnWorld]->setVisible(show);
+		break;
+	case FT_btnGuild:
+		if (!_isShowYYChatBtn)
+		{
+			show = _isShowYYChatBtn;
+		}
+		_isFrameShow[FT_btnGuild] = show;
+		_frame[FT_btnGuild]->setVisible(show);
+		break;
+	case FT_btnTeam:
+		if (!_isShowYYChatBtn)
+		{
+			show = _isShowYYChatBtn;
+		}
+		_isFrameShow[FT_btnTeam] = show;
+		_frame[FT_btnTeam]->setVisible(show);
+		break;
+	case IT_btnYY:
+		_yyFrame->setVisible(show);
+		break;
+	default:
+		CC_ASSERT("can not reach here!!!");
+		break;
+	}
+}
+
+bool ChatUiLayer::ifFrameShow( eFrameTag tag )
+{
+	if(tag == 3)
+		return false;
+
+	if(tag == FT_Num)
+		return false;
+
+	return _isFrameShow[tag];
+}
+
+void ChatUiLayer::setRecordFilter( ESendChatChannel filter )
+{
+	if(_chatRecordList != NULL)
+	{
+		if(_filter == filter)
+			return;
+
+		_filter = filter;
+		float height=0;
+		if(_chatRecordList != NULL)
+		{
+			int count = _chatRecordList->getItemCount();
+
+			for(int i = 0; i < count; i++)
+			{
+				ChatListItem *item = _chatRecordList->getItem(i);
+				if(item->setFilter(_filter))
+				{
+					height+=item->getItemHeight()+_chatRecordList->GetLineSpace();
+				}
+
+			}
+		}
+
+		_chatRecordList->updateDisplay();
+		_chatRecordscrollView->setContentOffset(ccp(0.0f,0.0f));
+		m_updateMessage=true;
+		_chatRecordItemHeightAdd=height;
+		if(height>=_chatRecordFrameMinHeight)
+		{
+			m_messageOut=true;
+		}
+		else
+			m_messageOut=false;
+
+	}
+}
+
+void ChatUiLayer::setFilterLabelHigh( eInputTag label )
+{
+	TouchSprite *touchSprite = getAreaFrameTouchSprite(label);
+	if(touchSprite != NULL)
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_11);
+		getAreaFrameTouchSprite(IT_All)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(_normalTab[IT_All].c_str()));
+		getAreaFrameTouchSprite(IT_World)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(_normalTab[IT_World].c_str()));
+		getAreaFrameTouchSprite(IT_Guild)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(_normalTab[IT_Guild].c_str()));
+		getAreaFrameTouchSprite(IT_Group)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(_normalTab[IT_Group].c_str()));
+		getAreaFrameTouchSprite(IT_NearBy)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(_normalTab[IT_NearBy].c_str()));
+		getAreaFrameTouchSprite(IT_Personal)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(_normalTab[IT_Personal].c_str()));
+		getAreaFrameTouchSprite(IT_System)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(_normalTab[IT_System].c_str()));
+		touchSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(_highTab[label].c_str()));
+	}
+}
+
+void ChatUiLayer::updateFudongMsg()
+{
+	CCFadeOut* fade1 = CCFadeOut::create(2.0f);
+	CCFadeOut* fade2 = CCFadeOut::create(3.0f);
+	CCFadeOut* fade3 = CCFadeOut::create(4.0f);
+	//CCAction* callbackFun = CCCallFunc::create(fade3, SEL_CallFunc(&ChatUiLayer::delFudongMeg));
+	std::string tempMsg = "";
+	for (size_t i = 0;i < fudongAllChatData.size();++i)
+	{
+		switch(i)
+		{
+		case 0:
+			if (!fudongAllChatData.front().empty())
+			{
+				tempMsg = fudongAllChatData.front();
+				fudongAllChatData.pop_front();
+				fudongLabel_1->setString(tempMsg.c_str());
+				fudongAllChatData.push_back(tempMsg);
+				fudongLabel_1->runAction(fade1);
+			}
+			break;
+		case 1:
+			if (!fudongAllChatData.front().empty())
+			{
+				tempMsg = fudongAllChatData.front();
+				fudongAllChatData.pop_front();
+				fudongLabel_2->setString(tempMsg.c_str());
+				fudongAllChatData.push_back(tempMsg);
+				fudongLabel_2->runAction(fade2);
+			}
+			break;
+		case 2:
+			if (!fudongAllChatData.front().empty())
+			{
+				tempMsg = fudongAllChatData.front();
+				fudongAllChatData.pop_front();
+				fudongLabel_3->setString(tempMsg.c_str());
+				fudongAllChatData.push_back(tempMsg);
+				fudongLabel_3->runAction(fade3);
+				lastTime = ServerTime::getInstance()->cal_current_server_dword_time(); //记录存储3条记录的时间
+			}
+			break;
+		default:
+			return;
+			break;
+		}
+	}
+}
+
+void ChatUiLayer::delFudongMeg()
+{
+	//循环清除所有记录
+	std::list<std::string>::iterator it = fudongAllChatData.begin();
+	while( it != fudongAllChatData.end() )
+	{
+		fudongAllChatData.erase(it);
+		it = fudongAllChatData.begin();
+	}
+	/*for (int i = 0;i < fudongAllChatData.size();++i)
+	{
+	fudongAllChatData.pop_front();
+	}*/
+	lastTime = ServerTime::getInstance()->cal_current_server_dword_time(); //重新记录最后一次三条记录的时间
+}
+
+void ChatUiLayer::appendMsg( const s_receive_chat_info &msgInfo )
+{
+	//如果是空消息，则返回
+	/*
+	if(msgInfo.chat_text == "" || msgInfo.chat_text.size() == 0)
+	{
+	return;
+	}*/
+	ChatListItem *item = new ChatListItem(715.f,2);
+	item->setData(msgInfo);
+
+	float fItemHeight =0;
+	if(item->setFilter(_filter))
+		fItemHeight= item->getItemHeight()+ _chatRecordList->GetLineSpace();
+
+	if (msgInfo.send_channel == ESCC_System)
+	{
+		_chatRecordList->addItem(item, true);
+		tagDWORDTime curTime = ServerTime::getInstance()->cal_current_server_dword_time(); //当前时间
+		unsigned int tmpDeltaT = CalcTimeDiff(curTime, lastTime); //当前时间与上一次存储3条记录的间隔时间
+		//如果相隔时间大于5秒并且容器里存储条数超过2条则将其全部清空
+		if( tmpDeltaT > 5 && fudongAllChatData.size() > 2 )
+			delFudongMeg();
+		fudongAllChatData.push_back(msgInfo.chat_text);
+		//系统信息
+		while(fudongAllChatData.size() > 3)
+		{
+			fudongAllChatData.pop_front();
+		}
+		updateFudongMsg();
+	}
+
+	if (msgInfo.send_channel != ESCC_System)
+	{
+		_chatRecordItemHeightAdd += fItemHeight;
+		if (_chatRecordItemHeightAdd > 386.0f)
+		{
+			_chatRecordItemHeightAdd = 308.f;	//确保容器里缓存的消息被移除后不再计算item高度 by zhang
+		}
+		//float testHeight = _chatRecordscrollView->getContentSize().height;
+		if (_chatRecordItemHeightAdd >= _chatRecordFrameMinHeight)
+		{
+			_chatRecordscrollView->setContentSize(CCSize(_recordContent->getContentSize().width + 10,_chatRecordItemHeightAdd + 6));
+			//_chatRecordList->setMinSize(_chatRecordscrollView->getContentSize());
+			//_chatRecordscrollView->setContentOffset(_chatRecordscrollView->maxContainerOffset(), false);
+			m_messageOut=true;
+		}
+
+		_chatRecordList->addItem(item, true);
+
+
+		if(m_updateMessage)
+			_chatRecordscrollView->setContentOffset(ccp(0.0f,0.0f));
+		else
+			_chatRecordscrollView->setContentOffset(ccpAdd(_chatRecordscrollView->getContentOffset(),ccp(0,-fItemHeight)));
+
+		float miniY=_chatRecordscrollView->minContainerOffset().y;
+		float offY=_chatRecordscrollView->getContentOffset().y;
+		if(miniY<0&&offY<miniY)
+		{
+			_chatRecordscrollView->setContentOffset(_chatRecordscrollView->minContainerOffset());//偏离超出最小Y 设置回去（删除消息时会出现）
+		}
+
+		//小窗口;
+		int count = _small_chatRecordList->getItemCount();
+		if(count >= 4)
+		{//最多保留3条;
+			_small_chatRecordList->removeItem(0);
+		}
+
+		bool isShows = ChatMgr::getInstance()->getShowMap();
+		if((!isShows && msgInfo.send_channel != ESCC_Map)|| isShows)
+		{
+			int decreeCount = _small_decreeList->getItemCount();
+			if (decreeCount <= 0)
+			{
+				item = new ChatListItem(400.0f,1);//vv
+				item->setData(msgInfo);
+				item->setFilter(ESCC_End);
+				_small_chatRecordList->addItem(item, true);
+				//_schatRecordList->updateDisplay();
+			}
+			else
+			{
+				float frameHeight = 88.0f;
+				float decreeHight = _small_decreeList->GetVisibleHeight() > 0.0f ? _small_decreeList->GetVisibleHeight() + _small_decreeList->GetLineSpace() : 0.0f;
+				float chatListHeight = frameHeight - (decreeHight > 0.0f ? decreeHight : 0.0f);
+				chatListHeight= _small_sv_root->getContentSize().height - decreeHight;
+				if (chatListHeight <0)
+				{
+					chatListHeight = 0;
+				}
+				_small_chatRecordscrollView->setViewSize(CCSize(_small_chatRecordscrollView->getViewSize().width, chatListHeight));
+				_small_chatRecordList->setMinSize(CCSize(/*400.0f*/_small_chatRecordscrollView->getViewSize().width, chatListHeight));
+
+				for (int i = 0; i < decreeCount; i++)
+				{
+					int chatCount = _small_chatRecordList->getItemCount();
+					if (chatCount >= 4 - decreeCount)
+					{
+						_small_chatRecordList->removeItem(0);
+					}
+				}
+
+				item = new ChatListItem(400.0f,1);//vv
+				item->setData(msgInfo);
+				item->setFilter(ESCC_End);
+
+				_small_chatRecordList->addItem(item, false);
+				_small_chatRecordList->updateDisplay(1.0f);
+			}
+
+			if (_isChatUiOpen == false && _showState == true)
+			{
+				if (_frame[FT_ChatRecord]->isVisible() == false)
+				{
+					showFrame(FT_ChatRecord, true, false);
+				}
+				CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&ChatUiLayer::doscheduleEvent), this);
+				float fTime = (float)getDecreeRemainTime();
+				if (fTime < 20.1f )
+				{
+					fTime = 20.1f;
+				}
+				CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&ChatUiLayer::doscheduleEvent), this, fTime, false);
+			}
+			_small_chatRecordscrollView->setContentOffset(_small_chatRecordscrollView->maxContainerOffset(), false);
+		}
+
+		//显示按钮的红点
+		LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+		if (player)
+		{
+			// 私聊
+			if(msgInfo.send_channel == ESCC_SiLiao && IS_VALID(msgInfo.receive_role_id) && IS_VALID(msgInfo.send_role_id) && msgInfo.send_role_id != player->getId())
+			{
+				if (!World::getInstance()->isHighLight(_frame[FT_Input]->getChildByTag(IT_Personal), WT_CCSPRITE, WCT_ChatUi))
+				{
+					TouchSprite *touchSprite = getAreaFrameTouchSprite(IT_Personal);
+					World::getInstance()->SetHighLight(touchSprite, WT_CCSPRITE, WCT_ChatUi, 0, true, touchSprite->getContentSize().width * 0.6, 0);
+				}
+			}
+
+			// 附近：自己在附近频道发言，且没有选择附近过滤标签时加红点
+			if(msgInfo.send_channel == ESCC_Map && _filter != ESCC_Map && msgInfo.send_role_id == player->getId())
+			{
+				if (!World::getInstance()->isHighLight(_frame[FT_Input]->getChildByTag(IT_NearBy), WT_CCSPRITE, WCT_ChatUi))
+				{
+					TouchSprite *touchSprite = getAreaFrameTouchSprite(IT_NearBy);
+					World::getInstance()->SetHighLight(touchSprite, WT_CCSPRITE, WCT_ChatUi, 0, true, touchSprite->getContentSize().width * 0.6, 0);
+				}
+			}
+
+		}
+	}
+}
+
+void ChatUiLayer::deleteMsg( const s_receive_chat_info &msgInfo )
+{
+	int count = _chatRecordList->getItemCount();
+	for(int i = 0; i < count; i ++)
+	{
+		const s_receive_chat_info &itemData = _chatRecordList->getItem(i)->getData();
+		if(isChatInfoEqual(msgInfo, itemData))
+		{
+			//[bing] 移除之前先取一下解析的物品
+			CCNode *pItem = _chatRecordList->getItem(i)->GetNode();
+			//[bing] 遍历一下它下面的元素 找Label
+			CCLabelTTF* pLabel = dynamic_cast<CCLabelTTF*>(pItem->getChildByTag(0));
+			CCArray *ChildrenArr = pLabel->getChildren();
+			if(ChildrenArr)
+			{
+				for(size_t j = 0; j < ChildrenArr->count(); ++j)
+				{
+					pLabel = dynamic_cast<CCLabelTTF*>(ChildrenArr->objectAtIndex(j));
+					if(!pLabel || !pLabel->getUserData())
+						continue;
+
+					s_Chat_UserData* pdData = (s_Chat_UserData*)(pLabel->getUserData());
+					switch (pdData->m_type)
+					{
+					case 1:
+						ChatMgr::getInstance()->EraseItemInfo(pdData->m_value);
+						break;
+					case 2:
+#if ENABLE_GOTYE==1
+						VoiceMgr::getSingleton()->removeItem(pdData->m_value);
+#endif
+						_chatRecordList->getItem(i)->eraseYYFuHaoInformation(pdData->m_value);
+						break;
+					}
+					//if (pdData->m_type == 1)
+					//	ChatMgr::getInstance()->EraseItemInfo( pdData->m_value );
+
+					//在ChatListItem析构函数里删除
+					//delete pdData;
+					//pLabel->setUserData(NULL);
+				}
+			}
+
+			_chatRecordList->removeItem(i);
+			break;
+		}
+	}
+	_chatRecordList->updateDisplay();
+}
+
+void ChatUiLayer::deleteFrontMsg()
+{
+	int count = _chatRecordList->getItemCount();
+	if(count > 0)
+	{
+		_chatRecordList->removeItem(0);
+	}
+	_chatRecordList->updateDisplay();
+}
+
+void ChatUiLayer::appendDecree( const s_receive_chat_info &msgInfo )
+{
+	ChatListItem *item = new ChatListItem(715.0f, 2);
+	item->setData(msgInfo);
+	item->setFilter(_filter);
+	item->runDecreeEffect();
+	_decreeList->addItem(item, true);
+
+	//小窗口;
+	item = new ChatListItem(400.f, 1);
+	item->setData(msgInfo);
+	item->setFilter(ESCC_End);
+	item->runDecreeEffect();
+	_small_decreeList->addItem(item, true);
+	_small_decree_scrollview->setContentOffset(_small_decree_scrollview->maxContainerOffset(), false);
+	updateDisplay();
+	if (_isChatUiOpen == false && _showState == true)
+	{
+		CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&ChatUiLayer::doscheduleEvent), this);
+		if (_frame[FT_ChatRecord]->isVisible() == false)
+		{
+			showFrame(FT_ChatRecord, true, false);
+		}
+		CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&ChatUiLayer::doscheduleEvent), this, 45.1f, false);
+	}
+}
+
+void ChatUiLayer::deleteDecree( const s_receive_chat_info &msgInfo )
+{
+	int count = _decreeList->getItemCount();
+	for(int i = 0; i < count; i ++)
+	{
+		const s_receive_chat_info &itemData = _decreeList->getItem(i)->getData();
+		if(isChatInfoEqual(msgInfo, itemData))
+		{
+			_decreeList->removeItem(i);
+			break;
+		}
+	}
+	_decreeList->updateDisplay();
+	//_chatRecordList->updateDisplay();
+
+	//小窗口;
+	count = _small_decreeList->getItemCount();
+	for(int i = 0; i < count; i ++)
+	{
+		const s_receive_chat_info &itemData = _small_decreeList->getItem(i)->getData();
+		if(isChatInfoEqual(msgInfo, itemData))
+		{
+			_small_decreeList->removeItem(i);
+			break;
+		}
+	}
+	_small_decreeList->updateDisplay();
+
+	//float fTmpY = _schatRecordscrollView->getPositionY();
+	//_schatRecordList->updateDisplay();
+	_small_decree_scrollview->setContentOffset(_small_decree_scrollview->maxContainerOffset(), false);
+
+	updateDisplay();
+}
+
+void ChatUiLayer::deleteFrontDecree()
+{
+	int count = _decreeList->getItemCount();
+	if(count > 0)
+	{
+		_decreeList->removeItem(0);
+	}
+	_decreeList->updateDisplay();
+	//_chatRecordList->updateDisplay();
+
+	//小窗口;
+	count = _small_decreeList->getItemCount();
+	if(count > 0)
+	{
+		_small_decreeList->removeItem(0);
+	}
+	_small_decreeList->updateDisplay();
+	//float fTmpY = _schatRecordscrollView->getPositionY();
+	//_schatRecordList->updateDisplay();
+
+	updateDisplay();
+}
+
+bool ChatUiLayer::isChatInfoEqual( const s_receive_chat_info &d1, const s_receive_chat_info &d2 )
+{
+	if(d1.send_role_id == d2.send_role_id &&
+		d1.receive_role_id == d2.receive_role_id &&
+		d1.send_channel == d2.send_channel &&
+		d1.send_role_name == d2.send_role_name &&
+		d1.receive_role_name == d2.receive_role_name &&
+		d1.chat_text == d2.chat_text &&
+		d1.is_auto_reply == d2.is_auto_reply &&
+		d1.is_gm == d2.is_gm)
+	{
+		return true;
+	}
+
+	return false;
+}
+
+void ChatUiLayer::updateDisplay()
+{
+	float frameHeight = _recordContent->getContentSize().height;
+	float decreeHight = _decreeList->GetVisibleHeight() > 0.0f ? _decreeList->GetVisibleHeight() + _decreeList->GetLineSpace() : 0.0f;
+	float chatListHeight = frameHeight - decreeHight;
+	float width = _recordContent->getContentSize().width;
+	//float viewHieght = _chatRecordscrollView->getViewSize().height;
+
+	_chatRecordscrollView->setViewSize(CCSize(width, chatListHeight));
+	_chatRecordList->setMinSize(CCSize(width, chatListHeight));
+	_chatRecordList->updateDisplay();
+
+	//小窗口;
+	//frameHeight = 88.0f;
+	decreeHight = _small_decreeList->GetVisibleHeight() > 0.0f ? _small_decreeList->GetVisibleHeight() + _small_decreeList->GetLineSpace() : 0.0f;
+	//chatListHeight = frameHeight - (decreeHight > 0.0f ? decreeHight : 0.0f);
+	chatListHeight= _small_sv_root->getContentSize().height - decreeHight;
+	if (chatListHeight <0)
+	{
+		chatListHeight = 0;
+	}
+	//viewHieght = _schatRecordscrollView->getViewSize().height;
+
+	_small_chatRecordscrollView->setViewSize(CCSize(_small_chatRecordscrollView->getViewSize().width,chatListHeight));
+	_small_chatRecordList->setMinSize(CCSize(/*400.0f*/_small_chatRecordscrollView->getViewSize().width,chatListHeight));
+
+	int count = _small_chatRecordList->getItemCount();
+	if(count >= 4)
+	{//最多保留3条;
+		_small_chatRecordList->removeItem(0);
+	}
+	_small_chatRecordList->updateDisplay();
+}
+
+void ChatUiLayer::changeShowState(bool flag)
+{
+	//_showState = !_showState;
+	_showState = flag;
+	if(!_showState)
+	{
+		showFrame(FT_Channel, false);
+		showFrame(FT_Input, false);
+		showFrame(FT_ChatRecord, false);
+		showFrame(FT_biaoqing, false);
+		showFrame(IT_btnYY, false);
+		showFrame(FT_btn, false);
+		showFrame(FT_btnWorld, false);
+		showFrame(FT_btnGuild, false);
+		showFrame(FT_btnTeam, false);
+	}
+	else
+	{
+		showFrame(FT_ChatRecord, true);
+		showFrame(FT_btn, true);
+		showFrame(FT_btnWorld, true);
+		showFrame(FT_btnGuild, true);
+		showFrame(FT_btnTeam, true);
+		if (_frame[FT_ChatRecord] != NULL)
+		{
+			CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&ChatUiLayer::doscheduleEvent), this);
+			float fTime = (float)getDecreeRemainTime();
+			if (fTime < 20.1f )
+			{
+				fTime = 20.1f;
+			}
+			CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&ChatUiLayer::doscheduleEvent), this, fTime, false);
+		}
+	}
+}
+
+void ChatUiLayer::sendMessageTo( unsigned int id, const std::string &roleName )
+{
+	CCControlButton *channelBtn = dynamic_cast<CCControlButton*>(_frame[FT_Input]->getChildByTag(IT_ChannelBtn));
+	channelBtn->setTitleColorForState(ccc3(0x5c, 0xff, 0xf2), CCControlStateNormal);
+	GET_UI(SystemUi,WCT_SystemUi)->resetShowStateNoChat();
+	CCSpriteFrame* spriteFrameN = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("world_btn_sl_n");
+	CCSpriteFrame* spriteFrameH = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("world_btn_sl_h");
+	channelBtn->setBackgroundSpriteFrameForState(spriteFrameN, CCControlStateNormal);
+	channelBtn->setBackgroundSpriteFrameForState(spriteFrameH, CCControlStateHighlighted);
+	//setBtnTitle(channelBtn, GET_STR(26));
+	siLiaoName = roleName;
+	std::string str = replaceStr(GET_STR(27), "***", roleName);
+	CLOSE_ALL_UI();
+	setInputAsSiliao(true, str);
+	showFrame(FT_Input, true);
+	showFrame(IT_btnYY, true);
+	showFrame(FT_ChatRecord, false);
+	showFrame(FT_btn, false);
+	showFrame(FT_btnWorld, false);
+	showFrame(FT_btnGuild, false);
+	showFrame(FT_btnTeam, false);
+
+	//_isChatUiOpen = true;
+	_targetId = id;
+	_sendChannel = ESCC_SiLiao;
+	//_channalBtnGroup->selectNull();
+
+	//隐藏相关ui;
+	World::getInstance()->getTaskTraceUi()->showUi(false);
+	World::getInstance()->getMiniMapUi()->showUi(false);
+	GET_UI(ShortCutUi, WCT_ShorCutUi)->showUi(false);
+	GET_UI(JoyStickUi, WCT_JoyStick)->showUi(false);
+}
+
+void ChatUiLayer::setInputAsSiliao( bool siliao, const std::string &text )
+{
+	if(siliao)
+	{
+		CCNode *contentNode = _frame[FT_Input]->getChildByTag(IT_InputContent);
+		CCLabelTTF *labelSiliao = dynamic_cast<CCLabelTTF*>(contentNode->getChildByTag(0));
+		labelSiliao->setString(text.c_str());
+		float width = labelSiliao->getContentSize().width;
+		//float height = labelSiliao->getContentSize().height;
+		//_inputLabel->setContentSize(contentNode->getContentSize());
+		_inputLabel->setContentSize(CCSize(contentNode->getContentSize().width - width, contentNode->getContentSize().height));
+		_inputLabel->setDimensions(CCSize(contentNode->getContentSize().width - width, contentNode->getContentSize().height));
+		_inputLabel->setPositionX(contentNode->getPositionX() + width + 3);
+		_inputLabel->setPositionY(contentNode->getPositionY() - 2.5f);
+	}
+	else
+	{
+		CCNode *contentNode = _frame[FT_Input]->getChildByTag(IT_InputContent);
+		CCLabelTTF *labelSiliao = dynamic_cast<CCLabelTTF*>(contentNode->getChildByTag(0));
+		labelSiliao->setString("");
+		_inputLabel->setContentSize(contentNode->getContentSize());
+		_inputLabel->setDimensions(contentNode->getContentSize());
+		_inputLabel->setPositionX(contentNode->getPositionX());
+		_inputLabel->setPositionY(contentNode->getPositionY() - 2.5f);
+		ChatMgr::getInstance()->setNeedPrivate(false);
+	}
+}
+
+void ChatUiLayer::showRecordFrame( bool show, bool anim )
+{
+	float posY = 0.0f;
+	if(show)
+	{
+		posY = fabs(_srcFramePos[FT_ChatRecord].y);
+	}
+	else
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+		posY = _srcFramePos[FT_ChatRecord].y;
+	}
+
+	if(anim)
+	{
+		float posX = _srcFramePos[FT_ChatRecord].x;
+		CCAction *moveTo = createMoveTo(_frame[FT_ChatRecord]->getPosition(), ccp(posX, posY), show ? 2 : 1);
+		_frame[FT_ChatRecord]->stopAllActions();
+		_frame[FT_ChatRecord]->runAction(moveTo);
+	}
+	else
+	{
+		CCFadeIn* fade1 = CCFadeIn::create(0.1f);
+		_frame[FT_ChatRecord]->runAction( CCSequence::createWithTwoActions(fade1, CCCallFunc::create(this, NULL)) );
+		_frame[FT_ChatRecord]->setPositionY(posY);
+		_frame[FT_ChatRecord]->setVisible(show);
+	}
+}
+
+void ChatUiLayer::showInputFrame( bool show, bool anim )
+{
+	float posY = 0.f;
+	if(show)
+	{
+		posY = _srcFramePos[FT_Input].y;
+	}
+	else
+	{
+		posY = -_srcFramePos[FT_Input].y;
+
+		if(_chatOpBtnGroup != NULL)
+			_chatOpBtnGroup->hideBtn();
+	}
+	_isChatUiOpen = show;
+	if(anim)
+	{
+		float posX = _srcFramePos[FT_Input].x;
+		//CCAction *moveTo = createMoveTo(_frame[FT_Input]->getPosition(), ccp(posX, posY));
+		float dt = ccpDistance(_frame[FT_Input]->getPosition(), ccp(posX, posY)) / 1000.f;
+		CCAction* seq=NULL;
+		CCMoveTo *moveTo = CCMoveTo::create(dt, ccp(posX, posY));
+		if (show)
+		{
+			showInput();
+			seq = moveTo;
+			//CCCallFunc* cb = CCCallFunc::create(this,callfunc_selector(ChatUiLayer::showInput));
+			//all = CCSequence::createWithTwoActions(moveTo,cb);
+		}
+		else
+		{
+			CCCallFunc* cb = CCCallFunc::create(this,callfunc_selector(ChatUiLayer::hideInput));
+			seq = CCSequence::createWithTwoActions(moveTo,cb);
+		}
+		_frame[FT_Input]->stopAllActions();
+		_frame[FT_Input]->runAction(seq);
+	}
+	else
+	{
+		_frame[FT_Input]->setPositionY(posY);
+	}
+}
+
+void ChatUiLayer::resetShowState()
+{
+	if(_isFrameShow[FT_Input])
+	{
+		onCloseBtnPressed1(NULL, CCControlEvent());
+	}
+}
+
+void ChatUiLayer::hidChatUi(bool isShowTask)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	showFrame(FT_Input, false);
+	showFrame(FT_ChatRecord, true);
+	showFrame(FT_Channel,false);
+	showFrame(FT_biaoqing, false);
+	showFrame(IT_btnYY, false);
+	showFrame(FT_btn, true);
+	showFrame(FT_btnWorld, true);
+	showFrame(FT_btnGuild, true);
+	showFrame(FT_btnTeam, true);
+	//_isChatUiOpen = false;
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&ChatUiLayer::doscheduleEvent), this);
+	float fTime = (float)getDecreeRemainTime();
+	if (fTime < 20.1f)
+	{
+		fTime = 20.1f;
+	}
+	if (_frame[FT_ChatRecord] != NULL)
+	{
+		CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&ChatUiLayer::doscheduleEvent), this, fTime, false);
+	}
+	//显示相关ui;
+	World::getInstance()->getTaskTraceUi()->showUi(isShowTask);
+	World::getInstance()->getMiniMapUi()->showUi(true);
+	GET_UI(ShortCutUi, WCT_ShorCutUi)->showUi(true);
+	GET_UI(JoyStickUi, WCT_JoyStick)->showUi(true);
+	resetZolder();
+}
+
+//录入物品信息
+void ChatUiLayer::InputItemInfo( f_item* pItem )
+{
+	std::string& GSstr = _inputLabel->GetGSString();
+
+	std::string equipName = get_item_title(pItem);
+	std::string item_rich_text = get_item_rich_text(pItem);
+
+	GSstr += item_rich_text;
+// 	if(MIsEquipment(pItem->get_item_type_id()))
+// 	{
+// //已完成 		cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// // 		cmd->set_integer32(1 , pItem->get_item_type_id());
+// // 		table = c_db_manager::getSingleton()->create_table();
+// // 		while(table->retrieve_row())
+// // 		{
+// // 			unsigned int idx = table->get_index("Name");
+// // 			equipName = table->get_text(idx);
+// // 		}
+// 		const EquipTypeData* data = PackageManager::getInstance()->getEquipTypeDataPointer(pItem->get_item_type_id());
+// 		if (data != NULL)
+// 		{
+// 			equipName = data->name;
+// 		}
+// 	}
+// 	else
+// 	{
+// 		c_sql_command* cmd = NULL;
+// 		c_sql_table* table = NULL;
+// 
+// 		cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM ItemTipData WHERE id = ?1");
+// 		cmd->set_integer32(1 , pItem->get_item_type_id());
+// 		table = c_db_manager::getSingleton()->create_table();
+// 		while(table->retrieve_row())
+// 		{
+// 			unsigned int idx = table->get_index("name");
+// 			equipName = table->get_text(idx);
+// 		}
+// 
+// 		c_db_manager::getSingleton()->destroy_table(table);
+// 		c_db_manager::getSingleton()->end_operation(cmd);
+// 	}
+// 	//[bing] 装备的解析格式为<i id=xxxx na=xxxx />
+// 	GSstr += "<iid=";
+// 	CCString* valstr = CCString::createWithFormat("%lld",pItem->get_data()->n64_serial); //INT64转string %lld
+// 	GSstr +=  valstr->getCString();
+// 	GSstr += " na=";
+// 	GSstr += equipName;
+// 	GSstr += "/>";
+
+	//[bing] 组装显示的字符串
+	std::ostringstream str;
+	str << _inputLabel->getString();
+	//str << "[";
+	str << equipName.c_str();
+	//str << "]";
+	_inputLabel->setString(str.str().c_str());
+}
+
+void ChatUiLayer::onBiaoqingBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	showFrame(FT_biaoqing, !_frame[FT_biaoqing]->isVisible());
+}
+
+void ChatUiLayer::doscheduleEvent( float ft )
+{
+
+	if (_frame[FT_ChatRecord])
+	{
+		int chatCount = _small_chatRecordList->getItemCount();
+		for(int i=0;i<chatCount;i++){
+			CCFadeOut* fade2 = CCFadeOut::create(1.0f);
+			ChatListItem *chatitem = _small_chatRecordList->getItem(i);
+			chatitem->getLabel()->runAction( CCSequence::createWithTwoActions(fade2, CCCallFunc::create(this, NULL)) );
+		}
+
+		CCFadeOut* fade1 = CCFadeOut::create(1.0f);
+		_frame[FT_ChatRecord]->runAction( CCSequence::createWithTwoActions(fade1, CCCallFunc::create(this, SEL_CallFunc(&ChatUiLayer::animationCallback))) );
+
+
+
+		CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&ChatUiLayer::doscheduleEvent), this);
+	}
+}
+
+void ChatUiLayer::animationCallback(){
+	float posY = 0.0f;
+	posY = _srcFramePos[FT_ChatRecord].y;
+	_frame[FT_ChatRecord]->setPositionY(posY);
+	_frame[FT_ChatRecord]->setVisible(false);
+	_frame[FT_ChatRecord]->stopAllActions();
+}
+
+void ChatUiLayer::setDecreeRemainTime(unsigned int timeRef,bool b_isHaveDecree /*= false*/)
+{
+	if (timeRef / 1000 > 45)
+	{
+		_DecreeRemainTime = 0;
+		return;
+	}
+	unsigned int time = 45 - timeRef / 1000;
+	//if (time > _DecreeRemainTime)
+	//{
+	_DecreeRemainTime = time;
+	//}
+
+	if (!b_isHaveDecree)
+	{
+		_DecreeRemainTime = 0;
+	}
+}
+
+void ChatUiLayer::resetChannelBtn()
+{
+	CCControlButton *channelBtn = dynamic_cast<CCControlButton*>(_frame[FT_Input]->getChildByTag(IT_ChannelBtn));
+	channelBtn->setTitleColorForState(ccc3(0x75, 0xcd, 0xff), CCControlStateNormal);
+	channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("near_btn_bg_n"), CCControlStateNormal);
+	channelBtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("near_btn_bg_h"), CCControlStateHighlighted);
+}
+
+void ChatUiLayer::setYYBeginTime()
+{
+#if 1
+	struct timeval beginTime;
+	gettimeofday(&beginTime, 0);
+	_yyBeginTime = beginTime.tv_sec*1000;
+#else
+	_yyBeginTime = clock();
+#endif
+}
+
+unsigned int ChatUiLayer::getYYSpeakTime()
+{
+	//unsigned int timeDif(0);
+	unsigned int curTime(0);
+#if 1
+	struct timeval time;
+	gettimeofday(&time, 0);
+	curTime = time.tv_sec*1000;
+#else
+	curTime = clock();
+#endif
+	return curTime - _yyBeginTime;
+}
+
+void ChatUiLayer::setYYBtnSpriteFrame(CCNode* node,const std::string btnSprite)
+{
+	CCSprite* pSprite = (CCSprite*)node;
+	CCSpriteFrame* yyFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(btnSprite.c_str());
+	if (pSprite && yyFrame)
+	{
+		pSprite->setDisplayFrame(yyFrame);
+	}
+}
+
+void ChatUiLayer::yyChatGo()
+{
+	_inputLabel->GetGSString();	//[bing] 现在获取发给服务器的真实字符串
+
+
+	if (_sendChannel == ESCC_Map)
+	{
+		ToolTip::getInstance()->push(GET_STR(7260));
+		return;
+	}
+	if (_sendChannel == ESCC_Guild)
+	{
+		//判断有没有公会
+		if (GuildMgr::getInstance()->getGuildId() <= 0)
+		{
+			ToolTip::getInstance()->push(GET_STR(2390));
+			return;
+		}
+	}
+	if (_sendChannel == ESCC_Team)
+	{
+		//判断有没有组队
+		if (!TeamMgr::getInstance()->is_inteam())
+		{
+			ToolTip::getInstance()->push(GET_STR(256));
+			return;
+		}
+	}
+	_isCheckYY = true;
+	std::ostringstream osType;
+	switch (_sendChannel)
+	{
+	case ESCC_SiLiao:
+		osType << ESCC_SiLiao;
+		break;
+	case ESCC_Qianli:
+	case ESCC_Decree:
+	case ESCC_World:
+		{
+			int yyLevel = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+			if (yyLevel < 25)
+			{
+				ToolTip::getInstance()->push(GET_STR(2370));
+				//return;
+			}
+			osType << "0";
+		}
+		break;
+	case ESCC_Guild:
+		osType << ESCC_Guild;
+		break;
+	case ESCC_Team:
+		osType << ESCC_Team;
+		break;
+	default:
+		{
+
+		}
+		break;
+	}
+
+	if (m_VoiceSendInterval.get_milliseconds() <= 1000)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["voice_click_frequently"]);
+		m_VoiceSendInterval.reset();
+		m_IsVoiceReturn = true;
+		return;
+	}
+
+	m_VoiceSendInterval.reset();
+	m_TouchLength.reset();
+
+	if (!osType.str().empty())
+	{
+#if ENABLE_GOTYE==1
+		VoiceMgr::getSingleton()->process(YYS_CHANNEL, YY_BEGIN_REC, osType.str());
+#endif
+	}
+}
+
+//modify by lpf
+void ChatUiLayer::showYYChatBtn( bool show )
+{
+	_isShowYYChatBtn = show;
+}
+
+void ChatUiLayer::resumeVoiceBtnSet()
+{
+	showVoiceBtn(_isShowYYChatBtn);
+}
+
+void ChatUiLayer::showVoiceBtn( bool show )
+{
+	showFrame(FT_btnWorld, show);
+	showFrame(FT_btnGuild, show);
+	showFrame(FT_btnTeam, show);
+}
+
+unsigned int ChatUiLayer::getPrivateId()
+{
+	return _targetId;
+}
+
+void ChatUiLayer::hideInput()
+{
+	_frame[FT_Input]->setVisible(false);
+}
+
+void ChatUiLayer::showInput()
+{
+	_frame[FT_Input]->setVisible(true);
+}
+
+void ChatUiLayer::onEnter()
+{
+	//setAllChildernButtonPriority(this, 1);
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this,1,true);
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+
+	REGISTER_EVENT(CoverChatUiMainSV,ChatUiLayer,onEventChangeSVPriority);
+	REGISTER_EVENT(show_chat_ui,ChatUiLayer,showChatUI);
+}
+
+void ChatUiLayer::onEventChangeSVPriority( CoverChatUiMainSV* pEvent )
+{
+	if (!_chatRecordscrollView->isTouchEnabled())
+	{
+		return;
+	}
+
+	if(pEvent->bCover)
+	{
+		//_oriPriorityLayer = this->getTouchPriority();
+		//this->setTouchPriority(2);
+
+		_oriPrioritySV = _chatRecordscrollView->getTouchPriority();
+		CCDirector::sharedDirector()->getTouchDispatcher()->setPriority(100,_chatRecordscrollView);
+		//_chatRecordscrollView->setTouchPriority(100);
+	}
+	else
+	{
+		//this->setTouchPriority(_oriPriorityLayer);
+		CCDirector::sharedDirector()->getTouchDispatcher()->setPriority(_oriPrioritySV,_chatRecordscrollView);
+
+		//_chatRecordscrollView->setTouchPriority(_oriPrioritySV);
+	}
+}
+
+bool ChatUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"small_sv_root",CCNode*,_small_sv_root);
+	return false;
+}
+
+void ChatUiLayer::showChatUI(show_chat_ui* trans)
+{
+	showFrame(FT_Input, true);
+	showFrame(IT_btnYY, true);
+	showFrame(FT_ChatRecord, false);
+	showFrame(FT_btn, false);
+	showFrame(FT_btnWorld, false);
+	showFrame(FT_btnGuild, true);
+	showFrame(FT_btnTeam, false);
+
+	//隐藏相关ui;
+	World::getInstance()->getTaskTraceUi()->showUi(false);
+	World::getInstance()->getMiniMapUi()->showUi(false);
+	GET_UI(ShortCutUi, WCT_ShorCutUi)->showUi(false);
+	GET_UI(JoyStickUi, WCT_JoyStick)->showUi(false);
+	m_updateMessage=true;
+	m_messageOut=false;
+
+	this->setZOrder(trans->zolder+1);
+	// 	setRecordFilter(ESCC_Guild);
+	// 	setFilterLabelHigh(IT_Guild);
+	// 	onGuildBtnPressed(NULL, NULL);
+}
+
+void ChatUiLayer::resetZolder()
+{
+	this->setZOrder(WZ_ChatUi);
+}
+
+std::string ChatUiLayer::get_item_rich_text( f_item* item )
+{
+	std::string GSstr /*= _inputLabel->GetGSString()*/;
+
+	std::string equipName = get_item_title(item);
+	//[bing] 装备的解析格式为<i id=xxxx na=xxxx />
+	GSstr += "<iid=";
+	CCString* valstr = CCString::createWithFormat("%lld",item->get_data()->n64_serial); //INT64转string %lld
+	GSstr +=  valstr->getCString();
+	GSstr += " na=";
+	GSstr += equipName;
+	GSstr += "/>";
+
+	return GSstr;
+}
+
+std::string ChatUiLayer::get_item_title( f_item* item )
+{
+	std::string equipName;
+
+	if(MIsEquipment(item->get_item_type_id()))
+	{
+		const EquipTypeData* data = PackageManager::getInstance()->getEquipTypeDataPointer(item->get_item_type_id());
+		if (data != NULL)
+		{
+			equipName = data->name;
+		}
+	}
+	else
+	{
+		c_sql_command* cmd = NULL;
+		c_sql_table* table = NULL;
+
+		cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM ItemTipData WHERE id = ?1");
+		cmd->set_integer32(1 , item->get_item_type_id());
+		table = c_db_manager::getSingleton()->create_table();
+		while(table->retrieve_row())
+		{
+			unsigned int idx = table->get_index("name");
+			equipName = table->get_text(idx);
+		}
+
+		c_db_manager::getSingleton()->destroy_table(table);
+		c_db_manager::getSingleton()->end_operation(cmd);
+	}
+
+	return equipName;
+}
+
+
+//-------------------- 自定义Label
+CustomLabel::CustomLabel():
+m_nFontSize(22),
+	_vMargin(4),
+	m_strFontName("DroidSansFallback.ttf"),
+	_tmpNormalStr(""),
+	_maxLineWidth(0.0f),
+	_nRow(0)
+{
+}
+
+CustomLabel::~CustomLabel()
+{
+}
+
+//void CustomLabel::SetString( std::string& str )
+//{
+//	removeAllChildren();
+//
+//	int nSize = str.size();
+//	if(!nSize)
+//		return;
+//
+//	std::string strfontname = m_strFontName;
+//
+//	int nFontSize = m_nFontSize;
+//
+//	//[bing] Label宽度 转换成每行最多能显示几个空格
+//	int nOneLineNum = (int)this->getContentSize().width / (nFontSize / 2);
+//
+//	int nApos = 0;
+//	int nBpos = 0;
+//	int nCpos = 0;
+//	int nDpos = 0;
+//	int nOneCharNumber = 0;
+//	int nRow = 0;
+//	int nState = 0;
+//	CCLabelTTF *ItemLink = NULL;
+//	std::list<CCLabelTTF*> LabelList;
+//	unsigned char NowChar = 0;
+//	ccColor3B Color3 = ccc3(0xFF, 0xFF, 0xFF);
+//
+//	while(nApos < nSize)
+//	{
+//		//先看看这是什么字符
+//		switch((unsigned char)str[nApos])
+//		{
+//		case '<':	//是一个标签
+//			{
+//				if(nApos + 10 < nSize && str[nApos + 1] == 'c')
+//				{
+//					if(nApos != nBpos)
+//					{
+//						//将前面的文字创建一个Label写入
+//						ItemLink = CCLabelTTF::create();
+//						ItemLink->setPosition( ccp( nDpos, 0) );  //设定位置
+//						ItemLink->setFontName( strfontname.c_str() );
+//						ItemLink->setAnchorPoint( ccp( 0.0f, 0.0f ) );
+//						ItemLink->setFontSize(nFontSize);
+//						ItemLink->setColor(Color3);
+//						ItemLink->setDimensions(CCSize(0, 0));
+//						ItemLink->setString( str.substr(nBpos, nApos - nBpos) .c_str() );
+//						nDpos += ItemLink->getContentSize().width;
+//						//nDpos = nCpos * (nFontSize / 2);
+//						//ItemLink->setContentSize( CCSize(nDpos , nFontSize) );			//设定大小
+//						this->addChild(ItemLink);
+//						LabelList.push_back(ItemLink);
+//					}
+//
+//					unsigned int dwColor = strtol(str.substr(nApos + 2, 8).c_str(), NULL, 16);
+//					Color3.r = (dwColor >> 16) & 0xFF;
+//					Color3.g = (dwColor >> 8) & 0xFF;
+//					Color3.b = dwColor & 0xFF;
+//
+//					nState = 1;
+//					nBpos = nApos + 10;
+//					nApos += 10;
+//					continue;
+//				}
+//			}
+//		case '?':	//一个标签的结束
+//			{
+//				if(nApos + 1 < nSize && nState == 1 && str[nApos + 1] == '>')
+//				{
+//					if(nApos != nBpos)
+//					{
+//						ItemLink = CCLabelTTF::create();
+//						ItemLink->setPosition( ccp( nDpos, 0) );  //设定位置
+//						ItemLink->setFontName( strfontname.c_str() );
+//						ItemLink->setAnchorPoint( ccp( 0.0f, 0.0f ) );
+//						ItemLink->setFontSize(nFontSize);
+//						ItemLink->setColor(Color3);
+//						ItemLink->setDimensions(CCSize(0, 0));
+//						ItemLink->setString( str.substr(nBpos, nApos - nBpos) .c_str() );
+//						nDpos += ItemLink->getContentSize().width;
+//						this->addChild(ItemLink);
+//						LabelList.push_back(ItemLink);
+//					}
+//
+//					Color3.r = 0xFF;
+//					Color3.g = 0xFF;
+//					Color3.b = 0xFF;
+//
+//					nState = 0;
+//					nBpos = nApos + 2;
+//					nApos += 2;
+//					continue;
+//				}
+//			}
+//		case 10:	//跳过回车
+//			{
+//				str[nApos] = ' ';
+//
+//				//换行
+//				//结束当前行
+//				if(nApos != nBpos)
+//				{
+//					ItemLink = CCLabelTTF::create();
+//					ItemLink->setPosition( ccp( nDpos, 0) );  //设定位置
+//					ItemLink->setFontName( strfontname.c_str() );
+//					ItemLink->setAnchorPoint( ccp( 0.0f, 0.0f ) );
+//					ItemLink->setFontSize(nFontSize);
+//					ItemLink->setColor(Color3);
+//					ItemLink->setDimensions(CCSize(0, 0));
+//					ItemLink->setString( str.substr(nBpos, nApos - nBpos) .c_str() );
+//					this->addChild(ItemLink);
+//					LabelList.push_back(ItemLink);
+//				}
+//
+//				nApos++;
+//				nBpos = nApos;
+//				nCpos = 0;
+//				nDpos = 0;
+//				nRow ++;
+//
+//				//[bing] 把之前的Label上移
+//				std::list<CCLabelTTF*>::iterator IT = LabelList.begin();
+//				while(IT != LabelList.end())
+//				{
+//					CCLabelTTF *ItemLink = *IT;
+//					ItemLink->setPositionY( ItemLink->getPositionY() + (nFontSize + _vMargin) );
+//					IT++;
+//				}
+//
+//				continue;
+//			}
+//		}
+//
+//		nOneCharNumber = utf8_skip_data[(unsigned char)str[nApos]];
+//		nCpos = nOneCharNumber > 1 ? nCpos + 2 : nCpos + 1;
+//
+//		//换行
+//		if(nOneLineNum < nCpos)
+//		{
+//			//结束当前行
+//			if(nApos != nBpos)
+//			{
+//				ItemLink = CCLabelTTF::create();
+//				ItemLink->setPosition( ccp( nDpos, 0) );  //设定位置
+//				ItemLink->setFontName( strfontname.c_str() );
+//				ItemLink->setAnchorPoint( ccp( 0.0f, 0.0f ) );
+//				ItemLink->setFontSize(nFontSize);
+//				ItemLink->setColor(Color3);
+//				ItemLink->setDimensions(CCSize(0, 0));
+//				ItemLink->setString( str.substr(nBpos, nApos - nBpos) .c_str() );
+//				this->addChild(ItemLink);
+//				LabelList.push_back(ItemLink);
+//			}
+//
+//			nBpos = nApos;
+//			nCpos = nOneCharNumber > 1 ? 2 : 1;
+//			nDpos = 0;
+//			nRow ++;
+//
+//			//[bing] 把之前的Label上移
+//			std::list<CCLabelTTF*>::iterator IT = LabelList.begin();
+//			while(IT != LabelList.end())
+//			{
+//				CCLabelTTF *ItemLink = *IT;
+//				ItemLink->setPositionY( ItemLink->getPositionY() + (nFontSize + _vMargin) );
+//				IT++;
+//			}
+//		}
+//
+//		nApos += nOneCharNumber;
+//	}
+//
+//	//最后一行
+//	ItemLink = CCLabelTTF::create();
+//	ItemLink->setPosition( ccp( nDpos, 0 ) );  //设定位置
+//	ItemLink->setFontName( strfontname.c_str() );
+//	ItemLink->setAnchorPoint( ccp( 0.0f, 0.0f ) );
+//	ItemLink->setFontSize(nFontSize);
+//	ItemLink->setColor(Color3);	
+//	ItemLink->setString( str.substr(nBpos, nApos - nBpos) .c_str() );
+//	ItemLink->setContentSize( CCSize(nCpos * (nFontSize / 2), nFontSize) );			//设定大小
+//	this->addChild(ItemLink);
+//
+//	nRow++;
+//
+//	this->setContentSize(CCSize(this->getContentSize().width, nRow * (nFontSize + _vMargin) - _vMargin));
+//}
+
+
+void CustomLabel::moveToNewLine(std::list<CCNode*>& list, float &curWidth)
+{
+	std::list<CCNode*>::iterator iter;
+	for (iter = list.begin(); iter != list.end(); ++iter) {
+		CCNode * node = *iter;
+		node->setPositionY(node->getPositionY()+(m_nFontSize+_vMargin));
+	}
+	curWidth = 0;
+	_nRow++;
+}
+
+void CustomLabel::addNewLabel(std::list<CCNode*>& list, const char* labelStr, const ccColor3B& color, float &curWidth)
+{
+	if (!string(labelStr).size()) return;
+
+	TTFConfig config;
+	config.fontFilePath=  FT_FONTFACE;
+	config.fontSize = m_nFontSize;
+	config.outlineSize = 1;
+
+	LabelFT *label = LabelFT::createWithTTF(config, labelStr);
+	int nOneLineNum = (int)this->getContentSize().width / (m_nFontSize / 2);
+	//int nLineCount = string(labelStr).size() / nOneLineNum;
+
+	if (curWidth + label->getContentSize().width > _maxLineWidth) {
+		this->moveToNewLine(list, curWidth);
+	}
+	label->setAnchorPoint(CCPointZero);
+	label->setPosition(ccp(curWidth, 0));
+	label->setTextColor(Helper::converColor3B_2_4B(color));
+	this->addChild(label);
+	list.push_back(label);
+	curWidth += label->getContentSize().width;
+}
+
+bool CustomLabel::isColor(std::string &str, int &curPos, std::list<CCNode*> &list, float &curWidth)
+{
+	//<c0xffffff blalblabla/>
+	int nSize = str.size();
+	if (curPos > nSize - 12)
+		return false;
+
+	std::string prefix = str.substr(curPos, 2);
+	if (prefix != "<c")
+		return false;
+
+	std::string tmpStr = str.substr(curPos+10, -1);
+	if (tmpStr.find("?>") == std::string::npos)
+		return false;
+
+	std::string colorHexStr = str.substr(curPos+2, 8);
+	unsigned int dwColor = strtol(colorHexStr.c_str(), NULL, 16);
+	ccColor3B color;
+	color.r = (dwColor >> 16) & 0xFF;
+	color.g = (dwColor >> 8) & 0xFF;
+	color.b = dwColor & 0xFF;
+
+	int endPos = tmpStr.find("?>");
+	std::string contentStr = tmpStr.substr(0, endPos);
+
+	this->addNewLabel(list, _tmpNormalStr.c_str(), ccWHITE, curWidth);
+
+	int nOneLineNum = (int)this->getContentSize().width / (m_nFontSize / 2);
+	int nLineCount = contentStr.size() / nOneLineNum + (contentStr.size() % nOneLineNum == 0 ? 0 : 1);
+
+
+	TTFConfig config;
+	config.fontFilePath=  FT_FONTFACE;
+	config.fontSize = m_nFontSize;
+	config.outlineSize = 1;
+	LabelFT *label = LabelFT::createWithTTF(config, contentStr);
+
+	if (curPos == 0 && label->getContentSize().width > _maxLineWidth) 
+		nLineCount--;
+
+	if (label->getContentSize().width > _maxLineWidth) {
+		label->setDimensions(_maxLineWidth, 0);
+		for (int i = 0; i < nLineCount - 1; ++i) {
+			this->moveToNewLine(list, curWidth);
+		}
+		label->setAnchorPoint(CCPointZero);
+		label->setPosition(ccp(curWidth, 0));
+		label->setTextColor(Helper::converColor3B_2_4B(color));
+		this->addChild(label);
+		list.push_back(label);
+		curPos += (contentStr.size() + 12);
+		return true;
+	}
+
+	this->addNewLabel(list, contentStr.c_str(), color, curWidth);
+	curPos += (contentStr.size() + 12);
+
+	return true;
+}
+
+bool CustomLabel::isEnter(std::string &str, int &curPos, std::list<CCNode*> &list, float &curWidth)
+{
+	if ((size_t)curPos >= str.size()-1)
+		return false;
+
+	if (str[curPos] == 10) {
+		str[curPos] = ' ';
+		this->addNewLabel(list, _tmpNormalStr.c_str(), ccWHITE, curWidth);
+		this->moveToNewLine(list, curWidth);
+		return true;
+	}
+	return false;
+}
+
+bool CustomLabel::isEnd(std::string &str, int &curPos)
+{
+	return (curPos == str.size()-1);
+}
+
+bool CustomLabel::isOutOfWidth(const char * str, float &curWidth)
+{
+	// 	TTFConfig config;
+	// 	config.fontFilePath=  FT_FONTFACE;
+	// 	config.fontSize = m_nFontSize;
+	// 	config.outlineSize = 1;
+	// 
+	// 	LabelFT *label = LabelFT::createWithTTF(config, str);
+
+	//std::string fullPath = CCFileUtils::sharedFileUtils()->fullPathForFilename(FT_FONTFACE);
+	float width =LabelFT::measureText(str,m_nFontSize,FT_FONTFACE);
+
+	if (curWidth + width > _maxLineWidth) {
+		return true;
+	}
+	return false;
+}
+
+void CustomLabel::SetString( std::string& str)
+{
+	this->removeAllChildren();
+
+	int nSize = str.size();
+	if(!nSize) return;
+
+	_maxLineWidth = this->getContentSize().width;
+	int curPos = 0;
+	_nRow = 0;
+	float curWidth = 0.0f;
+	std::list<CCNode*> labelList;
+	_tmpNormalStr = "";
+
+	while ((unsigned int)curPos < str.size()) {
+		if (this->isColor(str, curPos, labelList, curWidth)) {
+			_tmpNormalStr = "";
+		}
+		else if (this->isEnter(str, curPos, labelList, curWidth)) {
+			_tmpNormalStr = "";
+		}
+		else if (!this->isEnd(str, curPos)) {
+			int oneCharSize = utf8_skip_data[(unsigned char)str[curPos]];
+			std::string tmpNewStr = str.substr(curPos, oneCharSize);
+			std::string tmpStr = _tmpNormalStr + tmpNewStr;
+			if (this->isOutOfWidth(tmpStr.c_str(), curWidth)) {
+				this->addNewLabel(labelList, _tmpNormalStr.c_str(), ccWHITE, curWidth);
+				this->moveToNewLine(labelList, curWidth);
+				_tmpNormalStr = tmpNewStr;
+			}
+			else {
+				_tmpNormalStr = tmpStr;
+			}
+			curPos += oneCharSize;
+		}
+		else if (this->isEnd(str, curPos)) {
+			this->addNewLabel(labelList, _tmpNormalStr.c_str(), ccWHITE, curWidth);
+			break;
+		}
+	}
+	_nRow++;
+	this->setContentSize(CCSize(this->getContentSize().width, _nRow * (m_nFontSize + _vMargin) - _vMargin));
+}

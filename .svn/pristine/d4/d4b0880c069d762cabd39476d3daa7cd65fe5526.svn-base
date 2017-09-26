@@ -1,0 +1,499 @@
+#include "StorageUi.h"
+#include "CfgReader.h"
+#include "TouchSprite.h"
+#include "BaseDefine.h"
+#include "PackageManager.h"
+#include "DBMgr.h"
+#include "CfgReader.h"
+#include "ItemNode.h"
+#include "DropDragDelegate.h"
+#include "EquipTipUi.h"
+#include "ShopUi.h"
+#include "UiResourceMgr.h"
+#include "Auto_ActionMgr.h"
+#include "StallUi.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "StallMgr.h"
+#include "ItemTip.h"
+#include "World.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "GongfaTip.h"
+#include "PackageUi.h"
+
+#include "ZZZTitleTipsUI.h"
+#include "ZZZFLDTipsUI.h"
+#include "ZZZManorTipsUI.h"
+#include "ZZZSignTipsUI.h"
+
+CCNode * Storage::openUi()
+{
+	StorageUi *node = StorageUi::create();
+	_loadSpriteSheet = node->_loadSpriteSheet;
+
+	return node;
+}
+
+StorageUi * Storage::getUiLayer()
+{
+	return getUiNodeByTag<StorageUi>(WCT_StorageUi);
+}
+
+void Storage::updateData()
+{
+	StorageUi *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		ui->updatePackage();
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+bool StorageUi::init()
+{
+	_beginWithMovableItem = false;
+	_currentPage = 0;
+	_movingItem = NULL;
+	m_nTmpEquipLevel = -1;
+
+	if(!CCLayer::init())
+		return false;
+
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("StorageUiLayer", UiLayerLoader<StorageUiLayer>::loader());
+	ccNodeLoaderLibrary->registerCCNodeLoader("TouchSprite", TouchSpriteLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode * node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "storageui.ccbi").c_str());
+	_loadSpriteSheet = ccbReader->getLoadedSpriteSheet();
+	UiResourceMgr::getInstance()->retainPlistFile(_loadSpriteSheet);
+	ccbReader->release();
+	if(node != NULL) {
+		addChild(node);
+		_frame = static_cast<CCSprite*>(node->getChildByTag(0));
+		for(int i = 0; i < STORAGE_PAGE_COUNT; i ++)
+		{
+			_pageSprite[i] = static_cast<TouchSprite*>(_frame->getChildByTag(i + 100));
+			_pageSpriteH[i] = static_cast<CCSprite*>(_frame->getChildByTag(i + 1));
+		}
+		_pageSprite[0]->signalTouched.connect(this, &StorageUi::onPage1Select);
+		_pageSprite[1]->signalTouched.connect(this, &StorageUi::onPage2Select);
+		_pageSprite[2]->signalTouched.connect(this, &StorageUi::onPage3Select);
+		_pageSprite[3]->signalTouched.connect(this, &StorageUi::onPage4Select);
+		_pageSprite[4]->signalTouched.connect(this, &StorageUi::onPage5Select);
+	}
+
+	for(int i = 0; i < HORIZONTALCOUNT; i ++)
+	{
+		for(int j = 0; j < VERTICALCOUNT; j ++)
+		{
+			ItemNode *node = ItemNode::create();
+			float x = LEFTSPACE + i * HORIZONTALSPACE;
+			float y = _frame->getContentSize().height - (TOPSPACE + j * VERTICALSPACE);
+			node->setPosition(ccp(x, y));
+			node->setTag(j * HORIZONTALCOUNT + i + INT_BEGIN);
+			_frame->addChild(node, 1);
+		}
+	}
+
+	updatePackage();
+
+	_selectSprite = CCSprite::createWithSpriteFrameName("packageui_selectrect");
+	_frame->addChild(_selectSprite, 0);
+	_selectSprite->setVisible(false);
+
+	return true;
+}
+
+
+void StorageUi::updatePackage()
+{
+	//根据当前页数，初始化背包ui;
+	int size = PackageManager::getInstance()->getConSize(EICT_RoleWare);
+
+	for(int i = 0; i < HORIZONTALCOUNT; i ++)
+	{
+		for(int j = 0; j < VERTICALCOUNT; j ++)
+		{
+			int index = j * HORIZONTALCOUNT + i;
+			ItemNode *node = getItemNode(index);
+			node->stopAnimation();
+//			node->removeQualityBox();
+			if(index + _currentPage * HORIZONTALCOUNT * VERTICALCOUNT >= size)
+			{
+				node->setBlock();
+				node->setLock(true);
+				node->clearBagItem();
+			}
+			else
+			{
+				PackageManager::ItemMap *itemMap = PackageManager::getInstance()->getItemMap(EICT_RoleWare);
+				f_item *item = PackageManager::getInstance()->getItem(*itemMap, (short)(index + _currentPage * HORIZONTALCOUNT * VERTICALCOUNT));
+				node->stopAnimation();
+//				node->removeQualityBox();
+				if(item == NULL)
+				{
+					node->setBlank();
+					node->clearBagItem();
+				}
+				else
+				{
+					node->initWithItem(item);
+					node->setStorageItemEffect(dynamic_cast<f_equipment*>(item));
+				}
+			}
+		}
+	}
+}
+
+void StorageUi::onEnter()
+{
+	CCLayer::onEnter();
+	DropDragDelegate::getInstance()->addDropLayer(this);
+}
+
+void StorageUi::onExit()
+{
+	DropDragDelegate::getInstance()->removeDropLayer(this);
+	CCLayer::onExit();
+}
+
+void StorageUi::onPage1Select( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_11);//vv
+	setSelectPage(0);
+}
+
+void StorageUi::onPage2Select( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_11);//vv
+	setSelectPage(1);
+}
+
+void StorageUi::onPage3Select( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_11);//vv
+	setSelectPage(2);
+}
+
+void StorageUi::onPage4Select( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_11);//vv
+	setSelectPage(3);
+}
+
+void StorageUi::onPage5Select( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_11);//vv
+	setSelectPage(4);
+}
+
+void StorageUi::setSelectPage( int page )
+{
+	CC_ASSERT(page < STORAGE_PAGE_COUNT && page >= 0);
+	if(page == _currentPage)
+		return;
+
+	for(int i = 0; i < STORAGE_PAGE_COUNT; i ++)
+	{
+		_pageSpriteH[i]->setVisible(false);
+	}
+
+	_pageSpriteH[page]->setVisible(true);
+	_currentPage = page;
+
+	_selectSprite->setVisible(false);
+
+	updatePackage();
+}
+
+int StorageUi::getItemUnderPoint( const CCPoint &pos )
+{
+	for(int i = 0; i < HORIZONTALCOUNT; i ++)
+	{
+		for(int j = 0; j < VERTICALCOUNT; j ++)
+		{
+			float x = LEFTSPACE + i * HORIZONTALSPACE;
+			float y = _frame->getContentSize().height - (TOPSPACE + j * VERTICALSPACE);
+			CCRect rect(x - ITEMNODE_CONTENTWIDTH / 2, y - ITEMNODE_CONTENTHEIGHT / 2, ITEMNODE_CONTENTWIDTH, ITEMNODE_CONTENTHEIGHT);
+			if(rect.containsPoint(pos))
+			{
+				return j * HORIZONTALCOUNT + i + _currentPage * HORIZONTALCOUNT * VERTICALCOUNT;
+			}
+		}
+	}
+
+	return -1;
+}
+
+bool StorageUi::setItemSelect( int index )
+{
+	ItemNode *itemNode = getItemNode(index);
+	if(itemNode == NULL)
+		return false;
+
+	index -= _currentPage * HORIZONTALCOUNT * VERTICALCOUNT;
+
+	int y = index / HORIZONTALCOUNT;
+	int x = index % HORIZONTALCOUNT;
+
+	CCPoint pos(LEFTSPACE + x * HORIZONTALSPACE, 
+		_frame->getContentSize().height - (TOPSPACE + y * VERTICALSPACE));
+	_selectSprite->setPosition(pos);
+
+	if(!_selectSprite->isVisible())
+		_selectSprite->setVisible(true);
+
+	_selectIndex = index;
+	return true;
+}
+
+ItemNode * StorageUi::getItemNode( int index )
+{
+	if(index < 0 || index >= HORIZONTALCOUNT * VERTICALCOUNT)
+		return NULL;
+
+	return static_cast<ItemNode*>(_frame->getChildByTag(index + INT_BEGIN));
+}
+
+cocos2d::CCPoint StorageUi::getIndexPosition( int index )
+{
+	//int page = index / (HORIZONTALCOUNT * VERTICALCOUNT);
+	int idx = index % (HORIZONTALCOUNT * VERTICALCOUNT);
+	ItemNode *itemNode = getItemNode(idx);
+	return itemNode->getPosition();
+}
+
+short StorageUi::getItem( CCTouch &touch, eGetResult &result )
+{
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(&touch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		int index = getItemUnderPoint(framePoint);
+		result = GR_SUCCESS;
+		return index;
+	}
+
+	result = GR_ERROR;
+	return -1;
+}
+
+short StorageUi::getItemBegin( CCTouch &touch, eGetResult &result )
+{
+	return getItem(touch, result);
+}
+
+short StorageUi::getItemEnd( CCTouch &touch, eGetResult &result, EItemConType src, short itemIndex )
+{
+	return getItem(touch, result);
+}
+
+bool StorageUi::onClicked( CCTouch &touch )
+{
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(&touch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		int index = getItemUnderPoint(framePoint);
+		//setItemSelect(index);
+		if(index >= PackageManager::getInstance()->getConSize(EICT_RoleWare))
+		{
+			//int addNum = index - PackageManager::getInstance()->getConSize(EICT_RoleWare) + 1;
+			//PackageManager::getInstance()->doAddBlank(1,addNum);
+			OpenPackageUi::getInstace()->setType(1);
+			OpenPackageUi::getInstace()->open();
+			
+		}
+
+		f_item *item = PackageManager::getInstance()->getItem(EICT_RoleWare, (short)index);
+		if(item != NULL)
+		{
+			CCPoint pos = getIndexPosition(index);
+			pos = _frame->convertToWorldSpace(pos);
+			if(MIsEquipment(item->get_item_type_id()))
+			{
+				const ItemTypeData &typeData =PackageManager::getInstance()->getItemTypeData(item->get_item_type_id());
+				ePackageItemType eItemType = typeData.type;
+				if (PIT_Kungfu == eItemType  || eItemType == PIT_KungfuExp)
+				{
+					//功法ui显示; 
+					GongfaTip::getInstace()->open();
+					GongfaTip::getInstace()->setPosition(pos);
+					GongfaTip::getInstace()->setData(dynamic_cast<f_equipment*>(item));
+				}
+				else
+				{
+					EquipTipUiLayer *ui = EquipTipUi::create();
+					if(IS_UI_OPEN(WCT_PACKAGEUI))
+					{
+						ui->showUi(dynamic_cast<f_equipment*>(item),false,false);				//【Ji：】
+						ui->setAllButtonOff(WCT_PACKAGEUI);
+					}
+					else
+					{
+						ui->showUi(dynamic_cast<f_equipment*>(item),false);				//【Ji：】
+					}
+				}
+			}
+			else
+			{
+				bool bag_is_open =IS_UI_OPEN(WCT_PACKAGEUI);
+				switch (item->get_item_type_id())
+				{
+				case ZZZTITLEZHAN:
+				case ZZZTITLEFA:
+				case ZZZTITLEDAO:
+					{
+						ZZZTitleTipsUI* node = ZZZTitleTipsUI::getInstance()->open();
+						node->setData(item->get_item_type_id(),index);
+						node->setPlace(pos);
+						node->set_btn_type(bag_is_open?eToPackage:eHideAll);
+						//node->setButtonVisible(true);
+						//ZZZTitleTipsUI::getInstance()->setData(m_dwTypeId);
+					}
+					break;
+				case ZZZFLYDRAGON:
+					{
+						ZZZFLDTipsUI* node = ZZZFLDTipsUI::getInstance()->open();
+						node->setData(index);
+						node->setPlace(pos);
+						node->set_btn_type(bag_is_open?eToPackage:eHideAll);
+						//node->setButtonVisible(true);
+					}
+					break;
+				case ZZZMANOR:
+					{
+						ZZZManorTipsUI* node = ZZZManorTipsUI::getInstance()->open();
+						node->setData(index);
+						node->setPlace(pos);
+						node->set_btn_type(bag_is_open?eToPackage:eHideAll);
+						//node->setButtonVisible(true);
+					}
+					break;
+				case ZZZSIGN:
+					{
+						ZZZSignTipsUI* node = ZZZSignTipsUI::getInstance()->open();
+						node->setData(index);
+						node->setPlace(pos);
+						node->set_btn_type(bag_is_open?eToPackage:eHideAll);
+						//node->setButtonVisible(true);
+					}
+					break;
+				default:
+					{
+						ItemTip::getInstace()->open();
+						ItemTip::getInstace()->setPosition(pos);
+						//ItemTip::getInstace()->setDataId(item->get_item_type_id());
+						ItemTip::getInstace()->setData(item);
+						if(IS_UI_OPEN(WCT_PACKAGEUI))
+						{
+							ItemTip::getInstace()->showTypeButton(WCT_PACKAGEUI);
+						}
+						else
+						{
+							ItemTip::getInstace()->hideOpBtn();
+						}
+					}
+				}
+			}
+		}
+
+
+		return true;
+	}
+
+	return false;
+}
+
+bool StorageUi::onDoubleClicked( CCTouch &touch )
+{
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(&touch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		int index = getItemUnderPoint(framePoint);
+		if(index >= PackageManager::getInstance()->getConSize(EICT_RoleWare))
+		{
+			//int addNum = index - PackageManager::getInstance()->getConSize(EICT_RoleWare) + 1;
+			//PackageManager::getInstance()->doAddBlank(1,addNum);
+			OpenPackageUi::getInstace()->setType(1);
+			OpenPackageUi::getInstace()->open();
+			
+			CCLOG("double click");
+		}
+	//	f_item *item = PackageManager::getInstance()->getItem(EICT_RoleWare, (short)index);
+	//	if(item != NULL)
+	//	{
+	//		if(MIsEquipment(item->get_item_type_id()))
+	//		{//双击装备
+	//			int posIndex = 0;
+	//			c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+	//			cmd->set_integer32(1 , item->get_item_type_id());
+	//			c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	//			while(table->retrieve_row())
+	//			{
+	//				unsigned int idx = table->get_index("PosIndex");
+	//				posIndex = table->get_integer32(idx);
+	//			}
+	//			c_db_manager::getSingleton()->destroy_table(table);
+	//			c_db_manager::getSingleton()->end_operation(cmd);
+
+	//			PackageManager::getInstance()->changeItemPosition(EICT_RoleWare, EICT_Equip, (short)index, (short)posIndex);
+	//		}
+	//		else
+	//		{//双击使用
+	//			PackageManager::getInstance()->useBagItem(index);
+	//			//TODO:取消挂机
+	//			if (AutoActionMgr::getInstance()->Get_Auto_Action())//gx add
+	//			{
+	//				AutoActionMgr::getInstance()->Set_Auto_Action(false);
+	//			}
+	//		}
+	//	}
+
+		return true;
+	}
+
+	return false;
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler StorageUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler StorageUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", StorageUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSortBtnPressed", StorageUiLayer::onSortBtnPressed);
+	return NULL;
+}
+
+bool StorageUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+
+void StorageUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	return;
+}
+
+void StorageUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);//vv
+	CLOSE_UI(WCT_StorageUi);
+}
+
+void StorageUiLayer::onSortBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_11);//vv
+	PackageManager::getInstance()->reorderPackage(EICT_RoleWare);
+}

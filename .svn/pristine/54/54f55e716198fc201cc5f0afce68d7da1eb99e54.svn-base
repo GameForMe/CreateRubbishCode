@@ -1,0 +1,3396 @@
+#include "EquipFusionUi.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "EquipFusionManager.h"
+#include "EquipFusionItemNode.h"
+#include "ToolTip.h"
+#include "DBMgr.h"
+#include "WorldPacket.h"
+#include "TCPClient.h"
+#include "CommonMsgDefine.h"
+#include "PackageManager.h"
+#include "ItemMarixLayer.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "NumericalIniMgr.h"
+#include "NewPlayerGuide.h" 
+#include "MessageBoxUi.h"
+#include "UiResourceMgr.h"
+#include "CfgReader.h"
+#include "StringMgr.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ClientCfg.h"
+#include "PackageManager.h"
+#include "UiResourceMgr.h"
+#include "EquipLevelUpNoticeMgr.h"
+#include "ItemTip.h"
+#include "CheckButton.h"
+#include "TouchSprite.h"
+#include "PackageProto.h"
+#include "Base.h"
+#include "f_string_table.h"
+#include "f_event_system.h"
+#include "GameEventDefine.h"
+#include "f_string_util.h"
+#include "Helper.h"
+#include "PlacardManager.h"
+#include "SecondVerifyMgr.h"
+//////////////////////////////////////////////////////////////////////////
+
+EquipFusionUi::EquipFusionUi()
+{
+
+}
+
+EquipFusionUi::~EquipFusionUi()
+{
+
+}
+
+CCNode* EquipFusionUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["EquipFusionUiLayer"] = UiLayerLoader<EquipFusionUiLayer>::loader();
+	nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+	nodeLoaders["CheckButton"] = CheckButtonLoader::loader();
+	CCNode* pNode = readUiFromCCBI("EquipmentSmelt", nodeLoaders, _loadSpriteSheet);
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+	std::string sSEFightFire = sSEDir + "E1_50.plist";
+	std::string effect=sSEDir + "E1_129.plist";
+	std::string fontEffect=sSEDir + "E1_130.plist";
+	std::string equipCleanEffect=sSEDir + "E1_227.plist";
+
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEFightFire.c_str());
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(effect.c_str());
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(fontEffect.c_str());
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(equipCleanEffect.c_str());
+
+	_loadSpriteSheet.insert(sSEFightFire);
+	_loadSpriteSheet.insert(effect);
+	_loadSpriteSheet.insert(fontEffect);
+
+	return pNode;
+}
+
+void EquipFusionUi::updateFusionQianData()
+{
+	EquipFusionUiLayer *ui = getUiNodeByTag<EquipFusionUiLayer>(WCT_EquipFusionUi);
+	if(ui != NULL)
+	{
+		ui->SetFusionQianData();
+	}
+}
+
+void EquipFusionUi::updateNum()
+{
+	EquipFusionUiLayer *ui = getUiNodeByTag<EquipFusionUiLayer>(WCT_EquipFusionUi);
+	if(ui != NULL)
+	{
+		ui->updateNum();
+	}
+}
+
+void EquipFusionUi::closeUI()
+{
+	UiInterface::closeUI();
+	if(World::getInstance()->getScene()->getChildByTag(WCT_EquipFusionTips))
+	{
+		FrameSprite* equipFusionTips = (FrameSprite*)World::getInstance()->getScene()->getChildByTag(WCT_EquipFusionTips);
+		equipFusionTips->setTouchEnable(false);
+		equipFusionTips->setVisible(false);
+		equipFusionTips->removeFromParentAndCleanup(true);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+bool EquipFusionUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if ( !isVisible() || !isRunning() || !hasVisibleParents() )
+	{
+		return false;
+	}
+	_frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	//if(frameRect.containsPoint(framePoint))
+	if (isTouchOnNodeContent(equipfu,pTouch))
+	{
+		equipItem->convertTouchToNodeSpace(pTouch);
+		CCRect stuff1(0.0f,0.0f,equipItem->getContentSize().width,equipItem->getContentSize().height);
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+		//_stuffIndex = 1;
+		if (xinghunIconId!=0)
+		{
+			/*
+			// 				EquipLevelupNoticeUiMgr::getInstance()->setTouchIndex(0);//EUUT_Stuff1是从1开始的
+			// 				EquipLevelupNoticeUiMgr::getInstance()->setNoticeDataItemId(xinghunIconId);
+			// 				EquipLevelupNoticeUiMgr::getInstance()->setNeedItemNum(0,1);//设置星魂购买界面的数量
+			// 				EquipLevelupNoticeUiMgr::getInstance()->setNoticeDataItemYuanbao(20);
+			// 				EquipLevelupNoticeUiMgr::getInstance()->setGotoBtnShow(false);
+			// 				EquipLevelupNoticeUiMgr::getInstance()->setOpenUiId(WCT_EquipFusionUi);
+			// 				EquipLevelupNoticeUiMgr::getInstance()->setSwitchUiTag(WCT_EquipFusionUi);
+			// 				OPEN_UI(WCT_EQUIPLEVELUPNOTICEUI);*/
+			ItemTip::getInstace()->open();
+			ItemTip::getInstace()->setPosition((equipfu->getParent())->convertToWorldSpace(equipfu->getPosition()));
+			ItemTip::getInstace()->setDataId(runeId);
+			//ItemTip::getInstace()->setDataId(funsinId);
+			ItemTip::getInstace()->showTipsButton(PackageManager::getInstance()->getItemTypeData(runeId).byTipsBtnIdx);
+			//ItemTip::getInstace()->showTipsButton(PackageManager::getInstance()->getItemTypeData(funsinId).byTipsBtnIdx);
+			ItemTip::getInstace()->setOpenUiId(WCT_EquipFusionUi);
+			return true;
+		}
+	}
+	return true;
+}
+
+//unused
+/*
+void EquipFusionUiLayer::updateItemData()
+{
+int temp = EquipFusionManager::getInstance()->getItemTagIndex();
+std::map<short, f_item*>::iterator iter = _items.find(temp);
+f_equipment* equip = dynamic_cast<f_equipment*>(iter->second);
+if (!IS_VALID_PTR(equip))
+return;
+
+equipName->setString(getEquipName(equip->get_item_id()).c_str());
+
+fightCapacity->setString(CCString::createWithFormat("%d",equip->get_equip()->nRating)->m_sString.c_str());
+_fightNumBLabel->setString(CCString::createWithFormat("%d",equip->get_equip()->nRating)->m_sString.c_str());
+
+//设置品质文字
+EItemQuality EIQ = (EItemQuality)equip->get_equip()->byQuality;
+equipfu->initWithFile(setItemFuIcon(EIQ).c_str());
+runeName->setString(runeNameStr.c_str());
+//显示符文的数量
+//int itemNum = PackageManager::getInstance()->getItemNumber(EICT_Bag,runeId);
+//int tempEquipLv = getEquipLv(equip->get_item_type_id());
+//runeNum->setString(CCString::createWithFormat("%d%s%d",itemNum,"/",1)->getCString());
+updateNum();
+qualityLift->setString(fusionConverQualityToString(EIQ).c_str());
+EIQ = (EItemQuality)(equip->get_equip()->byQuality + 1);
+qualityRight->setString(fusionConverQualityToString((EIQ)).c_str());
+qualityMiddle->setString(fusionConverQualityToString((EIQ)).c_str());
+//setExp(equip->get_fusionexp(), 100);
+//equip->get_equip()->EquipAttitionalAtt
+tagRoleAttEffect tempTagRoleAttEffect;
+int index = 1;
+int re = equip->get_equip()->nFusionExp;//nSpecifyAtt
+for (INT32 i = MAX_BASE_ATT; i < MAX_ADDITIONAL_EFFECT ; i++)
+{
+tempTagRoleAttEffect = equip->get_equip()->EquipAttitionalAtt[i];
+//eRoleAtt
+//equipaddatt  newatt ()eRoleAtt;
+if (tempTagRoleAttEffect.eRoleAtt != NULL && tempTagRoleAttEffect.nValue > 0)
+{
+switch(index)
+{
+case 1:
+equipAttr_1->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+equipBtn1->setVisible(true);
+if ((re & (1 << i)) != 0)
+//newatt
+{
+updateLock("smeltui_suoding",equipBtn1);
+equipAttFlag1=1;
+}
+else
+{
+updateLock("smeltui_kaisuo",equipBtn1);
+equipAttFlag1=0;
+}
+break;
+case 2:
+equipAttr_2->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+equipBtn2->setVisible(true);
+if ((re & (1 << i)) != 0)
+{
+updateLock("smeltui_suoding",equipBtn2);
+equipAttFlag2=1;
+}
+else
+{
+updateLock("smeltui_kaisuo",equipBtn2);
+equipAttFlag2=0;
+}
+break;;
+case 3:
+equipAttr_3->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+equipBtn3->setVisible(true);
+if ((re & (1 << i)) != 0)
+{
+updateLock("smeltui_suoding",equipBtn3);
+equipAttFlag3=1;
+}
+else
+{
+updateLock("smeltui_kaisuo",equipBtn3);
+equipAttFlag3=0;
+}
+break;;
+case 4:
+equipAttr_4->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+equipBtn4->setVisible(true);
+if ((re & (1 << i)) != 0)
+{
+updateLock("smeltui_suoding",equipBtn4);
+equipAttFlag4=1;
+}
+else
+{
+updateLock("smeltui_kaisuo",equipBtn4);
+equipAttFlag4=0;
+}
+break;;
+case 5:
+equipAttr_5->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+equipBtn5->setVisible(true);
+if ((re & (1 << i)) != 0)
+{
+updateLock("smeltui_suoding",equipBtn5);
+equipAttFlag5=1;
+}
+else
+{
+updateLock("smeltui_kaisuo",equipBtn5);
+equipAttFlag5=0;
+}
+break;;
+//case 6:
+//	equipAttr_6->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+//	break;;
+}
+++index;
+}
+}
+//INT64 n64DecSilver = 20; //扣除的金币
+//expenditure->setString(CCString::createWithFormat("%d",n64DecSilver)->getCString());//获取花费金币数
+UpdateFusionFuNum();
+UpDatearrows();
+}
+*/
+
+//unused
+
+// void EquipFusionUiLayer::setItemData(f_equipment* equip)
+// {
+// 	if (!IS_VALID_PTR(equip))
+// 		return;
+// 
+// 	equipName->setString(getEquipName(equip->get_item_id()).c_str());
+// 
+// 	fightCapacity->setString(CCString::createWithFormat("%d",equip->get_equip()->nRating)->m_sString.c_str());
+// 	_fightNumBLabel->setString(CCString::createWithFormat("%d",equip->get_equip()->nRating)->m_sString.c_str());
+// 	//设置品质文字
+// 	EItemQuality EIQ = (EItemQuality)equip->get_equip()->byQuality;
+// 	qualityLift->setString(fusionConverQualityToString(EIQ).c_str());
+// 	EIQ = (EItemQuality)(equip->get_equip()->byQuality + 1);
+// 	qualityRight->setString(fusionConverQualityToString((EIQ)).c_str());
+// 	qualityMiddle->setString(fusionConverQualityToString((EIQ)).c_str());
+// 	//setExp(equip->get_fusionexp(), 100);
+// 	//equip->get_equip()->EquipAttitionalAtt
+// 	tagRoleAttEffect tempTagRoleAttEffect;
+// 	int index = 1;
+// 	for (INT32 i = MAX_BASE_ATT; i < MAX_ADDITIONAL_EFFECT ; i++)
+// 	{
+// 		tempTagRoleAttEffect = equip->get_equip()->EquipAttitionalAtt[i];
+// 		if (tempTagRoleAttEffect.eRoleAtt != NULL && tempTagRoleAttEffect.nValue > 0)
+// 		{
+// 			switch(index)
+// 			{
+// 			case 1:
+// 				equipAttr_1->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+// 				break;
+// 			case 2:
+// 				equipAttr_2->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+// 				break;;
+// 			case 3:
+// 				equipAttr_3->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+// 				break;;
+// 			case 4:
+// 				equipAttr_4->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+// 				break;;
+// 			case 5:
+// 				equipAttr_5->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+// 				break;;
+// 			//case 6:
+// 			//	equipAttr_6->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+// 			//	break;;
+// 			}
+// 			++index;
+// 		}
+// 	}
+// 	//INT64 n64DecSilver = 20; //扣除的金币
+// 	//expenditure->setString(CCString::createWithFormat("%d",20*fac_str[n64DecSilver])->getCString());//获取花费金币数
+// 	UpdateFusionFuNum();
+// 	CCSpriteFrame *framelock=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("smeltui_suoding");
+// 	CC_ASSERT(framelock!=NULL);
+// 	equipBtn2->setBackgroundSpriteFrameForState(framelock, CCControlStateNormal);
+// 	equipBtn2->setBackgroundSpriteFrameForState(framelock,CCControlStateHighlighted);
+// }
+
+void EquipFusionUiLayer::InitItemData(int nRefreshFlag)
+{
+	fac_str[0]=1;
+	fac_str[1]=2;
+	fac_str[2]=4;
+	fac_str[3]=8;
+	fac_str[4]=16;
+	f_equipment* equip = EquipFusionManager::getInstance()->getEquipment();
+
+	if (!IS_VALID_PTR(equip))
+		return;
+	//initAttrNameStr();
+	//加载装备图片
+	const ItemTypeData &typeDataItem  = PackageManager::getInstance()->getItemTypeData(equip->get_item_type_id());
+	std::string equipIconFileName = CFGReader::instance()->get_profile_string("Art", "ICON", "") + typeDataItem.icon + std::string(".png");
+	//加载装备名字
+	equipName->setString(getEquipName(equip->get_item_type_id()).c_str());
+	equipFusionName->setString(equipName->getString());
+	fightCapacity->setString("");
+	_fightNumBLabel->setString(CCString::createWithFormat("%d",equip->get_equip()->nRating)->m_sString.c_str());
+	//设置品质文字
+	EItemQuality EIQ = (EItemQuality)equip->get_equip()->byQuality;
+	equipfu->initWithFile(setItemFuIcon(EIQ).c_str());
+	runeName->setString(runeNameStr.c_str());
+	//显示符文的数量
+	/*int itemNum = PackageManager::getInstance()->getItemNumber(EICT_Bag,runeId);
+	int tempEquipLv = getEquipLv(equip->get_item_type_id());
+	runeNum->setString(CCString::createWithFormat("%d%s%d",itemNum,"/",1)->getCString());*/
+	updateNum();
+	//qualityLift->setString(fusionConverQualityToString(EIQ).c_str());
+	EIQ = (EItemQuality)(equip->get_equip()->byQuality + 1);
+	if(EIQ == EIQ_End)
+	{
+		EIQ = EIQ_Quality5;
+	}
+	fusionConverQualityToString((EIQ));
+	CCString* qualityBGStr = CCString::createWithFormat("icon_block%d", EIQ);
+	CCSpriteFrame* qualityFrame = PackageManager::getInstance()->getIconFrameByName(qualityBGStr->getCString());
+	if(qualityFrame != NULL)
+	{
+		//equipItem->initWithFile(equipIconFileName.c_str());
+		equipItem->initWithSpriteFrame(qualityFrame);
+		CCSprite* qualityFramSprite = CCSprite::create();
+		qualityFramSprite->initWithFile(equipIconFileName.c_str());
+		equipItem->addChild(qualityFramSprite);
+		float scaleX = qualityFramSprite->getContentSize().width / equipItem->getContentSize().width;
+		float scaleY = qualityFramSprite->getContentSize().height / equipItem->getContentSize().height;
+		equipItem->setScaleX(scaleX);
+		equipItem->setScaleY(scaleY);
+		//qualityFramSprite->setPosition(ccp(equipItem->getPositionX() * 0.1,equipItem->getPositionY()));
+		qualityFramSprite->setAnchorPoint(ccp(0.01,0.01));
+	}
+	//qualityRight->setString(fusionConverQualityToString((EIQ)).c_str());
+	//qualityMiddle->setString(fusionConverQualityToString((EIQ)).c_str());
+
+	tagRoleAttEffect tempTagRoleAttEffect;
+	int index = 1;
+	int re = equip->get_equip()->nFusionExp;
+	//std::string equipAttBeforeStr;
+	for (INT32 i = MAX_BASE_ATT; i < MAX_ADDITIONAL_EFFECT ; i++)
+	{
+		tempTagRoleAttEffect = equip->get_equip()->EquipAttitionalAtt[i];
+		EquipAddAtt equipAtt = EquipFusionManager::getInstance()->ERA2EAA(tempTagRoleAttEffect.eRoleAtt);
+
+		if (tempTagRoleAttEffect.eRoleAtt != ERA_Null && tempTagRoleAttEffect.nValue > 0)
+		{
+			switch(index)
+			{
+			case 1:
+				//label，显示附加属性类型
+				//equipAttBeforeStr = equipAttr_1->getString();
+				equipAttr_1->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+				equipAttr_1->setVisible(true);
+				changeEquipAttDisplayData(0,equipAtt);
+				equipBtn1->setVisible(true);
+				if ((re & (1 << i)) != 0)
+				{
+					updateLock("smeltui_suoding",equipBtn1);
+					equipAttFlag1=1;
+					saveLockedEquipAttType(equipAtt);
+				}
+				else
+				{
+					if(nRefreshFlag==2)
+						showEquipCleanEffect(equipAttr_1/*, equipAttBeforeStr*/);
+					updateLock("smeltui_kaisuo",equipBtn1);
+					equipAttFlag1=0;
+					eraseLockedEquipAttType(equipAtt);
+
+					//equipAttListDefualt.push_back(equipAtt);
+				}
+				break;
+			case 2:
+				//equipAttBeforeStr = equipAttr_2->getString();
+				equipAttr_2->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+				equipAttr_2->setVisible(true);
+				equipBtn2->setVisible(true);
+				changeEquipAttDisplayData(1,equipAtt);
+				if ((re & (1 << i)) != 0)
+				{
+					updateLock("smeltui_suoding",equipBtn2);
+					equipAttFlag2=1;
+					saveLockedEquipAttType(equipAtt);
+				}
+				else
+				{
+					if(nRefreshFlag==2)
+						showEquipCleanEffect(equipAttr_2/*, equipAttBeforeStr*/);
+					updateLock("smeltui_kaisuo",equipBtn2);
+					equipAttFlag2=0;
+					eraseLockedEquipAttType(equipAtt);
+					//equipAttListDefualt.push_back(equipAtt);
+				}
+				break;;
+			case 3:
+				//equipAttBeforeStr = equipAttr_3->getString();
+				equipAttr_3->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+				equipAttr_3->setVisible(true);
+				equipBtn3->setVisible(true);
+				changeEquipAttDisplayData(2,equipAtt);
+				if ((re & (1 << i)) != 0)
+				{
+					updateLock("smeltui_suoding",equipBtn3);
+					equipAttFlag3=1;
+					saveLockedEquipAttType(equipAtt);
+				}
+				else
+				{
+					if(nRefreshFlag==2)
+						showEquipCleanEffect(equipAttr_3/*, equipAttBeforeStr*/);
+					updateLock("smeltui_kaisuo",equipBtn3);
+					equipAttFlag3=0;
+					eraseLockedEquipAttType(equipAtt);
+					//equipAttListDefualt.push_back(equipAtt);
+				}
+				break;;
+			case 4:
+				//equipAttBeforeStr = equipAttr_4->getString();
+				equipAttr_4->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+				equipAttr_4->setVisible(true);
+				equipBtn4->setVisible(true);
+				changeEquipAttDisplayData(3,equipAtt);
+				if ((re & (1 << i)) != 0)
+				{
+					updateLock("smeltui_suoding",equipBtn4);
+					equipAttFlag4=1;
+					saveLockedEquipAttType(equipAtt);
+				}
+				else
+				{
+					if(nRefreshFlag==2)
+						showEquipCleanEffect(equipAttr_4/*, equipAttBeforeStr*/);
+					updateLock("smeltui_kaisuo",equipBtn4);
+					equipAttFlag4=0;
+					eraseLockedEquipAttType(equipAtt);
+					//equipAttListDefualt.push_back(equipAtt);
+				}
+				break;
+			case 5:
+				//equipAttBeforeStr = equipAttr_5->getString();
+				equipAttr_5->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+				equipAttr_5->setVisible(true);
+				equipBtn5->setVisible(true);
+				changeEquipAttDisplayData(4,equipAtt);
+				if ((re & (1 << i)) != 0)
+				{
+					updateLock("smeltui_suoding",equipBtn5);
+					equipAttFlag5=1;
+					saveLockedEquipAttType(equipAtt);
+				}
+				else
+				{
+					if(nRefreshFlag==2)
+						showEquipCleanEffect(equipAttr_5/*, equipAttBeforeStr*/);
+					updateLock("smeltui_kaisuo",equipBtn5);
+					equipAttFlag5=0;
+					eraseLockedEquipAttType(equipAtt);
+					//equipAttListDefualt.push_back(equipAtt);
+				}
+				break;;
+				//case 6:
+				//	equipAttr_6->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+				//	break;;
+			}
+			++index;
+		}
+		// 		//判断是否锁定，指定是否能点击；
+		// 		for(std::vector<CheckButton*>::iterator item=allCheckButton.begin();item!=allCheckButton.end();++item)
+		// 		{
+		// 			updateCheckButtonState(equipAttFlag1,att,*item);
+		// 			updateCheckButtonState(equipAttFlag2,att,*item);
+		// 			updateCheckButtonState(equipAttFlag3,att,*item);
+		// 			updateCheckButtonState(equipAttFlag4,att,*item);
+		// 			updateCheckButtonState(equipAttFlag5,att,*item);
+		// 		}
+
+	}
+	//INT64 n64DecSilver = 20; //扣除的金币
+	//expenditure->setString(CCString::createWithFormat("%d",n64DecSilver)->getCString());//获取花费金币数
+	updateItemCostNum();
+
+	std::vector<int>	equipAttListDefualt;
+	updateChecked(equip,equipAttListDefualt);
+
+	refreshQuanlityChar(equip);
+
+	if (nRefreshFlag == 0)//初始化
+	{
+		setDefaultFusionOption(equipAttListDefualt);
+	}
+
+	updateCheckOptionEnableState();
+
+	updatelink(nRefreshFlag!=0);
+	//m_noShowCleanEffect = false;
+	// 	if(nRefreshFlag==1)
+	// 	{
+	// 		clearLabelAnimation();
+	// 		std::for_each(ctrlEquipAtt.begin(),ctrlEquipAtt.end(),[](CCLabelTTF*label){
+	// 			label->setOpacity(255);
+	// 		});
+	// 	}
+	// 	else
+	// 	{
+	// 		LabelAnimation(equip);
+	// 	}
+
+}
+
+void EquipFusionUiLayer::initAttrNameStr()
+{
+	_indentifyAttrStr[ERA_ExAttackMax] =STRING_TABLE["ERA_ExAttackMax"];
+	_indentifyAttrStr[ERA_ExAttackMin] = STRING_TABLE["ERA_ExAttackMin"];
+	_indentifyAttrStr[ERA_ExMaxDefense] = STRING_TABLE["ERA_ExMaxDefense"];
+	_indentifyAttrStr[ERA_ExMinDefense] =STRING_TABLE["ERA_ExMinDefense"];
+	_indentifyAttrStr[ERA_InAttackMax] =STRING_TABLE["ERA_InAttackMax"];
+	_indentifyAttrStr[ERA_InAttackMin] =STRING_TABLE["ERA_InAttackMin"];
+	_indentifyAttrStr[ERA_ArmorIn] = STRING_TABLE["ERA_ArmorIn"];
+	_indentifyAttrStr[ERA_ArmorEx] = STRING_TABLE["ERA_ArmorEx"];
+	_indentifyAttrStr[ERA_InMaxDefense] = STRING_TABLE["ERA_InMaxDefense"];
+	_indentifyAttrStr[ERA_InMinDefense] = STRING_TABLE["ERA_InMinDefense"];
+	_indentifyAttrStr[ERA_HitRate] = STRING_TABLE["ERA_HitRate"];
+	_indentifyAttrStr[ERA_Dodge] = STRING_TABLE["ERA_Dodge"];
+	_indentifyAttrStr[ERA_Crit_Rate] = STRING_TABLE["ERA_Crit_Rate"];
+	_indentifyAttrStr[ERA_UnCrit_Rate] = STRING_TABLE["ERA_UnCrit_Rate"];
+	_indentifyAttrStr[ERA_UnCrit_Amount] =STRING_TABLE["ERA_UnCrit_Amount"];
+	_indentifyAttrStr[ERA_MaxHP] = STRING_TABLE["ERA_MaxHP"];
+	_indentifyAttrStr[ERA_MaxMP] =STRING_TABLE["ERA_MaxMP"];
+}
+std::string EquipFusionUiLayer::qualitytoAppointNum(EItemQuality quality){
+	CC_ASSERT(quality  >= EIQ_Null && quality <= EIQ_End);
+	std::string str="";
+	if(quality  >= EIQ_Null && quality <= EIQ_End)
+	{
+		switch(quality){
+		case EIQ_Quality0:
+			str="0";
+			break;
+		case EIQ_Quality1:
+			str="1";
+			break;
+		case EIQ_Quality2:
+			str="2";
+			break;
+		case EIQ_Quality3:
+			str="3";
+			break;
+		case EIQ_Quality4:
+			str="4";
+			break;
+		case EIQ_Quality5:
+			str="5";
+			break;
+		default:
+			break;
+		}
+		return str;
+	}
+	return "";
+}
+std::string EquipFusionUiLayer::fusionConverQualityToString( EItemQuality quality )
+{
+	CC_ASSERT(quality  >= EIQ_Null && quality <= EIQ_End);
+	if(quality  >= EIQ_Null && quality <= EIQ_End)
+	{
+		const string str[] = 
+		{
+			GET_STR(9603),		//未鉴定
+			GET_STR(9604),			//普通
+			GET_STR(9605),			//优秀
+			GET_STR(9606),			//卓越
+			GET_STR(9607),			//完美
+			GET_STR(9608),			//史诗
+			GET_STR(9609),			//传说
+		};
+
+		const char *picStr[] = 
+		{
+			"smeltui_word0",		//未鉴定
+			"smeltui_word1",			//普通
+			"smeltui_word2",			//优秀
+			"smeltui_word3",			//卓越
+			"smeltui_word4",			//完美
+			"smeltui_word5",			//史诗
+			"smeltui_word6",			//传说
+			"smeltui_word7"			//空帧
+		};
+		if(quality <= 5)
+		{
+			upQualityLabel->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(picStr[quality + 1]));
+		}
+		else
+		{
+			upQualityLabel->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(picStr[quality]));
+		}
+		CCSpriteFrame *frame=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(picStr[quality + 1]);
+		CC_ASSERT(frame!=NULL);
+		downQualityLabel->setDisplayFrame(frame);
+		return str[quality + 1];
+	}
+
+	return "";
+}
+
+std::string EquipFusionUiLayer::getEquipAttToString(ERoleAttribute eRoleAtt,int eValue)
+{
+	return CCString::createWithFormat("%s %d",_indentifyAttrStr[eRoleAtt].c_str(),eValue)->getCString();
+}
+
+std::string EquipFusionUiLayer::getEquipName(unsigned int equipId)
+{
+	std::string equipItemName = "";
+//已完成 	c_sql_command* cmd = NULL;
+// 	c_sql_table* table = NULL;
+// 	
+// 	cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 	cmd->set_integer32(1 , equipId);
+// 	table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("Name");
+// 		equipItemName = table->get_text(idx);
+// 	}
+// 
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+	const EquipTypeData* t_data = PackageManager::getInstance()->getEquipTypeDataPointer(equipId);
+	if (t_data != NULL)
+	{
+		equipItemName = t_data->name;
+	}
+	return equipItemName;
+}
+
+cocos2d::SEL_MenuHandler EquipFusionUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler EquipFusionUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onEquipHighFusionbtnPressed", EquipFusionUiLayer::onEquipHighFusionbtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onEquipSpeedFusionbtnPressed", EquipFusionUiLayer::onEquipSpeedFusionbtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onEquipCleanbtnPressed", EquipFusionUiLayer::onEquipCleanbtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onEquipFusionbtnPressed", EquipFusionUiLayer::onEquipFusionbtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onEquipLevelUpbtnPressed", EquipFusionUiLayer::onEquipLevelUpbtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtn", EquipFusionUiLayer::onCloseBtn);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onxilianzhidingbtnPressed", EquipFusionUiLayer::onOptionBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onKnow1BtnPressed", EquipFusionUiLayer::onKnowBtn1Pressed);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHelpBtn", EquipFusionUiLayer::onHelpBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHelp1Btn", EquipFusionUiLayer::onHelp1Btn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseDescBtnPressed", EquipFusionUiLayer::onCloseDescBtnPressed);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onKnowBtnPressed", EquipFusionUiLayer::onKnowBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onAtt1PressedBtn", EquipFusionUiLayer::onAtt1PressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onAtt2PressedBtn", EquipFusionUiLayer::onAtt2PressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onAtt3PressedBtn", EquipFusionUiLayer::onAtt3PressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onAtt4PressedBtn", EquipFusionUiLayer::onAtt4PressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onAtt5PressedBtn", EquipFusionUiLayer::onAtt5PressedBtn);
+	return NULL;
+}
+
+void EquipFusionUiLayer::onEquipHighFusionbtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	f_equipment* pEquip = EquipFusionManager::getInstance()->getEquipment();
+	//装备等级
+	int tempEquipLv = getEquipLv(pEquip->get_item_type_id());
+
+	int dwMaxExp = (int)NumericalIniMgr::getInstance()->GetEquipFusionMaxExp(tempEquipLv,(EItemQuality)EquipFusionManager::getInstance()->getEquipment()->get_item_quality());
+	int equipExp = EquipFusionManager::getInstance()->getEquipment()->get_equip()->nFusionExp;
+
+	int dwDisExp = dwMaxExp - equipExp; //差多少经验升级
+	//根据差的经验计算所需元宝
+	//公式：所需经验* 经验价值(元宝)
+	if (dwDisExp < 0)
+	{
+		dwDisExp = 0;
+	}
+	int n32DecYuanBao = dwDisExp * NumericalIniMgr::getInstance()->GetFusionAdvExp(); //高级融合
+
+	//Src装备ID(INT64)
+	std::string tempMsg;
+	safe_sprintf(tempMsg,STRING_TABLE["funsion_msgbox_notcie"],n32DecYuanBao);
+	MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,
+		tempMsg.c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+	World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+	msgUi->signalOkBtnPressed.connect(this, &EquipFusionUiLayer::onEquipHighFusionOk);
+}
+
+void EquipFusionUiLayer::onEquipHighFusionOk()
+{
+	//Src装备ID(INT64) + 类型(INT)[1=普通融合+ 数量(INT) + <<tagItemSerial(struct)>>,2=加速融合,3=高级融合] 
+	WorldPacket C2G_Msg(NET_C2G_PROC_EQUIP_FUSION);	//组装消息头
+	C2G_Msg << EquipFusionManager::getInstance()->getEquipment()->get_item_id();
+	C2G_Msg << 3;
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_IDLE, false);		//发送
+}
+
+void EquipFusionUiLayer::onEquipSpeedFusionbtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	std::string tempMsg;
+	safe_sprintf(tempMsg,STRING_TABLE["funsion_msgbox_notcie_speed_up"],NumericalIniMgr::getInstance()->GetFusionFastYuanBao());
+	//Src装备ID(INT64) + 类型(INT)[1=普通融合+ 数量(INT) + <<tagItemSerial(struct)>>,2=加速融合,3=高级融合] 
+	MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,
+		tempMsg.c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+	World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+	msgUi->signalOkBtnPressed.connect(this, &EquipFusionUiLayer::onEquipSpeedFusionOk);
+}
+
+void EquipFusionUiLayer::onEquipSpeedFusionOk()
+{
+	//Src装备ID(INT64)
+	WorldPacket C2G_Msg(NET_C2G_PROC_EQUIP_FUSION);	//组装消息头
+	C2G_Msg << EquipFusionManager::getInstance()->getEquipment()->get_item_id();
+	C2G_Msg << 2;
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_IDLE, false);		//发送
+}
+
+void EquipFusionUiLayer::onEquipCleanbtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	//Src装备ID(INT64)
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	//洗练管理对象获取当前洗练装备
+	f_equipment *ep = EquipFusionManager::getInstance()->getEquipment();
+	if (!ep)
+		return;
+	if(m_lockMsgLock||m_cleanMsgLock)//加锁和洗练消息 加锁状态时不执行
+	{
+		CCLog("message lock");
+		return;
+	}
+	std::vector<int> att_list;
+	for (INT i = MAX_BASE_ATT; i < MAX_ADDITIONAL_EFFECT; ++i)
+	{
+		//获取装备附加属性并且加入容器中
+		INT att = (INT)ep->get_equip()->EquipAttitionalAtt[i].eRoleAtt;
+		if (att > 0)
+		{
+			att_list.push_back(att);
+		}
+	}
+
+	EquipFusionManager::getInstance()->setHoldAttr(att_list);
+	if (att_list.size()<=0)
+	{
+		ToolTip::getInstance()->push(GET_STR(7231));//
+		return;
+	}
+
+	if ((size_t)(getLockAttNum()) >= att_list.size())
+	{
+		ToolTip::getInstance()->push(GET_STR(7210));//
+		return;
+	}
+
+	// 	if (getLockNum()>=factAttNum)//锁定属性大于等于当前所有的附加属性 如何会出现这个问题？
+	// 	{
+	// 		ToolTip::getInstance()->push(GET_STR(7210));
+	// 		return;
+	// 	}
+	//int lockNum=getLockAttNum();
+	//NumericalIniMgr* numberConfig  = NumericalIniMgr::getInstance();
+	//int baseCost = numberConfig->getInt("equip_fusion","fusion_random_need_item_num",1);
+	//int nExchangeRate  = numberConfig->getInt("equip_fusion","fusion_random_need_yuanbao",20);
+	//int costItemNum  = getFusinCost();
+
+	int nCostItemNum =0,nCostYuanbao =0;
+	nCostYuanbao = getFusinCost(nCostItemNum);
+	//给二次确认提示，下次不提示那种的
+	std::stringstream ss;
+	ss<<"set"<<"_"<<ploc->getId();
+	int tip = ClientCfg::getInstance()->getInt(ss.str(), "toECBTip", 0);
+	//int numFusionFu=PackageManager::getInstance()->getItemNumber(EICT_Bag,FUSION_RANDOM_BOOK);
+	if(nCostYuanbao >0)
+	{
+		if (tip != 0){
+			onEquipCleanFusionOk();//如果勾选下次不再提示之后，下次洗练将不再有这个提示框
+		}
+		else
+		{
+			//std::string tempMsg = CCString::createWithFormat("%s%d%s","\xE6\xAD\xA4\xE6\xAC\xA1\xE6\xB4\x97\xE7\xBB\x83\xE9\x9C\x80\xE8\xA6\x81\xE8\x8A\xB1\xE8\xB4\xB9",
+			//	nCostItemNum,"\xE5\x85\x83\xE5\xAE\x9D\x2C\xE6\x98\xAF\xE5\x90\xA6\xE7\xBB\xA7\xE7\xBB\xAD\xEF\xBC\x9F")->getCString();
+			//没有勾选提示框，则直接显示提示框，点击确定之后向服务器发包
+			MessageBoxUi *messageBox = MessageBoxUi::createWithTwoBtnWithCheck(
+				STRING_TABLE["fusion_notice_msgbox"],
+				GET_STR(98).c_str(),
+				STRING_TABLE["notice_btn_ok"],
+				STRING_TABLE["notice_btn_cancel"],
+				false);
+			messageBox->signalOkBtnPressed.connect(this, &EquipFusionUiLayer::onEquipCleanFusionOk);
+			messageBox->signalCheckStateChange.connect(this, &EquipFusionUiLayer::togECBTip);
+			World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+		}
+	}else
+	{
+		if (tip != 0){
+			onEquipCleanFusionOk();//如果勾选下次不再提示之后，下次洗练将不再有这个提示框
+		}
+		else
+		{
+			//std::string tempMsg = CCString::createWithFormat("%s%d%s","\xE6\xAD\xA4\xE6\xAC\xA1\xE6\xB4\x97\xE7\xBB\x83\xE9\x9C\x80\xE8\xA6\x81\xE8\x8A\xB1\xE8\xB4\xB9",
+			//	nCostItemNum,"\xE5\x85\x83\xE5\xAE\x9D\x2C\xE6\x98\xAF\xE5\x90\xA6\xE7\xBB\xA7\xE7\xBB\xAD\xEF\xBC\x9F")->getCString();
+			//没有勾选提示框，则直接显示提示框，点击确定之后向服务器发包
+			MessageBoxUi *messageBox = MessageBoxUi::createWithTwoBtnWithCheck(
+				STRING_TABLE["fusion_notice_msgbox"],
+				GET_STR(98).c_str(),
+				STRING_TABLE["notice_btn_ok"],
+				STRING_TABLE["notice_btn_cancel"],
+				false);
+			messageBox->signalOkBtnPressed.connect(this, &EquipFusionUiLayer::onEquipCleanFusionOk);
+			messageBox->signalCheckStateChange.connect(this, &EquipFusionUiLayer::togECBTip);
+			World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+		}
+	}
+
+}
+void EquipFusionUiLayer::togECBTip( bool state )
+{
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return ;
+	unsigned int roleID = ploc->getId();
+	std::stringstream ss;
+	ss<<"set"<<"_"<<roleID;
+	ClientCfg::getInstance()->setInt(ss.str(), "toECBTip", state ? 1 : 0);
+}
+
+void EquipFusionUiLayer::onEquipCleanFusionOk()
+{
+	f_equipment* equip  =EquipFusionManager::getInstance()->getEquipment();
+	CC_ASSERT(equip);
+
+	int nItemCost = 0;
+	int nYuanbaoCost = getFusinCost(nItemCost);
+	bool autoBuy = nYuanbaoCost >0;
+	//int numFusionFu=PackageManager::getInstance()->getItemNumber(EICT_Bag,FUSION_RANDOM_BOOK);
+	bool enough = PackageManager::getInstance()->have_enough_yuanbao(nYuanbaoCost);
+	if (!enough)
+	{
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+		return;
+	}
+	if (anyChecked())
+	{
+		NET_SIC_Equip_Fusion_Specify cmd;
+		cmd.b_autoBuy = autoBuy;
+		cmd.n64_serial = equip->get_item_id();
+		memset(cmd.by_att,EAA_NULL,sizeof(cmd.by_att));
+		size_t addnum = 0;
+		for(std::vector<CheckButton*>::iterator item=allOptionCheckBtn.begin();item!=allOptionCheckBtn.end();++item)
+		{
+			if(reallyChecked(*item))
+			{
+				if(addnum<5)
+					cmd.by_att[addnum++]=_checkBtnToEquipAttType[*item];
+			}
+		}
+
+		/*TCP_CLIENT->send_net_cmd(&cmd,NP_IDLE,false);*/
+		m_cleanMsgLock = true;
+		std::function<void(bool)> func = [cmd,this](bool isSuccess){
+			if (isSuccess)
+			{
+				TCP_CLIENT->send_net_cmd(&cmd, NP_NORMAL, false);
+			}
+			else
+			{
+				m_cleanMsgLock = false;
+			}
+		};
+		SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+		CCLog("send funsion spec!!");
+		
+	}
+	else
+	{
+		WorldPacket C2G_Msg(NET_C2G_PROC_EQUIP_ATTR_RANDOM);	//组装消息头
+		C2G_Msg << equip->get_item_id();
+		C2G_Msg << autoBuy;
+		//TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_IDLE, false);		//发送
+		CCLog("send funsion normal!!");
+
+		m_cleanMsgLock = true;
+		std::function<void(bool)> func = [C2G_Msg,this](bool isSuccess){
+			if (isSuccess)
+			{
+				TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);
+			}
+			else
+			{
+				m_cleanMsgLock = false;
+			}
+		};
+		SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+
+		
+	}
+}
+
+void EquipFusionUiLayer::onEquipFusionbtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{//融合按钮
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	//Src装备ID(INT64) + 类型(INT)[1=普通融合+ 数量(INT) + <<tagItemSerial(struct)>>,2=加速融合,3=高级融合] 
+	/*if (tempItemIndex == 999)
+	{
+	ToolTip::getInstance()->push("\xE6\xB2\xA1\xE6\x9C\x89\xE9\x80\x89\xE5\x8F\x96\xE8\xA2\xAB\xE8\x9E\x8D\xE5\x90\x88\xE7\x9A\x84\xE8\xA3\x85\xE5\xA4\x87");//没有选择被融合的装备
+	return;
+	}
+	*/
+
+	//[bing] 改为检查所有node 若发现全是0 则说明没有选择要融合的物品
+	std::vector<tagItemSerial> tmpIdxVec;
+	std::map<short, f_item*>::iterator iter = _items.begin();
+	short nIdx = 0;
+	while(iter != _items.end())
+	{
+		ItemNode* pItemNode = itemFusionLayer->GetItemNode(nIdx++);
+		if(pItemNode->getNum() > 0)
+		{
+			tagItemSerial data;
+			data.n16Num = pItemNode->getNum();
+			data.n64ItemID = iter->second->get_item_id();
+			tmpIdxVec.push_back(data);
+		}
+		iter++;
+	}
+
+	if(tmpIdxVec.size() == 0)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["equip_no_fusion_item"]);//没有选择被融合的装备
+		return;
+	}
+
+	//int tempMoney = tmpIdxVec.size() * 5000;
+	//PackageManager *manager = PackageManager::getInstance();
+	/*
+	if(manager->getJinBi() < tempMoney)
+	{
+	ToolTip::getInstance()->push("\xE9\x87\x91\xE5\xB8\x81\xE4\xB8\x8D\xE8\xB6\xB3");//金币不足
+	return;
+	}*/
+
+	//std::map<short, f_item*>::iterator iter = _items.find(tempItemIndex);
+	//tempItemIndex = 999;
+	//Src装备ID(INT64) + 类型(INT)[1=普通融合+ 数量(INT) + <<tagItemSerial(struct)>>,2=加速融合,3=高级融合] 
+	WorldPacket C2G_Msg(NET_C2G_PROC_EQUIP_FUSION);	//组装消息头
+	C2G_Msg << EquipFusionManager::getInstance()->getEquipment()->get_item_id();
+	C2G_Msg << 1;
+	C2G_Msg << (int)tmpIdxVec.size();
+	for(int i = 0; i < (int)tmpIdxVec.size(); ++i)
+	{
+		C2G_Msg << tmpIdxVec[i];
+	}
+
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_IDLE, false);		//发送
+}
+
+void EquipFusionUiLayer::onCloseBtn(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_EquipFusionUi);
+}
+void EquipFusionUiLayer::updateHideEquipFusionAllControl()
+{
+	_frame->getChildByTag(20)->setVisible(true);
+	_frame->getChildByTag(3)->setVisible(false);
+	//_frame->getChildByTag(4)->setVisible(false);
+	_frame->getChildByTag(17)->setVisible(false);
+	_frame->getChildByTag(19)->setVisible(false);
+	_frame->getChildByTag(23)->setVisible(false);
+	_frame->getChildByTag(26)->setVisible(false);
+	_frame->getChildByTag(24)->setVisible(false);
+	_frame->getChildByTag(25)->setVisible(false);
+	_frame->getChildByTag(27)->setVisible(false);
+	_frame->getChildByTag(28)->setVisible(false);
+	_frame->getChildByTag(100)->setVisible(false);
+	_frame->getChildByTag(102)->setVisible(false);
+	_frame->getChildByTag(999)->setVisible(true);
+}
+void EquipFusionUiLayer::onEquipLevelUpbtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_17);
+	f_equipment* pEquip = EquipFusionManager::getInstance()->getEquipment();
+	if( pEquip == NULL )
+		return;
+	if( pEquip->get_item_quality() >= EIQ_Quality5 )
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["equip_reach_top_lv"]);//装备品质已达最高，无法继续升阶
+		return;
+	}
+	//std::vector<int> att_list;
+	//for (INT i = MAX_BASE_ATT; i < MAX_ADDITIONAL_EFFECT; ++i)
+	//{
+	//	INT att = (INT)pEquip->get_equip()->EquipAttitionalAtt[i].eRoleAtt;
+	//	if (att > 0)
+	//	{
+	//		att_list.push_back(att);
+	//	}
+	//}
+	//EquipFusionManager::getInstance()->setHoldAttr(att_list);
+
+	//装备等级
+	//int tempEquipLv = getEquipLv(pEquip->get_item_type_id());
+	////所需融合符个数
+	//signed int nNeedItemCount = NumericalIniMgr::getInstance()->GetEquipFusionLvUpItemNum(tempEquipLv, EItemQuality(pEquip->get_item_quality()));
+	////所需元宝数
+	//signed int nDecYuanBao = NumericalIniMgr::getInstance()->GetEquipFusionLvUpYuanBao(EItemQuality(pEquip->get_item_quality()), nNeedItemCount);
+	////融合符品质
+	//std::string qualityStr = converQualityToString((EItemQuality)(pEquip->get_item_quality() + 1));
+	////升阶需要消耗X个XX融合符,如融合符不够则需花费X元宝,是否继续？
+	/*std::string str = CCString::createWithFormat("%s%s%s%s%s","\xE5\x8D\x87\xE9\x98\xB6\xE9\x9C\x80\xE8\xA6\x81\xE6\xB6\x88\xE8\x80\x97"
+	,"\xE4\xB8\xAA","\xE8\x9E\x8D\xE5\x90\x88\xE7\xAC\xA6\x2C\xE5\xA6\x82\xE8\x9E\x8D\xE5\x90\x88\xE7\xAC\xA6\xE4\xB8\x8D\xE5\xA4\x9F\xE5\x88\x99\xE9\x9C\x80\xE8\x8A\xB1\xE8\xB4\xB9"
+	,"\xE5\x85\x83\xE5\xAE\x9D\x2C\xE6\x98\xAF\xE5\x90\xA6\xE7\xBB\xA7\xE7\xBB\xAD\xEF\xBC\x9F")->getCString();*/
+	// 	int lockNum=getLockAttNum();
+	// 	if (lockNum>=1)
+	// 	{
+	// 		MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,
+	// 			GET_STR(7230).c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+	// 		World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+	// 		msgUi->signalOkBtnPressed.connect(this, &EquipFusionUiLayer::onMessageBoxEquipLevelUpOk);
+	// 	}
+	// 	else
+	{
+		onMessageBoxEquipLevelUpOk();
+	}
+
+}
+
+int EquipFusionUiLayer::getItemUnderPoint( const CCPoint &pos )
+{
+
+	return -1;
+}
+
+void EquipFusionUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	initAttrNameStr();
+
+	replaceAnonymousLable();
+
+	//initAttrNameStr();
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(0));
+	CC_ASSERT(_frame != NULL);
+	//	_contentLayer = dynamic_cast<CCLayer*>(_frame->getChildByTag(0));
+	//	CC_ASSERT(_contentLayer != NULL);
+	//	_contentLayer->setContentSize(CCSize(_contentLayer->getContentSize().width + 20,_contentLayer->getContentSize().height));
+	//	_container = CCNode::create();
+	//	_container->setContentSize(CCSize(_contentLayer->getContentSize().width + 20,_contentLayer->getContentSize().height));
+	//	//_container->setContentSize(CCSize(_contentLayer->getContentSize().width + 20,_contentLayer->getContentSize().height));
+	//	_scrollView = createScrollViewWithContent(_contentLayer);//物品展示滑动框
+	//	_scrollView->setContainer(_container);
+	//_descframe = NULL;
+	//_descframe = dynamic_cast<FrameSprite*>(getChildByTag(20));
+	_appointframe=dynamic_cast<FrameSprite*>(getChildByTag(1));
+	CC_SAFE_RETAIN(_appointframe);
+	_appointframe->removeFromParent();
+	_appointframe->setVisible(false);
+	//_appointframe->retain();
+	//_appointframe->removeFromParent();
+	//CC_SAFE_RETAIN(_descframe);
+	//_descframe->removeFromParent();
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	//_descframe->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+	_appointframe->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+	_appointframe->setAwaysTrueWhenTouch(false);
+
+	equipfu = dynamic_cast<CCSprite*>(_frame->getChildByTag(25));
+	//加载文字部分
+	equipName = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(EQUIPNAME)));
+	fightCapacity = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(FIGHTCAPACITY)));//战斗力
+	//qualityLift =  Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(QUALITYLIFT)));//品质左
+	//	qualityRight = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(QUALITYRIGHT));//品质右
+	//	qualityMiddle = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(QUALITYMIDDLE));//品质中
+
+	//钩子
+	for (int  i= 51; i <=55  ; ++i)
+	{
+		CCSprite* sp = dynamic_cast<CCSprite *>(_frame->getChildByTag(i));
+		CC_ASSERT(sp);
+		_checkPics.push_back(sp);
+		sp->setVisible(false);
+	}
+	//属性文字
+	equipArrow1=dynamic_cast<CCSprite*>(_frame->getChildByTag(EQUIPARROW1));//箭头1
+	//_image.push_back(equipArrow1);
+	equipArrow1->setVisible(false);
+	equipArrow2=dynamic_cast<CCSprite*>(_frame->getChildByTag(EQUIPARROW2));
+	equipArrow2->setVisible(false);
+	//_image.push_back(equipArrow2);
+	equipArrow3=dynamic_cast<CCSprite*>(_frame->getChildByTag(EQUIPARROW3));
+	equipArrow3->setVisible(false);
+	//_image.push_back(equipArrow3);
+	equipArrow4=dynamic_cast<CCSprite*>(_frame->getChildByTag(EQUIPARROW4));
+	equipArrow4->setVisible(false);
+	//_image.push_back(equipArrow4);
+	equipArrow5=dynamic_cast<CCSprite*>(_frame->getChildByTag(EQUIPARROW5));
+	equipArrow5->setVisible(false);
+	//_image.push_back(equipArrow5);
+	//属性
+	equipAttr_1 = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(EQUIPATTR1)));//属性1
+	equipAttr_1->setVisible(false);
+	_equipAttTextLabels.push_back(tagEquipAttDisplayData(equipAttr_1,-1));
+	_attCharPics.insert(std::make_pair(equipAttr_1,equipArrow1));
+
+	equipAttr_2 = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(EQUIPATTR2)));//属性1
+	equipAttr_2->setVisible(false);
+	_equipAttTextLabels.push_back(tagEquipAttDisplayData(equipAttr_2,-1));
+	_attCharPics.insert(std::make_pair(equipAttr_2,equipArrow2));
+
+	equipAttr_3 = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(EQUIPATTR3)));//属性1
+	equipAttr_3->setVisible(false);
+	_equipAttTextLabels.push_back(tagEquipAttDisplayData(equipAttr_3,-1));
+	_attCharPics.insert(std::make_pair(equipAttr_3,equipArrow3));
+
+	equipAttr_4 = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(EQUIPATTR4)));//属性1
+	equipAttr_4->setVisible(false);
+	_equipAttTextLabels.push_back(tagEquipAttDisplayData(equipAttr_4,-1));
+	_attCharPics.insert(std::make_pair(equipAttr_4,equipArrow4));
+
+	equipAttr_5 = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(EQUIPATTR5)));//属性1
+	equipAttr_5->setVisible(false);
+	_equipAttTextLabels.push_back(tagEquipAttDisplayData(equipAttr_5,-1));
+	_attCharPics.insert(std::make_pair(equipAttr_5,equipArrow5));
+	//_pic1=dynamic_cast<CCSprite *>(_frame->getChildByTag(51));
+	//_pic2=dynamic_cast<CCSprite *>(_frame->getChildByTag(52));
+	//_pic3=dynamic_cast<CCSprite *>(_frame->getChildByTag(53));
+	//_pic4=dynamic_cast<CCSprite *>(_frame->getChildByTag(54));
+	//_pic5=dynamic_cast<CCSprite *>(_frame->getChildByTag(55));
+
+	//equipAttr_6 = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(EQUIPATTR6));//属性1
+	expenditure = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(EXPENDITURE)));//花费
+	runeName = Helper::replaceLabelTTFWithLabelFTAndRemove(
+		dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(RUNENAME)));//符文名称
+
+	runeNum = Helper::replaceLabelTTFWithLabelFTAndRemove(
+		dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(RUNENUM)));//符文数量
+	upQualityLabel = dynamic_cast<CCSprite*>(_frame->getChildByTag(UPQUALITYLABEL));//上面品质文字图片
+	downQualityLabel = dynamic_cast<CCSprite*>(_frame->getChildByTag(DOWNQUALITYLABEL));//下面品质文字图片
+	//
+	equipFusionName =  Helper::replaceLabelTTFWithLabelFTAndRemove(
+		dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(EQUIPFUSIONNAME)));//融合的装备名字
+	//PackageManager
+	//	_expProgress = new ProgressBar;
+	//	_expProgress->initWithSprite((CCSprite*)_frame->getChildByTag(EXPPROGRESS)->getChildByTag(0));
+	//	_expProgress->addToParent(_frame->getChildByTag(EXPPROGRESS));
+	//
+	//// 	bgsprite=dynamic_cast<CCSprite*>(_frame->getChildByTag(89));
+	//// 	CCRotateBy* rotateto = CCRotateBy::create(20, 360);
+	//// 	bgsprite->runAction(CCRepeatForever::create(rotateto));
+	//
+	//	int tempEquipLv = getEquipLv(EquipFusionManager::getInstance()->getEquipment()->get_item_type_id());
+	//	int dwMaxExp = (int)NumericalIniMgr::getInstance()->GetEquipFusionMaxExp(tempEquipLv,(EItemQuality)EquipFusionManager::getInstance()->getEquipment()->get_item_quality());
+	//	int equipExp = EquipFusionManager::getInstance()->getEquipment()->get_equip()->nFusionExp;
+	//	_expProgress->setProgress(equipExp,dwMaxExp);
+	//	if(equipExp >= dwMaxExp)
+	//		ToolTip::getInstance()->push("\xE8\x9E\x8D\xE7\x82\xBC\xE7\xBB\x8F\xE9\xAA\x8C\xE5\xB7\xB2\xE6\xBB\xA1\xEF\xBC\x8C\xE5\x8F\xAF\xE4\xBB\xA5\xE5\x8D\x87\xE9\x98\xB6");
+	//	//curExp = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(30)->getChildByTag(1));//当前经验
+	equipItem = dynamic_cast<CCSprite*>(_frame->getChildByTag(EQUIPITEM));
+	//	
+	//	equipName->setString("");
+	//	fightCapacity->setString("");
+	//	qualityLift->setString("");
+	//	qualityRight->setString("");
+	//	qualityMiddle->setString("");
+	//	equipAttr_1->setString("");
+	//	equipAttr_2->setString("");
+	//	equipAttr_3->setString("");
+	//	equipAttr_4->setString("");
+	//	equipAttr_5->setString("");
+	//	equipAttr_6->setString("");
+	//	expenditure->setString("");
+	//	runeNameStr = "";
+	//	runeName->setString("");
+	//	runeNum->setString("");
+	//	_items = EquipFusionManager::getInstance()->getEquipFusionItemMap();
+	//	itemFusionLayer = ItemMarixLayer::create(_contentLayer->getContentSize().width,_contentLayer->getContentSize().height,7,12); //Mr.Green
+	//	//itemFusionLayer->setPosition(ccp(,25));
+	//	std::map<short, f_item*>::iterator iter =  _items.begin();
+	//	int index = 0;
+	//	while(iter != _items.end())
+	//	{
+	//		if (iter->second->get_item_type_id() == FUSION_POWDER||
+	//			iter->second->get_item_type_id() == SECONDARY_FUSION_POWDER)
+	//		{
+	//			itemFusionLayer->SetItemID(index,iter->second->get_item_type_id());
+	//			ItemNode* pItemNode = itemFusionLayer->GetItemNode(index);
+	//			pItemNode->setNum(0,iter->second->get_item_number(),false);
+	//			//pItemNode->setNum(0);
+	//			//pItemNode->SetShowNum(true);
+	//			pItemNode->SetLessBtn(false);
+	//		}
+	//		else
+	//		{
+	//			itemFusionLayer->SetItemID(index,iter->second->get_item_type_id());
+	//			ItemNode* pItemNode = itemFusionLayer->GetItemNode(index);
+	//			pItemNode->setNum(0);
+	//			pItemNode->SetShowNum(true);
+	//			pItemNode->SetLessBtn(false);
+	//		}
+	//		++index;
+	//		++iter;
+	//	}
+	//	itemFusionLayer->signalCallEndItem.connect(this, &EquipFusionUiLayer::onDropEndItem);
+	//	itemFusionLayer->signalClickItem.connect(this,&EquipFusionUiLayer::onClickDropEndItem);
+	//	itemFusionLayer->signalDoubleClickItem.connect(this,&EquipFusionUiLayer::onDoubleClickDropEndItem);
+	//	itemFusionLayer->SetItemMap(&_items);
+	//	//itemFusionLayer->setPositionX(-15);
+	//	_contentLayer->addChild(itemFusionLayer);
+	//
+	//	tempItemIndex = 999;//暂定
+	//
+	//	//战斗力特效			【Ji：】
+	//	_fightNumAcNode = NULL;
+	_fightNumAcNode = this->getFightNumSuperEffect();
+	_frame->addChild(_fightNumAcNode, RZN_EFFECT);
+	_fightNumAcNode->setPosition(_frame->getChildByTag(EFT_FightNumSE1)->getPosition());
+	_fightNumAcNode->setAnchorPoint(ccp(0,0.20));
+	_fightNumAcNode->setScale(0.55f);
+	_fightNumAcNode->BeginAction(0.07f, true);
+	//	_frame->getChildByTag(EFT_FightNumSP1)->setZOrder(RZN_EFFECT+2);
+	//	fightCapacity->setZOrder(RZN_EFFECT+1);
+	//	fightCapacity->setVisible(false);
+	//	//战斗力艺术字特效
+	_fightNumBLabel = CCLabelBMFont::create();
+	_fightNumBLabel->setFntFile("Art/Scene/fontNum.fnt");
+	_fightNumBLabel->setPosition(_frame->getChildByTag(FIGHTCAPACITY)->getPosition());
+	_fightNumBLabel->setAnchorPoint(ccp(0.0f, 0.5f));
+	_fightNumBLabel->setScale(0.5f);
+	_frame->addChild(_fightNumBLabel, RZN_EFFECT+1);
+	_fightNumBLabel->setTag(FightNumValue);
+	dwAddExp = 0;
+
+	equipBtn1=dynamic_cast<CCControlButton*>(_frame->getChildByTag(EQUIPBTN1));
+	equipBtn1->setVisible(false);
+	equipBtn2=dynamic_cast<CCControlButton*>(_frame->getChildByTag(EQUIPBTN2));
+	equipBtn2->setVisible(false);
+	equipBtn3=dynamic_cast<CCControlButton*>(_frame->getChildByTag(EQUIPBTN3));
+	equipBtn3->setVisible(false);
+	equipBtn4=dynamic_cast<CCControlButton*>(_frame->getChildByTag(EQUIPBTN4));
+	equipBtn4->setVisible(false);
+	equipBtn5=dynamic_cast<CCControlButton*>(_frame->getChildByTag(EQUIPBTN5));
+	equipBtn5->setVisible(false);
+	equipAttFlag1=0;
+	equipAttFlag2=0;
+	equipAttFlag3=0;
+	equipAttFlag4=0;
+	equipAttFlag5=0;
+	_successAcNode = this->setEquipEffect();
+	_successAcNode->setPosition(equipItem->getPosition());
+	_frame->addChild(_successAcNode, RZN_EFFECT);
+	fontAcNode = this->getNodeEffect();
+	fontAcNode->setPosition(ccp(CCDirector::sharedDirector()->getWinSize().width / 2.0f+10, CCDirector::sharedDirector()->getWinSize().height / 2.0f));
+	_frame->addChild(fontAcNode, RZN_EFFECT);
+	pEquip = EquipFusionManager::getInstance()->getEquipment();
+	if( pEquip == NULL )
+		return;
+	if( pEquip->get_item_quality() >= EIQ_Quality5 )
+	{
+		updateHideEquipFusionAllControl();
+	}
+	currequipQuality = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_appointframe->getChildByTag(1)));
+	EItemQuality EIQ = (EItemQuality)pEquip->get_item_quality();
+	std::string str=fusionConverQualityToString(EIQ);
+	currequipQuality->setString(str.c_str());
+	currequipQuality->setVisible(false);
+
+	_funsionOptNumText=Helper::replaceLabelTTFWithLabelFTAndRemove(
+		dynamic_cast<CCLabelTTF*>(_appointframe->getChildByTag(2)));
+	//updateOptionNumString();
+
+	//maxAppointnum->setVisible(false);
+
+	//构建属性控件组的相关信息关联
+	for(int i=0;i<16;i++){
+		CheckButton * checkBtn=dynamic_cast<CheckButton*>(_appointframe->getChildByTag(i+21));
+		CC_ASSERT(checkBtn);
+		checkBtn->setCheck(false);
+		checkBtn->setTouchProprity(-1);
+		checkBtn->setCheckPolicy(std::bind(&EquipFusionUiLayer::checkPolicy,this,std::placeholders::_1));
+		checkBtn->signalStateChanged.connect(this,&EquipFusionUiLayer::onChangeCheckBtnState);
+		CCLabelTTF * tmp=dynamic_cast<CCLabelTTF*>(_appointframe->getChildByTag(i+41));
+		CC_ASSERT(tmp);
+		LabelFT* label =Helper::replaceLabelTTFWithLabelFTAndRemove(tmp);
+		allOptionCheckBtn.push_back(checkBtn);
+		//allLabel.push_back(label);
+		//_checkBtnGroup.setCheckGuard(std::bind(&EquipFusionUiLayer::checkPolicy,this));
+		//_checkBtnGroup.addCheckButton(checkBtn,false);
+		switch(i){
+		case 0:
+			_checkBtnToEquipAttType.insert(std::make_pair(checkBtn,EAA_MaxHP));
+			allOptionTextLable.insert(std::make_pair(EAA_MaxHP,label));
+
+			_optMap.insert(std::make_pair(EAA_MaxHP,AttOption(checkBtn,label)));
+			break;
+		case 1:
+			_checkBtnToEquipAttType.insert(std::make_pair(checkBtn,EAA_ExAttackMax)); 
+			allOptionTextLable.insert(std::make_pair(EAA_ExAttackMax,label));
+
+			_optMap.insert(std::make_pair(EAA_ExAttackMax,AttOption(checkBtn,label)));
+
+			break;
+		case 2:
+			_checkBtnToEquipAttType.insert(std::make_pair(checkBtn,EAA_InAttackMax));
+			allOptionTextLable.insert(std::make_pair(EAA_InAttackMax,label));
+
+			_optMap.insert(std::make_pair(EAA_InAttackMax,AttOption(checkBtn,label)));
+			break;
+		case 3:
+			_checkBtnToEquipAttType.insert(std::make_pair(checkBtn,EAA_ArmorIn));
+			allOptionTextLable.insert(std::make_pair(EAA_ArmorIn,label));
+			_optMap.insert(std::make_pair(EAA_ArmorIn,AttOption(checkBtn,label)));
+			break;
+		case 4:
+			_checkBtnToEquipAttType.insert(std::make_pair(checkBtn,EAA_MaxMP));
+			allOptionTextLable.insert(std::make_pair(EAA_MaxMP,label));
+			_optMap.insert(std::make_pair(EAA_MaxMP,AttOption(checkBtn,label)));
+
+			break;
+		case 5:
+			_checkBtnToEquipAttType.insert(std::make_pair(checkBtn,EAA_ExAttackMin));
+			allOptionTextLable.insert(std::make_pair(EAA_ExAttackMin,label));
+			_optMap.insert(std::make_pair(EAA_ExAttackMin,AttOption(checkBtn,label)));
+			break;
+		case 6:
+			_checkBtnToEquipAttType.insert(std::make_pair(checkBtn,EAA_InAttackMin));
+			allOptionTextLable.insert(std::make_pair(EAA_InAttackMin,label));
+			_optMap.insert(std::make_pair(EAA_InAttackMin,AttOption(checkBtn,label)));
+			break;
+		case 7:
+			_checkBtnToEquipAttType.insert(std::make_pair(checkBtn,EAA_ArmorEx));
+			allOptionTextLable.insert(std::make_pair(EAA_ArmorEx,label));
+			_optMap.insert(std::make_pair(EAA_ArmorEx,AttOption(checkBtn,label)));
+
+			break;
+		case 8:
+			_checkBtnToEquipAttType.insert(std::make_pair(checkBtn,EAA_HitRate));
+			allOptionTextLable.insert(std::make_pair(EAA_HitRate,label));
+			_optMap.insert(std::make_pair(EAA_HitRate,AttOption(checkBtn,label)));
+			break;
+		case 9:
+			_checkBtnToEquipAttType.insert(std::make_pair(checkBtn,EAA_Crit_Rate));
+			allOptionTextLable.insert(std::make_pair(EAA_Crit_Rate,label));
+			_optMap.insert(std::make_pair(EAA_Crit_Rate,AttOption(checkBtn,label)));
+			break;
+		case 10:
+			_checkBtnToEquipAttType.insert(std::make_pair(checkBtn,EAA_ExDef));
+			allOptionTextLable.insert(std::make_pair(EAA_ExDef,label));
+			_optMap.insert(std::make_pair(EAA_ExDef,AttOption(checkBtn,label)));
+			break;
+		case 11:
+			_checkBtnToEquipAttType.insert(std::make_pair(checkBtn,EAA_InDefense));
+			allOptionTextLable.insert(std::make_pair(EAA_InDefense,label));
+			_optMap.insert(std::make_pair(EAA_InDefense,AttOption(checkBtn,label)));
+			break;
+		case 12:
+			_checkBtnToEquipAttType.insert(std::make_pair(checkBtn,EAA_Dodge));
+			allOptionTextLable.insert(std::make_pair(EAA_Dodge,label));
+			_optMap.insert(std::make_pair(EAA_Dodge,AttOption(checkBtn,label)));
+			break;
+		case 13:
+			_checkBtnToEquipAttType.insert(std::make_pair(checkBtn,EAA_UnCrit_Rate)); 
+			allOptionTextLable.insert(std::make_pair(EAA_UnCrit_Rate,label));
+			_optMap.insert(std::make_pair(EAA_UnCrit_Rate,AttOption(checkBtn,label)));
+			break;
+		case 14:
+			_checkBtnToEquipAttType.insert(std::make_pair(checkBtn,EAA_ExAttack));
+			allOptionTextLable.insert(std::make_pair(EAA_ExAttack,label));
+			_optMap.insert(std::make_pair(EAA_ExAttack,AttOption(checkBtn,label)));
+			break;
+		case 15:
+			_checkBtnToEquipAttType.insert(std::make_pair(checkBtn,EAA_InAttack));
+			allOptionTextLable.insert(std::make_pair(EAA_InAttack,label));
+			_optMap.insert(std::make_pair(EAA_InAttack,AttOption(checkBtn,label)));
+			break;
+		default:
+			break;
+		}
+
+	}
+	m_lockMsgLock=false;
+	m_cleanMsgLock=false;
+	//m_noShowCleanEffect = true;
+
+	InitItemData();
+	//CheckButton *check = dynamic_cast<CheckButton*>(_frame->getChildByTag(CHECKBTN));
+	//CC_ASSERT(check);
+	//if (check)
+	//check->setCheck(false);
+}
+
+void EquipFusionUiLayer::onDropEndItem( CCNode* pNode, short nIdx )
+{
+	//const ItemTypeData &typeDataItem  = PackageManager::getInstance()->getItemTypeData(_items[nIdx]->get_item_type_id());
+	//CCSprite* temp = (CCSprite*)pNode;
+	//temp->initWithFile(typeDataItem.icon.c_str());
+	//tempUpStarItem[pNode->getTag()] = upStarEquipData[nIdx];
+	//upStarEquipData[nIdx]->lock();
+	//upStarEquipData[nIdx]->b_locked = true;
+	return;
+}
+
+void EquipFusionUiLayer::onDoubleClickDropEndItem( short nIdx )
+{
+	//检查一下数量上限
+	std::map<short, f_item*>::iterator iter = _items.find(nIdx);
+	if(iter == _items.end())
+		return;
+
+	ItemNode* pItemNode = itemFusionLayer->GetItemNode(nIdx);
+	f_item* pItem = iter->second;
+	if (iter->second->get_item_type_id() == FUSION_POWDER ||
+		iter->second->get_item_type_id() == SECONDARY_FUSION_POWDER)
+	{
+		if(pItemNode->getNum() < pItem->get_item_number())
+		{
+			//int tempCount = PackageManager::getInstance()->getItemNumber(EICT_Bag,iter->second->get_item_type_id());
+			pItemNode->setNum(pItemNode->getNum() + 1,pItem->get_item_number(),false);
+			pItemNode->SetLessBtn(true);
+		}
+	} 
+	else
+	{
+		if(pItemNode->getNum() < pItem->get_item_number())
+		{
+			pItemNode->setNum(pItemNode->getNum() + 1);
+			pItemNode->SetLessBtn(true);
+		}
+	}
+
+	//expenditure->setString(CCString::createWithFormat("%d",tempCheckCount * 5000)->getCString());
+	//----------------------------------------------------------------
+	//[bing] 改为检查所有node 若发现全是0 则说明没有选择要融合的物品
+	std::vector<tagItemSerial> tmpIdxVec;
+	std::map<short, f_item*>::iterator tmpiter = _items.begin();
+	short tempnIdx = 0;
+	dwAddExp = 0;
+	while(tmpiter != _items.end())
+	{
+		ItemNode* pItemNode = itemFusionLayer->GetItemNode(tempnIdx++);
+		if(pItemNode->getNum() > 0)
+		{
+			int EquipNeedLv = 0;
+			long long itemId = tmpiter->second->get_data()->dw_data_id;
+			if (itemId == FUSION_POWDER)
+			{
+				dwAddExp += 250 * pItemNode->getNum();
+			}
+			else if (itemId == SECONDARY_FUSION_POWDER)
+			{
+				int dwMaxExp = (int)NumericalIniMgr::getInstance()->GetEquipFusionMaxExp(EquipFusionManager::getInstance()->getEquipLv(),(EItemQuality)EquipFusionManager::getInstance()->getEquipment()->get_item_quality());
+				dwAddExp += dwMaxExp;
+			}
+			else
+			{
+				f_equipment* equipment = dynamic_cast<f_equipment*>(tmpiter->second);
+				if (equipment != NULL || pItemNode->getNum() < 2)
+				{
+//已完成 					c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 					cmd->set_integer32(1 , itemId);
+// 					c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 
+// 					while(table->retrieve_row())
+// 					{
+// 						unsigned int idx = table->get_index("referLv");
+// 						EquipNeedLv = table->get_integer32(idx);
+// 					}
+// 					c_db_manager::getSingleton()->destroy_table(table);
+// 					c_db_manager::getSingleton()->end_operation(cmd);
+
+
+					const EquipTypeData* t_data = PackageManager::getInstance()->getEquipTypeDataPointer(itemId);
+					if (t_data != NULL)
+					{
+						EquipNeedLv = t_data->referLv;
+					}
+
+					dwAddExp += NumericalIniMgr::getInstance()->GetEquipFusionDecompose(
+						EquipFusionManager::getInstance()->getEquipReferLv()
+						,EquipNeedLv
+						,(EItemQuality)EquipFusionManager::getInstance()->getEquipment()->get_equip()->byQuality
+						,(EItemQuality)equipment->get_equip()->byQuality);
+				}
+			}
+			tagItemSerial data;
+			data.n16Num = pItemNode->getNum();
+			data.n64ItemID = iter->second->get_item_id();
+			tmpIdxVec.push_back(data);
+		}
+		tmpiter++;
+	}
+	int CurMoney = tmpIdxVec.size();
+	expenditure->setString(CCString::createWithFormat("%d",CurMoney * 5000)->getCString());
+	//-----------------------------------------------------------------
+	//根据累加的经验设置进度条
+	int dwMaxExp = (int)NumericalIniMgr::getInstance()->GetEquipFusionMaxExp(EquipFusionManager::getInstance()->getEquipReferLv(),(EItemQuality)EquipFusionManager::getInstance()->getEquipment()->get_item_quality());
+	int equipExp = EquipFusionManager::getInstance()->getEquipment()->get_equip()->nFusionExp;
+	_expProgress->setProgress(equipExp + dwAddExp,dwMaxExp);
+	if(equipExp + dwAddExp >= (unsigned int)dwMaxExp)
+		ToolTip::getInstance()->push(STRING_TABLE["equip_fusion_max"]);
+	return;
+}
+
+void EquipFusionUiLayer::onClickDropEndItem( short nIdx )
+{
+	//检查一下数量上限
+	std::map<short, f_item*>::iterator iter = _items.find(nIdx);
+	if(iter == _items.end())
+		return;
+
+	ItemNode* pItemNode = itemFusionLayer->GetItemNode(nIdx);
+	f_item* pItem = iter->second;
+	if (iter->second->get_item_type_id() == FUSION_POWDER ||
+		iter->second->get_item_type_id() == SECONDARY_FUSION_POWDER)
+	{
+		if(pItemNode->getNum() < pItem->get_item_number())
+		{
+			//int tempCount = PackageManager::getInstance()->getItemNumber(EICT_Bag,iter->second->get_item_type_id());
+			pItemNode->setNum(pItemNode->getNum() + 1,pItem->get_item_number(),false);
+			pItemNode->SetLessBtn(true);
+		}
+	} 
+	else
+	{
+		if(pItemNode->getNum() < pItem->get_item_number())
+		{
+			pItemNode->setNum(pItemNode->getNum() + 1);
+			pItemNode->SetLessBtn(true);
+		}
+	}
+
+	//expenditure->setString(CCString::createWithFormat("%d",tempCheckCount * 5000)->getCString());
+	//----------------------------------------------------------------
+	//[bing] 改为检查所有node 若发现全是0 则说明没有选择要融合的物品
+	std::vector<tagItemSerial> tmpIdxVec;
+	std::map<short, f_item*>::iterator tmpiter = _items.begin();
+	short tempnIdx = 0;
+	dwAddExp = 0;
+	while(tmpiter != _items.end())
+	{
+		ItemNode* pItemNode = itemFusionLayer->GetItemNode(tempnIdx++);
+		if(pItemNode->getNum() > 0)
+		{
+			int EquipNeedLv = 0;
+			long long itemId = tmpiter->second->get_data()->dw_data_id;
+			if (itemId == FUSION_POWDER)
+			{
+				dwAddExp += 250 * pItemNode->getNum();
+			}
+			else if (itemId == SECONDARY_FUSION_POWDER)
+			{
+				int dwMaxExp = (int)NumericalIniMgr::getInstance()->GetEquipFusionMaxExp(EquipFusionManager::getInstance()->getEquipLv(),(EItemQuality)EquipFusionManager::getInstance()->getEquipment()->get_item_quality());
+				dwAddExp += dwMaxExp;
+			}
+			else
+			{
+				f_equipment* equipment = dynamic_cast<f_equipment*>(tmpiter->second);
+				if (equipment != NULL || pItemNode->getNum() < 2)
+				{
+					const EquipTypeData* t_data = PackageManager::getInstance()->getEquipTypeDataPointer(itemId);
+					if (t_data != NULL)
+					{
+						EquipNeedLv = t_data->referLv;
+					}
+// 					c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 					cmd->set_integer32(1 , itemId);
+// 					c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 
+// 					while(table->retrieve_row()) 
+// 					{
+// 						unsigned int idx = table->get_index("referLv");
+// 						EquipNeedLv = table->get_integer32(idx);
+// 					}
+// 					c_db_manager::getSingleton()->destroy_table(table);
+// 					c_db_manager::getSingleton()->end_operation(cmd);
+
+					dwAddExp += NumericalIniMgr::getInstance()->GetEquipFusionDecompose(
+						EquipFusionManager::getInstance()->getEquipReferLv()
+						,EquipNeedLv
+						,(EItemQuality)EquipFusionManager::getInstance()->getEquipment()->get_equip()->byQuality
+						,(EItemQuality)equipment->get_equip()->byQuality);
+				}
+			}
+			tagItemSerial data;
+			data.n16Num = pItemNode->getNum();
+			data.n64ItemID = iter->second->get_item_id();
+			tmpIdxVec.push_back(data);
+		}
+		tmpiter++;
+	}
+	int CurMoney = (int	)tmpIdxVec.size();
+	expenditure->setString(CCString::createWithFormat("%d",CurMoney * 5000)->getCString());
+	//-----------------------------------------------------------------
+	//根据累加的经验设置进度条
+	int dwMaxExp = (int)NumericalIniMgr::getInstance()->GetEquipFusionMaxExp(EquipFusionManager::getInstance()->getEquipReferLv(),(EItemQuality)EquipFusionManager::getInstance()->getEquipment()->get_item_quality());
+	int equipExp = EquipFusionManager::getInstance()->getEquipment()->get_equip()->nFusionExp;
+	_expProgress->setProgress(equipExp + dwAddExp,dwMaxExp);
+	if(equipExp + dwAddExp >= (unsigned int)dwMaxExp)
+		ToolTip::getInstance()->push(STRING_TABLE["equip_fusion_max"]);
+	return;
+}
+
+void EquipFusionUiLayer::UpdateScrollViewDate()
+{
+	dwAddExp = 0;
+	EquipFusionManager::getInstance()->removeEndItem();
+	_items = EquipFusionManager::getInstance()->getEquipFusionItemMap();
+	//std::map<short, f_item*>::iterator iterEnd = _items.end();
+	//_items.erase(_items.size() - 1);
+	//_scrollView->removeAllChildren();
+	itemFusionLayer->removeAllChildren();
+	_items = EquipFusionManager::getInstance()->getEquipFusionItemMap();
+	itemFusionLayer = ItemMarixLayer::create(_contentLayer->getContentSize().width,_contentLayer->getContentSize().height,7,12); //Mr.Green
+	std::map<short, f_item*>::iterator iter =  _items.begin();
+	int index = 0;
+	while(iter != _items.end())
+	{
+		if (iter->second->get_item_type_id() == FUSION_POWDER ||
+			iter->second->get_item_type_id() == SECONDARY_FUSION_POWDER)
+		{
+			itemFusionLayer->SetItemID(index,iter->second->get_item_type_id());
+			ItemNode* pItemNode = itemFusionLayer->GetItemNode(index);
+			pItemNode->setNum(0,iter->second->get_item_number(),false);
+			//pItemNode->SetShowNum(true);
+			pItemNode->SetLessBtn(false);
+		} 
+		else
+		{
+			itemFusionLayer->SetItemID(index,iter->second->get_item_type_id());
+			ItemNode* pItemNode = itemFusionLayer->GetItemNode(index);
+			pItemNode->setNum(0);
+			pItemNode->SetShowNum(true);
+			pItemNode->SetLessBtn(false);
+		}
+		++index;
+		++iter;
+	}
+	itemFusionLayer->signalCallEndItem.connect(this, &EquipFusionUiLayer::onDropEndItem);
+	//itemFusionLayer->signalClickItem.connect(this,&EquipFusionUiLayer::onClickDropEndItem);
+	//itemFusionLayer->signalDoubleClickItem.connect(this,&EquipFusionUiLayer::onDoubleClickDropEndItem);
+	itemFusionLayer->SetItemMap(&_items);
+
+	_contentLayer->addChild(itemFusionLayer);
+	//----------------------------------------------------------------
+	//[bing] 改为检查所有node 若发现全是0 则说明没有选择要融合的物品
+	/*
+	std::vector<tagItemSerial> tmpIdxVec;
+	std::map<short, f_item*>::iterator tmpiter = _items.begin();
+	short tempnIdx = 0;
+	while(tmpiter != _items.end())
+	{
+	ItemNode* pItemNode = itemFusionLayer->GetItemNode(tempnIdx++);
+	if(pItemNode->getNum() > 0)
+	{
+	tagItemSerial data;
+	data.n16Num = pItemNode->getNum();
+	data.n64ItemID = iter->second->get_item_id();
+	tmpIdxVec.push_back(data);
+	}
+	tmpiter++;
+	}
+	int CurMoney = tmpIdxVec.size();
+	expenditure->setString(CCString::createWithFormat("%d",CurMoney * 5000)->getCString());*/
+	//-----------------------------------------------------------------
+}
+
+//洗炼结果
+unsigned int EquipFusionUiLayer::setEquipCleanResultDate(s_net_cmd* cmd)
+{//结果(DWORD)[0=成功+ Src装备ID(INT64),非0=错误编号] 纯洗练
+	WorldPacket Msg((const void*)cmd);
+	unsigned int resultId;
+	INT64 equipId;
+	Msg >> resultId;
+	if (resultId == 0)
+	{
+		Msg >> equipId;
+		//f_equipment* equip;
+		f_item* item = PackageManager::getInstance()->getItem(EICT_Bag,equipId);
+		if( !item )
+			item = PackageManager::getInstance()->getItem(EICT_Equip,equipId);
+		if (item)
+		{
+			InitItemData(2);
+		}
+	}else{
+		switch(resultId)
+		{
+		case E_Fusion_Equip_Not_Exist: //装备不存在
+			ToolTip::getInstance()->push(STRING_TABLE["equip_not_exist"]);
+			break;
+		case E_Fusion_Equip_Quality_Error: //只有品质大于白色才可进行洗炼
+			ToolTip::getInstance()->push(GET_STR(7211));
+			break;
+		case E_Fusion_Equip_Quality_MAX: //品质已达最高，无法洗炼
+			ToolTip::getInstance()->push(STRING_TABLE["equip_quanlity_max_no_fusion"]);
+			break;
+		case E_Fusion_Not_YuanBao: //元宝不足
+			//ToolTip::getInstance()->push("\xE5\x85\x83\xE5\xAE\x9D\xE4\xB8\x8D\xE8\xB6\xB3");
+			//add by vvv 2014.11.05
+			//messageBox = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(7024).c_str(), TEXT_UTF8_RECHARGE, TEXT_UTF8_QUXIAO);//充值，取消
+			//	messageBox->signalOkBtnPressed.connect(this, &EquipFusionUiLayer::noticeRecharge);
+			//	World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+			RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+			break;
+		case E_Fusion_Equip_Specify_Troppo:
+			ToolTip::getInstance()->push(STRING_TABLE["E_Fusion_Equip_Specify_Troppo"]);
+			break;
+		case E_Fusion_Equip_Lock_Troppo:
+			ToolTip::getInstance()->push(STRING_TABLE["E_Fusion_Equip_Lock_Troppo"]);
+			break;
+		}
+	}
+	//INT64 n64DecSilver = 20; //扣除的金币
+	//expenditure->setString(CCString::createWithFormat("%d",n64DecSilver)->getCString());//获取花费金币数
+	m_cleanMsgLock=false;
+	updateItemCostNum();
+	return 0;
+}
+//升阶结果
+unsigned int EquipFusionUiLayer::setEquipFusionLvUpResultDate(s_net_cmd* cmd)
+{//结果(DWORD)[0=成功+ Src装备ID(INT64),非0=错误编号]
+	WorldPacket Msg((const void*)cmd);
+	unsigned int resultId;
+	//int crit;
+	Msg >> resultId;
+	if (resultId == 0)
+	{
+		//int tempEquipLv = getEquipLv(EquipFusionManager::getInstance()->getEquipment()->get_item_type_id());
+		//int dwMaxExp = (int)NumericalIniMgr::getInstance()->GetEquipFusionMaxExp(tempEquipLv,(EItemQuality)EquipFusionManager::getInstance()->getEquipment()->get_item_quality());
+		//int equipExp = EquipFusionManager::getInstance()->getEquipment()->get_equip()->nFusionExp;
+
+		//_expProgress->setProgress(equipExp,dwMaxExp);
+		//if(equipExp >= dwMaxExp)
+		//	ToolTip::getInstance()->push("\xE8\x9E\x8D\xE7\x82\xBC\xE7\xBB\x8F\xE9\xAA\x8C\xE5\xB7\xB2\xE6\xBB\xA1\xEF\xBC\x8C\xE5\x8F\xAF\xE4\xBB\xA5\xE5\x8D\x87\xE9\x98\xB6");
+		//setExp(dwMaxExp,equipExp);
+		//刷界面
+		//UpdateScrollViewDate();
+		//武器进阶，进阶成功后判断武器是否满级，满级则隐藏进阶按钮，显示满级页面
+		f_equipment* pEquip = EquipFusionManager::getInstance()->getEquipment();
+		if(pEquip->get_item_quality() >= EIQ_Quality5 )
+		{
+			updateHideEquipFusionAllControl();
+		}
+		//m_noShowCleanEffect = true;
+		InitItemData(1);
+		playSuccessSE();
+		playFontEffect();
+		return 0;
+	}else{
+		switch(resultId)
+		{//错误的返回结果
+		case E_Fusion_Equip1_Not_Exist: //被融合的装备1未找到
+			ToolTip::getInstance()->push(STRING_TABLE["funsion_equip_slot1_missing"]);
+			break;
+		case E_Fusion_Equip_Is_Max_Quality: //装备已达最高品质
+			ToolTip::getInstance()->push(STRING_TABLE["equip_quanlity_max"]);
+			break;
+		case E_Fusion_Equip_Is_Not_Max_Exp: //装备未达最高经验
+			ToolTip::getInstance()->push(STRING_TABLE["equip_not_top_exp"]);
+			break;
+		case E_Fusion_Not_Find_Item: //没有找到对应融合升阶道具
+			ToolTip::getInstance()->push(STRING_TABLE["equip_not_find_fusion_item"]);
+			break;
+		case E_Fusion_Not_YuanBao: //元宝不足
+			ToolTip::getInstance()->push(GET_STR(7217));
+			//MessageBoxUi * messageBox = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(7024).c_str(), TEXT_UTF8_RECHARGE, TEXT_UTF8_QUXIAO);//充值，取消
+			//messageBox->signalOkBtnPressed.connect(this, &EquipFusionUiLayer::noticeRecharge);
+			//World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+			break;
+		case E_Fusion_Not_YuanBao_Auto_Buy: //元宝不足
+			MessageBoxUi * messageBox = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(7024).c_str(), TEXT_UTF8_RECHARGE, TEXT_UTF8_QUXIAO);//充值，取消
+			messageBox->signalOkBtnPressed.connect(this, &EquipFusionUiLayer::noticeRecharge);
+			World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+			break;
+		}
+	}
+	return 0;
+}
+
+//融合结果
+unsigned int EquipFusionUiLayer::setEquipFusionResultDate(s_net_cmd* cmd)
+{//结果(DWORD)[0=成功,非0=错误编号] + 类型(INT)[1=普通融合,2=加速融合 + 暴击数(INT),3=高级融合] + 当前融合经验(DWORD)
+	WorldPacket Msg((const void*)cmd);
+	INT resultId;
+	//	int type;
+	//	int crit;
+	//	unsigned int equipExp;
+	Msg >> resultId;
+	if (resultId == 0)
+	{
+		INT size;
+		INT times;
+		Msg >> size;
+		Msg >> times;
+		std::vector<INT64> itemIdLists;
+		for (int i = 0; i < size; ++i)
+		{
+			INT64 id;
+			Msg >> id;
+			itemIdLists.push_back(id);
+		}
+		//int tempEquipLv = getEquipLv(EquipFusionManager::getInstance()->getEquipment()->get_item_type_id());
+		//int dwMaxExp = (int)NumericalIniMgr::getInstance()->GetEquipFusionMaxExp(tempEquipLv,(EItemQuality)EquipFusionManager::getInstance()->getEquipment()->get_item_quality());
+		//_expProgress->setProgress(equipExp,dwMaxExp);
+		//setExp(equipExp, dwMaxExp);
+		//刷界面
+		UpdateScrollViewDate();
+	}else{
+		switch(resultId)
+		{//错误的返回结果
+		case E_Fusion_Equip1_Not_Exist: //被融合的装备1未找到
+			ToolTip::getInstance()->push(STRING_TABLE["funsion_equip_slot1_missing"]);
+			break;
+		case E_Fusion_Equip_Is_Max_Quality: //装备已达最高品质
+			ToolTip::getInstance()->push(STRING_TABLE["equip_quanlity_max"]);
+			break;
+		case E_Fusion_Equip_Is_Max_Exp: //装备已达最高经验
+			ToolTip::getInstance()->push(STRING_TABLE["equip_reach_top_exp"]);
+			break;
+		case E_Fusion_Same_Equip: //同一件装备不可融合
+			ToolTip::getInstance()->push(STRING_TABLE["funsion_equip_same"]);
+			break;
+		case E_Fusion_Equip2_Not_Exist: //被融合的装备2未找到
+			ToolTip::getInstance()->push(STRING_TABLE["funsion_equip_slot2_missing"]);
+			break;
+		case E_Fusion_Equip2_Not_Forty: //小于40的装备不可被吃
+			ToolTip::getInstance()->push(STRING_TABLE["funsion_can_not_eat_equip40"]);
+			break;
+		case E_Fusion_Equip2_Have_Gem: //被吃的装备中有宝石
+			ToolTip::getInstance()->push(STRING_TABLE["funsion_gem_in_equip"]);
+			break;
+		case E_Fusion_Not_Silver: //金币不足
+			ToolTip::getInstance()->push(STRING_TABLE["gold_not_enough"]);
+			//UpdateScrollViewDate();//刷界面
+			break;
+		case E_Fusion_Fast_Not_VipLv: //加速vip等级不足
+			ToolTip::getInstance()->push(GET_STR(7139).c_str());
+			break;
+		case E_Fusion_Adv_Not_VipLv: //高级vip等级不足
+			ToolTip::getInstance()->push(GET_STR(7140).c_str());
+			break;
+		case E_Fusion_Not_YuanBao: //元宝不足
+			RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+			break;
+		}
+	}
+
+	//[bing] 融合以后刷新新手引导
+	CCLOG("EquipFusionResult");
+	NewPlayerGuider::getInstance()->RunNewPlayerGuilde();
+
+	return 0;
+}
+void EquipFusionUiLayer::noticeRecharge()
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+}
+void EquipFusionUiLayer::onEnter()
+{
+	TCP_CLIENT->register_net_cmd(NET_G2C_PROC_EQUIP_FUSION_LVUP_RESULT,this,&EquipFusionUiLayer::setEquipFusionLvUpResultDate);
+	TCP_CLIENT->register_net_cmd(NET_G2C_PROC_EQUIP_FUSION_RESULT,this,&EquipFusionUiLayer::setEquipFusionResultDate);
+	TCP_CLIENT->register_net_cmd(NET_G2C_PROC_EQUIP_ATTR_RANDOM_RESULT,this,&EquipFusionUiLayer::setEquipCleanResultDate);
+	TCP_CLIENT->register_net_cmd(NET_G2C_PROC_EQUIP_FUSION_LOCK,this,&EquipFusionUiLayer::setEquipLock);
+	TCP_CLIENT->register_net_cmd("NET_SIS_Equip_Fusion_Specify",this,&EquipFusionUiLayer::onServerEquipFusionSpecify);
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+	//REGISTER_EVENT(MutilGroupRefresh,EquipFusionUiLayer,updateAddNum);
+	REGISTER_EVENT(UpdateFusionFu,EquipFusionUiLayer,UpdateFusionLabel);
+}
+
+void EquipFusionUiLayer::onExit()
+{
+	TCP_CLIENT->unregister_net_cmd(NET_G2C_PROC_EQUIP_FUSION_LVUP_RESULT,this,&EquipFusionUiLayer::setEquipFusionLvUpResultDate);
+	TCP_CLIENT->unregister_net_cmd(NET_G2C_PROC_EQUIP_FUSION_RESULT,this,&EquipFusionUiLayer::setEquipFusionResultDate);
+	TCP_CLIENT->unregister_net_cmd(NET_G2C_PROC_EQUIP_ATTR_RANDOM_RESULT,this,&EquipFusionUiLayer::setEquipCleanResultDate);
+	TCP_CLIENT->unregister_net_cmd(NET_G2C_PROC_EQUIP_FUSION_LOCK,this,&EquipFusionUiLayer::setEquipLock);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Equip_Fusion_Specify",this,&EquipFusionUiLayer::onServerEquipFusionSpecify);
+	SecondVerifyMgr::getInstance()->destroyRequsetVerityData();
+	//CC_SAFE_DELETE(_expProgress);
+	//CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+	// UNREGISTER_EVENT(MutilGroupRefresh,EquipFusionUiLayer,updateAddNum);
+	UNREGISTER_EVENT(UpdateFusionFu,EquipFusionUiLayer,UpdateFusionLabel);
+}
+
+void EquipFusionUiLayer::setExp( int cur, int max )
+{
+	if(_expProgress != NULL)
+	{
+		_expProgress->setProgress(cur, max);
+		if(cur >= max)
+			ToolTip::getInstance()->push(STRING_TABLE["equip_fusion_max"]);
+	}
+}
+void EquipFusionUiLayer::onHelpBtn(  cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	PlacardManager::getInstance()->open_placard_node(9);
+// 	CC_ASSERT(_descframe != NULL);
+// 	if(_descframe->getParent() == NULL)
+// 	{
+// 		CCSpriteFrame* showInfoFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("smeltui_Explain-bottomPicture");
+// 		if(showInfoFrame == NULL)
+// 			return;
+// 		_descframe->setDisplayFrame(showInfoFrame);
+// 		_descframe->setVisible(true);
+// 		_descframe->setTouchPriority(-1);
+// 		setAllChildernButtonPriority(_descframe,-1);
+// 		_descframe->setTouchEnable(true);
+// 		World::getInstance()->getScene()->addChild(_descframe,WZ_POPUI, WCT_EquipFusionTips);
+// 	}
+}
+
+void EquipFusionUiLayer::onHelp1Btn(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	PlacardManager::getInstance()->open_placard_node(8);
+
+// 	CC_ASSERT(_descframe != NULL);
+// 	if(_descframe->getParent() == NULL)
+// 	{
+// 		CCSpriteFrame* showInfoFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("smeltui_Explain-bottomPicture1");
+// 		if(showInfoFrame == NULL)
+// 			return;
+// 		_descframe->setDisplayFrame(showInfoFrame);
+// 		_descframe->setVisible(true);
+// 		_descframe->setTouchPriority(-1);
+// 		setAllChildernButtonPriority(_descframe,-1);
+// 		_descframe->setTouchEnable(true);
+// 		World::getInstance()->getScene()->addChild(_descframe, WZ_POPUI, WCT_EquipFusionTips);
+// 	}
+}
+
+void  EquipFusionUiLayer::onOptionBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent){
+	CC_ASSERT(_appointframe!=NULL);
+	if (_appointframe->getParent() == NULL)
+	{
+		this->addChild(_appointframe);
+	}
+	_appointframe->setVisible(true);
+	//_appointframe->setTouchPriority(-1);
+	setAllChildernButtonPriority(_appointframe,-1);
+	_appointframe->setTouchEnable(true);
+	currequipQuality->setVisible(true);
+	//maxAppointnum->setVisible(true);
+
+	updateCheckOptionEnableState();
+
+	// 	f_equipment* equip = EquipFusionManager::getInstance()->getEquipment();
+	// 	CC_ASSERT(equip);
+	// 	tagRoleAttEffect tempTagRoleAttEffect;
+	// 	for (INT32 i = MAX_BASE_ATT; i < MAX_ADDITIONAL_EFFECT ; i++)
+	// 	{
+	// 		tempTagRoleAttEffect = equip->get_equip()->EquipAttitionalAtt[i];
+	// 		EquipAddAtt att = EquipFusionManager::getInstance()->ERA2EAA(tempTagRoleAttEffect.eRoleAtt);
+	// 		
+	// 	}
+}
+
+// void  EquipFusionUiLayer::updateCheckButtonState(int equipFlag,int att,CheckButton* ckbtn){
+// 
+// }
+
+
+void EquipFusionUiLayer::onCloseDescBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+// 	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+// 	CC_ASSERT(_descframe != NULL);
+// 	_descframe->setTouchEnable(false);
+// 	_descframe->removeFromParent();
+}
+
+// void EquipFusionUiLayer::onKnowBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+// {
+// 	CC_ASSERT(_descframe != NULL);
+// 	_descframe->setTouchEnable(false);
+// 	_descframe->removeFromParent();
+// }
+
+
+// void EquipFusionUiLayer::updateAddNum(MutilGroupRefresh * mug){
+// 	if(mug->group== &_checkBtnGroup){
+// 		_currNum=mug->cur;
+// 		EItemQuality EIQ = (EItemQuality)pEquip->get_item_quality();
+// 		std::string str1=qualitytoAppointNum((EItemQuality)_currNum)+"/"+qualitytoAppointNum(EIQ);
+// 		maxAppointnum->setString(str1.c_str());
+// 	}
+// }
+
+void EquipFusionUiLayer::onKnowBtn1Pressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent){
+	//CC_ASSERT(_appointframe!=NULL);
+
+	//InitItemData();
+	_appointframe->setTouchEnable(false);
+	_appointframe->setVisible(false);
+
+	if (_appointframe->getParent())
+	{
+		_appointframe->removeFromParent();
+	}
+	//刷新属性更新模块
+	updatelink();
+}
+
+cocos2d::CCRect EquipFusionUiLayer::GetFusionPos(unsigned int dwItemID)
+{
+	std::map<short, f_item*>::iterator iter =  _items.begin();
+	int index = 0;
+	while(iter != _items.end())
+	{
+		unsigned int dwTmpID = iter->second->get_item_type_id();
+		if(dwTmpID == dwItemID)
+			break;
+		index++;
+		iter++;
+	}
+
+	itemFusionLayer->SetSrollViewOffSetY(index);
+	SetNodeTintTo(itemFusionLayer->GetItemNode(index));
+	CCPoint cp = itemFusionLayer->GetItemNode(index)->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = itemFusionLayer->GetItemNode(index)->getContentSize();
+	return CCRect(cp.x, cp.y, cs.width, cs.height);
+}
+
+cocos2d::CCRect EquipFusionUiLayer::GetBtnPos( int nTag )
+{
+	if(nTag == 100)
+	{
+		SetNodeTintTo(_frame->getChildByTag(100)->getChildByTag(100));
+		CCPoint cp = _frame->getChildByTag(100)->getChildByTag(100)->convertToWorldSpace(ccp(0, 0));
+		CCSize cs = _frame->getChildByTag(100)->getChildByTag(100)->getContentSize();
+		return CCRect(cp.x, cp.y, cs.width, cs.height);
+	}
+
+	SetNodeTintTo(_frame->getChildByTag(nTag));
+	CCPoint cp = _frame->getChildByTag(nTag)->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = _frame->getChildByTag(nTag)->getContentSize();
+	return CCRect(cp.x, cp.y, cs.width, cs.height);
+}
+
+void EquipFusionUiLayer::SetFusionQianData()
+{
+	/*
+	ItemNode* pItemNode = itemFusionLayer->GetItemNode(nIdx);
+	f_item* pItem = iter->second;
+	if(pItemNode->getNum() < pItem->get_item_quantity())
+	pItemNode->setNum(pItemNode->getNum() + 1);*/
+	//expenditure->setString(CCString::createWithFormat("%d",tempCheckCount * 5000)->getCString());
+	//----------------------------------------------------------------
+	//[bing] 改为检查所有node 若发现全是0 则说明没有选择要融合的物品
+	dwAddExp = 0;
+	std::vector<tagItemSerial> tmpIdxVec;
+	std::map<short, f_item*>::iterator tmpiter = _items.begin();
+	short tempnIdx = 0;
+	while(tmpiter != _items.end())
+	{
+		ItemNode* pItemNode = itemFusionLayer->GetItemNode(tempnIdx++);
+		if(pItemNode->getNum() > 0)
+		{
+			int EquipNeedLv = 0;
+			long long itemId = tmpiter->second->get_data()->dw_data_id;
+			if (itemId == FUSION_POWDER)
+			{
+				dwAddExp += 250 * pItemNode->getNum();
+			} 
+			else if (itemId == SECONDARY_FUSION_POWDER)
+			{
+				int dwMaxExp = (int)NumericalIniMgr::getInstance()->GetEquipFusionMaxExp(EquipFusionManager::getInstance()->getEquipLv(),(EItemQuality)EquipFusionManager::getInstance()->getEquipment()->get_item_quality());
+				dwAddExp += dwMaxExp;
+			}
+			else
+			{
+				f_equipment* equipment = dynamic_cast<f_equipment*>(tmpiter->second);
+				if (equipment != NULL || pItemNode->getNum() < 2)
+				{
+//已完成 					c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 					cmd->set_integer32(1 , itemId);
+// 					c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 
+// 					while(table->retrieve_row())
+// 					{
+// 						unsigned int idx = table->get_index("Level");
+// 						EquipNeedLv = table->get_integer32(idx);
+// 					}
+// 					c_db_manager::getSingleton()->destroy_table(table);
+// 					c_db_manager::getSingleton()->end_operation(cmd);
+
+					const EquipTypeData* t_data = PackageManager::getInstance()->getEquipTypeDataPointer(itemId);
+					if (t_data != NULL)
+					{
+						EquipNeedLv = t_data->level;
+					}
+
+					dwAddExp += NumericalIniMgr::getInstance()->GetEquipFusionDecompose(
+						EquipFusionManager::getInstance()->getEquipReferLv()
+						,EquipNeedLv
+						,(EItemQuality)EquipFusionManager::getInstance()->getEquipment()->get_equip()->byQuality
+						,(EItemQuality)equipment->get_equip()->byQuality);
+				}
+			}
+			tagItemSerial data;
+			tmpIdxVec.push_back(data);
+		}
+		tmpiter++;
+	}
+	int CurMoney = tmpIdxVec.size();
+	expenditure->setString(CCString::createWithFormat("%d",CurMoney * 5000)->getCString());
+	//-----------------------------------------------------------------
+	//根据累加的经验设置进度条
+	int dwMaxExp = (int)NumericalIniMgr::getInstance()->GetEquipFusionMaxExp(EquipFusionManager::getInstance()->getEquipReferLv(),(EItemQuality)EquipFusionManager::getInstance()->getEquipment()->get_item_quality());
+	int equipExp = EquipFusionManager::getInstance()->getEquipment()->get_equip()->nFusionExp;
+	_expProgress->setProgress(equipExp + dwAddExp,dwMaxExp);
+	if(equipExp + dwAddExp >= (unsigned int)dwMaxExp)
+		ToolTip::getInstance()->push(STRING_TABLE["equip_fusion_max"]);
+}
+
+int EquipFusionUiLayer::getEquipLv(unsigned int equipId)
+{
+	int equipItemLv = 0;
+	const EquipTypeData* t_data = PackageManager::getInstance()->getEquipTypeDataPointer(equipId);
+	if (t_data != NULL)
+	{
+		equipItemLv = t_data->referLv;
+	}
+//已完成 	c_sql_command* cmd = NULL;
+// 	c_sql_table* table = NULL;
+// 	
+// 	cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 	cmd->set_integer32(1 , equipId);
+// 	table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("referLv");
+// 		equipItemLv = table->get_integer32(idx);
+// 	}
+// 
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	return equipItemLv;
+}
+
+int EquipFusionUiLayer::GetFusionNum( unsigned int dwItemID )
+{
+	std::map<short, f_item*>::iterator iter =  _items.begin();
+	int index = 0;
+	while(iter != _items.end())
+	{
+		if(iter->second->get_item_type_id() == dwItemID)
+			break;
+		++index;
+		++iter;
+	}
+
+	return itemFusionLayer->GetItemNode(index)->getNum();
+}
+
+//升阶
+void EquipFusionUiLayer::onMessageBoxEquipLevelUpOk()
+{
+	WorldPacket C2G_Msg(NET_C2G_PROC_EQUIP_FUSION_LVUP);	//组装消息头
+	C2G_Msg << EquipFusionManager::getInstance()->getEquipment()->get_item_id();
+	bool autoBuy = false;
+	//CheckButton *check = dynamic_cast<CheckButton*>(_frame->getChildByTag(CHECKBTN));
+	//CC_ASSERT(check);
+	//if (check)
+	//autoBuy = check->isCheckd();
+	C2G_Msg << autoBuy;
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_IDLE, false);		//发送
+}
+
+GameActionNode* EquipFusionUiLayer::getFightNumSuperEffect()
+{
+	GameActionNode* fireSEAcNode = GameActionNode::create();
+	// 	for (int i=1; i<99; ++i)
+	// 	{
+	// 		CCString* fireStr = CCString::createWithFormat("%s%02d", "E1_50", i);
+	// 		if(!fireSEAcNode->AddTexture(fireStr->getCString(), "Effect", "png"))
+	// 			break;
+	// 	}
+	fireSEAcNode->InitTextureWithSpriteFrame("E1_50");
+	return fireSEAcNode;
+}
+
+std::string EquipFusionUiLayer::setItemFuIcon( EItemQuality quality )
+{
+	xinghunIconId=0;
+	CC_ASSERT(quality  >= EIQ_Null && quality <= EIQ_End);
+	if(quality  >= EIQ_Null && quality < EIQ_End)
+	{
+		const int str[] = 
+		{
+			0,		//未鉴定
+			1003217,			//普通
+			1003218,			//优秀
+			1003219,			//卓越
+			1003220,			//完美
+			1003221,			//史诗
+			0,			//传说
+			0			//传说
+		};
+		runeId = 0;
+		c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM PackageData WHERE TypeId = ?1");
+		cmd->set_integer32(1 ,str[quality + 1]);
+		c_sql_table* table = c_db_manager::getSingleton()->create_table();
+		while(table->retrieve_row())
+		{
+			unsigned int idx = table->get_index("Icon");
+			xinghunIconId = table->get_integer32(idx);
+			idx = table->get_index("TypeId");
+			runeId = table->get_integer32(idx);
+			idx = table->get_index("Name");
+			runeNameStr = table->get_text(idx);
+		}
+		c_db_manager::getSingleton()->destroy_table(table);
+		c_db_manager::getSingleton()->end_operation(cmd);
+
+		std::string filePath = CCString::createWithFormat("%s%d%s","Art/ICON/",xinghunIconId,".png")->getCString();
+		return filePath;
+	}
+
+	return "fuck";
+}
+
+
+void EquipFusionUiLayer::refreshQuanlityChar(f_equipment* equip)
+{
+	//f_equipment* equip = EquipFusionManager::getInstance()->getEquipment();
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipQualityAtt WHERE id = ?1");
+// 	cmd->set_integer32(1 , equip->get_item_quality());
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		int idx = table->get_index("wuli_min");
+// 		equipAtt[EAA_ExAttackMin]= table->get_integer32(idx);
+// 		idx=table->get_index("wuli_max");
+// 		equipAtt[EAA_ExAttackMax]=table->get_integer32(idx);
+// 		idx=table->get_index("mofa_min");
+// 		equipAtt[EAA_InAttackMin]=table->get_integer32(idx);
+// 		idx=table->get_index("mofa_max");
+// 		equipAtt[EAA_InAttackMax]=table->get_integer32(idx);
+// 		idx=table->get_index("daosu_min");
+// 		equipAtt[EAA_ArmorEx]=table->get_integer32(idx);
+// 		idx=table->get_index("daosu_max");
+// 		equipAtt[EAA_ArmorIn]=table->get_integer32(idx);
+// 		idx=table->get_index("wufang_min");
+// 		equipAtt[EAA_ExAttack]=table->get_integer32(idx);
+// 		idx=table->get_index("wufang_max");
+// 		equipAtt[EAA_ExDef]=table->get_integer32(idx);
+// 		idx=table->get_index("mofang_min");
+// 		equipAtt[EAA_InAttack]=table->get_integer32(idx);
+// 		idx=table->get_index("mofang_max");
+// 		equipAtt[EAA_InDefense]=table->get_integer32(idx);
+// 		idx=table->get_index("hit_rate");
+// 		equipAtt[EAA_HitRate]=table->get_integer32(idx);
+// 		idx=table->get_index("dodge");
+// 		equipAtt[EAA_Dodge]=table->get_integer32(idx);
+// 		idx=table->get_index("cirt");
+// 		equipAtt[EAA_Crit_Rate]=table->get_integer32(idx);
+// 		idx=table->get_index("fan_cirt");
+// 		equipAtt[EAA_UnCrit_Rate]=table->get_integer32(idx);
+// 		idx=table->get_index("hp");
+// 		equipAtt[EAA_MaxHP]=table->get_integer32(idx);
+// 		idx=table->get_index("mp");
+// 		equipAtt[EAA_MaxMP]=table->get_integer32(idx);
+// 
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+// 	//	
+// 	int level;
+// 	c_sql_command* cmd2 = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 	cmd2->set_integer32(1 , equip->get_item_type_id());
+// 	c_sql_table* table2 = c_db_manager::getSingleton()->create_table();
+// 	while(table2->retrieve_row())
+// 	{
+// 		int idx = table2->get_index("qualityLv");
+// 		level= table2->get_integer32(idx);
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table2);
+// 	c_db_manager::getSingleton()->end_operation(cmd2);
+// 	//
+// 	c_sql_command* cmd3 = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipLevelAtt WHERE id = ?1");
+// 	cmd3->set_integer32(1 , level);
+// 	c_sql_table* table3 = c_db_manager::getSingleton()->create_table();
+// 	while(table3->retrieve_row())
+// 	{
+// 		int idx = table3->get_index("Param");
+// 		fPct= table3->get_double(idx);
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table3);
+// 	c_db_manager::getSingleton()->end_operation(cmd3);
+	tagRoleAttEffect tempTagRoleAttEffect;
+	int index = 1;
+	//double value1;
+	for (INT32 i = MAX_BASE_ATT; i < MAX_ADDITIONAL_EFFECT ; i++)
+	{
+		tempTagRoleAttEffect = equip->get_equip()->EquipAttitionalAtt[i];
+		if (tempTagRoleAttEffect.eRoleAtt != ERA_Null && tempTagRoleAttEffect.nValue > 0)
+		{
+			EquipAddAtt att = EquipFusionManager::getInstance()->ERA2EAA(tempTagRoleAttEffect.eRoleAtt);
+			float min=0,max=0;
+			EquipFusionManager::getInstance()->getEquipAttBaseRangeVal(equip->get_item_type_id(),equip->get_item_quality(),att,min,max );
+			std::string name;
+			//value1=equipAtt[att]*fPct;
+			name=getQuanlityCharSpriteFrameName(min,max,(float)tempTagRoleAttEffect.nValue);//属性等级，劣，低，中，高
+			switch(index)
+			{
+			case 1:
+				//属性等级，劣，低，中，高，对应的图片
+				equipArrow1->setPositionX(equipBtn1->getPositionX()-(equipBtn1->getContentSize().width)-5);
+				equipArrow1->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(name.c_str()));
+				equipArrow1->setVisible(true);
+				equipAttNum1=tempTagRoleAttEffect.eRoleAtt;//附加属性对应的锁定图片标识
+				break;
+			case 2:
+				//name=initArrows(value1,tempTagRoleAttEffect.nValue);
+				equipArrow2->setPositionX(equipBtn2->getPositionX()-(equipBtn2->getContentSize().width)-5);
+				equipArrow2->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(name.c_str()));
+				equipArrow2->setVisible(true);
+				equipAttNum2=tempTagRoleAttEffect.eRoleAtt;
+				break;;
+			case 3:
+				//name=initArrows(value1,tempTagRoleAttEffect.nValue);
+				equipArrow3->setPositionX(equipBtn3->getPositionX()-(equipBtn3->getContentSize().width)-5);
+				equipArrow3->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(name.c_str()));
+				equipArrow3->setVisible(true);
+				equipAttNum3=tempTagRoleAttEffect.eRoleAtt;
+				break;;
+			case 4:
+				//name=initArrows(value1,tempTagRoleAttEffect.nValue);
+				equipArrow4->setPositionX(equipBtn4->getPositionX()-(equipBtn4->getContentSize().width)-5);
+				equipArrow4->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(name.c_str()));
+				equipArrow4->setVisible(true);
+				equipAttNum4=tempTagRoleAttEffect.eRoleAtt;
+				break;;
+			case 5:
+				//name=initArrows(value1,tempTagRoleAttEffect.nValue);
+				equipArrow5->setPositionX(equipBtn5->getPositionX()-(equipBtn5->getContentSize().width)-5);
+				equipArrow5->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(name.c_str()));
+				equipArrow5->setVisible(true);
+				equipAttNum5=tempTagRoleAttEffect.eRoleAtt;
+				break;;
+			case 6:
+				//equipAttr_6->setString(getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue).c_str());
+				break;;
+			}
+			++index;
+		}
+	}
+}
+
+// std::string EquipFusionUiLayer::initArrows(double att,int randAtt)
+// {
+// 	std::string icon="";
+// 	/*const std::string str[] = 
+// 	{
+// 		"smeltui_jiantouxia",
+// 		"smeltui_jiantouxiexia",
+// 		"smeltui_jiantouyou",
+// 		"smeltui_jiantouxieshang",
+// 		"smeltui_jiantoushang",
+// 	};*/
+// 	float max = att * ( 100.0f + 30 ) / 100.0f;
+// 	float min = att * ( 100.0f - 30) / 100.0f;
+// 	float part=(float)(max-min)/5;
+// 	int i = 0;
+// 	FLOAT num = min;
+// 	while (num < max)
+// 	{
+// 		if (num >= randAtt)
+// 			break;
+// 		num += part;
+// 		i++;
+// 	}
+// 	switch(i)
+// 	{
+// 	case 0:
+// 		/*if (randAtt<=min)
+// 		{
+// 			icon="smeltui_jiantouxia";
+// 		}
+// 		else
+// 			icon="smeltui_jiantouxiexia";
+// 		break;*/
+// 		icon="smeltui_jiantouxia";
+// 		break;
+// 	case 1:
+// 		//icon="smeltui_jiantouxiexia";
+// 		icon="smeltui_jiantouxia";
+// 		break;
+// 	case 2:
+// 		//icon="smeltui_jiantouyou";
+// 		icon="smeltui_jiantouxia";
+// 		break;
+// 	case 3:
+// 		icon="smeltui_jiantouxiexia";
+// 		//icon="smeltui_jiantouyou";
+// 		break;
+// 	case 4:
+// 		icon="smeltui_jiantouyou";
+// 		//icon="smeltui_jiantouxieshang";
+// 		break;
+// 	default:
+// 		//if (randAtt>=max)
+// 		double bestPartNum=min+part*4+part*4/5;
+// 		if (randAtt>bestPartNum)
+// 		{
+// 		 icon="smeltui_jiantoushang";
+// 		}
+// 		else
+// 		 icon="smeltui_jiantouxieshang";
+// 		break;
+// 	}
+// 	return icon;
+// }
+
+void EquipFusionUiLayer::lockEquip(int idx,int state)
+{
+	f_equipment* eq=EquipFusionManager::getInstance()->getEquipment();
+	const tagEquipSpec* tes = eq->get_equip();
+	int lock = tes->nFusionExp;
+	if ((lock & (1 << idx)) != 0)
+	{
+		//已经锁定
+		if (state == 0)
+		{
+
+		}
+		else if (state == 1)//解锁
+		{
+			int attr = tes->EquipAttitionalAtt[idx].eRoleAtt;
+
+			WorldPacket C2G_Msg(NET_C2G_PROC_EQUIP_FUSION_LOCK);	//组装消息头
+			//unsigned int id=EquipFusionManager::getInstance()->getEquipment()->get_item_id();
+			C2G_Msg << EquipFusionManager::getInstance()->getEquipment()->get_item_id();
+			C2G_Msg <<attr;
+			C2G_Msg <<1;
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_IDLE, false);		//发送
+
+			m_lockMsgLock=true;
+		}
+	}
+	else
+	{
+		//锁定
+		if (state == 0)
+		{
+			int attr = tes->EquipAttitionalAtt[idx].eRoleAtt;
+			int equipAttNeedLock =EquipFusionManager::getInstance()->ERA2EAA(ERoleAttribute(attr));
+
+			LabelFT* labelText = getAttLabelByAttType(equipAttNeedLock);
+			CC_ASSERT(labelText);
+			int linkAttVal= getLinkedCheckBtnAttType(labelText);
+			if (linkAttVal!= -1 && linkAttVal != equipAttNeedLock)
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["equip_att_lock_contradiction"]);
+				return;
+			}
+
+			WorldPacket C2G_Msg(NET_C2G_PROC_EQUIP_FUSION_LOCK);	//组装消息头
+			//unsigned int id=EquipFusionManager::getInstance()->getEquipment()->get_item_id();
+			C2G_Msg << EquipFusionManager::getInstance()->getEquipment()->get_item_id();
+			C2G_Msg <<attr;
+			C2G_Msg <<0;
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_IDLE, false);		//发送
+
+			m_lockMsgLock=true;
+		}
+	}
+
+}
+
+void EquipFusionUiLayer::onLockStateChange(int id,int lock)
+{
+	_attId=id;
+	_lockFlag=lock;
+	std::string str;
+	//int lockNum=getLockNum();
+	if (_lockFlag==1)
+	{
+		str=GET_STR(7208);
+	}
+	else
+	{
+		/*str=CCString::createWithFormat("%s%d%s",GET_STR(7207).c_str()
+		,20*fac_str[lockNum],
+		GET_STR(7212).c_str())->getCString();*/
+		str=GET_STR(7207);
+	}
+	MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,
+		str.c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+	World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+	msgUi->signalOkBtnPressed.connect(this, &EquipFusionUiLayer::onMessageBoxEquipLockOk);
+}
+
+void EquipFusionUiLayer::onAtt1PressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	_tryToLockPos = 0;
+	onLockStateChange(12,equipAttFlag1);
+}
+
+void EquipFusionUiLayer::onAtt2PressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	_tryToLockPos = 1;
+	onLockStateChange(13,equipAttFlag2);
+}
+
+void EquipFusionUiLayer::onAtt3PressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	_tryToLockPos = 2;
+	onLockStateChange(14,equipAttFlag3);
+}
+
+void EquipFusionUiLayer::onAtt4PressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	_tryToLockPos = 3;
+	onLockStateChange(15,equipAttFlag4);
+}
+
+void EquipFusionUiLayer::onAtt5PressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	_tryToLockPos = 4;
+	onLockStateChange(16,equipAttFlag5);
+}
+
+void EquipFusionUiLayer::updateLock(std::string icon,CCControlButton *btn )
+{
+	CCSpriteFrame *framelock=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(icon.c_str());
+	CC_ASSERT(framelock!=NULL);
+	btn->setBackgroundSpriteFrameForState(framelock, CCControlStateNormal);
+	btn->setBackgroundSpriteFrameForState(framelock,CCControlStateHighlighted);
+}
+
+void EquipFusionUiLayer::onMessageBoxEquipLockOk()
+{
+	lockEquip(_attId,_lockFlag);
+}
+
+void EquipFusionUiLayer::onMessageBoxEquipUnLockOk()
+{
+}
+unsigned int EquipFusionUiLayer::setEquipLock( s_net_cmd* cmd )
+{
+	WorldPacket Msg((const void*)cmd);
+	unsigned int resultId;//错误码
+	unsigned int attId;//枚举属性
+	unsigned int state;//状态
+	INT64 id;//
+	Msg >> attId;
+	Msg >> resultId;
+	Msg >> state;
+	Msg >> id;
+	if (state==0)
+	{
+		if (resultId == 0)
+		{  
+			/*f_item* item = PackageManager::getInstance()->getItem(EICT_Bag, id);
+			if (!item)
+			return 0;
+			f_equipment* _desEquip = dynamic_cast<f_equipment*>(item);
+			if (!_desEquip)
+			return 0;
+			EquipFusionManager::getInstance()->setEquipment(_desEquip);*/
+			if (attId==equipAttNum1)
+			{
+				updateLock("smeltui_suoding",equipBtn1);
+				equipAttFlag1=!equipAttFlag1;
+			}
+			else if (attId==equipAttNum2)
+			{
+				updateLock("smeltui_suoding",equipBtn2);
+				equipAttFlag2=!equipAttFlag2;
+			}
+			else if (attId==equipAttNum3)
+			{
+				updateLock("smeltui_suoding",equipBtn3);
+				equipAttFlag3=!equipAttFlag3;
+			}
+			else if (attId==equipAttNum4)
+			{
+				updateLock("smeltui_suoding",equipBtn4);
+				equipAttFlag4=!equipAttFlag4;
+			}
+			else if (attId==equipAttNum5)
+			{
+				updateLock("smeltui_suoding",equipBtn5);
+				equipAttFlag5=!equipAttFlag5;
+			}
+			EquipAddAtt att = EquipFusionManager::getInstance()->ERA2EAA((ERoleAttribute)attId);
+			saveLockedEquipAttType(att);
+		}
+	}
+	else
+	{
+		if (resultId==0)
+		{
+			/*f_item* item = PackageManager::getInstance()->getItem(EICT_Bag, id);
+			if (!item)
+			return 0;
+			f_equipment* _desEquip = dynamic_cast<f_equipment*>(item);
+			if (!_desEquip)
+			return 0;
+			EquipFusionManager::getInstance()->setEquipment(_desEquip);*/
+			if (attId==equipAttNum1)
+			{
+				updateLock("smeltui_kaisuo",equipBtn1);
+				equipAttFlag1=!equipAttFlag1;
+			}
+			else if (attId==equipAttNum2)
+			{
+				updateLock("smeltui_kaisuo",equipBtn2);
+				equipAttFlag2=!equipAttFlag2;
+			}
+			else if (attId==equipAttNum3)
+			{
+				updateLock("smeltui_kaisuo",equipBtn3);
+				equipAttFlag3=!equipAttFlag3;
+			}
+			else if (attId==equipAttNum4)
+			{
+				updateLock("smeltui_kaisuo",equipBtn4);
+				equipAttFlag4=!equipAttFlag4;
+			}
+			else if (attId==equipAttNum5)
+			{
+				updateLock("smeltui_kaisuo",equipBtn5);
+				equipAttFlag5=!equipAttFlag5;
+			}
+			EquipAddAtt att = EquipFusionManager::getInstance()->ERA2EAA((ERoleAttribute)attId);
+			eraseLockedEquipAttType(att);
+		}
+	}
+	m_lockMsgLock=false;
+
+	//更新制定状态
+	 f_equipment* equip =EquipFusionManager::getInstance()->getEquipment();
+	 std::vector<int>	equipAttListDefualt;
+	 if(equip)
+		updateChecked(equip,equipAttListDefualt);
+
+	updateItemCostNum();
+
+	updateCheckOptionEnableState();
+
+	updatelink();
+
+	return resultId;
+}
+
+// void EquipFusionUiLayer::setLockMessage( int attId,int lockFlag )
+// {
+// 	_attId=attId;
+// 	_lockFlag=lockFlag;
+// }
+
+void EquipFusionUiLayer::updateNum()
+{
+	//显示符文的数量
+	//f_equipment* equip = EquipFusionManager::getInstance()->getEquipment();
+	int itemNum = PackageManager::getInstance()->getItemNumber(EICT_Bag,runeId);
+	//int tempEquipLv = getEquipLv(equip->get_item_type_id());
+	int needNum=1;
+	if (itemNum<needNum)
+	{
+		runeNum->setColor(ccc3(255,0,0));
+	}
+	else
+	{
+		runeNum->setColor(ccc3(0,255,0));
+	}
+	runeNum->setString(CCString::createWithFormat("%d%s%d",itemNum,"/",needNum)->getCString());
+}
+
+int EquipFusionUiLayer::getLockAttNum()const
+{
+	return (int)_lockAttList.size();
+}
+
+GameActionNode* EquipFusionUiLayer::setEquipEffect()
+{
+	GameActionNode* successSEAcNode = GameActionNode::create();
+	// 	for (int i=1; i<99; ++i)
+	// 	{
+	// 		CCString* fireStr = CCString::createWithFormat("%s%02d", "E1_129", i);
+	// 		if(!successSEAcNode->AddTexture(fireStr->getCString(), "Effect", "png"))
+	// 			break;
+	// 	}
+	successSEAcNode->InitTextureWithSpriteFrame("E1_129");
+	return successSEAcNode;
+}
+
+void EquipFusionUiLayer::onSECalback( float dt )
+{
+	//effect->setVisible(false);
+}
+
+void EquipFusionUiLayer::playSuccessSE()
+{
+	if(_successAcNode->GetActionState())
+		_successAcNode->StopAction();
+	_successAcNode->playAnimOnce(0.12f, false);
+	//this->scheduleOnce(schedule_selector(EquipFusionUiLayer::onSECalback), 1.8f);
+}
+
+void EquipFusionUiLayer::playFontEffect()
+{
+	if(fontAcNode->GetActionState())
+		fontAcNode->StopAction();
+	fontAcNode->playAnimOnce(0.18f, false);
+}
+
+GameActionNode* EquipFusionUiLayer::getNodeEffect()
+{
+	GameActionNode* successSEAcNode = GameActionNode::create();
+	// 	for (int i=1; i<99; ++i)
+	// 	{
+	// 		CCString* fireStr = CCString::createWithFormat("%s%02d", "E1_130", i);
+	// 		if(!successSEAcNode->AddTexture(fireStr->getCString(), "Effect", "png"))
+	// 			break;
+	// 	}
+	successSEAcNode->InitTextureWithSpriteFrame("E1_130");
+	return successSEAcNode;
+}
+
+void EquipFusionUiLayer::showEquipCleanEffect(LabelFT* attLabel/*, std::string beforeShowAtt*/)
+{
+// 	if(m_noShowCleanEffect)
+// 		return;
+
+	GameActionNode* equipCleanAc = (GameActionNode*)(attLabel->getChildByTag(EFT_EquipClean));
+	if(equipCleanAc == NULL){
+		equipCleanAc = GameActionNode::create();
+		equipCleanAc->InitTextureWithSpriteFrame("E1_227");
+		equipCleanAc->setPosition(ccp(60.f, 10.f));
+		attLabel->addChild(equipCleanAc, 2, EFT_EquipClean);
+	}
+	equipCleanAc->BeginAction(0.1f, false);
+}
+
+void EquipFusionUiLayer::updateItemCostNum()
+{
+	//int lockNum=getLockAttNum();
+	//lockAppointNum=calRealyCheckedNum();
+	//n64DecSilver=0;
+	// 	if (lockNum<5)
+	// 	{
+	// 	 n64DecSilver= 1+1*fac_str[lockNum]+1*lockAppointNum; //需要扣除的符文数
+	// 	}
+	NumericalIniMgr* nNumberConfig  = NumericalIniMgr::getInstance();
+	int nBaseCost = nNumberConfig->getInt("equip_fusion","fusion_random_need_item_num",1);
+	//int nExchangeRate  = nNumberConfig->getInt("equip_fusion","fusion_random_need_yuanbao",20);
+
+	int nItemCost = EquipFusionManager::getInstance()->getFusionCost(getLockAttNum(),calRealyCheckedNum());
+	int nTotal = nItemCost + nBaseCost;
+	//int nCostItemNum=0;
+	//getFusinCost(nCostItemNum);
+	int numFusionFu=PackageManager::getInstance()->getItemNumber(EICT_Bag,FUSION_RANDOM_BOOK);
+	std::stringstream ss;
+	ss<<numFusionFu<<"/"<<nTotal;
+	std::string str=ss.str();
+	expenditure->setString(str.c_str());//获取花费符文数
+
+	if(nTotal>numFusionFu){
+		expenditure->setColor(ccc3(255,0,0));
+	}else{
+		expenditure->setColor(ccc3(0,255,0));
+	}
+
+}
+
+//指定洗练
+unsigned int EquipFusionUiLayer::onServerEquipFusionSpecify( s_net_cmd* cmd )
+{
+	NET_SIS_Equip_Fusion_Specify* msg = (NET_SIS_Equip_Fusion_Specify*)cmd;
+	if (msg)
+	{
+		switch (msg->dwError)
+		{
+		case E_Success:
+			{
+				f_item* item = PackageManager::getInstance()->getItem(EICT_Bag,msg->n64_serial);
+				if( !item )
+					item = PackageManager::getInstance()->getItem(EICT_Equip,msg->n64_serial);
+				if (item)
+				{
+					InitItemData(2);
+					//clearLabelAnimation();
+				}
+			}
+			break;
+		case E_Fusion_Not_YuanBao: //元宝不足
+			RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+			break;
+		case E_Fusion_Equip_Not_Exist:
+			ToolTip::getInstance()->push(STRING_TABLE["E_Fusion_Equip_Not_Exist"]);
+			break;
+		case E_Fusion_Equip_Quality_Error:
+			ToolTip::getInstance()->push(GET_STR(7211));
+			break;
+		case E_Fusion_Equip_Quality_MAX:
+			ToolTip::getInstance()->push(STRING_TABLE["E_Fusion_Equip_Quality_MAX"]);
+			break;
+		case E_Fusion_Equip_Specify_Null:
+			ToolTip::getInstance()->push(STRING_TABLE["E_Fusion_Equip_Specify_Null"]);
+			break;
+		case E_Fusion_Equip_Specify_Not_Exsit:
+			ToolTip::getInstance()->push(STRING_TABLE["E_Fusion_Equip_Specify_Not_Exsit"]);
+			break;
+		case E_Fusion_Equip_Specify_Troppo:
+			ToolTip::getInstance()->push(STRING_TABLE["E_Fusion_Equip_Specify_Troppo"]);
+			break;
+		case E_Fusion_Equip_Specify_Already_Lock:
+			ToolTip::getInstance()->push(STRING_TABLE["E_Fusion_Equip_Specify_Already_Lock"]);
+			break;
+		case E_Fusion_Equip_Lock_Troppo:
+			ToolTip::getInstance()->push(STRING_TABLE["E_Fusion_Equip_Lock_Troppo"]);
+			break;
+		}
+	}
+	m_cleanMsgLock=false;
+	return 0;
+}
+
+int EquipFusionUiLayer::calRealyCheckedNum() const
+{
+	int total  =0;
+	std::for_each(allOptionCheckBtn.begin(),allOptionCheckBtn.end(),
+		[&total,this](CheckButton const* one){ if (this->reallyChecked(one))++total;});
+	return total;
+}
+
+void EquipFusionUiLayer::updateChecked(f_equipment* pEquip,std::vector<int>& attList)
+{
+	tagRoleAttEffect tempTagRoleAttEffect;
+	//int index = 1;
+	int flag = pEquip->get_equip()->nSpecifyAtt;
+	for (INT32 i = MAX_BASE_ATT; i < MAX_ADDITIONAL_EFFECT ; i++)
+	{
+		tempTagRoleAttEffect = pEquip->get_equip()->EquipAttitionalAtt[i];
+		EquipAddAtt att = EquipFusionManager::getInstance()->ERA2EAA(tempTagRoleAttEffect.eRoleAtt);
+		if (tempTagRoleAttEffect.eRoleAtt != ERA_Null && tempTagRoleAttEffect.nValue > 0)
+		{
+			size_t pos  = getAttLabelPosByEquipAttType(att);
+			CC_ASSERT(pos < _checkPics.size());
+			bool bShow  = (flag & (1 << att)) != 0;
+			_checkPics[pos]->setVisible(bShow);
+
+			if (bShow && !isLockedAtt(att))
+			{
+				attList.push_back(att);
+			}
+		}
+	}
+}
+
+void EquipFusionUiLayer::switchLabelString( CCNode * object )
+{
+	LabelFT * label=dynamic_cast<LabelFT* >(object);
+	std::string str=label->getString();
+
+	std::pair<string ,string>& sp = _labelToStringPair[object];
+	CCSprite * image=_attCharPics[object];
+	CC_ASSERT(image);
+	if (string(label->getString()) == sp.first)
+	{
+		label->setString(sp.second.c_str());
+		label->setColor(ccGREEN);
+		//bel->setFontSize(14);
+		image->setVisible(false);
+	}
+	else
+	{
+		label->setString(sp.first.c_str());
+		label->setColor(ccWHITE);
+		//bel->setFontSize(16);
+		image->setVisible(true);
+	}
+}
+
+
+void EquipFusionUiLayer::UpdateFusionLabel( UpdateFusionFu * updatemsg )
+{
+	updateItemCostNum();
+}
+
+void EquipFusionUiLayer::saveLockedEquipAttType( int equipAttType )
+{
+	auto begin=_lockAttList.begin();
+	auto end= _lockAttList.end();
+	auto iter = std::find(begin,end,equipAttType);
+	if( iter==end)
+		_lockAttList.push_back(equipAttType);
+
+	CheckButton* cb = getCbByEquipAttType(equipAttType);
+	if (cb->isCheckd())
+	{
+		//取消锁定
+		cb->simSelected(false);
+	}
+}
+
+void EquipFusionUiLayer::eraseLockedEquipAttType( int equipAttType )
+{
+	auto begin=_lockAttList.begin();
+	auto end= _lockAttList.end();
+	auto iter = std::find(begin,end,equipAttType);
+	if(iter!=end)
+	{
+		_lockAttList.erase(iter);
+	}
+}
+
+void EquipFusionUiLayer::updateCheckOptionEnableState()
+{
+	auto iter  = _checkBtnToEquipAttType.begin();
+	auto end  = _checkBtnToEquipAttType.end();
+
+	for (;iter!=end;++iter)
+	{
+		//CheckButton* btn  =iter->first;
+		int attType = iter->second;
+		bool bLock  =isLockedAtt(attType);
+		enableOptionState(attType,!bLock);
+	}
+
+	updateOptionNumString();
+}
+
+void EquipFusionUiLayer::enableOptionState(int attType, bool bEnable )
+{
+	//CC_ASSERT(pos <  allCheckButton.size() );
+	//CC_ASSERT(pos <  allLabel.size() );
+	AttOption const* pop =getOption(attType);
+	CC_ASSERT(pop);
+	CheckButton* cb =pop->cb;
+	LabelFT* label = pop->label;
+	bool selected = cb->isCheckd();
+	if (!selected && !bEnable)
+	{
+		//设置新的精灵
+	}
+
+	cb->SetTouchEnable(bEnable);
+
+	label->setColor(bEnable?ccc3(255,255,255) : ccc3(125,125,125));
+}
+
+bool EquipFusionUiLayer::isLockedAtt( int equipAttType ) const
+{
+	auto iter = std::find(_lockAttList.begin(),_lockAttList.end(),equipAttType);
+	return iter != _lockAttList.end();
+}
+
+int EquipFusionUiLayer::getAttTypeFromCheckBtn( CheckButton* cb ) const
+{
+	auto iter = _checkBtnToEquipAttType.find(cb);
+	CC_ASSERT(iter != _checkBtnToEquipAttType.end());
+
+	return iter->second;
+}
+
+AttOption const* EquipFusionUiLayer::getOption( int attType )
+{
+	auto iter = _optMap.find(attType);
+	if (iter != _optMap.end())
+	{
+		return &iter->second;
+	}
+	return nullptr;
+}
+
+void EquipFusionUiLayer::setDefaultFusionOption( std::vector<int>const& defualtAttList )
+{
+	for (auto iter = defualtAttList.begin(); iter!= defualtAttList.end()  ; ++iter)
+	{
+		int att = *iter;
+		AttOption const* opt  =getOption(att);
+		CC_ASSERT(opt);
+
+		opt->cb->simSelected(true);
+	}
+}
+
+bool EquipFusionUiLayer::checkPolicy(CheckButton* sender)
+{
+	if (!sender->isEnable())
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["fusion_opt_notice_lock"]);
+		return false;
+	}
+
+	int nMax =getMaxAttNum();
+	int nLock = getLockAttNum();
+	int nCheckedNotLocked = getCheckedNotLocked();
+	//int nSelCnt =calCheckedNum();
+
+	bool ret= nMax - nLock > nCheckedNotLocked;
+	if (!ret)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["fusion_opt_notice_full"]);
+	}
+
+	return ret;
+}
+
+int EquipFusionUiLayer::getMaxAttNum()
+{
+	f_equipment* pEquip = EquipFusionManager::getInstance()->getEquipment();
+	if (pEquip)
+	{
+		return pEquip->get_indentify_att_num();
+	}
+	return 0;
+}
+
+int EquipFusionUiLayer::getCheckedNotLocked()
+{
+	int nTotal = 0;
+	typedef std::map<CheckButton * ,int> ThisMap;
+	std::for_each(_checkBtnToEquipAttType.begin(),
+		_checkBtnToEquipAttType.end(),
+		[&](ThisMap::value_type& kv)
+	{
+		if (kv.first->isCheckd() &&!isLockedAtt(kv.second))
+		{
+			++nTotal;
+		}
+	});
+
+	return nTotal;
+}
+
+void EquipFusionUiLayer::updateOptionNumString()
+{
+	std::string tmp ;
+	safe_sprintf(tmp,"%d/%d",getCheckedNotLocked(),getMaxAttNum() - getLockAttNum());
+	_funsionOptNumText->setString(tmp.c_str());
+}
+
+void EquipFusionUiLayer::onChangeCheckBtnState( CheckButton* btn,bool bSel )
+{
+	updateOptionNumString();
+
+	//updatelink();
+
+	updateItemCostNum();
+}
+
+void EquipFusionUiLayer::updatelink(bool bDelay /*= false*/)
+{
+	_cbToAttLabelLink.clear();
+
+	std::vector<CheckButton*>	lostLink;
+	for (auto cb_iter = _checkBtnToEquipAttType.begin();  cb_iter!= _checkBtnToEquipAttType.end()  ; ++cb_iter)
+	{
+		CheckButton* btn  =cb_iter->first;
+		if (reallyChecked(btn))
+		{
+			LabelFT* label  = getAttLabelByAttType(cb_iter->second);
+			if (label)
+				_cbToAttLabelLink.insert(std::make_pair(btn,label));
+			else
+				lostLink.push_back(cb_iter->first);
+		}
+	}
+
+	for (auto iter =lostLink.begin(); iter!= lostLink.end()  ; ++iter)
+	{
+		size_t pos = getReplaceAttPosByAttType(_checkBtnToEquipAttType[*iter]);
+		CC_ASSERT(pos <_equipAttTextLabels.size() );
+		_cbToAttLabelLink.insert(std::make_pair(*iter,_equipAttTextLabels[pos].label));
+	}
+
+	updateLabelAnim(bDelay);
+}
+
+void EquipFusionUiLayer::updateLabelAnim(bool delay_anim)
+{
+	f_equipment* equip = EquipFusionManager::getInstance()->getEquipment();
+	CC_ASSERT(equip);
+
+	resetLabelAnim(equip);
+
+	for (auto iter = _cbToAttLabelLink.begin();  iter!= _cbToAttLabelLink.end()  ; ++iter)
+	{
+		CheckButton* btn = iter->first;
+		LabelFT*	label= iter->second;
+
+		int equipAttType =_checkBtnToEquipAttType[btn];
+		ERoleAttribute eRoleAtt=EquipFusionManager::EAA2ERA((EquipAddAtt)equipAttType);
+
+		std::string attTitle=_indentifyAttrStr[eRoleAtt];
+		std::string attRange=EquipFusionManager::getInstance()->getItemAttRangeText(equip,equipAttType);
+		std::string attReplace=attTitle+attRange;
+		attReplace.insert(attReplace.begin(),'(');
+		attReplace.push_back(')');
+		//int oriEquipAttType  =getOriAttTypeByLabel(label);
+		std::string oriString  =label->getString()/*getEquipOriString(equip,oriEquipAttType)*/;
+
+		_labelToStringPair[label] =std::make_pair(oriString,attReplace);
+
+		if (!delay_anim)
+			playSwitch(label);	
+	}
+
+	if (delay_anim)
+	{
+		CCDelayTime* act = CCDelayTime::create(3.5f);
+		CCActionInstant* func  = CCCallFunc::create(this,
+			callfunc_selector(EquipFusionUiLayer::delayPlaySwtich));
+
+		this->runAction(CCSequence::create(act,func,NULL));
+	}
+}
+
+int EquipFusionUiLayer::getOriAttTypeByLabel( LabelFT* label )
+{
+	auto iter  = std::find_if(_equipAttTextLabels.begin(),_equipAttTextLabels.end(),
+		[=](tagEquipAttDisplayData const& one){ return one.label == label;} );
+	CC_ASSERT(iter != _equipAttTextLabels.end());
+
+	return (*iter).equipAttType;
+}
+
+std::string EquipFusionUiLayer::getEquipOriString( f_equipment* equip,int equipAttType )
+{
+	for (INT32 i = MAX_BASE_ATT; i < MAX_ADDITIONAL_EFFECT ; i++)
+	{
+		tagRoleAttEffect tempTagRoleAttEffect = equip->get_equip()->EquipAttitionalAtt[i];
+		EquipAddAtt att = EquipFusionManager::getInstance()->ERA2EAA(tempTagRoleAttEffect.eRoleAtt);
+
+		if (equipAttType == att)
+		{
+			return getEquipAttToString(tempTagRoleAttEffect.eRoleAtt,tempTagRoleAttEffect.nValue);
+		}
+	}
+
+	return "";
+}
+
+size_t EquipFusionUiLayer::getReplaceAttPosByAttType( int equipAttType )
+{
+	size_t pos = 0;
+	for (auto  iter= _equipAttTextLabels.begin();  iter!= _equipAttTextLabels.end()  ; ++iter,++pos)
+	{
+		tagEquipAttDisplayData const& data = *iter;
+		if (!isLinked(data.label) && !isLockedAtt(data.equipAttType)&& data.equipAttType!=-1)
+		{
+			return pos;
+		}
+	}
+	CC_ASSERT(0&&"something wrong!!!");
+	return pos;
+}
+
+bool EquipFusionUiLayer::isLinked( LabelFT* label ) const
+{
+	auto end = _cbToAttLabelLink.end();
+	typedef std::map<CheckButton*,LabelFT*> ThisMap;
+	auto iter  =  std::find_if(_cbToAttLabelLink.begin(),
+		end,
+		[=](ThisMap::value_type const& kv){return kv.second == label;});
+
+	return iter != end;
+}
+
+LabelFT* EquipFusionUiLayer::getAttLabelByAttType( int equipAttType ) const
+{
+	auto end  =_equipAttTextLabels.end();
+	auto iter = std::find_if(_equipAttTextLabels.begin()
+		,_equipAttTextLabels.end()
+		,[=](tagEquipAttDisplayData const& one)
+	{
+		return one.equipAttType == equipAttType;
+	});
+
+	if (iter!= end)
+	{
+		return iter->label;
+	}
+	return NULL;
+}
+
+void EquipFusionUiLayer::changeEquipAttDisplayData( size_t pos,int equipAttType )
+{
+	CC_ASSERT(pos <_equipAttTextLabels.size() );
+
+	tagEquipAttDisplayData& data = _equipAttTextLabels[pos];
+	data.equipAttType = equipAttType;
+}
+
+size_t EquipFusionUiLayer::getAttLabelPosByEquipAttType( int equipAttType )
+{
+	//size_t pos =0;
+	auto finder = std::find_if(_equipAttTextLabels.begin(),_equipAttTextLabels.end(),[=](tagEquipAttDisplayData const& one){
+		return one.equipAttType == equipAttType;
+	});
+	CC_ASSERT(finder != _equipAttTextLabels.end());
+
+	return std::distance(_equipAttTextLabels.begin(),finder);
+}
+
+bool EquipFusionUiLayer::reallyChecked( CheckButton const* btn ) const
+{
+	CheckButton* nc_btn = const_cast<CheckButton*>(btn);
+	auto iter = _checkBtnToEquipAttType.find(nc_btn);
+	CC_ASSERT(iter != _checkBtnToEquipAttType.end());
+	int equipAttType =iter->second;
+	bool bLocked = isLockedAtt(equipAttType);
+	return !bLocked && btn->isCheckd();
+}
+
+// bool EquipFusionUiLayer::attOptionChecked( int equipAttType ) const
+// {
+// 	CheckButton* cb = getCbByEquipAttType(equipAttType);
+// 	CC_ASSERT(cb);
+// 
+// 	return	cb->isCheckd();
+// }
+
+int EquipFusionUiLayer::getFusinCost(int& nItemNeed) const
+{
+	NumericalIniMgr* nNumberConfig  = NumericalIniMgr::getInstance();
+	int nBaseCost = nNumberConfig->getInt("equip_fusion","fusion_random_need_item_num",1);
+	int nExchangeRate  = nNumberConfig->getInt("equip_fusion","fusion_random_need_yuanbao",20);
+
+	int nItemCost = EquipFusionManager::getInstance()->getFusionCost(getLockAttNum(),calRealyCheckedNum());
+	int nTotal = nItemCost + nBaseCost;
+	int nOwnItemNum=PackageManager::getInstance()->getItemNumber(EICT_Bag,FUSION_RANDOM_BOOK);
+
+	if (nTotal > nOwnItemNum)
+	{
+		nItemNeed = nOwnItemNum;
+		return (nTotal - nOwnItemNum) * nExchangeRate;
+	}
+	else
+	{
+		nItemNeed = nTotal;
+		return 0;
+	}
+}
+
+EquipFusionUiLayer::~EquipFusionUiLayer()
+{
+	//CC_SAFE_RELEASE(_descframe);
+
+	CC_SAFE_RELEASE(_appointframe);
+}
+
+void EquipFusionUiLayer::resetLabelAnim( f_equipment* equip )
+{
+	_labelToStringPair.clear();
+	std::for_each(_equipAttTextLabels.begin()
+		,_equipAttTextLabels.end()
+		,[this,equip](tagEquipAttDisplayData& one){
+			one.label->stopAllActions();
+			one.label->setOpacity(255);
+
+			int oriEquipAttType  =this->getOriAttTypeByLabel(one.label);
+			std::string oriString  =this->getEquipOriString(equip,oriEquipAttType);
+			//one.label->setFontSize(16);
+			one.label->setString(oriString.c_str());
+			one.label->setColor(ccWHITE);
+
+
+			CCSprite * image=this->_attCharPics[one.label];
+			CC_ASSERT(image);
+			image->setVisible(one.equipAttType!= -1);
+	});
+	this->stopAllActions();
+}
+
+int EquipFusionUiLayer::getLinkedCheckBtnAttType( LabelFT* label )
+{
+	typedef std::map<CheckButton*,LabelFT*> ThisMap;
+	auto iter = std::find_if(_cbToAttLabelLink.begin(),_cbToAttLabelLink.end(),[=](ThisMap::value_type const& kv){
+		return kv.second == label;
+	});
+	if (iter != _cbToAttLabelLink.end())
+	{
+		CheckButton* cb= iter->first;
+		return _checkBtnToEquipAttType[cb];
+	}
+
+	return -1;
+}
+
+CheckButton* EquipFusionUiLayer::getCbByEquipAttType( int equipAttType ) const
+{
+	typedef std::map<CheckButton * ,int> ThisMap;
+	auto end  =_checkBtnToEquipAttType.end();
+	auto iter  =std::find_if(_checkBtnToEquipAttType.begin(),end,[=](ThisMap::value_type const& kv){
+		return kv.second == equipAttType;
+	});
+
+	CC_ASSERT(iter != end);
+
+	return iter->first;
+}
+
+void EquipFusionUiLayer::replaceAnonymousLable()
+{
+	CCNode* root = this->getChildByTag(0);
+	for (int i = 100; i <=104  ; ++i)
+	{
+		Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(root->getChildByTag(i)));
+	}
+
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(root->getChildByTag(FUSIONITEM)));
+}
+
+void EquipFusionUiLayer::playSwitch( LabelFT* label )
+{
+	CCFadeIn * fadein=CCFadeIn::create(0.5f);
+	CCFadeOut * fadeout=CCFadeOut::create(0.5f);
+	CCActionInstant * currfunc=CCCallFuncN::create(this,
+		callfuncN_selector(EquipFusionUiLayer::switchLabelString));
+	CCRepeatForever * repeat=CCRepeatForever::create(
+		CCSequence::create(fadeout,currfunc,fadein,CCDelayTime::create(2.5f),NULL));
+	label->runAction(repeat);
+}
+
+void EquipFusionUiLayer::delayPlaySwtich()
+{
+	typedef std::map<CheckButton*,LabelFT*> ThisMap;
+	std::for_each(_cbToAttLabelLink.begin(),
+		_cbToAttLabelLink.end(),
+		[this](ThisMap::value_type const& kv)
+	{
+		playSwitch(kv.second);
+	});
+}
+

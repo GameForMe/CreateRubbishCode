@@ -1,0 +1,764 @@
+#include "OffLineExpUi.h"
+#include "CfgReader.h"
+#include "World.h"
+#include "BaseDefine.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "UiLoader.h"
+#include "ActivityMgr.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "PackageManager.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "MiniMapUi.h"
+#include "NumericalIniMgr.h"
+#include "ReceiveRewardUi.h"
+#include "Helper.h"
+#include "RewardMgr.h"
+#include "FindBackUi.h"
+CCNode * OffLineExpUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["OffLineExpUiLayer"] = UiLayerLoader<OffLineExpUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("offlineexpui", nodeLoaders, _loadSpriteSheet);	   
+	if(uiNode != NULL)
+	{
+		OffLineExpUiLayer *uiLayer = dynamic_cast<OffLineExpUiLayer*>(uiNode);
+		CC_ASSERT(uiLayer != NULL);
+		uiLayer->updateData();
+	}
+
+	return uiNode;
+}
+  
+OffLineExpUiLayer * OffLineExpUi::getUiLayer()
+{
+	return getUiNodeByTag<OffLineExpUiLayer>(WCT_OffLineExpUi);
+}
+
+void OffLineExpUi::updateData()
+{
+	OffLineExpUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateData();
+	}
+}
+
+OffLineExpUiLayer::OffLineExpUiLayer() :
+	_offlineTimeExp(NULL)
+	,_offactivityexp(NULL)
+	,_offselfexp(NULL)
+	,_offPercent(NULL)
+	,_offlineNextTime(NULL)
+	,_offLineFreeFont(NULL)
+	,_offLineFreeSprite(NULL)
+	,_offLineGambleMoney(NULL)
+	,_expProgress(NULL)
+	,_offselfexpPositionx(0)
+	,_offselfexpPositiony(0)
+	,_offactivityexpPositionx(0)
+	,_offactivityexpPositiony(0)
+	,_offlineTimePositionx(0)
+	,_offlineTimePositiony(0)
+	,_offPercentPositionx(0)
+	,_offPercentPositiony(0)
+	,_freespitePosx(0)
+	,_gambleMoneyPosx(0)
+	,_freespitePosy(0)
+	,_gambleMoneyPosy(0)
+	, sprite1(NULL)
+	, sprite2(NULL)
+	,_frame(NULL)
+{
+   memset(shaizisprite, 0, sizeof(shaizisprite));
+}
+
+OffLineExpUiLayer::~OffLineExpUiLayer()
+{
+	CC_SAFE_DELETE(_expProgress);
+}
+
+void OffLineExpUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(0));
+	CC_ASSERT(_frame != NULL);
+
+	//_offlineTimeExp = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(4));
+	_offlineTimeExp = Helper::getLabelFTByParentAndTag(_frame, 4);
+	CC_ASSERT(_offlineTimeExp != NULL);
+
+	//_offactivityexp=dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(10));
+	_offactivityexp = Helper::getLabelFTByParentAndTag(_frame, 10);
+	CC_ASSERT(_offactivityexp !=NULL);
+
+	//_offselfexp=dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(11));
+	_offselfexp = Helper::getLabelFTByParentAndTag(_frame, 11);
+	CC_ASSERT(_offselfexp != NULL);
+
+	//_offlineNextTime= dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(12));
+	_offlineNextTime = Helper::getLabelFTByParentAndTag(_frame, 12);
+	CC_ASSERT(_offlineNextTime != NULL);
+
+	//CCLabelTTF* freesprite =  dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(16));
+	LabelFT* freesprite = Helper::getLabelFTByParentAndTag(_frame, 16);
+	CC_ASSERT(freesprite != NULL);
+	if (freesprite)
+	{
+		//freesprite->setHorizontalAlignment(kCCTextAlignmentLeft);
+		freesprite->setHorizontalAlignment(LEFT);
+		freesprite->setVisible(false);
+	}
+	_offLineFreeFont = CCLabelBMFont::create();
+	CC_ASSERT(_offLineFreeFont != NULL);
+	_offLineFreeFont->setFntFile("Art/Scene/fontNum_10.fnt");
+	_offLineFreeFont->setPosition(_frame->getChildByTag(16)->getPosition());
+	_offLineFreeFont->setAnchorPoint(ccp(0.5f,0.5f));
+	_offLineFreeFont->setVisible(false);
+	_frame->addChild(_offLineFreeFont, RZN_EFFECT+1);
+
+	//CCLabelTTF* moneysprite =  dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(8));
+	LabelFT* moneysprite = Helper::getLabelFTByParentAndTag(_frame, 8);
+	CC_ASSERT(moneysprite != NULL);
+	if (moneysprite)
+	{
+		//moneysprite->setHorizontalAlignment(kCCTextAlignmentLeft);
+		moneysprite->setHorizontalAlignment(LEFT);
+		moneysprite->setVisible(false);
+	}
+	_offLineGambleMoney = CCLabelBMFont::create();
+	CC_ASSERT(_offLineGambleMoney != NULL);
+	_offLineGambleMoney->setFntFile("Art/Scene/fontNum_10.fnt");
+	_offLineGambleMoney->setPosition(_frame->getChildByTag(8)->getPosition());
+	_offLineGambleMoney->setAnchorPoint(ccp(0.5f, 0.5f));
+	_offLineGambleMoney->setVisible(false);
+	_frame->addChild(_offLineGambleMoney, RZN_EFFECT+1);
+
+	//_offPercent = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(14));
+	_offPercent = Helper::getLabelFTByParentAndTag(_frame, 14);
+	CC_ASSERT(_offPercent != NULL);
+
+	_expProgress = new ProgressBar;
+	CC_ASSERT(_expProgress != NULL);
+	_expProgress->initBarWithSprite((CCSprite*)_frame->getChildByTag(20)->getChildByTag(17));
+	_expProgress->addToParent(_frame->getChildByTag(20));
+	_expProgress->setRotate(90.0f);
+	_expProgress->setProgress(0,100);
+	_expProgress->setLabelVisible(false);
+
+	AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_155", anims);
+	BSAnimate *animate = anims[0];
+
+	sprite1 = CCSprite::create();
+	CC_ASSERT(sprite1 != NULL);
+	_frame->getChildByTag(20)->getChildByTag(18)->addChild(sprite1);
+	sprite1->stopAllActions();
+	sprite1->runAction(CCRepeatForever::create(animate));
+
+	AnimationCache::AnimateList anims2;
+	AnimationCache::createDefList(1, anims2);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_156", anims2);
+	BSAnimate *animate2 = anims2[0];
+	 
+	CCSprite *sprite40 = dynamic_cast<CCSprite*>(_frame->getChildByTag(40));
+	CC_ASSERT(sprite40 != NULL);
+	std::string dir40 = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "SingleUI/";
+	std::string	str40 = dir40 + "offlineexpui_jingyanchikuang.png";
+	CCSpriteFrame* Frame40 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str40.c_str());
+	if(Frame40 == NULL)
+	{
+		CCTexture2D *texture40 = CCTextureCache::sharedTextureCache()->addImage(str40.c_str());
+		Frame40 = CCSpriteFrame::createWithTexture(texture40, CCRect(0.0, 0.0, texture40->getPixelsWide(), texture40->getPixelsHigh()));
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(Frame40, str40.c_str());
+	}
+	if (Frame40)
+		sprite40->setDisplayFrame(Frame40);
+
+	CCSprite *sprite50 = dynamic_cast<CCSprite*>(_frame->getChildByTag(50));
+	CC_ASSERT(sprite50 != NULL);
+	std::string dir50 = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "SingleUI/";
+	std::string	str50 = dir50 + "offlineexpui_toumingqiu.png";
+	CCSpriteFrame* Frame50 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str50.c_str());
+	if(Frame50 == NULL)
+	{
+		CCTexture2D *texture50 = CCTextureCache::sharedTextureCache()->addImage(str50.c_str());
+		Frame50 = CCSpriteFrame::createWithTexture(texture50, CCRect(0.0, 0.0, texture50->getPixelsWide(), texture50->getPixelsHigh()));
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(Frame50, str50.c_str());
+	}
+	if (Frame50)
+		sprite50->setDisplayFrame(Frame50);
+	
+
+	_offLineFreeSprite = CCSprite::create();
+	CC_ASSERT(_offLineFreeSprite != NULL);
+	std::string freeSpriteText = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "SingleUI/";
+	std::string	finalSpriteText = freeSpriteText + "offlineexpui_cunchuzi.png";
+	CCSpriteFrame* FrameFreeSprite = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(finalSpriteText.c_str());
+	if(FrameFreeSprite == NULL)
+	{
+		CCTexture2D *textureFree = CCTextureCache::sharedTextureCache()->addImage(finalSpriteText.c_str());
+		FrameFreeSprite = CCSpriteFrame::createWithTexture(textureFree, CCRect(0.0, 0.0, textureFree->getPixelsWide(), textureFree->getPixelsHigh()));
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(FrameFreeSprite, finalSpriteText.c_str());
+	}
+	if (FrameFreeSprite)
+		_offLineFreeSprite->setDisplayFrame(FrameFreeSprite);
+	if (freesprite)
+		_offLineFreeSprite->setPosition(freesprite->getPosition());
+	_frame->addChild(_offLineFreeSprite,RZN_EFFECT+1);
+
+
+	sprite2 = CCSprite::create();
+	CC_ASSERT(sprite2 != NULL);
+	_frame->getChildByTag(19)->addChild(sprite2,sprite40->getZOrder() - 1);
+	sprite2->setScaleY(0.5f);
+	sprite2->stopAllActions();
+	sprite2->runAction(CCRepeatForever::create(animate2));
+
+	for (int i = 0; i < 2; i++)
+	{
+		int index = i + 4;
+		AnimationCache::createDefList(1, _animsList[i], false);
+		std::ostringstream ostr;
+		ostr << index;
+		std::string str = "E1_16";
+		str += std::string(ostr.str().c_str());
+		AnimationCache::getInstance()->getSinEffect(0, str ,_animsList[i]);
+		shaizisprite[i] = CCSprite::create();
+		_frame->addChild(shaizisprite[i]);
+	}
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	if (_offselfexp)
+	{
+		_offselfexpPositionx = _offselfexp->getPositionX();
+		_offselfexpPositiony = _offselfexp->getPositionY();
+	}
+	if (_offactivityexp)
+	{
+		_offactivityexpPositionx = _offactivityexp->getPositionX();
+		_offactivityexpPositiony = _offactivityexp->getPositionY();
+	}
+	if (_offlineTimeExp)
+	{
+		_offlineTimePositionx  = _offlineTimeExp->getPositionX();
+		_offlineTimePositiony  = _offlineTimeExp->getPositionY();
+	}
+	_offPercentPositionx  = sprite2->getPositionX();
+	_offPercentPositiony  = sprite2->getPositionY();
+	_freespitePosx = _offLineFreeFont->getPositionX();
+	_freespitePosy = _offLineFreeFont->getPositionY();
+	_gambleMoneyPosx = _offLineGambleMoney->getPositionX();
+	_gambleMoneyPosy = _offLineGambleMoney->getPositionY();
+
+	//CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&OffLineExpUiLayer::setOffLineNextTime), this, 1.0f, false);
+	//设置免费领取按钮图片
+	
+	if(NULL != _frame->getChildByTag(2))
+	{
+		setButtonSpriteFrame(dynamic_cast<CCControlButton*>(_frame->getChildByTag(2)),"offlineexpui_freebtnh","offlineexpui_freebtnn","offlineexpui_freebtnn");
+		_frame->getChildByTag(2)->setVisible(true);
+	}
+	
+	if(NULL != _offLineFreeSprite)
+		_offLineFreeSprite->setVisible(false);
+
+	if(NULL != _frame->getChildByTag(3))
+		_frame->getChildByTag(3)->setVisible(false);
+
+	//SetAllOpacity(this, 1);
+}
+
+cocos2d::SEL_MenuHandler OffLineExpUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler OffLineExpUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onFreeBackBtnPressed", OffLineExpUiLayer::onFreeBackBtnPressed);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onDoubleBackBtnPressed", OffLineExpUiLayer::onDoubleBackBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", OffLineExpUiLayer::onCloseBtnPressed);
+	return NULL;
+}
+
+void OffLineExpUiLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	for( int i = 0 ; i < 2; i++)
+	{
+		AnimationCache::releaseDefList(_animsList[i]);
+	}
+
+	//CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&OffLineExpUiLayer::setOffLineNextTime), this);	
+	CCLayer::onExit();
+}
+
+bool OffLineExpUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (isTouchOnNodeContent(this,pTouch) && isVisible())
+	{
+		return true;
+	} 
+
+	return false;
+}
+
+void OffLineExpUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//World::getInstance()->setBallImage();
+	//CLOSE_UI(WCT_OffLineExpUi);
+	UiMgr::getInstance()->closeUi(WCT_OffLineExpUi,false);
+
+	if(GET_UI(FindBackUI,WCT_FindBackUi)->getCanFindBack())
+	{
+		OPEN_UI(WCT_FindBackUi);
+	}
+}
+
+void OffLineExpUiLayer::onFreeBackBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//免费找回;
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (ploc)
+	{
+		if (ploc->getLevel() < 20)
+		{
+			ToolTip::getInstance()->push(GET_STR(9536));
+			return;
+		}
+		MiniMapUi* miniMap = World::getInstance()->getMiniMapUi();
+		if(miniMap)
+		{
+			RewardMgr::getInstance()->deleteActivitySignList(WCT_OffLineExpUi);
+			miniMap->revokeBtnHighLight(WCT_OffLineExpUi);
+		}
+		if(0 == ploc->GetOffLineTotalExp())
+		{
+			ToolTip::getInstance()->push(GET_STR(2403));
+			return;
+		}
+		ploc->SendPickupLeaveExp(1);
+	}
+}
+
+void OffLineExpUiLayer::onDoubleBackBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+//	//摇色子找回;
+//	//元宝检查
+//	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+//	if (ploc)
+//	{
+//			if(0 == ploc->GetOffLineTotalExp())
+//			{
+//				ToolTip::getInstance()->push(GET_STR(2403));
+//				return;
+//			}
+//
+//		ploc->SendPickupLeaveExp(2);
+//	} 
+}
+
+//播放骰子1动画	
+void OffLineExpUiLayer::PlayGambleAn1()
+{
+	if (!shaizisprite[0])
+		return;
+
+	BSAnimate *bsanims = _animsList[0][0];
+	shaizisprite[0]->setPosition(ccp(shaizisprite[0]->getPositionX() + _frame->getPositionX() / 2,shaizisprite[0]->getPositionY() + (_frame->getPositionY() / 1.5 )));
+	shaizisprite[0]->stopAllActions();
+	shaizisprite[0]->runAction(CCSequence::createWithTwoActions(bsanims, CCCallFuncN::create(this, SEL_CallFuncN(&OffLineExpUiLayer::animationCallback1))));
+}
+
+//播放骰子2动画	
+void OffLineExpUiLayer::PlayGambleAn2()
+{
+	if (!shaizisprite[1])
+		return;
+
+	BSAnimate *bsanims = _animsList[1][0];
+	shaizisprite[1]->setPosition(ccp(shaizisprite[1]->getPositionX() + _frame->getPositionX() / 2 + 25 ,shaizisprite[1]->getPositionY() + (_frame->getPositionY() / 1.5 ) -60));
+	shaizisprite[1]->stopAllActions();
+	shaizisprite[1]->runAction(CCSequence::createWithTwoActions(bsanims, CCCallFuncN::create(this, SEL_CallFuncN(&OffLineExpUiLayer::animationCallback2))));
+}
+
+void OffLineExpUiLayer::CloseAwardUI(float dt)
+{
+	ReceiveRewardUiMgr::GetInstance()->CloseReceiveRewardUI();
+	UiMgr::getInstance()->closeUi(WCT_OffLineExpUi,false);
+
+	if(GET_UI(FindBackUI,WCT_FindBackUi)->getCanFindBack())
+	{
+		OPEN_UI(WCT_FindBackUi);
+	}
+}
+
+void OffLineExpUiLayer::ShowFreeAwardUI(float dt)
+{
+	
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(NULL == ploc)
+		return ;
+
+	if (ploc->GetTempTotalExp() > 0)
+	{
+		std::string strBasic = GET_STR(2408);
+		CCString *exp = CCString::createWithFormat("%d",ploc->GetTempTotalExp());
+		strBasic = replaceStr(strBasic,"*",exp->getCString());
+		std::string dir = CFGReader::instance()->get_profile_string("Art", "ICON", "");
+		std::string	str = dir +"icon_exp.png";
+		ReceiveRewardUiMgr::GetInstance()->setAwardBySelf(strBasic,str);
+		ReceiveRewardUiMgr::GetInstance()->openRewardUi();
+		this->scheduleOnce(schedule_selector(OffLineExpUiLayer::CloseAwardUI),1.5f);
+	}
+}
+
+void OffLineExpUiLayer::ShowDiceAwardUI(float dt)
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(NULL == ploc)
+		return ;
+
+	if (ploc->GetTempTotalExp() > 0)
+	{
+
+		std::string strBasic = GET_STR(2294);
+		if(0 != ploc->GetOfflineDice1() && 0 != ploc->GetOfflineDice2())
+		{
+			std::ostringstream os1;
+			os1<< ploc->GetOfflineDice1();
+
+			std::ostringstream os2;
+			os2<< ploc->GetOfflineDice2();
+
+			std::string str = os1.str() + '.' + os2.str();
+			CCString *exp = CCString::createWithFormat("%d",ploc->GetTempTotalExp());
+			strBasic = replaceStrL(strBasic,"*",str,"**",exp->getCString());
+		}
+		else
+		{
+		
+			std::ostringstream os1;
+			os1<< 1;
+
+			std::ostringstream os2;
+			os2<< 0;
+
+			std::string str = os1.str() + '.' + os2.str();
+			CCString *exp = CCString::createWithFormat("%d",ploc->GetTempTotalExp());
+			strBasic = replaceStrL(strBasic,"*",str,"**",exp->getCString());
+
+		}
+
+		std::string dir = CFGReader::instance()->get_profile_string("Art", "ICON", "");
+		std::string	str = dir +"icon_exp.png";
+
+		ReceiveRewardUiMgr::GetInstance()->setAwardBySelf(strBasic,str);
+		ReceiveRewardUiMgr::GetInstance()->openRewardUi();
+		this->scheduleOnce(schedule_selector(OffLineExpUiLayer::CloseAwardUI),7.9f);
+	}
+}
+
+void OffLineExpUiLayer::animationCallback1(CCNode *node)
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (ploc && shaizisprite[0])
+	{
+		shaizisprite[0]->stopAllActions();
+		if(1 > ploc->GetOfflineDice1() || 6 < ploc->GetOfflineDice1())
+			return ;
+
+		AnimationCache::getInstance()->releaseSinEffect("E1_164");	
+		std::string dir = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "SingleUI/";
+		std::string	str = dir +"shaizi_";
+		std::ostringstream ostr;
+		ostr << ploc->GetOfflineDice1();
+		str += std::string(ostr.str().c_str()) + ".png";
+		shaizisprite[0]->setPosition(ccp(node->getPositionX(),node->getPositionY()));
+		CCSpriteFrame* Frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str.c_str());
+		if(Frame == NULL)
+		{
+			CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addImage(str.c_str());
+			Frame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+			CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(Frame, str.c_str());
+		}
+		if (Frame)
+			shaizisprite[0]->setDisplayFrame(Frame);
+	}
+}
+
+void OffLineExpUiLayer::animationCallback2( CCNode *node )
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (ploc && shaizisprite[1])
+	{
+		shaizisprite[1]->stopAllActions();
+		if(1 > ploc->GetOfflineDice2() || 6 < ploc->GetOfflineDice2())
+			return ;
+
+		AnimationCache::getInstance()->releaseSinEffect("E1_165");	
+		std::string dir = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "SingleUI/";
+		std::string	str = dir +"shaizi_";
+		std::ostringstream ostr;
+		ostr << ploc->GetOfflineDice2();
+		str += std::string(ostr.str().c_str()) + ".png";
+		shaizisprite[1]->setPosition(ccp(node->getPositionX() ,node->getPositionY()));
+		CCSpriteFrame* Frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str.c_str());
+		if(Frame == NULL)
+		{
+			CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addImage(str.c_str());
+			Frame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+			CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(Frame, str.c_str());
+		}
+		if (Frame)
+			shaizisprite[1]->setDisplayFrame(Frame);
+
+		this->scheduleOnce(schedule_selector(OffLineExpUiLayer::ShowDiceAwardUI),0.79f);
+	}
+}
+
+void OffLineExpUiLayer::updateData()
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	CC_ASSERT(NULL != ploc);
+
+	setOffPercent(ploc);
+	setOffLineTime(ploc->GetOfflineTime(),ploc->GetLeaveExp());
+	setOffSelfExp(ploc->GetAddOffLineSelf());
+	setOffActivityExp(ploc->GetOfflineFlower() + ploc->GetOffLineDouble() + ploc->GetOffLineRedEnvelope());
+	setOffTotalExp(ploc->GetOffLineTotalExp());
+	setOffLineCoin(ploc->GetOffLineTotalExp() / 10000);
+	UpdateBtnImage(ploc->GetOffLineTotalExp());
+	//setOffLineNextTime(0);
+}
+
+
+void OffLineExpUiLayer::UpdateBtnImage(int exp)
+{
+	if(NULL == _frame->getChildByTag(3))
+		return ;
+
+	_frame->getChildByTag(3)->setVisible(true);
+	if(0 == exp / 10000)
+		setButtonSpriteFrame(dynamic_cast<CCControlButton*>(_frame->getChildByTag(3)),"offlineexpui_doublebtnh","offlineexpui_doublebtnn","offlineexpui_doublebtnn");
+	else
+	   setButtonSpriteFrame(dynamic_cast<CCControlButton*>(_frame->getChildByTag(3)),"offlineexpui_doublebackbtnh","offlineexpui_doublebackbtnn","offlineexpui_doublebackbtnn");
+}
+
+void OffLineExpUiLayer::setOffSelfExp(int exp)
+{
+	std::string strtxt = "";
+	std::stringstream ss;
+	ss<<exp;
+
+	if( 0 < exp)
+		strtxt = replaceStr(GET_STR(2395), "*", ss.str());
+	else
+		strtxt = GET_STR(2398);
+
+	if (_offselfexp == NULL)
+		return;
+
+	_offselfexp->setString(strtxt.c_str());
+	//_offselfexp->setDimensions(CCSize(273,0));
+	_offselfexp->setDimensions(273,0);
+	_offselfexp->setPosition(ccp(_offselfexpPositionx,_offselfexpPositiony - 10));
+}
+
+void OffLineExpUiLayer::setOffPercent(LocalPlayer* ploc)
+{
+	if(NULL == ploc)
+		return;
+
+	int totalexp = ploc->GetOffLineTotalExp();
+	float percent = 0;
+	if(0 != ploc->GetOffLineMaxExp())
+		percent = (float)totalexp / (float)ploc->GetOffLineMaxExp();
+
+	//保留小数点后两位
+	percent =((int)((percent + 0.0005f) * 1000)) / 10.0f;
+	if (_offPercent)
+		_offPercent->setString(CCString::createWithFormat("%g%s",percent,"%")->getCString());
+	_expProgress->setProgress(100 - percent,100);
+
+	if(100 == (int)percent || 0 == (int)percent )
+	{
+		sprite2->setVisible(false);
+		return;
+	}
+
+	if(50 >= (int)percent)
+	{
+		sprite2->setScaleX((50 + percent + 8) / 100.0f);
+		sprite2->setPositionY((_offPercentPositiony + 150 * (percent / 100) + 3));
+		if(0 < (int)percent && 8 >= (int)percent)
+		{
+			sprite2->setScaleX(0.45f);
+			sprite2->setPositionY((_offPercentPositiony + 150 * (percent / 100) + 8));
+		}
+	}
+	else
+	{
+		sprite2->setScaleX(1.0f - (percent - 55 ) / 100.0f);
+		sprite2->setPositionY((_offPercentPositiony + 150 * (percent / 100) + 2));
+
+		if( 95 <= (int)percent && 99 >= (int)percent)
+		{
+			sprite2->setScaleX(0.3f);
+			sprite2->setPositionY((_offPercentPositiony + 150 * (percent / 100) - 6));
+		}
+
+		else if( 90 <= (int)percent && 95 > (int)percent)
+		{
+			sprite2->setScaleX(0.3f);
+			sprite2->setPositionY((_offPercentPositiony + 150 * (percent / 100) + 1));
+		}
+	}	
+}
+
+void OffLineExpUiLayer::setOffTotalExp(int exp)
+{
+	if(NULL == _offLineFreeSprite ||NULL ==  _offLineFreeFont)
+		return ;
+
+	if(0 == exp)
+	{
+		_offLineFreeSprite->setVisible(true);
+		_offLineFreeSprite->setPosition(ccp(_freespitePosx,_freespitePosy));
+		_offLineFreeFont->setVisible(false);
+	}
+	else
+	{	
+		_offLineFreeSprite->setVisible(false);
+		_offLineFreeFont->setVisible(true);
+		_offLineFreeFont->setPosition(ccp(_freespitePosx,_freespitePosy - 6));
+		_offLineFreeFont->setString(CCString::createWithFormat("%d",exp)->getCString());
+	}
+}
+
+void OffLineExpUiLayer::setOffActivityExp(int exp)
+{
+	if(NULL == _offactivityexp)
+		return; 
+
+	if(0 == exp)
+	{
+		std::string strtxt = GET_STR(2397);
+		_offactivityexp->setString(strtxt.c_str());
+		//_offactivityexp->setDimensions(CCSize(273,0));
+		_offactivityexp->setDimensions(273,0);
+	}
+	else
+	{
+		std::stringstream ss;
+		ss<<exp;
+		std::string strtxt = replaceStr(GET_STR(2394), "*", ss.str());
+		_offactivityexp->setString(strtxt.c_str());
+		//_offactivityexp->setDimensions(CCSize(273,0));
+		_offactivityexp->setDimensions(273,0);
+	}
+	
+	_offactivityexp->setPosition(ccp(_offactivityexpPositionx,_offactivityexpPositiony - 10));
+}
+
+void OffLineExpUiLayer::setOffLineTime( unsigned int time,int exp )
+{
+	std::stringstream ss;
+	ss<<time / 60;
+	std::stringstream ss2;
+	ss2<<exp;
+
+	if (_offlineTimeExp == NULL)
+		return;
+
+	if(0 == time || 0 == exp )
+	{
+		std::stringstream ss3;
+		ss3<< NumericalIniMgr::getInstance()->Get_OfflineExp_Base_Time() / 60;
+
+		std::string strtxt = replaceStr(GET_STR(2396), "*", ss3.str());
+		_offlineTimeExp->setString(strtxt.c_str());
+		//_offlineTimeExp->setDimensions(CCSize(273,0));
+		_offlineTimeExp->setDimensions(273,0);
+		
+	}
+	else
+	{
+		std::string strtxt = replaceStr(replaceStr(GET_STR(2393), "*", ss.str()),"**",ss2.str());
+		_offlineTimeExp->setString(strtxt.c_str());
+		//_offlineTimeExp->setDimensions(CCSize(273,0));
+		_offlineTimeExp->setDimensions(273,0);
+	}
+
+	_offlineTimeExp->setPosition(ccp(_offlineTimePositionx,_offlineTimePositiony - 10));
+
+}
+
+void OffLineExpUiLayer::setOffLineNextTime(float dt)
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	CC_ASSERT(NULL != ploc);
+
+	if( 0 >= (long)GetOffLineLeaveTime())
+	{
+		LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+		if (!ploc)
+			return;
+
+		if (_offlineNextTime)
+		{
+			if(0 == ploc->GetOffLineTotalExp())
+			{
+				std::string strtxt = GET_STR(2403);
+				_offlineNextTime->setString(strtxt.c_str());
+			}
+			else
+			{
+				std::string strtxt = GET_STR(2400);
+				_offlineNextTime->setString(strtxt.c_str());
+			}	
+		}
+		CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&OffLineExpUiLayer::setOffLineNextTime), this);	
+	}
+	else
+	{
+		unsigned int hour = GetOffLineLeaveTime() /(60 * 60);
+		unsigned int minutes = (GetOffLineLeaveTime() / 60) % 60;
+		unsigned int secondes = GetOffLineLeaveTime() % 60;
+		char scripttime[20];
+		sprintf(scripttime,"%02d:%02d:%02d",hour,minutes,secondes);
+		std::string strtxt = replaceStr(GET_STR(2399), "*", scripttime);
+		if (_offlineNextTime)
+			_offlineNextTime->setString(strtxt.c_str());
+	}
+}
+
+long OffLineExpUiLayer::GetOffLineLeaveTime()
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	CC_ASSERT(NULL != ploc);
+
+	if(0 == ploc->GetOfflineStartTime().year)
+		return 0;
+
+	return CalcTimeDiff(ServerTime::getInstance()->get_dis_hour_Time(ploc->GetOfflineStartTime(),6),ServerTime::getInstance()->cal_current_server_dword_time());
+}
+
+void OffLineExpUiLayer::setOffLineCoin(int money)
+{
+	if(NULL == _offLineGambleMoney)
+		return; 
+
+	if(0 < money)
+	{
+		_offLineGambleMoney->setVisible(true);
+		_offLineGambleMoney->setString(CCString::createWithFormat("%d",money)->getCString());//摇色子所需的钱 
+		_offLineGambleMoney->setPosition(ccp(_gambleMoneyPosx - 1,_gambleMoneyPosy - 5));
+	}
+	else
+		_offLineGambleMoney->setVisible(false);
+}
+

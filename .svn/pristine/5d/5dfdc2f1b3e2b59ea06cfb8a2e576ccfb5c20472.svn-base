@@ -1,0 +1,386 @@
+#include "BossPKMgr.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "CfgReader.h"
+#include "DBMgr.h"
+#include "FubenInfoUI.h"
+#include "WorldPacket.h"
+#include "UiManager.h"
+#include "BossPKUi.h"
+#include "BossPKUi_new.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ServerTime.h"
+#include "CommonMsgDefine.h"
+#include "TCPClient.h"
+#include "MiniMapUi.h"
+#include "NumericalIniMgr.h"
+
+BossPKMgr::BossPKMgr()
+{
+	_lastBossDataSyncTime = (unsigned int)INVALID;
+	_isNewFuctionOpen = false;
+	_bossIDMap.clear();
+	_bossFlushTimeMap.clear();
+	_mapBossData.clear();
+}
+
+BossPKMgr::~BossPKMgr()
+{
+	_isNewFuctionOpen = false;
+	_bossIDMap.clear();
+	_bossFlushTimeMap.clear();
+	_mapBossData.clear();
+}
+
+void BossPKMgr::Init()
+{
+	_lastBossDataSyncTime = (unsigned int)INVALID;
+	_isNewFuctionOpen = false;
+	_bossIDMap.clear();
+	_bossFlushTimeMap.clear();
+/*	_mapBossData.clear();*/
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM BossChallenge");
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		sBossProto data;
+// 		unsigned int idx = table->get_index("id");
+// 		data.bossId = table->get_integer32(idx);
+// 		idx = table->get_index("lv");
+// 		data.bossLevel = table->get_integer32(idx);
+// 		idx = table->get_index("showLv");
+// 		data.showLevel = table->get_integer32(idx);
+// 		idx = table->get_index("name");
+// 		data.name = table->get_text(idx);
+// 
+// 		_mapBossData.insert(std::make_pair(data.bossId, data));
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+	TCP_CLIENT->register_net_cmd(NET_G2C_ASK_USE_NEW_BOSS_LIST, this, &BossPKMgr::onServerNewFuctionOpen);
+
+	_IsNeedSortBossUI = true;
+}
+
+void BossPKMgr::InitBossDataFromXML()
+{
+	_mapBossData.clear();
+	f_data_set dataset;
+	std::list<std::string> fields;
+
+	bool ret = dataset.load("Config/db/BossChallenge.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		sBossProto data;
+		data.bossId =  dataset.get_int("id",one.c_str());
+		data.name = dataset.get_string("name",one.c_str());
+		data.bossLevel = dataset.get_int("lv",one.c_str());
+		data.m_sPortrait = dataset.get_string("portrait",one.c_str());
+		data.m_nRelayID = dataset.get_int("relayID",one.c_str());
+		data.m_sDesc = dataset.get_string("desc",one.c_str());
+		data.m_sHaunt = dataset.get_string("haunt",one.c_str());
+		data.m_nMapID = dataset.get_dword("map_id",one.c_str());
+		data.m_nItem2ID = dataset.get_int("item2",one.c_str());
+		data.m_nItem3ID = dataset.get_int("item3",one.c_str());
+		data.m_nItem4ID = dataset.get_int("item4",one.c_str());
+		data.m_nItem5ID = dataset.get_int("item5",one.c_str());
+		data.m_nItem6ID = dataset.get_int("item6",one.c_str());
+		data.m_sPortraitNew = dataset.get_string("portraitNew",one.c_str());
+		data.showLevel = dataset.get_int("showLv",one.c_str());
+		
+		_mapBossData.insert(std::make_pair(data.bossId, data));
+	});
+}
+
+const sBossProto* BossPKMgr::getBossDataByBossID(unsigned int pID)
+{
+	 BossProMap::iterator iter = _mapBossData.find(pID);
+	 if (iter != _mapBossData.end())
+	 {
+		 return &iter->second;
+	 }
+	 else
+	 {
+		 return NULL;
+	 }
+}
+
+
+void BossPKMgr::Destory()
+{
+	_lastBossDataSyncTime = (unsigned int)INVALID;
+	_isNewFuctionOpen = false;
+	_bossIDMap.clear();
+	_bossFlushTimeMap.clear();
+	//_mapBossData.clear();
+
+	TCP_CLIENT->unregister_net_cmd(NET_G2C_ASK_USE_NEW_BOSS_LIST, this, &BossPKMgr::onServerNewFuctionOpen);
+}
+
+BossPKMgr* BossPKMgr::getInstance()
+{
+	static BossPKMgr bossMgr;
+	return &bossMgr;
+}
+
+void BossPKMgr::getBossData(s_net_cmd* cmd)
+{
+	_bossIDMap.clear();
+	//_bossFlushTimeMap.clear();
+	int bossCount = 0;
+	WorldPacket Msg((const void*)cmd);
+	Msg >> bossCount;
+	if (bossCount >= 0)
+	{
+		_lastBossDataSyncTime = ServerTime::getInstance()->cal_current_server_dword_time();
+		for (int i = 0; i < bossCount ; ++i)
+		{
+// 			Msg >> _bossIDMap[i];
+// 			Msg >> _mapBossType[_bossIDMap[i]];
+// 			Msg >> _bossFlushTimeMap[_bossIDMap[i]];
+			int bossId = 0;
+			int oddTime = 0;
+			int bossType = 0;
+			Msg >> bossId;
+			Msg >> bossType;
+			Msg >> oddTime;
+			if (isFlushBossData(bossId, oddTime))
+			{
+				addbossFlushTimeMap(bossId, oddTime,_lastBossDataSyncTime);
+			}
+			else
+			{
+				addbossFlushTimeMap(bossId, oddTime);
+			}
+			addBossIDMap(i, bossId);
+			addBossType(bossId,bossType);
+		}
+	}
+	if (_isOpenBossUi)
+	{
+		if ( getFuctionOpen() )
+			UiMgr::getInstance()->openUi(WCT_BOSSPKUI_NEW,false);
+		else
+			UiMgr::getInstance()->openUi(WCT_BOSSPKUI,false);
+	}
+}
+
+bool BossPKMgr::isFlushBossData( int boosId,int time )
+{
+	if (time == 0)
+	{
+		BossFlushMap::iterator iter = _bossFlushTimeMap.find(boosId);
+		if (iter == _bossFlushTimeMap.end())
+		{
+			return true;
+		}
+		else
+		{
+			if (iter->second.oddTime != 0)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+BossPKMgr::BossDataMap* BossPKMgr::getBossDatamap( BossDataTag eBossData )
+{
+	switch(eBossData)
+	{
+	case BPK_BOSSIDMAP:
+		return &_bossIDMap;
+		break;
+// 	case BPK_BOSSFLUSHTIMEMAP:
+// 		return &_bossFlushTimeMap;
+// 		break;
+// 	case BPK_BOSSDATA:
+// 		return &_mapBossData;
+// 		break;
+	case BPK_BOSSTYPE:
+		return &_mapBossType;
+		break;
+	default:
+		return NULL;
+		break;
+	}
+}
+
+BossPKMgr::BossFlushMap& BossPKMgr::getBossFlushMap()
+{
+	return _bossFlushTimeMap;
+}
+
+BossPKMgr::BossProMap& BossPKMgr::getBossProMap()
+{
+	return _mapBossData;
+}
+
+int BossPKMgr::getBossCount()
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if (player == NULL)
+	{
+		return 0;
+	}
+
+	int count = 0;
+	BossFlushMap bossFlushTimeMap = getBossFlushMap();
+	BossProMap bossDataMap = getBossProMap();
+	for (BossFlushMap::iterator iter = bossFlushTimeMap.begin(); iter != bossFlushTimeMap.end(); ++iter)
+	{
+		sBossFlushData data = iter->second;
+		if (data.oddTime == 0)
+		{
+			BossProMap::iterator tempIter = bossDataMap.find(iter->first);
+			if (tempIter != bossDataMap.end())
+			{
+				if (tempIter->second.showLevel < player->getLevel())
+				{
+					++count;
+				}
+			}
+		}
+	}
+	return count;
+}
+
+void BossPKMgr::setOpenBossUi(bool flag,bool bNeedSortBossUI /*= true*/)
+{
+	_isOpenBossUi = flag;
+
+	_IsNeedSortBossUI = bNeedSortBossUI;
+}
+
+bool BossPKMgr::isBossNeedShow()
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if (player == NULL)
+		return false;
+
+	int timeLimit = NumericalIniMgr::getInstance()->Get_Boss_Show_Time();
+	unsigned int nowTime = ServerTime::getInstance()->cal_current_server_dword_time();
+	unsigned int interval = CalcTimeDiff(nowTime,_lastBossDataSyncTime);
+	for (BossFlushMap::iterator iter = _bossFlushTimeMap.begin();iter != _bossFlushTimeMap.end();++iter)
+	{
+		//int bossId = iter->first;
+		sBossFlushData flushData = iter->second;
+		if (player->getLevel() < flushData.showLv)
+			continue;
+
+		//boss刷新且存在,5分钟内显示
+		if (flushData.oddTime == 0)
+		{
+			if (flushData.flushTime != (unsigned int)INVALID && flushData.flushTime != 0)
+			{
+				unsigned int disTime = CalcTimeDiff(nowTime, flushData.flushTime);
+				if (disTime < (unsigned int)timeLimit)
+				{
+					return true;
+				}
+			}
+		}
+		//boss刷新前5分钟显示
+		else if (flushData.oddTime > 0)
+		{
+			int time = flushData.oddTime - interval;
+			if (time > 0 && time < timeLimit)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+void BossPKMgr::addBossIDMap( int index, int boosId )
+{
+	BossDataMap::iterator iter = _bossIDMap.find(index);
+	if (iter == _bossIDMap.end())
+	{
+		_bossIDMap.insert(std::make_pair(index,boosId));
+	}
+	else
+	{
+		iter->second = boosId;
+	}
+}
+
+void BossPKMgr::addbossFlushTimeMap( int boosId, int oddTime,unsigned int flushTime /*= INVALID*/ )
+{
+	BossFlushMap::iterator iter = _bossFlushTimeMap.find(boosId);
+	if (iter == _bossFlushTimeMap.end())
+	{
+		sBossFlushData data;
+		data.oddTime = oddTime;
+		data.flushTime = flushTime;
+		BossProMap::iterator tempIter = _mapBossData.find(boosId);
+		if (tempIter != _mapBossData.end())
+		{
+			data.showLv = tempIter->second.showLevel;
+		}
+		_bossFlushTimeMap.insert(std::make_pair(boosId,data));
+	}
+	else
+	{
+		sBossFlushData& data = iter->second;
+		data.oddTime = oddTime;
+		if (flushTime != INVALID)
+		{
+			data.flushTime = flushTime;
+		}
+	}
+}
+
+void BossPKMgr::addBossType( int boosId,int bossType )
+{
+	BossDataMap::iterator iter = _mapBossType.find(boosId);
+	if (iter == _mapBossType.end())
+	{
+		_mapBossType.insert(std::make_pair(boosId,bossType));
+	}
+	else
+	{
+		iter->second = bossType;
+	}
+}
+
+bool BossPKMgr::getFuctionOpen()
+{
+	return _isNewFuctionOpen;
+}
+
+string BossPKMgr::get_boss_name_by_id(int boss_id)
+{
+	BossProMap::iterator iter = _mapBossData.find(boss_id);
+	if(iter != _mapBossData.end())
+	{
+		return iter->second.name;
+	}
+	return "";
+}
+
+unsigned int BossPKMgr::onServerNewFuctionOpen( s_net_cmd* cmd )
+{
+	WorldPacket Msg((const void*)cmd);
+	int IsOpen;
+	Msg >> IsOpen;
+	if (IsOpen == 1)
+	{
+		_isNewFuctionOpen = true;
+		MiniMapUi* ui = World::getInstance()->getMiniMapUi();
+		if (ui)
+		{
+			ui->showNewBoss(true);
+		}
+	}
+	else
+	{
+		_isNewFuctionOpen = false;
+	}
+	return 0;
+}

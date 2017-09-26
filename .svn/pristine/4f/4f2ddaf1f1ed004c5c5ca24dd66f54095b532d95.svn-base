@@ -1,0 +1,851 @@
+#include "UpdateUI.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "MessageBoxUi.h"
+#include "ClientUpdate.h"
+#include "CfgReader.h" 
+#include "ProgressBar.h"
+#include "ToolTip.h"
+#include "Login.h"
+#include "AppDelegate.h"
+#include "StringMgr.h"
+#include "MovingBackground.h"
+extern AppDelegate *g_AppDelegate;
+
+//盛大测试
+//const char* serverlistDownFileName = "serverlist.xml";
+
+#if (CC_TARGET_PLATFORM != CC_PLATFORM_WIN32)
+#include <dirent.h>
+#include <sys/stat.h>
+#endif
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+#include "wzolJni.h"
+#endif
+
+
+//UpdateUI * UpdateUI::getInstance()
+//{
+//	static UpdateUI instance;
+//	return &instance;
+//}
+
+/* AreaPlayerUI */
+UpdateUI* UpdateUI::Init(CCScene* pScene, AppDelegate* pAppDelegate)
+{
+	CCLog("-----------UpdateUI::Init  begin");
+	if(!pScene)
+		return NULL;
+
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["autoupdateui"] = UiLayerLoader<UpdateUI>::loader();
+	std::set<std::string> _loadSpriteSheet;
+	CCNode* node = readUiFromCCBI("autoupdateui", nodeLoaders, _loadSpriteSheet);
+
+	UpdateUI* pUI = NULL;
+	if(node)
+	{
+		pUI = (UpdateUI*)node;
+		pUI->SetScene(pScene);
+		pUI->SetAppDelegate(pAppDelegate);
+		pUI->m_loadSpriteSheet = _loadSpriteSheet;
+		pScene->addChild(pUI);
+	}
+	CCLog("-----------UpdateUI::Init  end");
+	return pUI;
+}
+
+void UpdateUI::onExit()
+{
+	//m_pUpdateMgr->destroy();
+	//CC_SAFE_DELETE(m_pMgrDelegate);
+	CCLayer::onExit();
+}
+cocos2d::SEL_MenuHandler UpdateUI::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler UpdateUI::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCLog("-----------UpdateUI::onResolveCCBCCControlSelector  begin");
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOKBtnPressed", UpdateUI::onOKBtnPressed);  
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCancelBtnPressed", UpdateUI::onCancelBtnPressed);  
+	CCLog("-----------UpdateUI::onResolveCCBCCControlSelector  end");
+	return NULL;
+}
+
+void UpdateUI::onOKBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CCLog("-----------UpdateUI::onOKBtnPressed  begin");
+	m_infoShowSprite->setVisible(false);
+	m_infoBtnOk->setVisible(false);
+	m_barSprite->setVisible(true);
+	//CCString* pNowStr = CCString::createWithFormat("\xE7\x89\x88\xE6\x9C\xAC\xE5\x8F\xB7%s", m_pUpdateMgr->getNewestVersion().c_str());
+	//CCLog("-----------getNewestVersion()-----%s",m_pUpdateMgr->getNewestVersion().c_str());
+	//m_pNewVersion->setString(pNowStr->getCString());
+	//m_barBanben->setString(pNowStr->getCString());
+	//m_pUpdateMgr->update();	
+	CCLog("-----------UpdateUI::onOKBtnPressed  end");
+}
+void UpdateUI::onCancelBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+}
+bool UpdateUI::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	return true;
+}
+
+void UpdateUI::showTip(int n, const std::string &string )
+{
+	CCLog("----------------------UpdateUI::showTip %d, begin%s",n, string.c_str());
+	ToolTip::getInstance()->show(string, -1, GetScene());
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	ToolTip::getInstance()->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f + 25.0f));
+	//CCLog("----------------------UpdateUI::showTip end winSize.width=%f,winSize.height=%f",(winSize.width),(winSize.height));
+	//CCLog("----------------------UpdateUI::showTip end width=%f,height=%f",(winSize.width / 2.0f),(winSize.height / 2.0f + 25.0f));
+}
+
+void UpdateUI::hideTip()
+{
+	ToolTip::getInstance()->hide();
+}
+void UpdateUI::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	CCLog("-----------UpdateUI::onNodeLoaded  begin");
+	m_pScene = NULL;
+
+	m_barSprite = dynamic_cast<CCSprite*>(getChildByTag(0)->getChildByTag(1));
+	m_barBox = dynamic_cast<CCSprite*>(m_barSprite->getChildByTag(0));
+	m_barVal = dynamic_cast<CCSprite*>(m_barSprite->getChildByTag(1));
+	m_barBanben = dynamic_cast<CCLabelTTF*>(m_barSprite->getChildByTag(2));
+	m_barFileSize = dynamic_cast<CCLabelTTF*>(m_barSprite->getChildByTag(3));
+	m_barPercent = dynamic_cast<CCLabelTTF*>(m_barSprite->getChildByTag(4));
+	m_barTitle = dynamic_cast<CCLabelTTF*>(m_barSprite->getChildByTag(5));
+	m_barSprite->setVisible(false);
+
+	m_infoShowSprite = dynamic_cast<CCSprite*>(getChildByTag(0)->getChildByTag(0));
+	m_infoShowLabel = dynamic_cast<CCLabelTTF*>(m_infoShowSprite->getChildByTag(1));
+	m_infoBtnOk = dynamic_cast<CCControlButton*>(m_infoShowSprite->getChildByTag(2));
+	m_infoShowSprite->setVisible(false);
+
+	_expProgress = new ProgressBar;
+	_expProgress->initBarWithSprite(m_barVal);
+	_expProgress->addToParent(m_barSprite);
+	_expProgress->setProgress(0,100);
+
+	CCSprite* backGroundSprite = dynamic_cast<CCSprite*>(getChildByTag(0));
+	CCSize screenSize = CCDirector::sharedDirector()->getWinSize();
+	CCSize uiEffectSize = backGroundSprite->getContentSize();
+	backGroundSprite->setScaleX(screenSize.width / uiEffectSize.width);
+	backGroundSprite->setScaleY(screenSize.height / uiEffectSize.height);
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&UpdateUI::startFileCheck), this, 0.01f, false);
+
+	CCLog("-----------UpdateUI::onNodeLoaded  end");
+}
+
+void UpdateUI::startFileCheck(float fdt)
+{
+	CCLog("----------------- UpdateUI::startFileCheck begin----%f",fdt);
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&UpdateUI::startFileCheck), this);
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	//正在进入游戏......
+	showTip(1, "\xE6\xAD\xA3\xE5\x9C\xA8\xE8\xBF\x9B\xE5\x85\xA5\xE6\xB8\xB8\xE6\x88\x8F\x2E\x2E\x2E");
+#elif (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+	//正在检查更新...
+	showTip(1, "\xE6\xAD\xA3\xE5\x9C\xA8\xE6\xA3\x80\xE6\x9F\xA5\xE6\x9B\xB4\xE6\x96\xB0\x2E\x2E\x2E");
+#endif
+
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&UpdateUI::startupdate), this, 0.8f, false);
+	CCLog("----------------- UpdateUI::startFileCheck end");
+}
+
+void UpdateUI::startupdate(float fdt)
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&UpdateUI::startupdate), this);
+	CCLog("----------------- UpdateUI::startupdate 1 -->%f", fdt);
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+    g_AppDelegate->initDelegate();
+    Login::getInstance()->openOnCGVedioEnd1();
+    Login::getInstance()->openOnCGVedioEnd2();
+    Login::getInstance()->openOnCGVedioEnd3();
+    Login::getInstance()->openOnCGVedioEnd4();
+    return;
+#endif
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	g_AppDelegate->initDelegate();
+	Login::getInstance()->openOnCGVedioEnd1();
+	Login::getInstance()->openOnCGVedioEnd2();
+	Login::getInstance()->openOnCGVedioEnd3();
+	Login::getInstance()->openOnCGVedioEnd4();
+	return;
+#endif
+
+	//m_pMgrDelegate = new UpMgrDelegateProtocol(this);
+	m_pMgrDelegate = new UpdateDelegateProtocol();
+	m_pMgrDelegate->setUI(this);
+
+	CCLog("----------------- UpdateUI::startupdate 2");
+
+	std::string tmpdownloaddir = CCFileUtils::sharedFileUtils()->getWritablePath();
+
+	CCLog("----------------- UpdateUI::tmpdownloaddir = %s", tmpdownloaddir.c_str());
+
+#ifndef WIN32
+	tmpdownloaddir.erase(tmpdownloaddir.rfind('/'));
+#else
+	tmpdownloaddir.erase(tmpdownloaddir.rfind('\\'));
+#endif
+
+	CCLog("---------UpdateUI ---------------- 333333333333");
+
+#ifdef WIN32
+	//m_pUpdateMgr = new UpdateManager(tmpdownloaddir.c_str(), "http://192.168.1.100:30080/", "http://192.168.1.100:30080/version.txt");
+	m_pResUpdateMgr = new ResUpdateManager("", "http://192.168.1.100:30080/", "http://192.168.1.100:30080/GameVersion.txt", tmpdownloaddir.c_str());
+	//m_pResUpdateMgr = new ResUpdateManager("ktUpdate:123", "ftp://192.168.1.98/ClientVersion/res", "ftp://192.168.1.98/ClientVersion/GameVersion.txt", tmpdownloaddir.c_str());
+#else
+
+	#ifndef _USE_TX_SDK
+		//m_pUpdateMgr = new UpdateManager(tmpdownloaddir.c_str(), "http://192.168.1.100:30080/", "http://192.168.1.100:30080/version.txt");
+		//m_pUpdateMgr = new UpdateManager(tmpdownloaddir.c_str(), "http://testrxcdn.kt007.com/", "http://testrxcdn.kt007.com/version.txt");
+		
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+#ifdef _IOS  //ios官方
+	//内网
+	//m_pResUpdateMgr = new ResUpdateManager("", "http://192.168.1.100:30080/resnei/", "http://192.168.1.100:30080/resnei/GameVersion.txt", tmpdownloaddir.c_str());
+	//外网
+	m_pResUpdateMgr = new ResUpdateManager("", "http://update.tl.kt007.com/resios/", "http://update.tl.kt007.com/resios/GameVersion.txt", tmpdownloaddir.c_str());
+	//盛大
+	//m_pResUpdateMgr = new ResUpdateManager("", "http://sbk.webpatch.sdg-china.com/sbk/reswai/ios/", "https://sbkhttpsupdate.sdo.com/sbk/gameversion/ios/GameVersion.txt", tmpdownloaddir.c_str());
+#elif _IOS_YY  //ios越狱
+	//内网
+	//m_pResUpdateMgr = new ResUpdateManager("", "http://192.168.1.100:30080/resnei/", "http://192.168.1.100:30080/resnei/GameVersion.txt", tmpdownloaddir.c_str());
+	//外网
+	m_pResUpdateMgr = new ResUpdateManager("", "http://update.tl.kt007.com/resiosjb/", "http://update.tl.kt007.com/resiosjb/GameVersion.txt", tmpdownloaddir.c_str());
+	//盛大
+	//m_pResUpdateMgr = new ResUpdateManager("", "http://sbk.webpatch.sdg-china.com/sbk/reswai/iosyy/", "https://sbkhttpsupdate.sdo.com/sbk/gameversion/iosyy/GameVersion.txt", tmpdownloaddir.c_str());
+#endif
+#elif (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+		//内网
+		//m_pResUpdateMgr = new ResUpdateManager("", "http://192.168.1.100:30080/resnei/", "http://192.168.1.100:30080/resnei/GameVersion.txt", tmpdownloaddir.c_str());
+		//外网
+		m_pResUpdateMgr = new ResUpdateManager("", "http://update.tl.kt007.com/reswai/", "http://update.tl.kt007.com/reswai/GameVersion.txt", tmpdownloaddir.c_str());
+		//盛大
+		//m_pResUpdateMgr = new ResUpdateManager("", "http://sbk.webpatch.sdg-china.com/sbk/reswai/android", "https://sbkhttpsupdate.sdo.com/sbk/gameversion/android/GameVersion.txt", tmpdownloaddir.c_str());
+#endif
+
+	#else
+		//m_pUpdateMgr = new UpdateManager(tmpdownloaddir.c_str(), "http://qqrxcdn.kt007.com/", "http://qqrxcdn.kt007.com/version.txt");
+
+		//内网
+		//m_pResUpdateMgr = new ResUpdateManager("", "http://192.168.1.100:30080/", "http://192.168.1.100:30080/GameVersion.txt", tmpdownloaddir.c_str());
+		//外网
+		m_pResUpdateMgr = new ResUpdateManager("", "http://update.tl.kt007.com/", "http://update.tl.kt007.com/GameVersion.txt", tmpdownloaddir.c_str());
+		//盛大
+		//m_pResUpdateMgr = new ResUpdateManager("", "http://sbk.webpatch.sdg-china.com/sbk/reswai/", "https://sbkhttpsupdate.sdo.com/sbk/gameversion/GameVersion.txt", tmpdownloaddir.c_str());
+	#endif
+
+#endif
+
+	m_pResUpdateMgr->setConnectionTimeout(5);
+	//m_pUpdateMgr->setDelegate(m_pMgrDelegate);
+	//m_pMgrDelegate->SetUpManger(m_pUpdateMgr);
+	
+	m_pResUpdateMgr->setDelegate(m_pMgrDelegate);
+	//m_pMgrDelegate->SetUpManger(m_pResUpdateMgr);
+	std::string str("ver.");
+	CCString* pStr = CCString::createWithFormat("%s", (GET_STR(9391) + str + m_pResUpdateMgr->getVersion()).c_str());
+	//m_pNowVersion->setString(pStr->getCString());
+	m_barBanben->setString(pStr->getCString());
+
+	CCLog("---------UpdateUI ---------------- 444444444444444444");
+	m_pResUpdateMgr->update();
+
+	//hideTip();
+
+	//正在下载更新包......
+	CCString* pNowStr2 = CCString::createWithFormat("%s",GET_STR(9392).c_str());
+	m_barTitle->setString(pNowStr2->getCString());
+
+	m_infoBtnOk->setVisible(false);
+	m_infoShowSprite->setVisible(true);
+	m_infoShowSprite->setAnchorPoint(ccp(0.5f,0.5f));
+	m_infoBtnOk->setVisible(true);
+	CCLog("---------UpdateUI ---------------- 666666666666666");
+	CCLog("---------------convertToMB() begin");
+	long totalCount = m_pResUpdateMgr->getTotalCount();
+	float MB_Size = convertCapacityIntoTheAppropriateUnits(totalCount);
+	CCLog("---------------MB_Size.c_str() : %f",MB_Size);
+	CCString* pNowStr = CCString::createWithFormat("\xE6\x9C\xAC\xE6\xAC\xA1\xE6\x9B\xB4\xE6\x96\xB0\xE5\x8C\x85\xE4\xB8\xBA %.2f%s \xEF\xBC\x8C\xE6\x98\xAF\xE5\x90\xA6\xE7\xA1\xAE\xE8\xAE\xA4\xE4\xB8\x8B\xE8\xBD\xBD",MB_Size,displayBinaryUnit(kindOfCountSize));
+	CCLog("---------------MB_Size.c_str() : end");
+	m_infoShowLabel->setString(pNowStr->getCString());
+	CCLog("---------UpdateUI ---------------- 777777777777777777");
+	m_infoShowSprite->setVisible(false);
+	m_infoBtnOk->setVisible(false);
+	m_barSprite->setVisible(false);
+	return;
+	/*
+	//检测需要更新，
+	if(m_pResUpdateMgr->checkUpdate() == true)
+	{
+		CCLog("---------UpdateUI ---------------- 55555555555555");
+		hideTip();
+		m_infoShowSprite = dynamic_cast<CCSprite*>(getChildByTag(0));
+		m_infoShowLabel = dynamic_cast<CCLabelTTF*>(m_infoShowSprite->getChildByTag(1));
+		m_infoBtnOk = dynamic_cast<CCControlButton*>(m_infoShowSprite->getChildByTag(2));
+		//m_infoShowLabel->setString("");
+		m_infoBtnOk->setVisible(false);
+		m_infoShowSprite->setVisible(true);
+		//m_infoShowSprite->setPosition(kCCTextAlignmentCenter);
+		m_infoShowSprite->setAnchorPoint(ccp(0.5f,0.5f));
+		//m_infoShowSprite->setVisible(false);----------------
+		m_infoBtnOk->setVisible(true);
+		CCLog("---------UpdateUI ---------------- 666666666666666");
+		CCLog("---------------convertToMB() begin");
+		long totalCount = m_pResUpdateMgr->getTotalCount();
+		float MB_Size = convertCapacityIntoTheAppropriateUnits(totalCount);
+		CCLog("---------------MB_Size.c_str() : %f",MB_Size);
+		CCString* pNowStr = CCString::createWithFormat("\xE6\x9C\xAC\xE6\xAC\xA1\xE6\x9B\xB4\xE6\x96\xB0\xE5\x8C\x85\xE4\xB8\xBA %.2f%s \xEF\xBC\x8C\xE6\x98\xAF\xE5\x90\xA6\xE7\xA1\xAE\xE8\xAE\xA4\xE4\xB8\x8B\xE8\xBD\xBD",MB_Size,displayBinaryUnit(kindOfCountSize));
+		CCLog("---------------MB_Size.c_str() : end");
+		m_infoShowLabel->setString(pNowStr->getCString());
+		CCLog("---------UpdateUI ---------------- 777777777777777777");
+	}*/
+}
+
+void UpdateUI::onError(ResUpdateManager::ErrorCode errorCode)
+{
+	CCLog("onError:%d",int(errorCode));
+	if (errorCode == ResUpdateManager::kCreateFile)
+	{
+		//请检查设备存储卡，确保有足够空间可以正常写入文件
+		showTip(2, "\xE8\xAF\xB7\xE6\xA3\x80\xE6\x9F\xA5\xE8\xAE\xBE\xE5\xA4\x87\xE5\xAD\x98\xE5\x82\xA8\xE5\x8D\xA1\xEF\xBC\x8C\xE7\xA1\xAE\xE4\xBF\x9D\xE6\x9C\x89\xE8\xB6\xB3\xE5\xA4\x9F\xE7\xA9\xBA\xE9\x97\xB4\xE5\x8F\xAF\xE4\xBB\xA5\xE6\xAD\xA3\xE5\xB8\xB8\xE5\x86\x99\xE5\x85\xA5\xE6\x96\x87\xE4\xBB\xB6");
+	}
+	else if (errorCode == ResUpdateManager::kNetwork)
+	{
+		//请检查网络设置，确保您的设备能够正常访问网络
+		showTip(3, "\xE8\xAF\xB7\xE6\xA3\x80\xE6\x9F\xA5\xE7\xBD\x91\xE7\xBB\x9C\xE8\xAE\xBE\xE7\xBD\xAE\xEF\xBC\x8C\xE7\xA1\xAE\xE4\xBF\x9D\xE6\x82\xA8\xE7\x9A\x84\xE8\xAE\xBE\xE5\xA4\x87\xE8\x83\xBD\xE5\xA4\x9F\xE6\xAD\xA3\xE5\xB8\xB8\xE8\xAE\xBF\xE9\x97\xAE\xE7\xBD\x91\xE7\xBB\x9C");
+	}
+	else if (errorCode == ResUpdateManager::kNoNewVersion)
+	{
+		//已经更新到最新版本
+		showTip(4, "\xE5\xB7\xB2\xE7\xBB\x8F\xE6\x9B\xB4\xE6\x96\xB0\xE5\x88\xB0\xE6\x9C\x80\xE6\x96\xB0\xE7\x89\x88\xE6\x9C\xAC");
+	}
+	else if (errorCode == ResUpdateManager::kUncompress)
+	{
+		//请检查设备存储卡，确保有足够空间可以正常写入文件
+		showTip(2, "\xE8\xAF\xB7\xE6\xA3\x80\xE6\x9F\xA5\xE8\xAE\xBE\xE5\xA4\x87\xE5\xAD\x98\xE5\x82\xA8\xE5\x8D\xA1\xEF\xBC\x8C\xE7\xA1\xAE\xE4\xBF\x9D\xE6\x9C\x89\xE8\xB6\xB3\xE5\xA4\x9F\xE7\xA9\xBA\xE9\x97\xB4\xE5\x8F\xAF\xE4\xBB\xA5\xE6\xAD\xA3\xE5\xB8\xB8\xE5\x86\x99\xE5\x85\xA5\xE6\x96\x87\xE4\xBB\xB6");
+	}
+	//else if (errorCode == ResUpdateManager::kBigVersionUpdate)
+	//{
+	//}
+	else if (errorCode == ResUpdateManager::kUnkown)
+	{
+		//更新中出现未知错误
+		showTip(6, "\xE6\x9B\xB4\xE6\x96\xB0\xE4\xB8\xAD\xE5\x87\xBA\xE7\x8E\xB0\xE6\x9C\xAA\xE7\x9F\xA5\xE9\x94\x99\xE8\xAF\xAF");
+	}
+}
+
+void UpdateUI::SetProgressZHJL( int cur,double totalToDownload,double nowDownloaded)
+{
+	hideTip();
+	_expProgress->setProgress(cur,100);
+
+	CCString* pStr = CCString::createWithFormat(" %ldKB / %ldKB",convertCapacityIntoKB(nowDownloaded), convertCapacityIntoKB(totalToDownload));
+	m_barFileSize->setString(pStr->getCString());
+
+	m_barPercent->setVisible(false);
+	m_barSprite->setVisible(true);
+}
+
+void UpdateUI::SetProgress( long cur, long max )
+{
+	CCLog("-----------UpdateUI::SetProgress  begin");
+	float pec;
+	if (cur <= max)
+		pec = 100.f * (float)cur / (float)max;
+	else
+		pec = 100.f * (float)max / (float)max;
+
+	if(cur != max)
+	{
+		//正在进行版本更新 x / x
+		CCString* pStr = CCString::createWithFormat(" %ldKB / %ldKB",
+						convertCapacityIntoKB(cur), convertCapacityIntoKB(max));
+		//m_pInfo->setString(pStr->getCString());
+		m_barFileSize->setString(pStr->getCString());
+		m_barPercent->setString(CCString::createWithFormat("%d %%",(int)pec)->getCString());
+		//CCLog("--------------width--->%f,height---->%f",pec,m_barVal->getContentSize().height);
+		//m_barVal->setContentSize(CCSize::CCSize(pec,m_barVal->getContentSize().height));
+	}
+	else if(cur != 0 && max != 0 && cur==max)
+	{
+		//更新完成
+		CCString* pStr = CCString::createWithFormat(" %ldKB / %ldKB",
+								convertCapacityIntoKB(max), convertCapacityIntoKB(max));
+				//m_pInfo->setString(pStr->getCString());
+		m_barFileSize->setString(pStr->getCString());
+		m_barPercent->setString(CCString::createWithFormat("%d %%",(int)pec)->getCString());
+		_expProgress->setProgress(100,100);
+		return;
+	}
+	_expProgress->setProgress(pec,100);
+	CCLog("-----------UpdateUI::SetProgress  end");
+}
+void UpdateUI::onFirstCopy(int type)
+{
+	if (type==1)
+	{
+		//首次运行，正在读取游戏包信息
+		showTip(7, "\xE9\xA6\x96\xE6\xAC\xA1\xE8\xBF\x90\xE8\xA1\x8C\xEF\xBC\x8C\xE6\xAD\xA3\xE5\x9C\xA8\xE8\xAF\xBB\xE5\x8F\x96\xE6\xB8\xB8\xE6\x88\x8F\xE5\x8C\x85\xE4\xBF\xA1\xE6\x81\xAF");
+	}
+	else if (type==2)
+	{
+		//showTip("");
+	}
+	else if (type==3)
+	{
+		//游戏包信息读取完毕
+		showTip(8, "\xE6\xB8\xB8\xE6\x88\x8F\xE5\x8C\x85\xE4\xBF\xA1\xE6\x81\xAF\xE8\xAF\xBB\xE5\x8F\x96\xE5\xAE\x8C\xE6\xAF\x95");
+	}
+	else if (type==4)
+	{
+		//正在检查更新...
+		showTip(1, "\xE6\xAD\xA3\xE5\x9C\xA8\xE6\xA3\x80\xE6\x9F\xA5\xE6\x9B\xB4\xE6\x96\xB0\x2E\x2E\x2E");
+	}
+}
+void UpdateUI::onDownloadBegin()
+{
+	hideTip();
+	//更新中，正在下载......
+	CCString* pNowStr = CCString::createWithFormat("\xE6\x9B\xB4\xE6\x96\xB0\xE4\xB8\xAD\xEF\xBC\x8C\xE6\xAD\xA3\xE5\x9C\xA8\xE4\xB8\x8B\xE8\xBD\xBD\x2E\x2E\x2E\x2E\x2E\x2E");
+	m_barTitle->setString(pNowStr->getCString());
+
+	//当前下载资源
+	CCString* pNewStr = CCString::createWithFormat("\xE5\xBD\x93\xE5\x89\x8D\xE4\xB8\x8B\xE8\xBD\xBD\xE8\xB5\x84\xE6\xBA\x90 ver.%s", m_pResUpdateMgr->getVersionDownloading().c_str());
+	//m_pNewVersion->setString(pNewStr->getCString());
+	m_barBanben->setString(pNewStr->getCString());
+}
+void UpdateUI::onDownLoadOK()
+{
+	//下载完成，正在解压......
+	//showTip("\xE4\xB8\x8B\xE8\xBD\xBD\xE5\xAE\x8C\xE6\x88\x90\xEF\xBC\x8C\xE6\xAD\xA3\xE5\x9C\xA8\xE8\xA7\xA3\xE5\x8E\x8B\x2E\x2E\x2E\x2E\x2E\x2E");
+	CCString* pNowStr = CCString::createWithFormat("\xE4\xB8\x8B\xE8\xBD\xBD\xE5\xAE\x8C\xE6\x88\x90\xEF\xBC\x8C\xE6\xAD\xA3\xE5\x9C\xA8\xE8\xA7\xA3\xE5\x8E\x8B\x2E\x2E\x2E\x2E\x2E\x2E");
+	m_barTitle->setString(pNowStr->getCString());
+
+	CCString str = "";
+	m_barFileSize->setString(str.getCString());
+}
+
+void UpdateUI::onOneUpdate()
+{
+	//更新完一个版本，正在检查新版本......
+	CCString* pNowStr = CCString::createWithFormat("\xE6\x9B\xB4\xE6\x96\xB0\xE5\xAE\x8C\xE4\xB8\x80\xE4\xB8\xAA\xE7\x89\x88\xE6\x9C\xAC\xEF\xBC\x8C\xE6\xAD\xA3\xE5\x9C\xA8\xE6\xA3\x80\xE6\x9F\xA5\xE6\x96\xB0\xE7\x89\x88\xE6\x9C\xAC\x2E\x2E\x2E\x2E\x2E\x2E");
+	m_barTitle->setString(pNowStr->getCString());
+}
+
+void UpdateUI::onSuccess()
+{
+	bool needToRestart = false;
+	//当更新完成 如果有so库 移动到data/data
+#ifndef WIN32
+	if(CCFileUtils::sharedFileUtils()->isFileExist((CCFileUtils::sharedFileUtils()->getWritablePath() + "libgame.so").c_str()))
+	{
+		needToRestart = true;
+	}
+#endif
+
+	if (needToRestart)
+	{
+		//游戏需要重启应用，正在准备重启应用......
+		showTip(9, "\xE6\xB8\xB8\xE6\x88\x8F\xE9\x9C\x80\xE8\xA6\x81\xE9\x87\x8D\xE5\x90\xAF\xE5\xBA\x94\xE7\x94\xA8\xEF\xBC\x8C\xE6\xAD\xA3\xE5\x9C\xA8\xE5\x87\x86\xE5\xA4\x87\xE9\x87\x8D\xE5\x90\xAF\xE5\xBA\x94\xE7\x94\xA8\x2E\x2E\x2E\x2E\x2E\x2E");
+		//更新完成，请等待游戏退出后，点击游戏图标重启...
+		//showTip(9, "\xE6\x9B\xB4\xE6\x96\xB0\xE5\xAE\x8C\xE6\x88\x90\xEF\xBC\x8C\xE8\xAF\xB7\xE7\xAD\x89\xE5\xBE\x85\xE6\xB8\xB8\xE6\x88\x8F\xE9\x80\x80\xE5\x87\xBA\xE5\x90\x8E\xEF\xBC\x8C\xE7\x82\xB9\xE5\x87\xBB\xE6\xB8\xB8\xE6\x88\x8F\xE5\x9B\xBE\xE6\xA0\x87\xE9\x87\x8D\xE5\x90\xAF\x2E\x2E\x2E");
+	}
+	else
+	{
+		//正在进入游戏......
+		showTip(10, "\xE6\xAD\xA3\xE5\x9C\xA8\xE8\xBF\x9B\xE5\x85\xA5\xE6\xB8\xB8\xE6\x88\x8F\x2E\x2E\x2E");
+
+		if (g_AppDelegate)
+			g_AppDelegate->initDelegate();
+	}
+
+	m_infoShowSprite->setVisible(false);
+	m_barSprite->setVisible(false);
+
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&UpdateUI::copySOFile), this, 0.5f, false);
+}
+
+void UpdateUI::copySOFile(float fdt)
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&UpdateUI::copySOFile), this);
+
+	bool needToRestart = false;
+	//当更新完成 如果有so库 移动到data/data
+#ifndef WIN32
+	CCLog("----------------UpMgrDelegateProtocol::onSuccess begin");
+	//extern void copy_soFile(char const* filepath);
+
+	if(CCFileUtils::sharedFileUtils()->isFileExist((CCFileUtils::sharedFileUtils()->getWritablePath() + "libgame.so").c_str()))
+	{
+		WzolJni::getInstance()->copy_soFile((CCFileUtils::sharedFileUtils()->getWritablePath() + "libgame.so").c_str());
+		CCLog("----------------UpMgrDelegateProtocol::onSuccess begin WritablePath %s", CCFileUtils::sharedFileUtils()->getWritablePath().c_str());
+		needToRestart = true;
+	}
+
+#endif
+
+	if(!needToRestart)
+	{
+		//这里更新完成直接进入登录界面，平台登录
+		Login::getInstance()->openOnCGVedioEnd1();
+		Login::getInstance()->openOnCGVedioEnd2();
+		Login::getInstance()->openOnCGVedioEnd3();
+		Login::getInstance()->openOnCGVedioEnd4();
+	}
+	else
+	{
+		CCLog("----------UpMgrDelegateProtocol::onSuccess() needToRestart");
+		//更新完成,请重启游戏
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+		WzolJni::getInstance()->restartGameApp();
+#endif
+	}
+
+	CCLog("------UpdateUI::SetProgress --------- 1");	
+}
+/**
+ *转换为合适的单位
+ */
+float UpdateUI::convertCapacityIntoTheAppropriateUnits(long sizeOfUpdateFile)
+{
+	if(sizeOfUpdateFile / GB_Size >= 1){
+		kindOfCountSize = 2;
+		return (sizeOfUpdateFile / (float)GB_Size);
+	}else if(sizeOfUpdateFile / MB_Size >= 1){
+		kindOfCountSize = 0;
+		return (sizeOfUpdateFile / (float)MB_Size);
+	}else if(sizeOfUpdateFile / KB_Size >= 1){
+		kindOfCountSize = 1;
+		return (sizeOfUpdateFile / (float)KB_Size);
+	}else{
+		kindOfCountSize = 3;
+		return (float)sizeOfUpdateFile;
+	}
+}
+
+/**
+ *转换为KB单位
+ */
+long UpdateUI::convertCapacityIntoKB(long sizeOfUpdateFile)
+{
+	kindOfCountSize = 1;
+	return (sizeOfUpdateFile / (long)KB_Size);
+}
+
+/**
+ * 显示单位的文字
+ */
+const char* UpdateUI::displayBinaryUnit(int kindOfCountSize)
+{
+	std::string units;
+	switch(kindOfCountSize){
+		case 0:
+			units = "MB";
+			break;
+		case 1:
+			units = "KB";
+			break;
+		case 2:
+			units = "GB";
+			break;
+		case 3:
+			units = "B";
+			break;
+	}
+	return units.c_str();
+}
+
+//重启游戏
+void UpdateUI::RestartGame()
+{
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+	//WzolJni::getInstance()->restartGameApp();
+#endif
+}
+
+//进入设置手机空间界面
+// void UpdateUI::checkRomSpace()
+// {
+// 	CCLog("----------UpdateUI::checkRomSpace() begin");
+// 	WzolJni::getInstance()->checkRomSpace();
+// 	CCLog("----------UpdateUI::checkRomSpace() end");
+// }
+// 
+// void UpdateUI::checkNetWork()
+// {
+// 	CCLog("----------UpdateUI::checkNetWork()");
+// 	WzolJni::getInstance()->checkNetWork();
+// }
+
+void UpdateUI::RunGame()
+{
+	CCLog("----------UpdateUI::RunGame()");
+	//m_AppDelegate->RunGame(true);
+}
+
+void UpdateUI::DownLoadFullPackage()
+{
+	//m_pUpdateMgr->updateWhole();
+}
+
+//void UpMgrDelegateProtocol::onError( std::string& errorCode )
+//{
+//	//m_pUI->m_pInfo->setString("");
+//	CCLog("-----------------UpMgrDelegateProtocol::onError%s", errorCode.c_str());
+//	if(m_pUI->GetScene() == NULL)
+//	{
+//		CCAssert(0, "update scene is NULL");
+//		return;
+//	}
+//	CCLog("-----------------UpMgrDelegateProtocol::onErfd fefef");
+//	if(errorCode == kUpmErrorCreateFile)
+//	{
+//		CCLog("----------------errorCode == kUpmErrorCreateFile");
+//		m_pUI->m_infoShowSprite->setVisible(false);
+//		m_pUI->m_barSprite->setVisible(false);
+//		//[bing] 创建文件出错,可能容量不够,或没有权限。提示用户跳入到用户管理器界面，并且关闭游戏。
+//		MessageBoxUi* pMsgBox = MessageBoxUi::createWithOneBtn("\xE9\x94\x99\xE8\xAF\xAF"
+//			, "\xE6\x82\xA8\xE7\x9A\x84\xE7\xA9\xBA\xE9\x97\xB4\xE4\xB8\x8D\xE8\xB6\xB3\xEF\xBC\x8C\xE6\x97\xA0\xE6\xB3\x95\xE6\x9B\xB4\xE6\x96\xB0\xEF\xBC\x8C\xE8\xAF\xB7\xE6\xB8\x85\xE7\x90\x86\xE7\xA9\xBA\xE9\x97\xB4"
+//			, "\xE7\xA1\xAE\xE5\xAE\x9A");
+//		pMsgBox->signalOkBtnPressed.connect(m_pUI, &UpdateUI::RestartGame);
+//		m_pUI->GetScene()->addChild(pMsgBox, WZ_MESSAGEBOX);
+//	}
+//	else if(errorCode == kUpmErrorNetwork)
+//	{
+//		CCLog("----------------errorCode == kUpmErrorNetwork");
+//		m_pUI->m_infoShowSprite->setVisible(false);
+//		m_pUI->m_barSprite->setVisible(false);
+//		//[bing] 网络错误请检查网络
+//		MessageBoxUi* pMsgBox = MessageBoxUi::createWithOneBtn("\xE9\x94\x99\xE8\xAF\xAF"
+//			, "\xE7\xBD\x91\xE7\xBB\x9C\xE9\x94\x99\xE8\xAF\xAF\xE8\xAF\xB7\xE6\xA3\x80\xE6\x9F\xA5\xE7\xBD\x91\xE7\xBB\x9C"
+//			, "\xE7\xA1\xAE\xE5\xAE\x9A");
+//		pMsgBox->signalOkBtnPressed.connect(m_pUI, &UpdateUI::checkNetWork);
+//		m_pUI->GetScene()->addChild(pMsgBox, WZ_MESSAGEBOX);
+//	}
+//	else if(errorCode == kUpmErrorNoNewVersion)
+//	{
+//		CCLog("----------------errorCode == kUpmErrorNoNewVersion");
+//		//[bing] 当前已为最新版本
+//		//MessageBoxUi* pMsgBox = MessageBoxUi::createWithOneBtn("\xE9\x94\x99\xE8\xAF\xAF"
+//		//	, "\xE5\xBD\x93\xE5\x89\x8D\xE5\xB7\xB2\xE4\xB8\xBA\xE6\x9C\x80\xE6\x96\xB0\xE7\x89\x88\xE6\x9C\xAC"
+//		//	, "\xE7\xA1\xAE\xE5\xAE\x9A");
+//		//pMsgBox->signalOkBtnPressed.connect(m_pUI, &UpdateUI::RunGame);
+//		//m_pUI->GetScene()->addChild(pMsgBox, WZ_MESSAGEBOX);
+//		//m_pUI->SetProgress(1, 1);
+//		//m_pUI->m_infoShowSprite->setVisible(false);
+//		//m_pUI->m_barSprite->setVisible(false);
+//		CCString* pNewStr = CCString::createWithFormat("\xE6\x9C\x80\xE6\x96\xB0\xE7\x89\x88\xE6\x9C\xAC ver.%s", m_pUpManager->getVersion().c_str());
+//		//m_pUI->m_pNewVersion->setString(pNewStr->getCString());
+//		m_pUI->m_barBanben->setString(pNewStr->getCString());
+//		//m_pUI->RunGame();
+//		CCLog("----------------errorCode == kUpmErrorNoNewVersion");
+//	}
+//	else if(errorCode == kUpmErrorAppVersion)
+//	{
+//		CCLog("----------------errorCode == kUpmErrorAppVersion");
+//		m_pUI->m_infoShowSprite->setVisible(false);
+//		m_pUI->m_barSprite->setVisible(false);
+//		CCString* infostr = CCString::createWithFormat("%s %s", "\xE6\x9C\x89\xE6\x96\xB0\xE7\x9A\x84\x41\x70\x70\xE9\x9C\x80\xE6\x95\xB4\xE5\x8C\x85\xE4\xB8\x8B\xE8\xBD\xBD\x20\x20\xE4\xB8\x8B\xE8\xBD\xBD\xE5\x9C\xB0\xE5\x9D\x80"
+//			, "");
+//		//[bing] 有新的App需整包下载
+//	    MessageBoxUi* pMsgBox = MessageBoxUi::createWithOneBtn("\xE9\x94\x99\xE8\xAF\xAF"
+//			, infostr->getCString()
+//			, "\xE7\xA1\xAE\xE5\xAE\x9A");
+//		pMsgBox->signalOkBtnPressed.connect(m_pUI, &UpdateUI::DownLoadFullPackage);
+//		m_pUI->GetScene()->addChild(pMsgBox, WZ_MESSAGEBOX);
+//	}
+//}
+//
+//void UpMgrDelegateProtocol::onProgress( long complete, long total )
+//{
+//	m_pUI->SetProgress(complete, total);
+//}
+//
+//void UpMgrDelegateProtocol::onSuccess( bool needToRestart /*= false*/ )
+//{
+//	m_pUI->m_infoShowSprite->setVisible(false);
+//	m_pUI->m_barSprite->setVisible(false);
+//	//[bing] 当更新完成 如果有so库 移动到data/data
+//#ifndef WIN32
+//	CCLog("----------------UpMgrDelegateProtocol::onSuccess begin");
+//	//extern void copy_soFile(char const* filepath);
+//
+//	if(CCFileUtils::sharedFileUtils()->isFileExist((CCFileUtils::sharedFileUtils()->getWritablePath() + "libgame.so").c_str()))
+//	{
+//		WzolJni::getInstance()->copy_soFile((CCFileUtils::sharedFileUtils()->getWritablePath() + "libgame.so").c_str());
+//		CCLog("----------------UpMgrDelegateProtocol::onSuccess begin WritablePath %s", CCFileUtils::sharedFileUtils()->getWritablePath().c_str());
+//		needToRestart = true;
+//	}
+//
+//#endif
+//
+//	MessageBoxUi* pMsgBox = NULL;
+//	m_pUI->m_barSprite->setVisible(false);
+//	if(!needToRestart)
+//	{
+//		//更新完成
+//		pMsgBox = MessageBoxUi::createWithOneBtn(""
+//			, "\xE6\x9B\xB4\xE6\x96\xB0\xE5\xAE\x8C\xE6\x88\x90"
+//			, "\xE7\xA1\xAE\xE5\xAE\x9A");
+//		//pMsgBox->signalOkBtnPressed.connect(m_pUI, &UpdateUI::RunGame);
+//		CCLog("----------------!needToRestart");
+//	}
+//	else
+//	{
+//		CCLog("----------UpMgrDelegateProtocol::onSuccess() needToRestart");
+//		//更新完成,请重启游戏
+//#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+//	//WzolJni::getInstance()->restartGameApp();
+//#endif
+//	}
+//
+//	m_pUI->GetScene()->addChild(pMsgBox, WZ_MESSAGEBOX);
+//	CCLog("------UpdateUI::SetProgress --------- 1");
+//
+//}
+
+
+UpdateDelegateProtocol::UpdateDelegateProtocol()
+{
+}
+
+UpdateDelegateProtocol::~UpdateDelegateProtocol()
+{
+	CCLOG("UpdateDelegateProtocol::~UpdateDelegateProtocol()");
+	ResUpdateManager *pAssetsManager = getAssetsManager();
+	CC_SAFE_DELETE(pAssetsManager);
+}
+
+void UpdateDelegateProtocol::setFtpInfo(const char* user, const char* addr1, const char* addr2, int t)
+{
+	CCLOG("setFtpInfo11111");
+	userName = user;
+	addrZip = addr1;
+	addrVer = addr2;
+	nTime = t;
+	CCLOG("setFtpInfo22222");
+    createDownloadedDir();
+	CCLOG("setFtpInfo33333");
+
+	getAssetsManager()->update();
+	CCLOG("setFtpInfo444444");
+}
+
+void UpdateDelegateProtocol::update()
+{
+}
+
+
+ResUpdateManager* UpdateDelegateProtocol::getAssetsManager()
+{
+	static ResUpdateManager *pAssetsManager = NULL;
+
+	if (! pAssetsManager)
+	{
+		//pAssetsManager = new AssetsManager("ftp://192.168.1.98/ClientVersion/Client",
+		//	"ftp://192.168.1.98/ClientVersion/GameVersion",
+		//	pathToSave.c_str());
+		//pAssetsManager->setDelegate(this);
+		//pAssetsManager->setConnectionTimeout(3);
+
+		pAssetsManager = new ResUpdateManager(userName.c_str(), addrZip.c_str(), addrVer.c_str(),	pathToSave.c_str());
+		pAssetsManager->setDelegate(this);
+		pAssetsManager->setConnectionTimeout(nTime);
+	}
+
+	return pAssetsManager;
+}
+
+void UpdateDelegateProtocol::createDownloadedDir()
+{
+	pathToSave = CCFileUtils::sharedFileUtils()->getWritablePath();
+	CCLOG("pathToSave1:%s",pathToSave.c_str());
+	//pathToSave += "KTSSdownload";
+	//CCLOG("pathToSave2:%s",pathToSave.c_str());
+
+	// Create the folder if it doesn't exist
+#if (CC_TARGET_PLATFORM != CC_PLATFORM_WIN32)
+	DIR *pDir = NULL;
+
+	pDir = opendir (pathToSave.c_str());
+	if (! pDir)
+	{
+		mkdir(pathToSave.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+	}
+#else
+	if ((GetFileAttributesA(pathToSave.c_str())) == INVALID_FILE_ATTRIBUTES)
+	{
+		CreateDirectoryA(pathToSave.c_str(), 0);
+	}
+#endif
+}
+
+void UpdateDelegateProtocol::onError(ResUpdateManager::ErrorCode errorCode)
+{
+	m_pUI->onError(errorCode);
+}
+
+void UpdateDelegateProtocol::onProgress(int percent,double totalToDownload,double nowDownloaded)
+{
+	//char progress[20];
+	//snprintf(progress, 20, "downloading %d%%", percent);
+	m_pUI->SetProgressZHJL(percent,totalToDownload,nowDownloaded);
+}
+
+void UpdateDelegateProtocol::onSuccess()
+{
+	m_pUI->onSuccess();
+}
+void UpdateDelegateProtocol::onFirstUncompress()
+{
+	
+    //CCLuaEngine* pEngine = CCLuaEngine::defaultEngine();
+	//pEngine->executeGlobalFunction("setGameUpdateDesc");
+}
+void UpdateDelegateProtocol::onOneUpdate()
+{
+	m_pUI->onOneUpdate();
+}
+void UpdateDelegateProtocol::onDownloadBegin()
+{
+	m_pUI->onDownloadBegin();
+}
+void UpdateDelegateProtocol::onDownloadOK()
+{
+	m_pUI->onDownLoadOK();
+}
+void UpdateDelegateProtocol::onDelTempData()
+{
+	
+    //CCLuaEngine* pEngine = CCLuaEngine::defaultEngine();
+	//pEngine->executeGlobalFunction("setGameUpdateDesc");
+}
+void UpdateDelegateProtocol::onUpdateType(int t)
+{
+	m_pUI->onFirstCopy(t);
+}
+
+void UpdateDelegateProtocol::doUpdateUILayer()
+{
+}
+
+void UpdateDelegateProtocol::doManiUILayer()
+{
+}
+
+void UpdateDelegateProtocol::retrydoUpdate()
+{
+	getAssetsManager()->update();
+}

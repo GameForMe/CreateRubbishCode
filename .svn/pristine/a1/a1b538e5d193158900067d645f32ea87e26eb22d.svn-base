@@ -1,0 +1,157 @@
+#include "MagicShield.h"
+#include "SkillAnimManager.h"
+#include "Role.h"
+#include "RoleManager.h"
+#include "SkillManager.h"
+
+MagicShield::MagicShield()
+	: _stoped(true)
+{
+	//for(int i = 0; i < 3; i ++)
+	//{
+	//	_animate[i] = NULL;
+	//}
+	IsRunning = false;
+}
+
+MagicShield::~MagicShield()
+{
+	AnimationCache::releaseDefList(_animate);
+	//for(int i = 0; i < 3; i ++)
+	//{
+	//	_animate[i]->release();
+	//	_animate[i] = NULL;
+	//}
+}
+
+bool MagicShield::accept( unsigned int skillId )
+{
+	if(skillId / 100 == 10203)
+		return true;
+
+	return false;
+}
+
+bool MagicShield::initSkill( unsigned int skillId, const st_skill_proto &skillInfo )
+{
+	CC_ASSERT(skillInfo.dirType == DT_SIN);
+	CC_ASSERT(!skillInfo.animFile.empty());
+	CC_ASSERT(skillInfo.type == ST_SPECIAL);
+	CC_ASSERT(skillId / 100 == 10203);
+
+	_bHasEffect= false;
+	if (skillInfo.animFile !="0")
+	{
+		_bHasEffect=true;
+		AnimationCache::createDefList(1, _animate, false);
+		AnimationCache::getInstance()->getSpecialEffect(skillId, skillInfo.animFile.c_str(), _animate);
+		_usedAnim.push_back(AnimsUsed(AT_Special, skillInfo.animFile));
+	}
+
+	_updatePos = true;
+
+	//_sprite->setVisible(false);
+	setVisible(false);
+	//addToMap();
+
+	return true;
+}
+
+bool MagicShield::run( unsigned int targetRoleId )
+{
+	if(targetRoleId == INVALID_ID)
+		return false;
+	if(IsRunning)
+	{
+		return true;
+	}
+
+	if (!_bHasEffect)
+	{
+		return true;
+	}
+
+	CC_ASSERT(_sprite != NULL);
+	Role *role = RoleManager::getInstance()->findRole(targetRoleId);
+	if(role != NULL)
+	{
+		setPosition(role->getPosition());
+		//CCSequence *sequence = CCSequence::createWithTwoActions(_animate[0], CCCallFuncND::create(MagicShieldCallabck::getInstance(), SEL_CallFuncND(&MagicShieldCallabck::onStartFinished), this));
+		_sprite->runAction(CCRepeatForever::create(_animate[0]));
+		IsRunning = true;
+		//_sprite->runAction(sequence);
+		//stop();
+		//////////增加技能判断，如果是魔法盾，并且屏蔽周围玩家，则不显示特效
+		//if (_skillId == SKILLMOFADUNID)
+		setVisible(RoleManager::getInstance()->isCanShowOtherPlayer(role));
+// 		if (RoleManager::getInstance()->isCanShowOtherPlayer(role))
+// 			_sprite->setVisible(true);
+// 		else
+// 			_sprite->setVisible(false);
+	}
+
+	_targetRoleId = targetRoleId;
+	_stoped = false;
+	
+	return true;
+}
+
+void MagicShield::startFinished()
+{
+	if (!_bHasEffect)
+	{
+		return;
+	}
+	CC_ASSERT(_sprite != NULL);
+	_sprite->stopAllActions();
+	_sprite->runAction(CCRepeatForever::create(_animate[0]));
+}
+
+void MagicShield::stop()
+{
+	CC_ASSERT(_sprite != NULL);
+	//CCSequence *sequence = CCSequence::createWithTwoActions(_animate[0], CCCallFuncND::create(MagicShieldCallabck::getInstance(), SEL_CallFuncND(&MagicShieldCallabck::onStopFinished), this));
+	_sprite->stopAllActions();
+	//原停止后又播放了一遍动作，现在取消多的一边特效
+	setVisible(false);//add
+	_stoped = true;//add
+	IsRunning = false;
+	//_sprite->runAction(sequence);
+}
+
+void MagicShield::stopFinished()
+{
+	_sprite->stopAllActions();
+	//_sprite->setVisible(false);
+	setVisible(false);
+	_stoped = true;
+	IsRunning = false;
+}
+
+void MagicShield::continueRun(unsigned int targetRoleId)
+{
+	if(targetRoleId == INVALID_ID)
+		return;
+	if(IsRunning)
+	{
+		return;
+	}
+
+	if (!_bHasEffect)
+	{
+		return;
+	}
+	CC_ASSERT(_sprite != NULL);
+	Role *role = RoleManager::getInstance()->findRole(targetRoleId);
+	if(role != NULL)
+	{
+		CC_ASSERT(_sprite != NULL);
+		_sprite->stopAllActions();
+		_sprite->runAction(CCRepeatForever::create(_animate[0]));
+		setVisible(true);
+		//_sprite->setVisible(true);
+	}
+
+	_targetRoleId = targetRoleId;
+	_stoped = false;
+}

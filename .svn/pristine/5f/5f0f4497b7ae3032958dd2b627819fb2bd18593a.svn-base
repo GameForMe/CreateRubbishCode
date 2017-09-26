@@ -1,0 +1,168 @@
+#ifndef SOCIAL_DATA_H
+#define SOCIAL_DATA_H
+/**
+ *	@file		social_data.h
+ *	@author		gx
+ *	@date		2013/5/17
+ *	@version	
+ *	@brief		社交管理类
+ */
+#include "SocialProto.h"
+
+class SocialMgr :public CCObject
+{
+public:
+	typedef std::vector<tagFriendInfo_> friend_vector;
+	typedef std::vector<tagBlackInfo_> black_vector;
+	typedef std::vector<tagFriendGeneralInfo> friendGeneral_vector;
+	typedef std::vector<tagEnemyInfo> enemy_vector;
+private:
+	friend_vector m_friend_vector;//好友信息
+	black_vector m_black_vector;//黑名单信息
+	unsigned int m_TempRoleID;//在删除好友与黑名中使用
+	unsigned int m_TempNameCrcRoleID;//在删除好友与黑名中使用
+	wchar_t m_TempName[X_SHORT_NAME];//临时保存姓名
+	std::list<std::string> m_TempNameList;//临时保存姓名
+	std::string m_TempGiftReceiveName;//临时保存收礼者的姓名
+	unsigned int m_ComPracticePartner;//记录与我双修的玩家ID
+	INT m_ComPracticeTimeLeft;
+	bool b_IsInStatePractice;//记录玩家是否在双修中
+	bool b_CancelComfirming;
+	unsigned int m_SpouseID;//配偶ID
+	std::string m_SpouseNameStr;//配偶姓名
+	unsigned char bySendLevel;//送花等级
+	tagRoleSocialInfo m_RoleSocialData;
+	enemy_vector m_enemy_vector; //仇人信息
+public:
+	SocialMgr();
+	~SocialMgr();
+	static SocialMgr* getInstance();
+	void Destroy();
+	void delayDestroy();//延迟重连需要销毁
+	void Init();
+	/*client2server*/
+	void onAddFriend(unsigned int destRoleID, bool bRecoverBlackList = false, const std::string* name = NULL);
+	void onDelFriend(unsigned int destRoleID);
+	void onAddBlack(unsigned int destRoleID, const std::string* name = NULL);
+	void onDelBlack(unsigned int destRoleID);
+	void SendDelFriend();
+	//void SendDelBlack();
+	void SendAddBlack();
+	void onDelEnemy(unsigned int destRoleID, bool isdel);
+	tagEnemyInfo* getEnemyInfo(unsigned int destRoleID);
+	bool getEnemyWatch(unsigned int destRoleID);
+	bool getIsEnemy(unsigned int destRoleID);
+	/*end*/
+	
+	/*server2client*/
+	unsigned int onServerAddFriend(s_net_cmd *cmd);
+	unsigned int onServerDelFriend(s_net_cmd *cmd);
+	unsigned int onServerBeAddFriend(s_net_cmd *cmd);
+	unsigned int onServerAddBlack(s_net_cmd *cmd);
+	unsigned int onServerDelBlack(s_net_cmd *cmd);
+
+	unsigned int onServerInitFriendInfo(s_net_cmd *cmd);//初始化玩家好友信息
+	unsigned int onServerInitBlackInfo(s_net_cmd *cmd);//初始化玩家黑名单信息
+	unsigned int onServerFriendLogout(s_net_cmd *cmd);//好友下线
+	unsigned int onServerFriendLogin(s_net_cmd *cmd);//好友上线
+	unsigned int onServerBlackLogout(s_net_cmd *cmd);//黑名单下线
+	unsigned int onServerBlackLogin(s_net_cmd *cmd);//黑名单上线
+	unsigned int onServerEnemyLogout(s_net_cmd *cmd);//仇人下线
+	unsigned int onServerEnemyLogin(s_net_cmd *cmd);//仇人上线
+	unsigned int onServerGetPlayerName(s_net_cmd *cmd);//获取玩家姓名
+	unsigned int onServerUpdateFriendState(s_net_cmd *cmd);
+
+	void onGetName(unsigned int roleid , const std::string& name);
+	/*end*/
+
+	/*UI调用函数*/
+	inline friend_vector const& GetAllFriendInfo() const {return m_friend_vector;}//获取玩家所有的好友信息
+	inline black_vector const& GetAllBlackInfo() const{return m_black_vector;}//获取玩家黑名单的全部信息
+	inline enemy_vector const& GetAllEnemyInfo() const { return m_enemy_vector;}	//获取玩家仇人信息
+	void ShowOnlineRoleOrNot(EFriendTypeList type,friendGeneral_vector& output_vector,bool bOnLine = false);
+	void UpdateFriendsState();
+	const tagRoleSocialInfo &getRoleSocialInfo() { return m_RoleSocialData; }
+	/*end*/
+
+	/*各种功能函数*/
+	bool has_friend(unsigned int role_id_ ) const;//该玩家是否已是好友
+	bool has_black(unsigned int role_id_ )	const;//该玩家是否已是黑名
+	bool has_friend(const char* name ) const;//该玩家是否已是好友
+	bool has_black(const char* name )	const;//该玩家是否已是黑名
+	inline int	get_friend_num(void) const {return (int)(m_friend_vector.size());}//获取玩家好友数目
+	inline int	get_black_num(void) const {return (int)(m_black_vector.size());}//获取玩家黑名单个数
+	void delFriend(unsigned int role_id_);//在好友信息数组中删除指定的好友
+	void delBlack(unsigned int role_id_);//在黑名单信息数组中删除指定的黑名
+	bool friend_is_online(unsigned int role_id);//指定的好友是否在线
+	void ToCharge();//充值预留
+	/*end*/
+
+	/*送花相关*/
+	void SendFlowers(unsigned int uDestRoleID,std::string strName,unsigned char byLevel = 1);
+	unsigned int OnServerSendFlowers(s_net_cmd *cmd);
+	void ConfirmSendFlowers();
+
+	/*玩家双修相关*/
+	void InvitePlayerCompractice(unsigned int uDestRoleID);//邀请玩家进行双修
+	void CancelCompractice();//本地玩家试图放弃双修
+	void ComfirmCancelCompractice();
+	void UnComfirmCancelCompractice();
+	unsigned int OnServerInvitePlayerToBoth(s_net_cmd *cmd);
+	void AgreeCompractice();
+	void DisagreeCompractice();
+	void addOrRemoveCompracticeTimer(bool f);
+	void compracticeTimer( float dt );
+	void setCompracticeTime(INT tims);
+	unsigned int OnServerInvitePlayerReply(s_net_cmd *cmd);
+	unsigned int OnServerCancleComPractice(s_net_cmd *cmd);
+
+	/*玩家结婚相关*/
+	void MalePropose();//男性玩家求婚
+	unsigned int OnServerMaleProposeToBoth(s_net_cmd *cmd);
+	void AgreePropose();
+	void DisagreePropose();
+	unsigned int OnServerFemaleReplyToBoth(s_net_cmd *cmd);
+
+	inline unsigned int GetSpouseID() {return m_SpouseID;}
+	inline void SetSpouseID(unsigned int uRoleID) {m_SpouseID = uRoleID;}
+	inline std::string GetSpouseName() {return m_SpouseNameStr;}
+	inline void SetSpouseName(std::string name)
+	{
+		m_SpouseNameStr = name;
+	}
+	void PlayerDivorce();//离婚
+	void ConfirmDivorce();
+	unsigned int OnServerPlayerDivorce(s_net_cmd *cmd);
+
+	void SetRoleSocialData(const tagRoleSocialInfo &Info);//设置玩家社交数据
+	unsigned int OnServerSetRoleSocialData(s_net_cmd *cmd);
+
+	void InitRoleSocialData();//向服务器请求本地玩家的社交数据
+	unsigned int OnServerInitRoleSocialData(s_net_cmd *cmd);
+
+	/*领取情比金坚奖*/
+	void GetQbjjReward();
+	unsigned int OnServerGetQbjjReward(s_net_cmd* cmd);
+
+	/*本地玩家设置红唇标记*/
+	unsigned int OnServerSetRedZuiFlag(s_net_cmd* cmd);
+	/*伴侣上下线通知*/
+	unsigned int OnServerSpouseLogin(s_net_cmd* cmd);
+	unsigned int OnServerSpouseLogout(s_net_cmd* cmd);
+	//仇人列表
+	unsigned int OnServerEnemy_List(s_net_cmd* cmd);
+	//添加仇人
+	unsigned int OnServerAddEnemy(s_net_cmd* cmd);
+	//删除仇人
+	unsigned int OnServerDelEnemy(s_net_cmd* cmd);
+
+	bool tryToAddFriend(unsigned int targetID);
+
+	void updateRoleLevel(unsigned int roleId,int level);
+	void updateRoleLevel(unsigned int roleId,bool online,int level,int rating);
+	void updateRoleOnline(unsigned int roleId,bool online);
+	//远程玩家离婚
+	unsigned int OnServerRemotePlayerDivorce(s_net_cmd *cmd);
+};
+
+#endif

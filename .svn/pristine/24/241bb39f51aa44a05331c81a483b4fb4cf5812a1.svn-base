@@ -1,0 +1,558 @@
+#include "ItemMarixLayer.h"
+#include "UiTools.h"
+#include "ItemNode.h"
+#include "item.h"
+#include "PackageManager.h"
+#include "NumericalIniMgr.h"
+ItemMarixLayer* ItemMarixLayer::create(int nWidth, int nHeight, int nX, int nY, int nXoffset/* = 15*/, int nYoffset /*= 8*/)
+{
+	ItemMarixLayer * ptr = new ItemMarixLayer();
+	if(ptr != NULL && ptr->init(nWidth, nHeight, nX, nY, nXoffset, nYoffset))
+	{
+		ptr->autorelease();
+		return ptr;
+	}
+	CC_SAFE_DELETE(ptr);
+	return NULL;
+}
+
+bool ItemMarixLayer::init(int nWidth, int nHeight, int nX, int nY, int nXoffset, int nYoffset)
+{
+	if(!CCLayer::init())
+		return false;
+
+	bCanScrollView = true;
+	_selectIndex = 0;
+	m_EItemConType = EICT_CommonLayer;
+
+	this->setContentSize( CCSize(nWidth, nHeight) );
+
+	reMarixSize(nX, nY, nXoffset, nYoffset);
+	return true;
+}
+
+void ItemMarixLayer::onEnter()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 2, true);
+	CCLayer::onEnter();
+	DropDragDelegate::getInstance()->addDropLayer(this);
+}
+
+void ItemMarixLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	DropDragDelegate::getInstance()->removeDropLayer(this);
+	CCLayer::onExit();
+}
+
+short ItemMarixLayer::getItemBegin(CCTouch &touch, eGetResult &result)
+{
+	return getItem(touch, result);
+}
+
+short ItemMarixLayer::getItemEnd(CCTouch &touch, eGetResult &result, EItemConType src, short itemIndex)
+{
+	CCPoint framePoint;
+	CCNode* pNode = NULL;
+	ItemMarixLayer* pItemMarix = NULL;
+
+	SetScrollViewTouchEnable(true);
+
+	for( unsigned int i = 0; i < m_TargetNodeMap.size(); ++i )
+	{
+		pNode = m_TargetNodeMap[i];
+		framePoint = pNode->convertTouchToNodeSpace(&touch);
+		CCRect frameRect(0.0f, 0.0f, pNode->getContentSize().width, pNode->getContentSize().height);
+		if(frameRect.containsPoint(framePoint))
+		{
+			//[bing] 现在有ItemMarixLayer往ItemMarixLayer上拖拽的需求
+			pItemMarix = dynamic_cast<ItemMarixLayer*>(pNode);
+			if(pItemMarix != NULL)
+			{
+				short nSonIdx = pItemMarix->getItem(touch, result);
+				if(nSonIdx != -1)
+				{
+					pNode = pItemMarix->GetItemNode(nSonIdx);
+					//[bing] 如果没拖到另一个ItemMarixLayer的Item上则什么也不触发
+					signalCallEndItem.emit(pNode, itemIndex);
+					return 0;
+				}
+				else
+				{
+					//继续找下一个 PS: 万一有重叠呢
+					continue;
+				}
+			}
+
+			signalCallEndItem.emit(pNode, itemIndex);
+			return 0;
+		}
+	}
+
+	//[bing] 现在有容器内自己换位置的需求
+	eGetResult e;
+	short nTargetIdx = getItem(touch, e);
+	//容器间自己交换 nTargetTdx == -1 表示没拖上去 有可能是丢弃
+	if(nTargetIdx==-1)
+	{
+		if(m_TargetNodeMap.size()>0)
+		{
+			CCNode * node1=m_TargetNodeMap.front();
+			CCNode * node2=this;
+			CCPoint framePoint1 = node1->convertTouchToNodeSpace(&touch);
+			CCPoint framePoint2 = node2->convertTouchToNodeSpace(&touch);
+			CCRect frameRect1(0.0f, 0.0f, node1->getContentSize().width, node1->getContentSize().height);
+			CCRect frameRect2(0.0f, 0.0f, node2->getContentSize().width, node2->getContentSize().height);
+			if(frameRect1.containsPoint(framePoint1)||frameRect2.containsPoint(framePoint2))
+			{
+				nTargetIdx=-2;
+			}
+		}
+	
+	}
+
+// 	if (!isTouchOnNodeContent(this,&touch))
+// 	{
+// 		signalInChangePos.emit(itemIndex, -1);
+// 		return false;
+// 	}
+	if (!isTouchOnNodeContent(this,&touch))
+	{
+		if (!isTouchOnNodeContent(this->getParent(),&touch))
+		{
+			signalInChangePos.emit(itemIndex, -1);
+			return false;
+		}
+		else
+		{
+			signalInChangePos.emit(itemIndex,-2);
+			return false;
+		}
+	}
+	
+	signalInChangePos.emit(itemIndex, nTargetIdx);
+
+	return 0;
+}
+
+bool ItemMarixLayer::onClicked(CCTouch &touch)
+{
+	//点击结束要恢复滚动条滚动
+	if(bCanScrollView == true)
+		SetScrollViewTouchEnable(true);
+	eGetResult result = GR_ERROR;
+	signalClickItem.emit(getItem(touch, result));
+	return result == GR_SUCCESS;
+}
+
+bool ItemMarixLayer::onDoubleClicked(CCTouch &touch)
+{
+	//点击结束要恢复滚动条滚动
+	if(bCanScrollView == true)
+		SetScrollViewTouchEnable(true);
+
+	eGetResult result = GR_ERROR;
+	signalDoubleClickItem.emit(getItem(touch, result));
+	return result == GR_SUCCESS;
+}
+
+ bool ItemMarixLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+ {
+	 CCPoint framePoint = convertTouchToNodeSpace(pTouch);
+	 const CCSize &frameSize = getContentSize();
+	 CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	 if(frameRect.containsPoint(framePoint))
+	 {
+		 return true;
+	 }
+	 return false;
+ }
+
+f_item* ItemMarixLayer::GetItemData( short nIdx )
+{
+	if(!m_pItemMap)
+		return NULL;
+
+	ItemMap::iterator IT = m_pItemMap->find(nIdx);
+	if(IT == m_pItemMap->end())
+		return NULL;
+
+	return (f_item*)IT->second;
+}
+
+short ItemMarixLayer::getItem( CCTouch &touch, eGetResult &result )
+{
+	if(m_CustomNodeMap.size())
+	{
+		//如果存在自定义node 则直接获取自定义node
+		return getCustomItem(touch, result);
+	}
+
+	if(!_itemContent || !getScrollViewRect(_itemScrollView).containsPoint(touch.getLocation()))
+	{
+		result = GR_ERROR;
+		return -1;
+	}
+
+	CCPoint framePoint = _itemContent->convertTouchToNodeSpace(&touch);
+	const CCSize &frameSize = _itemContent->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		int index = -1;
+		for(int i = 0; i < m_uYnum; ++i)
+		{
+			for(int j = 0; j < m_uXnum; ++j)
+			{
+				float x = m_uWidthSpace + (j * (ITEMNODE_CONTENTWIDTH + m_uWidthSpace));
+				float y = m_uHeightSpace + (i * (ITEMNODE_CONTENTHEIGHT + m_uHeightSpace));
+				CCRect rect(x, y, ITEMNODE_CONTENTWIDTH, ITEMNODE_CONTENTHEIGHT);
+				if(rect.containsPoint(framePoint))
+				{
+					index = (m_uYnum - 1 - i) * m_uXnum + j;
+					break;
+				}
+			}
+			if(index != -1)
+				break;
+		}
+
+		result = GR_SUCCESS;
+		_selectIndex = index;
+		return index;
+	}
+
+	result = GR_ERROR;
+	return -1;
+}
+
+short ItemMarixLayer::getCustomItem( CCTouch &touch, eGetResult &result )
+{
+	for(size_t i = 0; i < m_CustomNodeMap.size(); ++i)
+	{
+		CCPoint framePoint = m_CustomNodeMap[i]->convertTouchToNodeSpace(&touch);
+		const CCSize &frameSize = m_CustomNodeMap[i]->getContentSize();
+		CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+		if(frameRect.containsPoint(framePoint))
+		{
+			result = GR_SUCCESS;
+			return (short)i;
+		}
+	}
+
+	result = GR_ERROR;
+	return -1;
+}
+
+void ItemMarixLayer::SetItemID( short idx, unsigned int dwItemID ,f_item* fItem , bool isShowNum /* bool isShowNum = false*/)
+{
+	if(!_itemContent)
+	{
+		return;
+	}
+
+	if(idx < 0 || idx >= m_uXnum * m_uYnum)
+	{
+		CC_ASSERT(0);
+		return;
+	}
+
+	ItemNode* pItem = dynamic_cast<ItemNode*>(_itemContent->getChildByTag( idx ));
+	if(!pItem)
+	{
+		CC_ASSERT(0);
+		return;
+	}
+
+	pItem->setDataId(dwItemID);
+	if (isShowNum)
+	{
+		pItem->setNum(fItem->get_item_number());
+		pItem->SetShowNum(true);
+		pItem->setBind(fItem->is_item_binded());
+	}
+}
+
+void ItemMarixLayer::InsertTargetNodeMap( CCNode* pNode )
+{
+	if(!pNode)
+		return;
+
+	m_TargetNodeMap.push_back(pNode);
+}
+
+void ItemMarixLayer::RefreshData(bool isShowNum/*isShowNum = false*/)
+{
+	//需要根据列数计算行数 所以要知道列数
+	if(m_pItemMap == NULL)
+		return;
+
+	CCPoint cp = GetSrollViewOffSet();
+
+	//有自定义控件的直接刷新
+	if(m_CustomNodeMap.size() == 0)
+	{
+		if(m_uXnum == 0)
+			return;
+
+		short nRow = m_pItemMap->size() % m_uXnum == 0 ? m_pItemMap->size() / m_uXnum : m_pItemMap->size() / m_uXnum + 1;
+
+		if(nRow < m_uYnum)
+			nRow = m_uYnum;
+
+		reMarixSize(m_uXnum, nRow, m_uWidthSpace, m_uHeightSpace);
+	}
+	else
+	{
+		//init
+		for(size_t i = 0; i < m_CustomNodeMap.size(); ++i)
+		{
+			m_CustomNodeMap[i]->setBlock();
+			m_CustomNodeMap[i]->setClickable(false);
+		}
+			
+	}
+
+	ItemMap::iterator IT = m_pItemMap->begin();
+	while(IT != m_pItemMap->end())
+	{
+		//ItemNode* pItem = dynamic_cast<ItemNode*>(_itemContent->getChildByTag( IT->second->get_data()->n16Index ));
+		ItemNode* pItem = GetItemNode(IT->first);
+		if(!pItem)
+			continue;
+
+		///f_item* pfItem = (f_item*)(IT->second);
+		f_equipment* pfItem = (f_equipment*)(IT->second);
+		if(pfItem != NULL)
+		{
+			pItem->initWithItem(pfItem);
+			pItem->setClickable(true);
+			
+		}
+// 		f_equipment* pEquip = (f_equipment*)pfItem;
+// 		pItem->setDataId(pfItem->get_item_type_id());
+// 		pItem->setBind(pfItem->is_item_binded());
+// 		pItem->setLock(pfItem->is_locked());
+		//pItem->setLevel(pEquip->get_equip()->nLevel);
+		if(pfItem->get_container_type()==EICT_KungfuBag)//
+		{
+			pItem->setItemSpriteScale(NumericalIniMgr::getInstance()->gongfa_item_scale);
+			CCNode * node=pItem->getChildByTag(ItemNode::IT_LEVELLABEL);
+			if(node)
+			{
+				node->setScale(0.8);
+				node->setPosition(pItem->getItemsprite()->getContentSize().width,14);
+			}
+			
+		}
+
+		if(pfItem->get_container_type()==EICT_KungfuTemp)
+		{
+			CCNode * node=pItem->getChildByTag(ItemNode::IT_LEVELLABEL);
+			if(node)
+			{
+				node->setPosition(62,14);
+			}
+		}
+	
+		if (isShowNum)
+		{
+			//int num = PackageManager::getInstance()->getItemNumber(EICT_Bag,pfItem->get_item_type_id());
+			pItem->setNum(pfItem->get_item_number());
+			pItem->SetShowNum(true);
+		}
+		IT++;
+	}
+
+	if(cp.x >= 0 || cp.y >= 0)
+		SetSrollViewOffSet(cp);
+}
+
+ItemNode* ItemMarixLayer::GetItemNode( short idx )
+{
+	if(m_CustomNodeMap.size())
+		return GetCustomNode(idx);
+
+	if(!_itemContent)
+	{
+		return NULL;
+	}
+
+	if(idx < 0 || idx >= m_uXnum * m_uYnum)
+	{
+		//CC_ASSERT(0);
+		return NULL;
+	}
+
+	ItemNode* pItem = dynamic_cast<ItemNode*>(_itemContent->getChildByTag( idx ));
+	if(!pItem)
+	{
+		//CC_ASSERT(0);
+		return NULL;
+	}
+
+	return pItem;
+}
+
+ItemNode* ItemMarixLayer::GetCustomNode( short idx )
+{
+	if(idx < 0 || (size_t)idx >= m_CustomNodeMap.size())
+	{
+		//CC_ASSERT(0);
+		return NULL;
+	}
+
+	//[bing] 如果存在customnode则判断customnode的位置
+	return m_CustomNodeMap[idx];
+}
+
+void ItemMarixLayer::clearMarix()
+{
+	this->removeAllChildrenWithCleanup(true);
+	_itemScrollView = NULL;
+	_itemContent = NULL;
+
+	m_uWidthSpace = 0;
+	m_uHeightSpace = 0;
+	m_uXnum = 0;
+	m_uYnum = 0;
+}
+
+void ItemMarixLayer::reMarixSize(int nX, int nY, int nXoffset, int nYoffset)
+{
+	clearMarix();
+
+	m_uWidthSpace = nXoffset;
+	m_uHeightSpace = nYoffset;
+	m_uXnum = nX;
+	m_uYnum = nY;
+
+	if(nX == 0 || nY == 0)
+		return;
+
+	_itemContent = CCNode::create();
+	_itemContent->setContentSize( CCSize((m_uWidthSpace + ITEMNODE_CONTENTWIDTH) * m_uXnum + m_uWidthSpace, (m_uHeightSpace + ITEMNODE_CONTENTHEIGHT) * m_uYnum + m_uHeightSpace) );
+
+	_itemScrollView = createScrollViewWithContent(this);
+	_itemScrollView->setContainer(_itemContent);
+	_itemScrollView->setContentSize(_itemContent->getContentSize());
+	_itemScrollView->setContentOffset(ccp(0, _itemScrollView->minContainerOffset().y));
+	_itemScrollView->setTouchEnabled(bCanScrollView);
+	this->addChild(_itemScrollView);
+
+	for(int i = 0; i < m_uYnum; ++i)
+	{
+		for(int j = 0; j < m_uXnum; j++)
+		{
+			ItemNode* pItem = ItemNode::create();
+
+			pItem->setPosition( ccp( m_uWidthSpace + j * ( ITEMNODE_CONTENTWIDTH + m_uWidthSpace ), m_uHeightSpace + i * ( ITEMNODE_CONTENTHEIGHT + m_uHeightSpace ) ) );
+			pItem->setPositionX( pItem->getPositionX() + ITEMNODE_CONTENTWIDTH / 2 );	//居中
+			pItem->setPositionY( pItem->getPositionY() + ITEMNODE_CONTENTHEIGHT / 2 );
+			//int x =(m_uYnum - 1 - i) * m_uXnum + j;
+			pItem->setTag( (m_uYnum - 1 - i) * m_uXnum + j );
+
+			CCLabelTTF* nameLabel = CCLabelTTF::create( );
+			nameLabel->setFontSize(16);
+			nameLabel->setTag(10);
+			nameLabel->setPosition(ccp(25,-5));
+			pItem->addChild(nameLabel);
+
+			pItem->setConType(m_EItemConType);
+			_itemContent->addChild(pItem);
+		}
+		_itemScrollView->update_child_touch_clip_rect();
+	}
+}
+void ItemMarixLayer::createLabelTTF()
+{
+	for(int i = 0; i < m_uYnum * m_uXnum; ++i)
+	{
+		ItemNode* pItem = (ItemNode*)this->GetItemNode(i);
+		CCLabelTTF* nameLabel = CCLabelTTF::create( );
+		nameLabel->setFontSize(16);
+		nameLabel->setTag(10);
+		nameLabel->setPosition(ccp(0,-10));
+		pItem->addChild(nameLabel);
+	}
+}
+
+
+void ItemMarixLayer::AddColum(short nAdd)
+{
+	//todo:
+}
+
+//增加行
+void ItemMarixLayer::AddRow(short nAdd)
+{
+	//todo:
+}
+
+void ItemMarixLayer::AddCustomNode( ItemNode* pNode )
+{
+	if(!pNode)
+		return;
+
+	this->addChild(pNode);
+	m_CustomNodeMap.push_back(pNode);
+}
+
+void ItemMarixLayer::SetScrollViewTouchEnable( bool bEnable )
+{
+	if(!_itemScrollView )
+		return;
+
+	if( bEnable && !bCanScrollView )
+		return;
+
+	_itemScrollView->setTouchEnabled(bEnable);
+}
+
+void ItemMarixLayer::insteadChildNode( ItemNode* targetNode )
+{
+	_itemContent->addChild(targetNode);
+}
+
+void ItemMarixLayer::SetSrollViewOffSetY( int nIdx )
+{
+	if(m_uXnum == 0)
+		return;
+
+	int nLine = nIdx / m_uXnum;
+	float fOffSetY = (ITEMNODE_CONTENTHEIGHT + m_uHeightSpace) * nLine;
+	fOffSetY = _itemScrollView->minContainerOffset().y + fOffSetY;
+	if(fOffSetY > 0.0f)
+		fOffSetY = 0.0f;
+	_itemScrollView->setContentOffset(ccp(0, fOffSetY));
+}
+
+void ItemMarixLayer::setItemNodeTouchEnable( bool bEnable )
+{
+	ItemMap::iterator IT = m_pItemMap->begin();
+	while(IT != m_pItemMap->end())
+	{
+		//ItemNode* pItem = dynamic_cast<ItemNode*>(_itemContent->getChildByTag( IT->second->get_data()->n16Index ));
+		ItemNode* pItem = GetItemNode(IT->first);
+		if (pItem!=NULL)
+			pItem->setClickable(bEnable);
+		IT++;
+	}
+}
+
+void ItemMarixLayer::ClearMap()
+{
+	for (int i = 0 ;i< m_uXnum * m_uYnum; i++)
+	{
+		ItemNode* pItem = dynamic_cast<ItemNode*>(_itemContent->getChildByTag(i));
+		if (pItem == NULL)
+		{
+			continue;
+		}
+		pItem->stopAllActions();
+		pItem->setNum(0);	
+		pItem->removeFromParent();
+		pItem = NULL;
+	}		
+	m_pItemMap->clear();
+}

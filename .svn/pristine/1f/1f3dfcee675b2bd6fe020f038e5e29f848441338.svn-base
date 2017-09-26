@@ -1,0 +1,150 @@
+#include "TuningScrollView.h"
+#include "CommonView.h"
+
+#include <math.h>
+USING_NS_CC;
+USING_NS_CC_EXT;
+
+#define SCROLL_DEACCEL_RATE  0.95f
+#define SCROLL_DEACCEL_DIST  1.0f
+#define BOUNCE_DURATION      0.15f
+#define INSET_RATIO          0.2f
+#define MOVE_INCH            7.0f/160.0f
+
+TuningScrollView::TuningScrollView()
+{
+
+}
+
+TuningScrollView::~TuningScrollView()
+{
+
+}
+
+void TuningScrollView::ccTouchEnded( cocos2d::CCTouch *pTouch, cocos2d::CCEvent *pEvent )
+{
+	if (!this->isVisible())
+	{
+		return;
+	}
+	if (m_pTouches->containsObject(pTouch))
+	{
+		if (m_pTouches->count() == 1 && m_bTouchMoved)
+		{
+			this->schedule(schedule_selector(TuningScrollView::newDeaccelerateScrolling));
+		}
+		m_pTouches->removeObject(pTouch);
+	} 
+
+	if (m_pTouches->count() == 0)
+	{
+		m_bDragging = false;    
+		m_bTouchMoved = false;
+	}
+}
+
+void TuningScrollView::adjustScrolling( )
+{
+	CC_ASSERT(get_item_gap() == 0);
+
+	CCPoint ptViewCenter = this->getAnchorPointInPoints();
+	size_t index =0;
+	float adjOffset=0;
+	CCPoint newPt  = getContentOffset();
+
+	ptViewCenter = convert_point_to_node_space(this,ptViewCenter,getContainer());
+	BOOST_FOREACH(CCNode* item,items())
+	{
+		CCPoint itemCenter = item->getPosition();
+		float fHalfHeight = item->getContentSize().height*0.5f;
+		//itemCenter = convert_point_to_node_space(item,itemCenter,getContainer());
+		if (b_vertical)
+		{
+			if (fabs(ptViewCenter.y - itemCenter.y) < fHalfHeight)
+			{
+				//找到了
+				adjOffset  = ptViewCenter.y - itemCenter.y;
+				newPt.y += adjOffset;
+				break;
+			}
+		}
+		else
+		{
+			if (fabs(ptViewCenter.x - itemCenter.x) <fHalfHeight)
+			{
+				//找到了
+				adjOffset  = ptViewCenter.x - itemCenter.x;
+				newPt.x += adjOffset;
+				break;
+			}
+		}
+
+		++index;
+	} 
+	setContentOffsetInDuration(newPt,0.5f);
+
+	if (mcb)
+	{
+		mcb(this,index);
+	}
+}
+
+void TuningScrollView::newDeaccelerateScrolling( float dt )
+{
+	if (m_bDragging)
+	{
+		this->unschedule(schedule_selector(TuningScrollView::newDeaccelerateScrolling));
+		return;
+	}
+
+	float newX, newY;
+	CCPoint maxInset, minInset;
+	CCPoint prePos = m_pContainer->getPosition();
+
+	m_pContainer->setPosition(ccpAdd(m_pContainer->getPosition(), m_tScrollDistance));
+
+	if (m_bBounceable)
+	{
+		maxInset = m_fMaxInset;
+		minInset = m_fMinInset;
+	}
+	else
+	{
+		maxInset = this->maxContainerOffset();
+		minInset = this->minContainerOffset();
+	}
+
+	//check to see if offset lies within the inset bounds
+// 	newX     = MIN(m_pContainer->getPosition().x, maxInset.x);
+// 	newX     = MAX(newX, minInset.x);
+// 	newY     = MIN(m_pContainer->getPosition().y, maxInset.y);
+// 	newY     = MAX(newY, minInset.y);
+
+	newX = m_pContainer->getPosition().x;
+	newY = m_pContainer->getPosition().y;
+
+	m_tScrollDistance     = ccpSub(m_tScrollDistance, ccp(newX - m_pContainer->getPosition().x, newY - m_pContainer->getPosition().y));
+	m_tScrollDistance     = ccpMult(m_tScrollDistance, SCROLL_DEACCEL_RATE);
+	this->setContentOffset(ccp(newX,newY));
+
+	if ((fabsf(m_tScrollDistance.x) <= SCROLL_DEACCEL_DIST &&
+		fabsf(m_tScrollDistance.y) <= SCROLL_DEACCEL_DIST) ||
+		ccpFuzzyEqual(prePos,m_pContainer->getPosition(),0.1f))
+	{
+		this->unschedule(schedule_selector(TuningScrollView::newDeaccelerateScrolling));
+		this->adjustScrolling();
+	}
+}
+
+const char* gszVisibleCnt = "visible_cnt";
+void TuningScrollViewLoader::onHandlePropTypeInteger( cocos2d::CCNode * pNode, cocos2d::CCNode * pParent, const char* pPropertyName, int pInteger, cocos2d::extension::CCBReader * pCCBReader )
+{
+	if(strcmp(gszVisibleCnt,pPropertyName) == 0)
+	{
+		((TuningScrollView*)pNode)->setVisibleCnt(pInteger);
+	}
+	else
+	{
+		ListControlLoader::onHandlePropTypeInteger(pNode, pParent, pPropertyName, pInteger, pCCBReader);
+	}
+}

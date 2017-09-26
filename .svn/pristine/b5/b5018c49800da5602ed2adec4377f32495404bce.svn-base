@@ -1,0 +1,819 @@
+#include "ServerActivityUi.h"
+#include "CfgReader.h"
+#include "BaseDefine.h"
+#include "TouchSprite.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "RewardMgr.h"
+#include "World.h"
+#include "ItemNode.h"
+#include "StringMgr.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "ItemTip.h"
+#include "EquipTipUi.h"
+#include "World.h"
+#include "MiniMapUi.h"
+#include "PackageManager.h"
+#include "item.h"
+#include <algorithm>
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "UiResourceMgr.h"
+
+ServerActivityUi::ServerActivityUi()
+{
+
+}
+
+ServerActivityUi::~ServerActivityUi()
+{
+
+}
+
+CCNode * ServerActivityUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["ServerActivityUiLayer"] = UiLayerLoader<ServerActivityUiLayer>::loader();
+	nodeLoaders["TouchSprite"] = TouchSpriteLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("serveractivityui", nodeLoaders, _loadSpriteSheet);
+	if(uiNode)
+	{
+		ServerActivityUiLayer *uiLayer = dynamic_cast<ServerActivityUiLayer*>(uiNode);
+		CC_ASSERT(uiLayer != NULL);
+		uiLayer->updateData();
+	}
+	return uiNode;
+}
+
+ServerActivityUiLayer * ServerActivityUi::getUiLayer()
+{
+	return getUiNodeByTag<ServerActivityUiLayer>(WCT_ServerActivityUi);
+}
+
+void ServerActivityUi::updateData()
+{
+	ServerActivityUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateData();
+	}
+}
+
+int ServerActivityUi::getServerActivityDay()
+{
+	ServerActivityUiLayer *uiLayer = getUiLayer();
+	if (uiLayer != NULL)
+	{
+		return uiLayer->getServerActivityDay();
+	}
+	return -1;
+}
+
+//////////////////////////////////////////////////////////////////
+
+
+cocos2d::SEL_MenuHandler ServerActivityUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler ServerActivityUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", ServerActivityUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onAwardBtnPressed", ServerActivityUiLayer::onAwardBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onShouChongBtnPressed", ServerActivityUiLayer::onServerActivityBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onFanliCloseBtnPressed", ServerActivityUiLayer::onFanliCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChongZhiBtnPressed", ServerActivityUiLayer::onChongZhiBtnPressed);
+	return NULL;
+}
+
+
+void ServerActivityUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_frame = NULL;
+	_fanliframe = NULL;
+	_roleLabel = NULL;
+	_levelLabel = NULL;
+	_selectSprite = NULL;
+	_btnEffect = NULL;
+
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(SAUT_Frame));
+	CC_ASSERT(_frame != NULL);
+// 	_fanliframe = dynamic_cast<CCSprite*>(getChildByTag(SAUT_FanliFrame));
+// 	CC_ASSERT(_fanliframe != NULL);
+	_roleLabel = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(SAUT_ActivityRole));
+	_roleLabel->setDimensions(CCSize(100.0f,0.0f));
+	_levelLabel = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(SAUT_LevelTop));
+	CC_ASSERT(_roleLabel != NULL && _levelLabel != NULL);
+	
+
+	_selectSprite = CCSprite::createWithSpriteFrameName("serveractivityui_gaoliangbtnn");//serveractivityui_selectside   serveractivityui_btnn
+// 	_selectSprite1 = CCSprite::createWithSpriteFrameName("serveractivityui_2btnn");
+// 	_selectSprite2 = CCSprite::createWithSpriteFrameName("serveractivityui_3btnn");
+// 	_selectSprite3 = CCSprite::createWithSpriteFrameName("serveractivityui_4btnn");
+// 	_selectSprite4 = CCSprite::createWithSpriteFrameName("serveractivityui_5btnn");
+// 	_selectSprite5 = CCSprite::createWithSpriteFrameName("serveractivityui_6btnn");
+// 	_selectSprite6 = CCSprite::createWithSpriteFrameName("serveractivityui_7btnn");
+	_frame->addChild(_selectSprite, 0);
+// 	_frame->addChild(_selectSprite1, 0);
+// 	_frame->addChild(_selectSprite2, 0);
+// 	_frame->addChild(_selectSprite3, 0);
+// 	_frame->addChild(_selectSprite4, 0);
+// 	_frame->addChild(_selectSprite5, 0);
+// 	_frame->addChild(_selectSprite6, 0);
+
+	_selectSprite->setVisible(false);
+// 	_selectSprite1->setVisible(false);
+// 	_selectSprite2->setVisible(false);
+// 	_selectSprite3->setVisible(false);
+// 	_selectSprite4->setVisible(false);
+// 	_selectSprite5->setVisible(false);
+// 	_selectSprite6->setVisible(false);
+
+	//初始化tab 的framename;
+	_highlightLab[SAUT_LevelSprint] = "serveractivityui_1btnn";
+	_highlightLab[SAUT_ProfessPower] = "serveractivityui_2btnn";
+	_highlightLab[SAUT_CoolMount] = "serveractivityui_3btnn";
+	_highlightLab[SAUT_ShangchengCraft] = "serveractivityui_4btnn";
+	_highlightLab[SAUT_HonourGift] = "serveractivityui_5btnn";
+	_highlightLab[SAUT_CharmLauch] = "serveractivityui_6btnn";
+	_highlightLab[SAUT_GodsTop] = "serveractivityui_7btnn";
+
+	_normalLab[SAUT_LevelSprint] = "serveractivityui_1btnn";
+	_normalLab[SAUT_ProfessPower] = "serveractivityui_2btnn";
+	_normalLab[SAUT_CoolMount] = "serveractivityui_3btnn";
+	_normalLab[SAUT_ShangchengCraft] = "serveractivityui_4btnn";
+	_normalLab[SAUT_HonourGift] = "serveractivityui_5btnn";
+	_normalLab[SAUT_CharmLauch] = "serveractivityui_6btnn";
+	_normalLab[SAUT_GodsTop]  = "serveractivityui_7btnn";
+
+		//连接信号;
+	getTabSprite(SAUT_LevelSprint)->signalTouched.connect(this, &ServerActivityUiLayer::onLevelSprintTouched);
+	getTabSprite(SAUT_ProfessPower)->signalTouched.connect(this, &ServerActivityUiLayer::onProfessPowerTouched);
+	getTabSprite(SAUT_CoolMount)->signalTouched.connect(this, &ServerActivityUiLayer::onCoolMountTouched);
+	getTabSprite(SAUT_ShangchengCraft)->signalTouched.connect(this, &ServerActivityUiLayer::onShangChengCraftTouched);
+	getTabSprite(SAUT_CharmLauch)->signalTouched.connect(this, &ServerActivityUiLayer::onCharmLauchTouched);
+	getTabSprite(SAUT_HonourGift)->signalTouched.connect(this, &ServerActivityUiLayer::onHonourGiftTouched);
+	getTabSprite(SAUT_GodsTop)->signalTouched.connect(this, &ServerActivityUiLayer::onGodsTopTouched);
+
+	_curentSelect = SAUT_LevelSprint;
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+	std::string sSESurround = sSEDir + "E1_39.plist";
+	_plist.insert(sSESurround);
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSESurround.c_str());
+
+
+	//设置物品
+	for(int i = NT_ItemBegin; i < NT_ItemEnd; i ++)
+	{
+		CCNode* n = _frame->getChildByTag(i);
+		CC_ASSERT(n != NULL);
+		_itemPos[i - NT_ItemBegin] = n->getPosition();
+
+		ItemNode * node = ItemNode::create();
+		node->setPosition(_itemPos[i - NT_ItemBegin]);
+		node->setTag(NT_ItemNodeBegin + i);
+		node->setBlank();
+		node->setClickable(true);
+		node->hideItemOpBtn();
+		_frame->addChild(node,1);
+	}
+	_serverday = World::getInstance()->getServerActivityDay();
+// 	for (int i = SAUT_LevelSprint; i<= SAUT_DayNum; i++)
+// 	{
+// 		CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serveractivityui_finish");//serveractivityui_finish
+// 		CC_ASSERT(spriteFrame != NULL);
+// 		_finishSprite[i - SAUT_LevelSprint] = CCSprite::create();
+// 		_finishSprite[i - SAUT_LevelSprint]->setDisplayFrame(spriteFrame);
+// 		TouchSprite *tabSprite = getTabSprite((eServerActivityUiTag)i);
+// 		CCPoint pos = tabSprite->getPosition();
+// 		_finishSprite[i - SAUT_LevelSprint]->setPosition(ccp(pos.x + 18.0f,pos.y * 1.32f));
+// 		_frame->addChild(_finishSprite[i - SAUT_LevelSprint]);
+// 		_finishSprite[i - SAUT_LevelSprint]->setVisible(false);
+// 
+// 	}
+
+	//runAnimation();
+
+	//setFanliUiShow(false);
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+
+	for (int i = SAUT_LevelSprint; i < _serverday; i++)
+	{
+		if (_serverday <= 1 || _serverday > 8)
+			return;
+		if (_serverday - 1 == i)
+		{
+			return;
+		}
+		CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serveractivityui_finish");//serveractivityui_finish
+		CC_ASSERT(spriteFrame != NULL);
+		CCSprite* finishSprite = CCSprite::create();
+		finishSprite->setDisplayFrame(spriteFrame);
+		TouchSprite *tabSprite = getTabSprite((eServerActivityUiTag)i);
+		CCPoint pos = tabSprite->getPosition();
+		finishSprite->setPosition(ccp(pos.x - 8.0f,pos.y ));
+		_frame->addChild(finishSprite);
+	}
+
+}
+
+void ServerActivityUiLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+}
+
+bool ServerActivityUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+// 		int index = getItemUnderPoint(framePoint);
+// 		if ( index == -1 )
+// 		{
+// 			return true;
+// 		}
+// 		if (index >= NT_ItemBegin && index < NT_ItemEnd)
+// 		{
+// 			if(MIsEquipment(_itemDataId[index - NT_ItemBegin]))
+// 			{
+// 				EquipTipUiLayer *ui = EquipTipUi::create();
+// 				ui->showUi(framePoint,_itemDataId[index - NT_ItemBegin]);
+// 			}
+// 			else
+// 			{
+// 				ItemTip::getInstace()->open();
+// 				ItemTip::getInstace()->setPosition(_itemPos[index - NT_ItemBegin]);
+// 				ItemTip::getInstace()->setDataId(_itemDataId[index - NT_ItemBegin]);
+// 				ItemTip::getInstace()->hideOpBtn();
+// 			}
+// 		}
+		return true;
+	}
+	return false;
+}
+
+void ServerActivityUiLayer::onLevelSprintTouched( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	onTabSelectChanged(_curentSelect, SAUT_LevelSprint);
+	TouchSprite *sprite = getTabSprite(_curentSelect);
+	if (sprite != NULL)
+	{
+		_selectSprite->setPosition(sprite->getPosition());
+		_selectSprite->setVisible(true);
+		_selectSprite->setZOrder(2);
+	}
+}
+
+void ServerActivityUiLayer::onProfessPowerTouched( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	onTabSelectChanged(_curentSelect, SAUT_ProfessPower);
+	TouchSprite *sprite = getTabSprite(_curentSelect);
+	if (sprite != NULL)
+	{
+		_selectSprite->setPosition(sprite->getPosition());
+		_selectSprite->setVisible(true);
+		_selectSprite->setZOrder(2);
+// 		_selectSprite1->setPosition(sprite->getPosition());
+// 		_selectSprite1->setVisible(true);
+// 		_selectSprite1->setVisible(false);
+	}
+}
+
+void ServerActivityUiLayer::onCoolMountTouched( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	onTabSelectChanged(_curentSelect, SAUT_CoolMount);
+	TouchSprite *sprite = getTabSprite(_curentSelect);
+	if (sprite != NULL)
+	{
+		_selectSprite->setPosition(sprite->getPosition());
+		_selectSprite->setVisible(true);
+		_selectSprite->setZOrder(2);
+// 		_selectSprite2->setPosition(sprite->getPosition());
+// 		_selectSprite2->setVisible(true);
+// 		_selectSprite2->setZOrder(2);
+	}
+}
+
+void ServerActivityUiLayer::onShangChengCraftTouched( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	onTabSelectChanged(_curentSelect, SAUT_ShangchengCraft);
+	TouchSprite *sprite = getTabSprite(_curentSelect);
+	if (sprite != NULL)
+	{
+		_selectSprite->setPosition(sprite->getPosition());
+		_selectSprite->setVisible(true);
+		_selectSprite->setZOrder(2);
+// 		_selectSprite3->setPosition(sprite->getPosition());
+// 		_selectSprite3->setVisible(true);
+// 		_selectSprite3->setZOrder(2);
+	}
+}
+
+void ServerActivityUiLayer::onHonourGiftTouched( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	onTabSelectChanged(_curentSelect, SAUT_HonourGift);
+	TouchSprite *sprite = getTabSprite(_curentSelect);
+	if (sprite != NULL)
+	{
+		_selectSprite->setPosition(sprite->getPosition());
+		_selectSprite->setVisible(true);
+		_selectSprite->setZOrder(2);
+// 		_selectSprite4->setPosition(sprite->getPosition());
+// 		_selectSprite4->setVisible(true);
+// 		_selectSprite4->setZOrder(2);
+	}
+}
+
+void ServerActivityUiLayer::onCharmLauchTouched( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	onTabSelectChanged(_curentSelect, SAUT_CharmLauch);
+	TouchSprite *sprite = getTabSprite(_curentSelect);
+	if (sprite != NULL)
+	{
+		_selectSprite->setPosition(sprite->getPosition());
+		_selectSprite->setVisible(true);
+		_selectSprite->setZOrder(2);
+// 		_selectSprite5->setPosition(sprite->getPosition());
+// 		_selectSprite5->setVisible(true);
+// 		_selectSprite5->setZOrder(2);
+		
+	}
+}
+
+void ServerActivityUiLayer::onGodsTopTouched( TouchSprite* , bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	onTabSelectChanged(_curentSelect, SAUT_GodsTop);
+	TouchSprite *sprite = getTabSprite(_curentSelect);
+	if (sprite != NULL)
+	{
+		_selectSprite->setPosition(sprite->getPosition());
+		_selectSprite->setVisible(true);
+		_selectSprite->setZOrder(2);
+// 		_selectSprite6->setPosition(sprite->getPosition());
+// 		_selectSprite6->setVisible(true);
+// 		_selectSprite6->setZOrder(2);
+	}
+}
+
+void ServerActivityUiLayer::onTabSelectChanged( eServerActivityUiTag src, eServerActivityUiTag cur )
+{
+	CC_ASSERT(src >= SAUT_LevelSprint && src <=SAUT_GodsTop && cur >= SAUT_LevelSprint && cur <=SAUT_GodsTop);
+	if(cur != src)
+	{
+		_curentSelect = cur;
+		GET_UI(ServerActivityUi, WCT_ServerActivityUi)->updateData();
+	}
+}
+
+void ServerActivityUiLayer::setTabSpriteSelect( eServerActivityUiTag tabTag, bool select )
+{
+	TouchSprite *sprite = getTabSprite(tabTag);
+	if(sprite != NULL)
+	{
+		std::string frameName;
+		if(select)
+		{
+			frameName = _highlightLab[tabTag];
+		}
+		else
+		{
+			frameName = _normalLab[tabTag];
+		}
+
+		if(!frameName.empty())
+		{
+			sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName.c_str()));
+		}
+	}
+}
+
+TouchSprite * ServerActivityUiLayer::getTabSprite( eServerActivityUiTag tag )
+{
+	CC_ASSERT(_frame != NULL);
+	return dynamic_cast<TouchSprite*>(_frame->getChildByTag(tag));
+}
+
+void ServerActivityUiLayer::updateData()
+{
+	unsigned int rewardData[7][6];
+
+	eRoleType profess = RoleManager::getInstance()->getLocalPlayer()->getRoleType(); 
+
+	if(profess == RT_MWARRIOR)//战士。男
+	{
+		unsigned int tmp[7][6] = {
+			{ 9175066, 1003221, 1002012 ,1102180, 1003013, 9136045 },
+			{ 9115060, 1003220, 1005012 ,1005012, 1003014, 1003008},
+			{ 1003021, 1003020 ,1003019 ,1003020, 1003019, 1003008},
+			{ 9134065, 1005023, 1003006 ,1005023, 1002010, 9136055},
+			{ 9082068, 1003002, 1003018 ,1003017, 1003016, 1003008},
+			{ 9195065, 1003220, 1003004 ,1003004, 1102001, 1003008},
+			{ 9115070, 1005023, 1003016 ,1005023, 1003016, 9136065},
+		};
+
+		memcpy(rewardData, tmp, sizeof(unsigned int) * 6 * 7);
+	}
+
+	if(profess == RT_WWARRIOR)//战.女
+	{
+		unsigned int tmp[7][6] = {
+			{9175066, 1003221, 1002012 ,1102180, 1003013, 9137045},
+			{9115060, 1003220, 1005012 ,1005012, 1003014, 1003008},
+			{1003021, 1003020, 1003019 ,1003020, 1003019, 1003008},
+			{9133065, 1005023, 1003006 ,1005023, 1002010, 9137055},
+			{9082068, 1003002, 1003018 ,1003017, 1003016, 1003008},
+			{9195065, 1003220, 1003004 ,1003004, 1102001, 1003008},
+			{9115070, 1005034, 1003016 ,1005034, 1003016, 9137065},
+		};
+
+		memcpy(rewardData, tmp, sizeof(unsigned int) * 6 * 7);
+	}
+
+	if(profess == RT_MMAGE)//法 男
+	{
+		unsigned int tmp[7][6] = {
+			{9275066, 1003221, 1002012 ,1102180, 1003013, 9236045},
+			{9215060, 1003220, 1005012 ,1005012, 1003014, 1003008},
+			{1003021, 1003020, 1003019 ,1003020, 1003019, 1003008},
+			{9234065, 1005023, 1003006 ,1005023, 1002010, 9236055},
+			{9082068, 1003002, 1003018 ,1003017, 1003016, 1003008},
+			{9295065, 1003220, 1003004 ,1003004, 1102001, 1003008},
+			{9215070, 1005034, 1003016 ,1005034, 1003016, 9236065},
+		};
+
+		memcpy(rewardData, tmp, sizeof(unsigned int) * 6 * 7);
+	}
+
+	if(profess == RT_WMAGE)//法 女
+	{
+		unsigned int tmp[7][6] = {
+			{9275066, 1003221, 1002012 ,1102180, 1003013, 9237045},
+			{9215060, 1003220, 1005012 ,1005012, 1003014, 1003008},
+			{1003021, 1003020, 1003019 ,1003020, 1003019, 1003008},
+			{9233065, 1005023, 1003006 ,1005023, 1002010, 9237055},
+			{9082068, 1003002, 1003018 ,1003017, 1003016, 1003008},
+			{9295065, 1003220, 1003004 ,1003004, 1102001, 1003008},
+			{9215070, 1005034, 1003016 ,1005034, 1003016, 9237065},
+		};
+
+		memcpy(rewardData, tmp, sizeof(unsigned int) * 6 * 7);
+	}
+
+	if(profess == RT_MTAOIST)//道 男
+	{
+		unsigned int tmp[7][6] = {
+			{9175066, 1003221, 1002012 ,1102180, 1003013, 9536045},
+			{9315060, 1003220, 1005012 ,1005012, 1003014, 1003008},
+			{1003021, 1003020, 1003019 ,1003020, 1003019, 1003008},
+			{9334065, 1005023, 1003006 ,1005023, 1002010, 9536055},
+			{9082068, 1003002, 1003018 ,1003017, 1003016, 1003008},
+			{9395065, 1003220, 1003004 ,1003004, 1102001, 1003008},
+			{9315070, 1005034, 1003016 ,1005034, 1003016, 9536065},
+		};
+
+		memcpy(rewardData, tmp, sizeof(unsigned int) * 6 * 7);
+	}
+
+	if(profess == RT_WTAOIST)//道女
+	{
+		unsigned int tmp[7][6] = {
+			{9375066, 1003221, 1002012 ,1102180, 1003013, 9537045}, 
+			{9315060, 1003220, 1005012 ,1005012, 1003014, 1003008},
+			{1003021, 1003020, 1003019 ,1003020, 1003019, 1003008},
+			{9333065, 1005023, 1003006 ,1005023, 1002010, 9537055},
+			{9082068, 1003002, 1003018 ,1003017, 1003016, 1003008},
+			{9395065, 1003220, 1003004 ,1003004, 1102001, 1003008},
+			{9315070, 1005034, 1003016 ,1005034, 1003016, 9537065},
+		};
+
+		memcpy(rewardData, tmp, sizeof(unsigned int) * 6 * 7);
+	}
+	//更新ui;
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return ;
+	_serverday = World::getInstance()->getServerActivityDay();
+// 	for(int i = SAUT_LevelSprint; i <= SAUT_GodsTop;i++ )
+// 	{
+// 		if (i < _serverday)
+// 		{
+// 			setTabSpriteSelect((eServerActivityUiTag)i,true);
+// 		}
+// 		else
+// 		{
+// 			setTabSpriteSelect((eServerActivityUiTag)i,false);
+// 		}
+// 
+// 	}
+
+// 	for (int i = SAUT_LevelSprint; i<= _serverday; i++)
+// 	{
+// 		if (i == 1 || i == 2 )
+// 		{
+// 			_finishSprite[i - SAUT_LevelSprint]->setVisible(false);
+// 		}
+// 		else
+// 		{
+// 			_finishSprite[i - SAUT_LevelSprint -1]->setVisible(true);
+// 			if (i == SAUT_CharmLauch)
+// 			{
+// 				_finishSprite[0]->setVisible(true);
+// 			}
+// 		}
+// 	}
+
+// 	if (_serverday > 8)
+// 	{
+// 		_finishSprite[6]->setVisible(true);
+// 	}
+
+
+	switch (_curentSelect)
+	{
+	case SAUT_LevelSprint:
+		{
+			std::string str = GET_STR(6000);
+			std::replace(str.begin(), str.end(), '\\', '\n');
+			_roleLabel->setString(str.c_str());
+			_roleLabel->setDimensions(CCSize(580.0f,0.f));
+			for(int i= NT_ItemBegin; i < NT_ItemEnd; i++)
+			{
+				ItemNode * node =dynamic_cast<ItemNode *>(_frame->getChildByTag(NT_ItemNodeBegin + i));
+				CC_ASSERT(node != NULL);
+				node->stopAnimation();
+				node->setDataId(rewardData[0][i - NT_ItemBegin]);
+				_itemDataId[i - NT_ItemBegin] = rewardData[0][i - NT_ItemBegin];
+				node->setPosition(_itemPos[i - NT_ItemBegin]);
+//				node->runAnimation("E1_54");			//node环绕特效
+				node->getSurroundSE("E1_39");
+				node->setVisible(true);
+			}
+		}
+		break;
+	case SAUT_ProfessPower:
+		{
+			std::string str = GET_STR(6001);
+			std::replace(str.begin(), str.end(), '\\', '\n');
+			_roleLabel->setString(str.c_str());
+			_roleLabel->setDimensions(CCSize(570.0f,0.f));
+			for(int i= NT_ItemBegin; i < NT_ItemEnd; i++)
+			{
+				ItemNode * node =dynamic_cast<ItemNode *>(_frame->getChildByTag(NT_ItemNodeBegin + i));
+				CC_ASSERT(node != NULL);
+				node->stopAnimation();
+				node->setDataId(rewardData[1][i - NT_ItemBegin]);
+				_itemDataId[i - NT_ItemBegin] = rewardData[1][i - NT_ItemBegin];
+				node->setPosition(_itemPos[i - NT_ItemBegin]);
+				node->getSurroundSE("E1_39");
+				node->setVisible(true);
+			}
+		}
+		break;
+	case SAUT_CoolMount:
+		{
+			std::string str = GET_STR(6002);
+			std::replace(str.begin(), str.end(), '\\', '\n');
+			_roleLabel->setString(str.c_str());
+			_roleLabel->setDimensions(CCSize(575.f,0.f));
+			for(int i= NT_ItemBegin; i < NT_ItemEnd; i++)
+			{
+				ItemNode * node =dynamic_cast<ItemNode *>(_frame->getChildByTag(NT_ItemNodeBegin + i));
+				CC_ASSERT(node != NULL);
+				node->stopAnimation();
+				node->setDataId(rewardData[2][i - NT_ItemBegin]);
+				_itemDataId[i - NT_ItemBegin] = rewardData[2][i - NT_ItemBegin];
+				node->setPosition(_itemPos[i - NT_ItemBegin]);
+				node->getSurroundSE("E1_39");
+				node->setVisible(true);
+			}
+		}
+		break;
+	case SAUT_ShangchengCraft:
+		{
+			std::string str = GET_STR(6003);
+			std::replace(str.begin(), str.end(), '\\', '\n');
+			_roleLabel->setString(str.c_str());
+			_roleLabel->setDimensions(CCSize(590.f,0.f));
+			for(int i= NT_ItemBegin; i < NT_ItemEnd; i++)
+			{
+				ItemNode * node =dynamic_cast<ItemNode *>(_frame->getChildByTag(NT_ItemNodeBegin + i));
+				CC_ASSERT(node != NULL);
+				node->stopAnimation();
+				node->setDataId(rewardData[3][i - NT_ItemBegin]);
+				_itemDataId[i - NT_ItemBegin] = rewardData[3][i - NT_ItemBegin];
+				node->setPosition(_itemPos[i - NT_ItemBegin]);
+				node->getSurroundSE("E1_39");
+				node->setVisible(true);
+			}
+		}
+		break;
+	case SAUT_HonourGift:
+		{
+			std::string str = GET_STR(6004);
+			std::replace(str.begin(), str.end(), '\\', '\n');
+			_roleLabel->setString(str.c_str());
+			_roleLabel->setDimensions(CCSize(585.f,0.f));
+			for(int i= NT_ItemBegin; i < NT_ItemEnd; i++)
+			{
+				ItemNode * node =dynamic_cast<ItemNode *>(_frame->getChildByTag(NT_ItemNodeBegin + i));
+				CC_ASSERT(node != NULL);
+				node->stopAnimation();
+				node->setDataId(rewardData[4][i - NT_ItemBegin]);
+				_itemDataId[i - NT_ItemBegin] = rewardData[4][i - NT_ItemBegin];
+				node->setPosition(_itemPos[i - NT_ItemBegin]);
+				node->getSurroundSE("E1_39");
+				node->setVisible(true);
+			}
+		}
+		break;
+	case SAUT_CharmLauch:
+		{
+			std::string str = GET_STR(6005);
+			std::replace(str.begin(), str.end(), '\\', '\n');
+			_roleLabel->setString(str.c_str());
+			_roleLabel->setDimensions(CCSize(582.f,0.f));
+			for(int i= NT_ItemBegin; i < NT_ItemEnd; i++)
+			{
+				ItemNode * node =dynamic_cast<ItemNode *>(_frame->getChildByTag(NT_ItemNodeBegin + i));
+				CC_ASSERT(node != NULL);
+				node->stopAnimation();
+				node->setDataId(rewardData[5][i - NT_ItemBegin]);
+				_itemDataId[i - NT_ItemBegin] = rewardData[5][i - NT_ItemBegin];
+				node->setPosition(_itemPos[i - NT_ItemBegin]);
+				node->getSurroundSE("E1_39");
+				node->setVisible(true);
+			}
+		}
+		break;
+	case SAUT_GodsTop:
+		{
+			std::string str = GET_STR(6006);
+			std::replace(str.begin(), str.end(), '\\', '\n');
+			_roleLabel->setString(str.c_str());
+			_roleLabel->setDimensions(CCSize(565.f,0.f));
+			for(int i= NT_ItemBegin; i < NT_ItemEnd; i++)
+			{
+				ItemNode * node =dynamic_cast<ItemNode *>(_frame->getChildByTag(NT_ItemNodeBegin + i));
+				CC_ASSERT(node != NULL);
+				node->stopAnimation();
+				node->setDataId(rewardData[6][i - NT_ItemBegin]);
+				_itemDataId[i - NT_ItemBegin] = rewardData[6][i - NT_ItemBegin];
+				node->setPosition(_itemPos[i - NT_ItemBegin]);
+				node->getSurroundSE("E1_39");
+				node->setVisible(true);
+			}
+		}
+		break;
+	}
+
+	showEveryDayTop(_curentSelect);
+
+	if (_serverday > 8)
+	{
+		//World::getInstance()->getMiniMapUi()->showServerActivityBtn(false);
+	}
+
+// 	for (int i = SAUT_LevelSprint; i < _serverday; i++)
+// 	{
+// 		if (_serverday <= 1 || _serverday > 8)
+// 			return;
+// 		CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serveractivityui_finish");//serveractivityui_finish
+// 		CC_ASSERT(spriteFrame != NULL);
+// 		CCSprite* finishSprite = CCSprite::create();
+// 		finishSprite->setDisplayFrame(spriteFrame);
+// 		TouchSprite *tabSprite = getTabSprite((eServerActivityUiTag)i);
+// 		CCPoint pos = tabSprite->getPosition();
+// 		finishSprite->setPosition(ccp(pos.x,pos.y ));
+// 		_frame->addChild(finishSprite);
+// 	}
+}
+
+
+void ServerActivityUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	stopAnimation();
+	CLOSE_UI(WCT_ServerActivityUi);
+}
+
+void ServerActivityUiLayer::onAwardBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	CCLOG("select:%d",_curentSelect);
+	RewardMgr::getInstance()->getServerActivityReward(_curentSelect);
+}
+
+void ServerActivityUiLayer::showEveryDayTop(int day)
+{
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (day < 1 || day >7 )
+		return;
+	if (day > _serverday || day == SAUT_ShangchengCraft)
+	{
+		_levelLabel->setVisible(false);
+	}
+	else
+	{
+		_levelLabel->setVisible(true);
+	}
+	if (0 == ploc->getLevelSelf(day - 1))
+	{
+		_levelLabel->setString("\xE6\x82\xA8\xE5\xBD\x93\xE5\x89\x8D\xE4\xB8\x8D\xE5\x9C\xA8\xE6\x8E\x92\xE5\x90\x8D\xE5\x86\x85");
+	}
+	else
+	{
+		_levelLabel->setString(CCString::createWithFormat("%d",ploc->getLevelSelf(day - 1))->getCString());//\xE6\x82\xA8\xE6\x98\xA8\xE6\x97\xA5\xE6\x8E\x92\xE5\x90\x8D\xEF\xBC\x9A
+	}
+}
+
+int ServerActivityUiLayer::getItemUnderPoint( const CCPoint &point )
+{
+	for(int i =NT_ItemBegin ; i <NT_ItemEnd; i ++)
+	{
+		float x = _itemPos[i - NT_ItemBegin].x;
+		float y = _itemPos[i - NT_ItemBegin].y;
+		CCRect rect(x - ITEMNODE_CONTENTWIDTH / 2, y - ITEMNODE_CONTENTHEIGHT / 2, ITEMNODE_CONTENTWIDTH, ITEMNODE_CONTENTHEIGHT);
+		if(rect.containsPoint(point))
+		{
+			return i;
+		}
+	}
+	return -1;
+}
+
+void ServerActivityUiLayer::runAnimation()
+{
+	/*if (_btnEffect == NULL)
+	{
+		AnimationCache::AnimateList anims;
+		AnimationCache::createDefList(1, anims);
+		AnimationCache::getInstance()->getSinEffect(0,"chongzhifanli", anims);
+		BSAnimate *animste = anims[0];
+		_btnEffect = CCSprite::create();
+		CCControlButton* chongzhiBtn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(SAUT_ChongZhiBtn));
+		CC_ASSERT(chongzhiBtn != NULL);
+		CCPoint pos = chongzhiBtn->getPosition();
+		_btnEffect->setPosition(ccp(pos.x,pos.y - 15.f));
+		//_btnEffect->setAnchorPoint(ccp(0.0f,1.0f));
+		_frame->addChild(_btnEffect);
+		_btnEffect->runAction(CCRepeatForever::create(animste));
+	}*/
+}
+
+void ServerActivityUiLayer::stopAnimation()
+{
+	if (_btnEffect != NULL)
+	{
+		_btnEffect->stopAllActions();
+		_btnEffect->removeFromParent();
+		_btnEffect = NULL;
+	}
+}
+
+void ServerActivityUiLayer::onServerActivityBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//setFanliUiShow(true);
+	OPEN_UI(WCT_CoreTreeUi);
+}
+
+void ServerActivityUiLayer::onFanliCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setFanliUiShow(false);
+}
+
+void ServerActivityUiLayer::onChongZhiBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+}
+
+void ServerActivityUiLayer::setFanliUiShow( bool show )
+{
+// 	CCSize size = CCDirector::sharedDirector()->getWinSize();
+// 	if (show)
+// 	{
+// 		_fanliframe->setPosition(ccp(size.width * 0.5,size.height * 0.5));
+// 	}
+// 	else
+// 	{
+// 		_fanliframe->setPosition(ccp(size.width * 1.5,size.height * 0.5));
+// 	}
+}
+
+
+

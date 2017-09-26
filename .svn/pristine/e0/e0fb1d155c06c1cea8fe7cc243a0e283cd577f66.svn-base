@@ -1,0 +1,500 @@
+#ifndef MAPMANAGER_H
+#define MAPMANAGER_H
+
+#include "cocos2d.h"
+#include "AStarSearch.h"
+#include "SparseGraph.h"
+#include "AnimationCache.h"
+#include "GameActionNode.h"
+//#include "GameMapNode.h"
+
+using namespace cocos2d;
+//地图的材质
+enum MAP_MATERIAL
+{
+	hardGround=0,		//坚硬的地面
+	sandGround,
+	grassGround,		
+	woodGround,
+	riverSide,			//河边
+	snowGround,			//雪地
+	total
+};
+typedef std::map<UINT16,UINT16> LineStateMap;
+
+unsigned int const MANOR_MAP_ID = 2837440460;
+
+class Role;
+struct s_net_cmd;
+class MapBackFunc : public CCObject
+{
+public:
+	static MapBackFunc *getInstance();
+	void stopotcEffect(CCNode* node);
+	void jieshoutexiao(s_net_cmd* cmd);
+};
+
+
+class MapTouchHandle : public CCObject , public CCTouchDelegate
+{
+public:
+	void init();
+	void destroy();
+	virtual bool ccTouchBegan(CCTouch *touch, CCEvent *event); 
+};
+
+
+struct s_way_line
+{
+	int p1;
+	int p2;
+	inline bool  operator < (const s_way_line& wl) const
+	{
+		return p1*10000 + p2 < wl.p1*10000 + wl.p2;
+	}
+};
+
+
+struct BGBlockInfo
+{
+	unsigned short m_byIdx;
+	bool bInVisibleMap;
+	//CCPoint m_Point;
+	CCSprite* m_pSprite;
+};
+
+// class MapManager;
+// class BGCacheObject : public CCObject
+// {
+// public:
+// 	~BGCacheObject()
+// 	{
+// 		CCLOG("BGCache Desdroy idx = %d", _bgIdx);
+// 	};
+// 
+// 	MapManager* _MapMgr;
+// 	unsigned short _bgIdx;
+// 	unsigned int _mapid;
+// 
+// 	void BGTextureCallBack( CCObject* pTexture );
+// };
+enum MapStyle
+{
+	Map_Safe = 1,//安全地图
+	Map_NoSafe = 2,//危险地图
+	Map_PK   = 3 //PK地图
+};
+
+class AppDelegate;
+class MapManager : public CCObject
+{
+	friend class MapTouchHandle;
+	friend class MapBackFunc;
+	friend class BGCacheObject;
+
+public:
+	struct stMapTileData 
+	{
+		std::string		terrain;
+		std::string		mapName;
+		int				sceneType;
+		std::string		mapBGM;
+		bool				canRide;
+		bool				forceShowOther;
+		std::string		copyName;
+		bool				blockJPG;
+		int                 mapIsDangerous;//地图类型：安全、危险或者是PK
+		bool				mapCanRide;  //当前地图是否可骑乘，不可骑乘的话就算有马牌也不可以骑乘
+	};
+
+	typedef std::map<unsigned int,stMapTileData>				MapDataMap;
+public:
+	struct CreatureInfo
+	{
+		int mapIndex;
+		std::string creatureName;
+		int creatureType;
+		CCPoint pos;
+		std::string colour;
+		
+		CreatureInfo()
+		{
+			mapIndex = 0;
+			creatureName = "";
+			pos = CCPointZero;
+			colour = "white";
+			creatureType = 0;
+		}
+		CreatureInfo(const std::string &name, int posX, int posY, const std::string color = "white")
+			: creatureName(name)
+			, pos(posX, posY)
+			, colour(color)
+		{
+
+		}
+	};
+	typedef std::vector<CreatureInfo> CreatureVector;
+
+	struct Trigger
+	{
+		int mapName;
+		std::string nameStr;
+		CCRect rect;
+		int type ;
+		int targetID;
+		int questID;
+		unsigned int mapID;
+	};
+	typedef std::map<int, Trigger> TriggerMap;
+
+	struct MapArea
+	{
+		enum eAreaType
+		{
+			AT_Normal = 1,	//非特殊区域
+			AT_Safe = 2,	//安全区
+			AT_Stall = 3,	//摆摊区
+			AT_Team = 7,	//多人组队副本(来自服务器枚举 by zhang)
+			AT_GuildBattle = 9,//帮会战区(来自服务器枚举)
+			AT_NoPunish = 10,//PK无惩罚区(来自服务器枚举)
+			AT_UnRide = 15,//不能骑马区
+			AT_Risk = 16,//危险区
+			AT_End = 17
+		};
+
+		eAreaType areaType;
+		CCRect rect;
+
+		MapArea(eAreaType t, const CCRect &r)
+			: areaType(t)
+			, rect(r)
+		{
+
+		}
+	};
+	typedef std::vector<MapArea> MapAreaVector;
+
+	MapManager();
+	~MapManager();
+	static MapManager *getInstance();
+	inline int getCurMapIndex() const {return _mapIndex;}
+	void resetCrossMapping();
+	void init(AppDelegate* delegate);
+	void destroy();
+	void registerCmd();
+	void unregisterCmd();
+	void resetData();
+	const CreatureVector& getAllMapCreatureInfo(){ return m_vecAllmapCreatureInfo;};
+	void initMapCreatureDataWithXML();
+	const std::string &getCurMapName() const {return _mapName;}
+	const std::string &getCurCopyMapName() const {return _copyName;}
+	void changeMap(unsigned int mid);
+	void openMap();
+	bool open_map(/*int nStep, int& outCurStep*/);
+	void updataSelectAllRoleMap(int mapIndex);//更新所有mini地图上role
+	void closeMap(bool bNeedClearMapBlock = true);
+	void update(float dt);
+	void findPath(const pathNode& st_, pathNode& et_ ,std::vector<pathNode>& out ,int mapid = -1);
+	CCTMXTiledMap *getMap() { return _map; }
+	c_sparse_graph* getSparseGraph()const;
+	unsigned int getCurMapId()const { return _curMapId; }
+	std::vector<unsigned int> getAutoFightMapId() { return AutoFightMapId; }
+	inline std::map<unsigned int, int>& get_auto_fight_map_level(){return m_auto_fight_map_level;}
+
+	void AddAutoFightMapId(unsigned int id){ AutoFightMapId.push_back(id);}
+
+	bool isBlock(int tiledX, int tiledY);
+	bool isBlock(const CCPoint &coord);
+	bool isBlockByAStar(const CCPoint &pos);
+	bool isAlpha(const CCPoint &coord)const;
+	CCPoint findNoBlockPoint(const CCPoint &pos);
+	bool findNoBlockPointByAStar(const CCPoint &pos, CCPoint& outPos);
+	float getZOrderAtPoint(const CCPoint &pos)const;
+	bool getTriggerPosition(int triggerId, CCPoint &pos);
+	bool getMapEntry(int mapName, CCPoint &pos);
+	std::list<int> getMapPath(int map1, int map2);
+	void initLabelCache();
+	CCLabelBMFont *getLabelFromCache();
+	void pushBackToLabelCache(CCLabelBMFont *label);
+	bool isCrossMaping() { return _crossMapping; }
+
+	std::string get_cur_map_name()const{return getMapName(getCurMapId());}
+
+	std::string getMapName(unsigned int mapId)const;
+	std::string getMapName(const std::string &mapFileName)const;
+	unsigned int getMapIdFromName(const std::string &mapFileName);
+	void getMapNameFrom_mapId(unsigned int dwMapID,std::string &mapName);
+	CCSize& getMapSizeFrom_mapId(unsigned int dwMapID, CCSize& size);
+	int getCurSceneType(unsigned int curMapId);
+	//std::vector<pathNode> findPath(const CCPoint &start, const CCPoint &end);
+	const TriggerMap &getTriggerMap();
+	const CreatureVector &getNpcInfo();
+	const CreatureVector &getMonsterInfo();
+	void setSmallMapMode(bool v);
+	MapArea::eAreaType checkRoleArea(int roleId);
+	MapArea::eAreaType checkRoleArea(Role *role);
+	bool isStallArea(Role *role); //是否位于摆摊区
+	void enterAreaRemind(Role *role);
+	void enterMapRemind(unsigned int mapid);
+	void enter_cur_map_remind();
+
+	bool IsInSafeArea() {return _isEnterArea;}
+	int getEnterAreaFlag();
+	bool canCurMapRide();
+	bool getCurMapCanRideWithMaPai();       //当前地图是否可骑乘，不可骑乘的话就算有马牌也不可以骑乘
+	bool forceShowOther();
+	bool forceShowOther(unsigned int mapId);
+	int mapDangerousValue(unsigned int mapId);//地图安全值，1为安全地图,3为PK地图，2为危险地图
+	float getWorldMapScale() { return _worldMapScale; }
+	void getWorldMapScale(unsigned int mapId, const CCRect& rc, float& w, float& h);
+	//std::map<unsigned int, std::string> getMapNameMap(){ return _mapNameMap;};
+	//设置获取选择的mini地图的id
+	void setSelectMiniMapIndex(std::string mapIndex){selectMiniMapIndex = mapIndex;};
+	std::string getSelectMiniMapIndex(){return selectMiniMapIndex;};
+	//设置获取mini地图是否是当前人物所在地图
+	void setIsSelectCurMap(bool flag){isSelectCurMap = flag;};
+	bool getIsSelectCurMap(){return isSelectCurMap;};
+
+	void SetCameraPos( float fX, float fY, float fSpeed );
+
+	void FillImgFromImage( CCImage* pImg, unsigned short nIdx, unsigned int mapID,const char* FileName );
+
+	bool IsInstance(); //当前场景是否为副本 add by XSea 2014.10.21
+
+	void playSandParticleEffect(); //播放风沙粒子效果 //add by XSea 2014.11.13
+
+	void setRandPos(bool is);
+
+	bool IsBigMap()const { return m_bIsBigMap; }
+
+	bool checkIsInView(const CCPoint& pt)const;
+
+	bool CheakIsRotation(const CCPoint& pt);
+	std::string getCurBgm();
+	void createNpc();
+
+	MAP_MATERIAL getMaterial(const CCPoint &coord);		//获得当前地表材质
+	void InitMaterialLayer();							//隐藏材质层
+
+	bool isSbkTransmitLimited(); //沙巴克传送点是否有限制
+	void showSbkTransmitFailMessage(float dt);
+	bool getisEnabled()const{return m_isEnabled;}
+	void SetISetEnabled(bool value){m_isEnabled = value;}
+	void setCurLine(UINT16 index) {_curLine = index;}
+	inline UINT16 getCurLine()const {return _curLine;}
+	inline UINT16 getMaxRoleNum() const {return _maxRoleNum;}
+	inline UINT16 getGoodState()const {return _goodState;}
+	inline UINT16 getBusyState() const {return _busyState;}
+	LineStateMap& getLineStateMap();
+
+	unsigned int onServerSynchronizeLine( s_net_cmd *cmd);
+	unsigned int onServerLinestate( s_net_cmd *cmd );
+	unsigned int onServerSelectLine( s_net_cmd *cmd );
+	unsigned int onServerRoleMapTrigger(s_net_cmd *cmd );
+
+	void sendSynchronizeLine();
+
+	int getMaxLoadStep()const{return 6;}
+	//int getCurMapBlockCount() {return _blockCount;}
+	void sameMapRunPath();
+
+	void set_path_to_trigger_map_id(unsigned int val){
+		path_to_trigger_map_id = val;}
+
+	bool test_pathfind(CCPoint const& sp,CCPoint const& tp)const;
+
+	void escape_from_world();
+
+	void on_pathfind_end();
+
+	void check_map_trigger(float dt =2.0f);
+
+	void check_map_trigger_impl(float );
+protected:
+	CCTMXLayer *getAlphaLayer();
+	CCTMXLayer *getBlockLayer();
+	void addTransfer(const CCPoint &pos, const std::string &name);
+	void runClickAnims(const CCPoint &pos);											//点击特效,点击地图	【Ji：】std::string getCurBgm();
+	void initMapArea();
+	pathNode rand_pos(const pathNode& node);
+	void loadRendui();
+private:
+	void initAlpahData();
+	//TODO:视野
+	void initBigMapName();
+	void checkIsBigMap(std::string const& map_name);
+	void bgBlockLoaded(CCObject* tex,unsigned int mapID,unsigned short block_index);
+
+	void init_map_node();
+
+	std::vector<std::string> mvecBigMapNames;
+
+private:
+	GameActionNode* _roleSelectAcNode;												//人物选中特效		【Ji：】
+	GameActionNode* _clickNode;
+	std::set<std::string> _plist;												//保存特效文件名称
+	std::string _mapName;
+	std::string _copyName;
+	bool _inTrigger;
+	bool m_bPutSEFrame;															//检查是否加载特效图片到缓存
+	CCTMXTiledMap *_map;
+	MapTouchHandle _touchHandle;
+	std::list<CCLabelBMFont*> _hpEffectLabelCache;
+	void clearLabelCache()
+	{
+		std::for_each(_hpEffectLabelCache.begin(),_hpEffectLabelCache.end(),[](CCLabelBMFont* p){CC_SAFE_RELEASE(p);});
+		_hpEffectLabelCache.clear();
+	}
+
+	void remove_label()
+	{
+		std::for_each(_hpEffectLabelCache.begin()
+			,_hpEffectLabelCache.end()
+			,[](CCLabelBMFont* p)
+		{
+			if (p) p->removeFromParent();
+		});
+
+		std::for_each(_usedLabel.begin()
+			,_usedLabel.end()
+			,[](CCLabelBMFont* p)
+		{
+			if (p) p->removeFromParent();
+		});
+	}
+
+	std::list<CCLabelBMFont*> _usedLabel;
+
+	MapDataMap															mapDataCache;											
+
+	stMapTileData const* getMapData(unsigned int mapID) const;
+
+	void initMapData();
+	bool curMapIsBlockMap()const;
+
+	void addMapEffect();
+	void removeMapEffect();
+
+	void update_pathfinder_state();
+	void setup_trigger();
+	void update_map_graph_brush();
+
+	void update_tile_info();
+	//std::map<unsigned int , std::string> _terrainMapping;
+	//std::map<unsigned int, std::string> _mapNameMap;
+	//std::map<unsigned int, int> _mapSceneType;
+	//std::map<unsigned int, std::string> _mapBgm;
+	//std::map<unsigned int, bool> _canRideData;
+	//std::map<unsigned int, bool> _forceShowOther;
+	//std::map<unsigned int, std::string> _CpyFileNameMap;
+
+	std::map<int, bool> _enterAreaMap;//安全区
+	//传送
+	TriggerMap _triggerMap;
+	//float _triggerTimer;
+	float _remindTimer;
+
+	//地图特殊区域
+	MapAreaVector _mapAreaVector;
+
+	size_t			_cache_map_idx;
+	CreatureVector _monsterAreaInfo;
+	CreatureVector _npcAreaInfo;
+	CreatureVector m_vecAllmapCreatureInfo;
+
+	std::multimap<s_way_line , std::vector<int> > _mapLine;
+	unsigned int _curMapId;
+	std::vector<unsigned int> AutoFightMapId;
+	std::map<unsigned int, int> m_auto_fight_map_level;
+
+
+	//!以下变量都是跨地图寻路相关的东西;
+	int _mapIndex;//!地图编号;
+	std::vector<int> mapCross;
+	bool _crossMapping;
+	bool _isEnterArea;
+	pathNode _targetPos;
+	//c_sparse_graph* _graph;
+	std::vector<AnimsUsed> _usedAnims;
+	//地图alpha值
+	char *_alpahData; //0 不透明 1透明
+	float _worldMapScale;
+
+	float m_lastTime; //沙巴克皇宫传送阵提示信息时间间隔
+	int m_sbkTransLimitMsgId; //沙巴克传送阵提示信息id
+
+	//[bing] 摄像机node
+	CCNode* pCameraNode;
+
+	bool _isRandPos;
+	bool _isOldCrossMap;
+	UINT16 _curLine;	//当前线路
+	UINT16 _goodState;//空闲状态
+	UINT16 _busyState;//繁忙状态
+	UINT16 _maxRoleNum;//当前线路最大人数
+	DWORD m_pLastUpdateLineTime;
+	LineStateMap m_pLineMap;
+private:
+	//如果寻路的是传送点，这个是真正的目标地图id
+	unsigned int path_to_trigger_map_id;
+	//[bing] 场景图片路径
+	std::string curMapFilePath;
+
+	//bool m_bUseBlockMap;	//是否使用地块拼图
+
+	//[bing] 初始化每一块地块所在位置等信息
+	BGBlockInfo * m_pBlockArray;
+	//CCArray * _blockSpriteArray;
+	//int _blockCount;
+
+	//[bing] 当前可见的地块集合
+	typedef std::map< unsigned short, BGBlockInfo * > BGVisibleBlockMap;
+	BGVisibleBlockMap m_BGVisibleBlockMap;
+
+	typedef std::map< unsigned short, unsigned short > BGBlockCacheMap;
+	//BGBlockCacheMap m_BGBlockCacheMap;
+
+	//[bing] 场景地块数量
+	unsigned short nBlockNum_X;
+	unsigned short nBlockNum_Y;
+
+	//可见地块最大XY
+	int m_nVisBlockX;
+	int m_nVisBlockY;
+
+	float m_fSaveX;
+	float m_fSaveY;
+
+	int m_nBlockWidth;
+	int m_nBlockHeight;
+
+	bool m_bOpenMap;
+	bool m_bIsBigMap;
+	
+	bool m_isEnabled;
+
+	CCTMXLayer *m_grassLayer;
+	CCTMXLayer *m_sandLayer;
+	CCTMXLayer *m_hardgroundLayer;
+	CCTMXLayer *m_riverLayer;
+	CCTMXLayer *m_woodLayer;
+	CCTMXLayer *m_snowLayer;
+
+private:
+
+	void DeleteAllBGBlock(bool bNeedClearMapBlock);
+
+	void FillDataBGBlock( CCPoint& NowPoint, bool bUseAsyncLoad );
+	//void FillImgFromCache( CCTexture2D* pTexture, BGCacheObject* pObj );
+
+	void SetAllBGBlockInvisible();
+	void hideInvisibleMapBlock();
+	std::string selectMiniMapIndex;//选择的mini地图的id
+	bool isSelectCurMap;//在mini地图ui中是否选择的人物所在当前地图
+
+	AppDelegate*  m_app_delegate;
+};
+
+extern bool is_fire_massacre_map(unsigned int map_crc_id);
+
+#endif //MAPMANAGER_H

@@ -1,0 +1,762 @@
+#include "MartialEquipUi.h"
+#include "UiLoader.h"
+#include "UiResourceMgr.h"
+#include "CfgReader.h"
+#include "TouchSprite.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "PackageManager.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "PackageUi.h"
+#include "GongfaTip.h"
+#include "StringMgr.h"
+#include "NewPlayerGuide.h"
+#include <algorithm>
+
+
+InstructListForMartial::InstructListForMartial()
+{
+	CCLabelTTF *label = createLabel("");
+	label->setTag(NTT_Text);
+	_node->addChild(label);
+	getLabel(NTT_Text)->setPosition(ccp(PACKAGEUI_INSTRUCT_POX, 0.f));
+}
+
+InstructListForMartial::~InstructListForMartial()
+{
+
+}
+
+cocos2d::CCSize InstructListForMartial::getContentSize()
+{
+	return _contentSize;
+}
+
+void InstructListForMartial::setData( const std::string &text )
+{
+	getLabel(NTT_Text)->setString(text.c_str());
+	updateContent();
+}
+
+CCLabelTTF * InstructListForMartial::getLabel( eNonticTextTag tag )
+{
+	return dynamic_cast<CCLabelTTF*>(_node->getChildByTag(tag));
+}
+
+CCLabelTTF* InstructListForMartial::createLabel( const std::string &text )
+{
+	CCLabelTTF *label = CCLabelTTF::create();
+	label->setFontSize(16.0f);
+	label->setAnchorPoint(ccp(0.f, 1.0f));
+	label->setString(text.c_str()); 
+	label->setDimensions(CCSize(490,0.f));
+	label->setColor(ccc3(0xfe, 0xf8, 0xd8));
+	return label;
+}
+
+void InstructListForMartial::updateContent()
+{
+	float height = 0.f;
+
+	CCLabelTTF *label = getLabel(NTT_Text);
+	if(label != NULL)
+	{
+		float tmpHeight = label->getContentSize().height;
+		if(height < tmpHeight)
+			height = tmpHeight;
+	}
+
+	_contentSize.height = height;
+
+	CCLabelTTF *last = getLabel(NTT_Text);
+	if(last != NULL)
+	{
+		_contentSize.width = PACKAGEUI_INSTRUCT_POX + last->getContentSize().width;
+	}
+}
+
+///////////////////////////////////////////////////////
+CCNode * MartialEquipUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["MartialEquipUiLayer"] = UiLayerLoader<MartialEquipUiLayer>::loader();
+	nodeLoaders["TouchSprite"] = TouchSpriteLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("martialequipui", nodeLoaders, _loadSpriteSheet);
+	if (uiNode != NULL)
+	{
+		//onServerMartial(true);
+	}
+	return uiNode;
+}
+
+MartialEquipUiLayer * MartialEquipUi::getUiLayer()
+{
+	return getUiNodeByTag<MartialEquipUiLayer>(WCT_MartialEquipUi);
+}
+
+// void MartialEquipUi::onServerChisel( bool success )
+// {
+// 	MartialEquipUiLayer *uiLayer = getUiLayer();
+// 	if(uiLayer != NULL)
+// 	{
+// 		uiLayer->updateMartialData();
+// 	}
+// }
+
+// void MartialEquipUi::onServerMartial( bool success )
+// {
+// 	MartialEquipUiLayer *uiLayer = getUiLayer();
+// 	if(uiLayer != NULL)
+// 	{
+// 		uiLayer->updateMartialData();
+// 	}
+// }
+
+void MartialEquipUi::updateMartialData()
+{
+	MartialEquipUiLayer * uilayer = getUiLayer();
+	if (uilayer != NULL)
+	{
+		uilayer->updateMartialData();
+	}
+}
+
+void MartialEquipUi::setPlayerId( unsigned int  id )
+{
+	MartialEquipUiLayer * uilayer = getUiLayer();
+	if(uilayer != NULL)
+	{
+		uilayer->setPlayerId(id);
+	}
+}
+
+void MartialEquipUi::setZhandouli( int val )
+{
+	MartialEquipUiLayer * uilayer = getUiLayer();
+	if(uilayer != NULL)
+	{
+		uilayer->setZhandouli(val);
+	}
+}
+
+void MartialEquipUi::updateData()
+{
+	MartialEquipUiLayer * uilayer = getUiLayer();
+	if(uilayer != NULL)
+	{
+		uilayer->updateData();
+	}
+}
+
+void MartialEquipUi::setInstructFrameShow( bool show )
+{
+	MartialEquipUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setInstructFrameShow(show);
+	}
+}
+
+cocos2d::CCRect MartialEquipUi::getPosition( int tag )
+{
+	MartialEquipUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		return uiLayer->getPosition(tag);
+	}
+	return CCRect();
+}
+
+cocos2d::CCRect MartialEquipUi::getCloseBtnPos()
+{
+	MartialEquipUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		return uiLayer->getCloseBtnPos();
+	}
+	return CCRect();
+}
+
+
+/////////////////////////////////////////////////////
+MartialEquipUiLayer::MartialEquipUiLayer()
+	:_curSelectIndex(-1)
+{
+	
+}
+
+MartialEquipUiLayer::~MartialEquipUiLayer()
+{
+	
+}
+
+cocos2d::SEL_MenuHandler MartialEquipUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler MartialEquipUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", MartialEquipUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtn2Pressed", MartialEquipUiLayer::onCloseBtn2Pressed);
+	return NULL;
+}
+
+void MartialEquipUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_playerId = -1;
+	_zhandouli = NULL;
+
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(MET_Frame));
+	CC_ASSERT(_frame != NULL);
+	_zhandouli = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(MET_ZhandouLi));
+	// 
+	_nodeFrame = dynamic_cast<CCSprite*>(_frame->getChildByTag(MET_NodeFrame));
+	CC_ASSERT(_nodeFrame != NULL);
+
+
+	_instructframe = static_cast<CCSprite*>(getChildByTag(1));
+	CC_ASSERT(_instructframe != NULL);
+	_instructframe->setZOrder(2000);
+	CCSize size = CCDirector::sharedDirector()->getWinSize();
+	_instructframe->setPosition(ccp(size.width * 2, size.height));
+
+	_containerinstruct = _instructframe->getChildByTag(0);
+	CC_ASSERT(_containerinstruct != NULL);
+	_scrollView = createScrollViewWithContent(_containerinstruct);
+	CC_ASSERT(_scrollView != NULL);
+	_containerinstruct->addChild(_scrollView);
+	_verticalList = new VerticalList<InstructListForMartial>;
+	_verticalList->addToScrollView(_scrollView);
+	_verticalList->setMinSize(_containerinstruct->getContentSize());
+
+	//功法获取页签、升级页签点击事件;
+	TouchSprite *martialobtainTab = dynamic_cast<TouchSprite*>(_frame->getChildByTag(MET_ObtainTab));
+	CC_ASSERT(martialobtainTab != NULL);
+	martialobtainTab->signalTouched.connect(this, &MartialEquipUiLayer::onMartialObtainTabClicked);
+
+// 	TouchSprite *martialUpgradTab = dynamic_cast<TouchSprite*>(_frame->getChildByTag(MET_UpgradTab));
+// 	CC_ASSERT(martialUpgradTab != NULL);
+// 	martialUpgradTab->signalTouched.connect(this, &MartialEquipUiLayer::onMartialUpgradTabClicked);
+
+// 	_container = _frame->getChildByTag(MET_Container);
+// 	CC_ASSERT(_container != NULL);
+
+	for(int i = MET_ItemBegin; i < MET_ItemEnd; i ++)
+	{
+		/*CCNode *node = _nodeFrame->getChildByTag(i);*/
+		CCNode *node = _frame->getChildByTag(i);
+		CC_ASSERT(node != NULL);
+		_itemPos[i] = node->getPosition();
+		ItemNode *itemNode = ItemNode::create();
+		itemNode->setBlank();
+		itemNode->setPosition(node->getPosition());
+		itemNode->setTag(MET_ItemNodeBegin + i);
+		_frame->addChild(itemNode, 1);
+
+		CCLabelTTF *levellab = CCLabelTTF::create();
+		levellab->setPosition(_itemPos[i]);
+		levellab->setTag(MET_LevelLabBegin + i);
+		levellab->setVisible(false);
+		levellab->setFontSize(16.0f);
+		_frame->addChild(levellab,2);
+
+	}
+
+	updateData();
+
+//	NewPlayerGuider::getInstance()->onMartialPageChanged(MET_ObtainTab);
+}
+
+void MartialEquipUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	DropDragDelegate::getInstance()->addDropLayer(this);
+}
+
+void MartialEquipUiLayer::onExit()
+{
+	CCLayer::onExit();
+	DropDragDelegate::getInstance()->removeDropLayer(this);
+}
+
+bool MartialEquipUiLayer::onClicked( CCTouch &touch )
+{
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(&touch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		int index = getItemUnderPoint(framePoint);
+		if(_playerId == RoleManager::getInstance()->getLocalPlayer()->getId())
+		{
+			f_item *item = PackageManager::getInstance()->getItem(EICT_KungfuEquip, (short)index);
+			if (item != NULL)
+			{
+				if (index != -1)
+				{
+					setItemSelect(index);
+				}
+				if(MIsEquipment(item->get_item_type_id()))
+				{
+					const ItemTypeData &typeData =PackageManager::getInstance()->getItemTypeData(item->get_item_type_id());
+					f_equipment *equip = dynamic_cast<f_equipment*>(item);
+					if(equip != NULL)
+					{
+						ePackageItemType eItemType = typeData.type;
+						if (PIT_Kungfu == eItemType)
+						{
+							//功法ui显示; 
+							GongfaTip::getInstace()->open();
+							GongfaTip::getInstace()->setPosition(_itemPos[index]);
+							GongfaTip::getInstace()->setData(equip);
+						}
+					}
+				}
+			}
+		}
+		return true;
+	}
+
+	return false;
+}
+
+
+short MartialEquipUiLayer::getItemBegin( CCTouch &touch, eGetResult &result )
+{
+
+	return getItem(touch, result);
+}
+
+short MartialEquipUiLayer::getItemEnd( CCTouch &touch, eGetResult &result, EItemConType src, short itemIndex )
+{
+
+	return getItem(touch, result);
+
+}
+
+int MartialEquipUiLayer::getItemUnderPoint( const CCPoint &point )
+{
+	CCRect rect(point.x - ITEMNODE_CONTENTWIDTH / 2.0f, point.y - ITEMNODE_CONTENTHEIGHT / 2.0f, 
+		ITEMNODE_CONTENTWIDTH, ITEMNODE_CONTENTHEIGHT);
+
+	for(int i = MET_ItemBegin; i < MET_ItemEnd; i ++)
+	{
+		if(rect.containsPoint(_itemPos[i]))
+			return i;
+	}
+
+	return -1;
+}
+
+void MartialEquipUiLayer::setMartialData( f_equipment *equip )
+{
+
+}
+
+void MartialEquipUiLayer::putMartial( f_item *item, int index )
+{
+ 	f_equipment *martial = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(EICT_Bag, _putMartialId[index]));
+ 	if(martial != NULL)
+ 	{
+// 		int holeIndex = index - IUNT_NodeBegin - 1;
+// 		if(holeIndex < equip->get_equip_hole_num())
+// 		{
+// 			if (equip->get_equip_hold_gem_id(holeIndex) != EMPTY_HOLE_DATAID)//特殊判断;
+// 			{
+// 				//若背包已满，则无法替换宝石，防止丢失;
+// 				if (PackageManager::getInstance()->getBlankCount(EICT_Bag) <= 0)
+// 				{
+// 					ToolTip::getInstance()->push("\xE8\x83\x8C\xE5\x8C\x85\xE5\xB7\xB2\xE6\xBB\xA1\xEF\xBC\x8C\xE6\x97\xA0\xE6\xB3\x95\xE6\x9B\xBF\xE6\x8D\xA2\xE5\xAE\x9D\xE7\x9F\xB3");
+// 					return;
+// 				}
+// 			}
+//  			_putMartialId[index] = item->get_item_id();
+//  			ItemNode *node = getItemNode((eInlayUiNodeTag)index);
+//  			CC_ASSERT(node != NULL);
+//  			node->runSpecialAnima(0x3000,"xiangqiantexiao");
+//  			node->setPosition(_itemPos[index]);
+//  			node->setDataId(item->get_item_type_id());
+
+ 	}
+}
+
+ItemNode * MartialEquipUiLayer::getItemNode( eMartialEquipUiTag tag )
+{
+	if(tag < MET_ItemBegin || tag >= MET_ItemEnd)
+		return NULL;
+
+	CC_ASSERT(_frame != NULL);
+	return dynamic_cast<ItemNode*>(_frame->getChildByTag(tag + MET_ItemNodeBegin));
+}
+
+CCLabelTTF * MartialEquipUiLayer::getLevelLab( eMartialEquipUiTag tag )
+{
+	if (tag < MET_LevelLabBegin || tag >= MET_LevelLabEnd)
+	{
+		return NULL;
+	}
+	CC_ASSERT(_frame != NULL);
+	return dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(tag));
+}
+
+// void MartialEquipUiLayer::onMartialUpgradTabClicked( TouchSprite*, bool )
+// {
+// 	CLOSE_UI(WCT_MartialEquipUi);
+// 	OPEN_UI(WCT_MartialUpgradUi);
+// }
+
+void MartialEquipUiLayer::onMartialObtainTabClicked( TouchSprite*, bool )
+{
+	CLOSE_UI(WCT_MartialEquipUi);
+	OPEN_UI(WCT_MartialObtainUi);
+	GET_UI(Package, WCT_PACKAGEUI)->changePackageBtn(true);
+}
+
+void MartialEquipUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_MartialEquipUi);
+	CLOSE_UI(WCT_PACKAGEUI);
+}
+
+void MartialEquipUiLayer::setContainerEmpty()
+{
+	if(_container->getChildrenCount() != 0)
+	{
+		_container->removeAllChildren();
+	}
+
+	CCSize contentSize = _container->getContentSize();
+}
+
+void MartialEquipUiLayer::updateContainer()
+{
+
+}
+
+void MartialEquipUiLayer::updateMartialData()
+{
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if(_playerId == lp->getId())
+	{
+		memset(_putMartialId, INVALID, sizeof(INT64) * EKEP_End);
+		int localPlayerLevel = lp->getLevel();
+		setZhandouli(lp->getAttribute(RA_BATTLE_POINT));
+		if (localPlayerLevel < 40)
+		{
+			for(int i = MET_ItemBegin ; i < MET_ItemEnd; i ++)
+			{
+				ItemNode *martialNode = getItemNode((eMartialEquipUiTag)i);
+				martialNode->setBlock();
+				setLevelShow(MET_LevelLabBegin + i,true);
+			}
+		}
+		else
+		{
+			int girdnum = getGridNum(localPlayerLevel);
+			for (int i = MET_ItemBegin; i < MET_ItemEnd; i++ )
+			{	
+				ItemNode *martialNode = getItemNode((eMartialEquipUiTag)i);
+				CC_ASSERT(martialNode != NULL);
+				if(i >= girdnum)
+				{
+					martialNode->setBlock();
+					setLevelShow(MET_LevelLabBegin + i,true);
+				}
+				else
+				{
+					openGrid(i);
+					setLevelShow(MET_LevelLabBegin + i,false);
+				}
+			}
+		}
+	}
+}
+
+void MartialEquipUiLayer::openGrid(int i)
+{
+	if (i < MET_ItemBegin && i > MET_ItemEnd )
+		return;
+	ItemNode *martialNode = getItemNode((eMartialEquipUiTag)i);
+	CC_ASSERT(martialNode != NULL);
+	if (martialNode != NULL)
+	{
+		PackageManager::ItemMap *itemMap = PackageManager::getInstance()->getItemMap(EICT_KungfuEquip);
+		f_item *item = PackageManager::getInstance()->getItem(*itemMap, (short)i);
+		f_equipment *martialitem = dynamic_cast<f_equipment*>(item);
+		if(item == NULL)
+		{
+			martialNode->setBlank();
+		}
+		else
+		{
+			martialNode->initWithItem(item);
+			martialNode->setLevel(martialitem->get_equip()->nLevel);
+// 			f_equipment *equip = dynamic_cast<f_equipment*>(equip);
+// 			int level = equip->get_equip()->nLevel;
+// 			if (level != 0 && level != -1)
+// 			{
+// 				martialNode->setLevel(level);
+// 			}
+		}
+	}
+
+}
+
+int MartialEquipUiLayer::getGridNum(int level)
+{
+	if (level >= 41 && level < 45)
+	{
+		return 1;
+	}
+	else if (level >= 45 && level < 50)
+	{
+		return 2;
+	}
+	else if (level >= 50 && level < 55)
+	{
+		return 3;
+	}
+	else if (level >= 55 && level < 60)
+	{
+		return 4;
+	}
+	else if (level >= 60 && level < 63)
+	{
+		return 5;
+	}
+	else if (level >= 63 && level < 66)
+	{
+		return 6;
+	}
+	else if (level >= 66 && level < 70)
+	{
+		return 7;
+	}
+	else if(level >= 70)
+	{
+		return 8;
+	}
+	return -1;
+}
+
+short MartialEquipUiLayer::getItem( CCTouch &touch, eGetResult &result )
+{
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(&touch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		result = GR_SUCCESS;
+		if(_playerId == RoleManager::getInstance()->getLocalPlayer()->getId())
+		{
+			int index = getItemUnderPoint(framePoint);
+			return index;
+		}
+		else
+		{
+			return -1;
+		}
+	}
+
+	result = GR_ERROR;
+	return -1;
+}
+
+bool MartialEquipUiLayer::onDoubleClicked( CCTouch &touch )
+{
+	if(_playerId == RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		if(isTouchOnNodeContent(_frame, &touch))
+		{
+			CCPoint framePoint = _frame->convertTouchToNodeSpace(&touch);
+			int index = getItemUnderPoint(framePoint);
+			if(index != -1)
+			{
+				int destIndex = PackageManager::getInstance()->getBlankSpace(EICT_Bag);
+				if(destIndex != -1)
+				{//卸下功法;
+					PackageManager::getInstance()->changeItemPosition((EItemConType)EICT_KungfuEquip,(EItemConType)EICT_Bag, (short)index, (short)destIndex, 0);
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
+void MartialEquipUiLayer::setPlayerId( int id )
+{
+	_playerId = id;
+	updateMartialData();
+}
+
+void MartialEquipUiLayer::setZhandouli( int val )
+{
+	if(_zhandouli == NULL)
+		return;
+	CC_ASSERT(_zhandouli != NULL);
+	std::ostringstream ostr;
+	ostr << val;
+	_zhandouli->setString(ostr.str().c_str());
+}
+
+bool MartialEquipUiLayer::setItemSelect( int index )
+{
+	if(index < 0 || index >= EEP_MaxEquip)
+		return false;
+
+	CCSprite *selectSprite = dynamic_cast<CCSprite*>(_frame->getChildByTag(INT_SELECTSPRITE));
+	if(selectSprite == NULL)
+	{
+		selectSprite = CCSprite::create();
+		selectSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(
+			PackageManager::getInstance()->getSelectFrameName().c_str()));
+		selectSprite->setTag(INT_SELECTSPRITE);
+		_frame->addChild(selectSprite);
+	}
+
+	float x = _itemPos[index].x;
+	float y = _itemPos[index].y;
+
+	CCPoint pos(x, y);
+	selectSprite->setPosition(pos);
+
+	if(!selectSprite->isVisible())
+		selectSprite->setVisible(true);
+
+	return true;
+}
+
+void MartialEquipUiLayer::updateData()
+{
+	_verticalList->clear();
+	InstructListForMartial *notice = new InstructListForMartial;
+	std::string noticeText = GET_STR(6013);
+	std::replace(noticeText.begin(), noticeText.end(), '\\', '\n');
+	notice->setData(noticeText);
+	_verticalList->addItem(notice);
+	_verticalList->updateDisplay();
+}
+
+void MartialEquipUiLayer::setInstructFrameShow( bool show )
+{
+	CCSize size = CCDirector::sharedDirector()->getWinSize();
+	if (show)
+	{
+		_instructframe->setPosition(ccp(size.width * 0.5,size.height * 0.5));
+	}
+	else
+	{
+		_instructframe->setPosition(ccp(size.width * 1.5,size.height * 0.5));
+	}
+}
+
+void MartialEquipUiLayer::onCloseBtn2Pressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setInstructFrameShow(false);
+}
+
+cocos2d::CCRect MartialEquipUiLayer::getPosition( int tag )
+{
+	CCNode *node = NULL;
+
+	if(tag == MET_ObtainTab)
+	{
+		node = _frame->getChildByTag(MET_ObtainTab);
+	}
+	else if (tag == MET_ItemBegin)
+	{
+		node = _frame->getChildByTag(MET_ItemBegin);
+	}
+	if(node != NULL)
+	{
+		CCPoint pt = node->convertToWorldSpace(ccp(0, 0));
+		CCSize size = node->getContentSize();
+		return CCRect(pt.x, pt.y, size.width, size.height);
+	}
+
+	return CCRect();
+}
+
+cocos2d::CCRect MartialEquipUiLayer::getCloseBtnPos()
+{
+	CCSize size = _frame->getContentSize();
+	CCPoint pos = _frame->convertToWorldSpace(ccp(size.width - 15, size.height - 15));
+	return CCRect(pos.x - 23, pos.y - 23, 46, 46);
+}
+
+void MartialEquipUiLayer::setLevelShow( int i , bool show )
+{
+	if ( i < MET_LevelLabBegin || i >= MET_LevelLabEnd)
+		return;
+	switch (i)
+	{
+	case 40:
+		{
+			CCLabelTTF *lab = getLevelLab((eMartialEquipUiTag)i);
+			CC_ASSERT(lab != NULL);
+			lab->setString("\x4C\x56\x3A\x34\x31");
+			lab->setVisible(show);
+		}
+		break;
+	case 41:
+		{
+			CCLabelTTF *lab = getLevelLab((eMartialEquipUiTag)i);
+			CC_ASSERT(lab != NULL);
+			lab->setString("\x4C\x56\x3A\x34\x35");
+			lab->setVisible(show);
+		}
+		break;
+	case 42:
+		{
+			CCLabelTTF *lab = getLevelLab((eMartialEquipUiTag)i);
+			CC_ASSERT(lab != NULL);
+			lab->setString("\x4C\x56\x3A\x35\x30");
+			lab->setVisible(show);
+		}
+		break;
+	case 43:
+		{
+			CCLabelTTF *lab = getLevelLab((eMartialEquipUiTag)i);
+			CC_ASSERT(lab != NULL);
+			lab->setString("\x4C\x56\x3A\x35\x35");
+			lab->setVisible(show);
+		}
+		break;
+	case 44:
+		{
+			CCLabelTTF *lab = getLevelLab((eMartialEquipUiTag)i);
+			CC_ASSERT(lab != NULL);
+			lab->setString("\x4C\x56\x3A\x36\x30");
+			lab->setVisible(show);
+		}
+		break;
+	case 45:
+		{
+			CCLabelTTF *lab = getLevelLab((eMartialEquipUiTag)i);
+			CC_ASSERT(lab != NULL);
+			lab->setString("\x4C\x56\x3A\x36\x33");
+			lab->setVisible(show);
+		}
+		break;
+	case 46:
+		{
+			CCLabelTTF *lab = getLevelLab((eMartialEquipUiTag)i);
+			CC_ASSERT(lab != NULL);
+			lab->setString("\x4C\x56\x3A\x36\x36");
+			lab->setVisible(show);
+		}
+		break;
+	case 47:
+		{
+			CCLabelTTF *lab = getLevelLab((eMartialEquipUiTag)i);
+			CC_ASSERT(lab != NULL);
+			lab->setString("\x4C\x56\x3A\x37\x30");
+			lab->setVisible(show);
+		}
+		break;
+	}
+}
+

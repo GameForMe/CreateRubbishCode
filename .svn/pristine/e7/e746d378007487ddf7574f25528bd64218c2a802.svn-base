@@ -1,0 +1,602 @@
+#include "RingShopUi.h"
+#include "World.h"
+#include "CfgReader.h"
+#include "BaseDefine.h"
+#include "ShopMgr.h"
+#include "PackageManager.h"
+#include "UiResourceMgr.h"
+#include "UiTools.h"
+#include "ItemTip.h"
+#include "UiManager.h"
+#include "UiLoader.h"
+#include "BuySetUi.h"
+#include "EquipTipUi.h"
+#include "DBMgr.h"
+
+RingShopUiItem::RingShopUiItem()
+	: _uiFrame(NULL)
+{
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("RingShopUiItemFrame", RingShopUiItemLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	_uiFrame = dynamic_cast<RingShopUiItemFrame*>(ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "RingShopUiItem.ccbi").c_str()));
+	_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+	UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+	ccbReader->release();
+	if(_uiFrame != NULL)
+	{
+		_uiFrame->retain();
+		_uiFrame->_item = this;
+		//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(_uiFrame, 2 ,true);
+	}
+	pRingShopItemProto = NULL;
+}
+
+RingShopUiItem::~RingShopUiItem()
+{
+	if(_uiFrame != NULL)
+	{
+		//CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(_uiFrame);
+		_uiFrame->release();
+		_uiFrame = NULL;
+	}
+
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+}
+
+void RingShopUiItem::setData( const tagRingShopItemProto &itemProto )
+{
+	const ItemTypeData & typedata = PackageManager::getInstance()->getItemTypeData(itemProto.dw_data_id);
+	setName(typedata.name);
+	setIcon(PackageManager::getInstance()->getIconFrameName(itemProto.dw_data_id));
+	setMoney(itemProto.nMoney);
+	setNum(itemProto.nCount);
+	setCurrency(itemProto.nCurrency);
+	//_id = itemProto.dw_data_id;
+	pRingShopItemProto = &itemProto;
+}
+
+
+void RingShopUiItem::setName( const std::string &name )
+{
+	if(_uiFrame != NULL)
+	{
+		CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_uiFrame->getChildByTag(SUT_Name));
+		if(label != NULL)
+		{
+			label->setString(name.c_str());
+		}
+	}
+}
+
+void RingShopUiItem::setLevel( int level )
+{
+	if(_uiFrame != NULL)
+	{
+		CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_uiFrame->getChildByTag(SUT_Level));
+		if(label != NULL)
+		{
+			CCString *str = CCString::createWithFormat("%d", level);
+			label->setString(str->getCString());
+		}
+	}
+}
+
+void RingShopUiItem::setMoney( int money )
+{
+	if(_uiFrame != NULL)
+	{
+		CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_uiFrame->getChildByTag(SUT_Money));
+		if(label != NULL)
+		{
+			CCString *str = CCString::createWithFormat("%d", money);
+			label->setPositionX(label->getPositionX() - 30.0f );
+			label->setString(str->getCString());
+		}
+	}
+}
+
+void RingShopUiItem::setIcon( const std::string &frameName )
+{
+	if(_uiFrame != NULL)
+	{
+		CCSprite *iconSprite = dynamic_cast<CCLabelTTF*>(_uiFrame->getChildByTag(SUT_IconSprite));
+		if(iconSprite == NULL)
+		{
+			CCNode *node = _uiFrame->getChildByTag(SUT_IconNode);
+			if(node != NULL)
+			{
+				CCPoint pos = node->getPosition();
+				CCSize size = node->getContentSize();
+				iconSprite = CCSprite::create();
+				iconSprite->setPosition(pos);
+				_uiFrame->addChild(iconSprite, SUT_IconSprite);
+			}
+		}
+
+		if(iconSprite != NULL)
+		{
+			iconSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName.c_str()));
+		}
+	}
+}
+
+cocos2d::CCSize RingShopUiItem::getContentSize()
+{
+	if(_uiFrame != NULL)
+	{
+		return _uiFrame->getContentSize();
+	}
+	return CCSize();
+}
+
+void RingShopUiItem::setPosition( const CCPoint &pos )
+{
+	if(_uiFrame != NULL)
+	{
+		_uiFrame->setPosition(pos);
+	}
+}
+
+void RingShopUiItem::buy()
+{
+
+	if (pRingShopItemProto != NULL)
+	{
+		ShopMgr::getInstance()->onBuyRing(pRingShopItemProto);
+	}
+}
+
+void RingShopUiItem::setNum( int num )
+{
+	if(_uiFrame != NULL)
+	{
+		CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_uiFrame->getChildByTag(SUT_NumLabel));
+		CC_ASSERT(label != NULL);
+		label->setVisible(true);
+		if(label != NULL)
+		{
+			CCString *str = CCString::createWithFormat("\xE6\x95\xB0\xE9\x87\x8F\xEF\xBC\x9A%d", num);
+			label->setString(str->getCString());
+		}
+	}
+}
+
+void RingShopUiItem::setCurrency( std::string currency )
+{
+	if(_uiFrame != NULL)
+	{
+		CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_uiFrame->getChildByTag(SUT_CURRENCY));
+		if(label != NULL)
+		{
+			label->setPositionX(label->getPositionX() - 30.0f );
+			label->setString(currency.c_str());
+		}
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler RingShopUiItemFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler RingShopUiItemFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBuyBtnPressed", RingShopUiItemFrame::onBuyBtnPressed);
+	return NULL;
+}
+
+void RingShopUiItemFrame::onBuyBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+//	const tagRingShopItemProto *dataInfo = _item->getData();
+// 	BuySetUi::getInstance()->open();
+// 	BuySetUi::getInstance()->setDataId(dataInfo->dw_data_id);
+// 	BuySetUi::getInstance()->setPrice(dataInfo->nSilver);
+// 	BuySetUi::getInstance()->setNum(1);
+// 	BuySetUi::getInstance()->setChangeIcon("buysetui_gold");
+// 	BuySetUi::getInstance()->_signalBtnPressed->connect(this, &RingShopUiItemFrame::onBuyOkPressed);
+	_item->buy();
+}
+
+bool RingShopUiItemFrame::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCNode *node = getChildByTag(RingShopUiItem::SUT_IconNode);
+	if(isTouchOnNodeContent(node, pTouch))
+	{
+		return true;
+	}
+	return false;
+}
+
+void RingShopUiItemFrame::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCNode *node = getChildByTag(RingShopUiItem::SUT_IconNode);
+	CCPoint pos = UiMgr::getInstance()->getCurScene()->convertTouchToNodeSpace(pTouch);
+	if(isTouchOnNodeContent(node, pTouch))
+	{
+		unsigned int id = _item->getId();
+		if(MIsEquipment(id))
+		{
+			EquipTipUiLayer *ui = EquipTipUi::create();
+			ui->showUi(pos, id);
+		}
+		else
+		{
+			ItemTip::getInstace()->open();
+			ItemTip::getInstace()->setPosition(pos);
+			ItemTip::getInstace()->setDataId(id);
+			ItemTip::getInstace()->hideOpBtn();
+		}
+	}
+}
+
+void RingShopUiItemFrame::onEnter()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	CCSprite::onEnter();
+}
+
+void RingShopUiItemFrame::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCSprite::onExit();
+}
+
+void RingShopUiItemFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+RingShopUi::RingShopUi()
+{
+
+}
+
+RingShopUi::~RingShopUi()
+{
+
+}
+
+class RingShopItemFrameLayer :public CCLayer
+{
+public:
+	CREATE_FUNC(RingShopItemFrameLayer);
+	bool init() { return true; }
+
+	virtual void onEnter()
+	{
+		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 2, true);
+		CCLayer::onEnter();
+	}
+
+	virtual void onExit()
+	{
+		CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+		CCLayer::onExit();
+	}
+
+	virtual bool ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+	{
+		if(isTouchOnNodeContent(this, pTouch))
+		{
+			return true;
+		}
+		return false;
+	}
+};
+
+CCNode * RingShopUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["RingShopUiLayer"] = UiLayerLoader<RingShopUiLayer>::loader();
+	nodeLoaders["RingShopItemFrameLayer"] = UiLayerLoader<RingShopItemFrameLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("ringshopui", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+RingShopUiLayer * RingShopUi::getUiLayer()
+{
+	return getUiNodeByTag<RingShopUiLayer>(WCT_RINGSHOPUI);
+}
+
+void RingShopUi::setData( unsigned int shopId )
+{
+	RingShopUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setData(shopId);
+	}
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler RingShopUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler RingShopUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", RingShopUiLayer::onCloseBtnPressed);
+	return NULL;
+}
+
+void RingShopUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	//_touchstate = false;
+
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(SUT_Frame));
+	CC_ASSERT(_frame != NULL);
+	_contentLayer = dynamic_cast<CCLayer*>(_frame->getChildByTag(SUT_ContentLayer));
+	CC_ASSERT(_contentLayer != NULL);
+
+	_scrollView = CCScrollView::create(_contentLayer->getContentSize());
+	_contentLayer->addChild(_scrollView);
+
+	_container = CCNode::create();
+	//_container->retain();
+	_container->setContentSize(_contentLayer->getContentSize());
+	_scrollView->setContainer(_container);
+	_scrollView->setTouchEnabled(true);
+	_scrollView->setBounceable(true);
+	_scrollView->setContentSize(_container->getContentSize());
+	_scrollView->setDirection(kCCScrollViewDirectionVertical);
+	_scrollView->setContentOffset(_scrollView->maxContainerOffset());
+	CC_ASSERT(_container != NULL && _scrollView != NULL);
+
+	CCControlButton* repairBtn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(SUT_RepairBtn));
+	CCControlButton* sellBtn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(SUT_SellBtn));
+	CC_ASSERT(repairBtn != NULL && sellBtn != NULL);
+	repairBtn->setVisible(false);
+	sellBtn->setVisible(false);
+	
+
+	setAllChildernButtonPriority(this, -1);
+}
+
+void RingShopUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	DropDragDelegate::getInstance()->addDropLayer(this);
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+}
+
+void RingShopUiLayer::onExit()
+{
+	removeAllItem();
+	DropDragDelegate::getInstance()->removeDropLayer(this);
+
+	CCLayer::onExit();
+	BuySetUi::getInstance()->close();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+
+void RingShopUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_RINGSHOPUI);
+}
+
+void RingShopUiLayer::addContentItem( CCNode *item )
+{
+	CC_ASSERT(_container != NULL && item != NULL);
+	_container->addChild(item);
+}
+
+void RingShopUiLayer::removeContentItem( CCNode *item )
+{
+	CC_ASSERT(_container != NULL && item != NULL);
+	_container->removeChild(item);
+}
+
+float RingShopUiLayer::getContentLayerHeight()
+{
+	if(_contentLayer != NULL)
+	{
+		return _contentLayer->getContentSize().height;
+	}
+	return 0;
+}
+
+CCNode * RingShopUiLayer::getContainer()
+{
+	return _container;
+}
+
+short RingShopUiLayer::getItemBegin( CCTouch &touch, eGetResult &result )
+{
+	if(isTouchOnNodeContent(_frame, &touch))
+	{
+		result = GR_SUCCESS;
+	}
+	else
+	{
+		result = GR_ERROR;
+	}
+	return -1;
+}
+
+short RingShopUiLayer::getItemEnd( CCTouch &touch, eGetResult &result, EItemConType src, short itemIndex )
+{
+	if(isTouchOnNodeContent(_frame, &touch))
+	{
+		result = GR_SUCCESS;
+		if(src == EICT_Bag)
+		{
+// 			f_item *item = PackageManager::getInstance()->getItem(src, itemIndex);
+// 			if(item != NULL)
+// 			{
+// 				ShopMgr::getInstance()->onSellItem(0, item->get_item_id());
+// 			}
+		}
+	}
+	else
+	{
+		result = GR_ERROR;
+	}
+
+	return -1;
+}
+
+bool RingShopUiLayer::onClicked( CCTouch &touch )
+{
+	if(isTouchOnNodeContent(_frame, &touch))
+	{
+		if(isTouchOnNodeContent(_container, &touch))
+		{
+			return false;
+		}
+		return true;
+	}
+	return false;
+}
+
+bool RingShopUiLayer::onDoubleClicked( CCTouch &touch )
+{
+	return false;
+}
+
+void RingShopUiLayer::setData( unsigned int shopId )
+{
+	
+	c_sql_command* cmd2 = NULL;
+	c_sql_table* table2 = NULL;
+	cmd2 = c_db_manager::getSingleton()->begin_operation("SELECT * FROM RingShopData WHERE id = ?1");
+	cmd2->set_integer32(1, shopId);
+	table2 = c_db_manager::getSingleton()->create_table();
+
+	int idx2 = 0;
+	int i = 0;
+	char buffer2[64] = {0};
+	while(table2->retrieve_row())
+	{
+		for(int j = 0; j < 100; ++j)
+		{
+			sprintf(buffer2, "send_id%d", i+1);
+			idx2 = table2->get_index(buffer2);
+			if (idx2 == -1)
+				break;
+
+			tagRingShopItemProto SRingProto;
+
+			SRingProto.send_id = table2->get_integer32( idx2 );
+			if(SRingProto.send_id == 0)
+				break;
+
+			sprintf(buffer2, "item_id%d", i+1);
+			idx2 = table2->get_index(buffer2);
+
+			SRingProto.dw_data_id = table2->get_integer32( idx2 );
+
+			sprintf(buffer2, "item_money%d",	i+1);
+			idx2 = table2->get_index(buffer2);
+			SRingProto.nMoney	= table2->get_integer32( idx2 );
+
+			sprintf(buffer2, "item_num%d",	i+1);
+			idx2 = table2->get_index(buffer2);
+			SRingProto.nCount	= table2->get_integer32( idx2 );
+
+			sprintf(buffer2, "item_currency%d", i+1);
+			idx2 = table2->get_index(buffer2);
+			SRingProto.nCurrency = table2->get_text( idx2 );
+
+			sprintf(buffer2, "item_index%d", i+1);
+			idx2 = table2->get_index(buffer2);
+			SRingProto.index = table2->get_integer32( idx2 );
+
+			RingShopUiItem *item = new RingShopUiItem;
+			item->setData(SRingProto);
+			addItem(item);
+
+			i++;
+		}
+	}
+
+	c_db_manager::getSingleton()->destroy_table(table2);
+	c_db_manager::getSingleton()->end_operation(cmd2);
+
+	updateList();
+}
+
+void RingShopUiLayer::addItem( RingShopUiItem *item )
+{
+	if(item != NULL)
+	{
+		addContentItem(item->getUiFrame());
+		_items.push_back(item);
+	}
+}
+
+void RingShopUiLayer::removeItem( unsigned int itemId )
+{
+	for(RingShopUiItemList::iterator iter = _items.begin(); iter != _items.end(); ++ iter)
+	{
+		RingShopUiItem *item = *iter;
+		if(item->getId() == itemId)
+		{
+			removeContentItem(item->getUiFrame());
+			delete item;
+			_items.erase(iter);
+			break;
+		}
+	}
+}
+
+void RingShopUiLayer::removeAllItem()
+{
+	for(RingShopUiItemList::iterator iter = _items.begin(); iter != _items.end(); ++ iter)
+	{
+		RingShopUiItem *item = *iter;
+		removeContentItem(item->getUiFrame());
+		delete item;
+	}
+	_items.clear();
+}
+
+void RingShopUiLayer::updateList()
+{
+	CCNode *container = getContainer();
+	if(container == NULL)
+		return;
+
+	//得到总高度;
+	int itemCount = _items.size();
+	int lineCount = itemCount / 2 + itemCount % 2;
+	float height = RING_SHOP_ITEM_HEIGHT * lineCount + RING_SHOP_ITEM_SPACE * (lineCount - 1);
+	if(height < getContentLayerHeight())
+		height = getContentLayerHeight();
+
+	CCSize containerSize = container->getContentSize();
+	container->setContentSize(CCSize(containerSize.width, height));
+
+	int index = 0;
+	for(RingShopUiItemList::iterator iter = _items.begin(); iter != _items.end(); ++ iter)
+	{
+		RingShopUiItem *item = *iter;
+		int posX = (index % 2) * (RING_SHOP_ITEM_WIDTH + RING_SHOP_ITEM_SPACE);
+		int posY = height - (index / 2) * (RING_SHOP_ITEM_HEIGHT + RING_SHOP_ITEM_SPACE);
+		item->setPosition(ccp(posX, posY));
+		index ++;
+	}
+}
+
+bool RingShopUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_frame, pTouch))
+	{
+		if(isTouchOnNodeContent(_contentLayer, pTouch))
+		{
+			return false;
+		}
+		return true;
+	}
+	return false;
+}
+
+

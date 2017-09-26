@@ -1,0 +1,1691 @@
+#include "PackageUi.h"
+#include "CfgReader.h"
+#include "TouchSprite.h"
+#include "BaseDefine.h"
+#include "PackageManager.h"
+#include "DBMgr.h"
+#include "CfgReader.h"
+#include "ItemNode.h"
+#include "DropDragDelegate.h"
+#include "EquipTipUi.h"
+#include "ShopUi.h"
+#include "UiResourceMgr.h"
+#include "Auto_ActionMgr.h"
+#include "StallUi.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "StallMgr.h"
+#include "ItemTip.h"
+#include "World.h"
+#include "UiTools.h"
+#include "StringMgr.h"
+#include "MessageBoxUi.h"
+#include "UiManager.h"
+#include "ExchangeBusinessMgr.h"
+#include "Loading.h"
+#include "ActivityMgr.h"
+#include "GongfaTip.h"
+#include "MartialObtainUi.h"
+#include "MartialEquipUi.h"
+#include "NewPlayerGuide.h"
+#include <algorithm>
+#include "ChatUi.h"
+#include "NewStallUI.h"
+#include "ToolTip.h"
+#include "FragmentCompoundMgr.h"
+#include "ShopMgr.h"
+#include "UiLoader.h"
+#include "PlayerStallUi.h"
+#include "PlayerStallMgr.h"
+#include "ItemAutoUseDaojuTip.h"
+#include "RewardUi.h"
+#include "Helper.h"
+#include "QuickSaleUI.h"
+#include "GameEventDefine.h"
+#include "ZZZTitleTipsUI.h"
+#include "KaifuHuodongMgr.h"
+#include "ZZZFLDTipsUI.h"
+#include "ZZZManorTipsUI.h"
+#include "ZZZSignTipsUI.h"
+#include "f_formula_helper.h"
+#include "f_string_util.h"
+///////////////////////////////////////////
+
+size_t const g_max_warehouse_size = 100;
+size_t const g_max_pakage_size = 80;
+
+OpenPackageUi * OpenPackageUi::getInstace()
+{
+	static OpenPackageUi instance;
+	return &instance;
+}
+
+bool OpenPackageUi::isOpen()
+{
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		OpenPackageUi *uiNode = (OpenPackageUi*)(scene->getChildByTag(WCT_EXPANDPACKAGE));
+		if(uiNode != NULL)
+			return true;
+	}
+	return false;
+}
+
+CCNode* OpenPackageUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["OpenPackageUiLayer"] = UiLayerLoader<OpenPackageUiLayer>::loader();
+	CCNode* pNode = readUiFromCCBI("openpackage", nodeLoaders, _loadSpriteSheet);
+	return pNode;
+}
+
+void OpenPackageUi::open()
+{
+	if(isOpen())
+		return;
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+		ccNodeLoaderLibrary->registerCCNodeLoader("OpenPackageUiLayer", UiLayerLoader<OpenPackageUiLayer>::loader());
+		cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+		CCNode *node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "openpackage.ccbi").c_str());
+		_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+		//UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+		ccbReader->release();
+		if(node != NULL) {
+			scene->addChild(node, WZ_POPUI, WCT_EXPANDPACKAGE);
+		}
+	}
+}
+void OpenPackageUi::setType(int type)
+{
+	this->_type = type;
+}
+int OpenPackageUi::getType()
+{
+	return _type;
+}
+void OpenPackageUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+}
+void OpenPackageUiLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+cocos2d::SEL_MenuHandler OpenPackageUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+bool OpenPackageUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+cocos2d::extension::SEL_CCControlHandler OpenPackageUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", OpenPackageUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onMinBtnPressed", OpenPackageUiLayer::onMinBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onMaxBtnPressed", OpenPackageUiLayer::onMaxBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSubBtnPressed", OpenPackageUiLayer::onSubBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onAddBtnPressed", OpenPackageUiLayer::onAddBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", OpenPackageUiLayer::onOkBtnPressed);
+	return NULL;
+}
+void OpenPackageUiLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+// 	int curPackNum = 0;
+// 	if (OpenPackageUi::getInstace()->getType() == 0)
+// 	{
+// 		 curPackNum = PackageManager::getInstance()->getConSize(EICT_Bag);
+// 	}
+// 	else if (OpenPackageUi::getInstace()->getType() == 1)
+// 	{
+// 		curPackNum = PackageManager::getInstance()->getConSize(EICT_RoleWare);
+// 	}
+// 	_addNum = 1;
+	//(CCLabelTTF*)this->getChildByTag(0)->getChildByTag(1);
+	packNumLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(((CCLabelTTF*)(this->getChildByTag(0)->getChildByTag(1))));
+	//packNumLabel->setString("1");
+	
+	yuanBaoLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(((CCLabelTTF*)(this->getChildByTag(0)->getChildByTag(2))));
+	//char str[5] = {0};
+	//sprintf(str,"%d",/*curPackNum - 29*/f_formula_helper::get_unlock_warehouse_cost(curPackNum,_addNum));
+	//yuanBaoLabel->setString(str);
+
+	CCLayerColor* hazyLayer = CCLayerColor::create(ccc4(0,0,0,100)); 
+	hazyLayer->setContentSize(CCSizeMake(CCDirector::sharedDirector()->getVisibleSize().width,CCDirector::sharedDirector()->getVisibleSize().height));
+	hazyLayer->setAnchorPoint(ccp(0.5,0.5));
+	hazyLayer->setTouchEnabled(false);
+	this->addChild(hazyLayer,-1); 
+
+	update_cost();
+}
+bool OpenPackageUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	return true;
+}
+void OpenPackageUiLayer::onCloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+	 scene->removeChildByTag(WCT_EXPANDPACKAGE);
+	}
+}
+void OpenPackageUiLayer::onMinBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+// 	int curPackNum = 0;
+// 	if (OpenPackageUi::getInstace()->getType() == 0)
+// 	{
+// 		curPackNum = PackageManager::getInstance()->getConSize(EICT_Bag);
+// 	}
+// 	else if (OpenPackageUi::getInstace()->getType() == 1)
+// 	{
+// 		curPackNum = PackageManager::getInstance()->getConSize(EICT_RoleWare);
+// 	}
+	
+	_addNum =1;
+
+	update_cost();
+
+// 	packNumLabel->setString("1");
+// 
+// 	char str[10] = {0};
+// 	sprintf(str,"%d",/*curPackNum - 29*/f_formula_helper::get_unlock_warehouse_cost(curPackNum,_addNum));
+// 	yuanBaoLabel->setString(str);
+}
+void OpenPackageUiLayer::onMaxBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	int curPackNum = get_unlocked();
+
+ 	//int cnt_type  =OpenPackageUi::getInstace()->getType();
+// 	if (cnt_type == 0)
+// 	{
+// 		curPackNum = PackageManager::getInstance()->getConSize(EICT_Bag);
+// 	}
+// 	else if (cnt_type == 1)
+// 	{
+// 		curPackNum = PackageManager::getInstance()->getConSize(EICT_RoleWare);
+// 	}
+
+	size_t max_size = get_max();
+	_addNum = max_size - (size_t)curPackNum;
+	
+	update_cost();
+
+// 	char strNum[5] = {0};
+// 	sprintf(strNum,"%d",_addNum);
+// 	packNumLabel->setString(strNum);
+// 	
+// 	int YuanBaoNum = /*(50 + curPackNum - 29) * _addNum / 2*/f_formula_helper::get_unlock_warehouse_cost(curPackNum,_addNum);
+// 	char strYuan[10] = {0};
+// 	sprintf(strYuan,"%d",YuanBaoNum);
+// 	yuanBaoLabel->setString(strYuan);
+}
+void OpenPackageUiLayer::onSubBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	if (_addNum >1)
+	{
+		--_addNum;
+		update_cost();
+	}
+
+// 	int curPackNum = 0;
+// 	if (OpenPackageUi::getInstace()->getType() == 0)
+// 	{
+// 		curPackNum = PackageManager::getInstance()->getConSize(EICT_Bag);
+// 	}
+// 	else if (OpenPackageUi::getInstace()->getType() == 1)
+// 	{
+// 		curPackNum = PackageManager::getInstance()->getConSize(EICT_RoleWare);
+// 	}
+// 	if (_addNum > 1)
+// 	{
+// 		--_addNum;
+// 		
+// 		char strNum[5] = {0};
+// 		sprintf(strNum,"%d",_addNum);
+// 		packNumLabel->setString(strNum);
+// 
+// 		
+// 		int YuanBaoNum = /*((curPackNum + _addNum - 30) + curPackNum - 29) * _addNum / 2*/f_formula_helper::get_unlock_warehouse_cost(curPackNum,_addNum);
+// 		char strYuan[10] = {0};
+// 		sprintf(strYuan,"%d",YuanBaoNum);
+// 		yuanBaoLabel->setString(strYuan);
+// 	}
+}
+void OpenPackageUiLayer::onAddBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	int curPackNum = get_unlocked();
+	//int cnt_type = OpenPackageUi::getInstace()->getType();
+// 	if (cnt_type == 0)
+// 	{
+// 		curPackNum = PackageManager::getInstance()->getConSize(EICT_Bag);
+// 	}
+// 	else if (cnt_type == 1)
+// 	{
+// 		curPackNum = PackageManager::getInstance()->getConSize(EICT_RoleWare);
+// 	}
+
+	size_t max_size = get_max();
+
+	if(_addNum < max_size - (size_t)curPackNum)
+	{
+		++_addNum;
+		
+		update_cost();
+// 		char strNum[5] = {0};
+// 		sprintf(strNum,"%d",_addNum);
+// 		packNumLabel->setString(strNum);
+// 
+// 		
+// 		int YuanBaoNum = /*((curPackNum + _addNum - 30) + curPackNum - 29) * _addNum / 2*/f_formula_helper::get_unlock_warehouse_cost(curPackNum,_addNum);
+// 		char strYuan[10] = {0};
+// 		sprintf(strYuan,"%d",YuanBaoNum);
+// 		yuanBaoLabel->setString(strYuan);
+	}
+}
+void OpenPackageUiLayer::onOkBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	int curPackNum = get_unlocked();
+// 	if (OpenPackageUi::getInstace()->getType() == 0)
+// 	{
+// 		curPackNum = PackageManager::getInstance()->getConSize(EICT_Bag);
+// 	}
+// 	else if (OpenPackageUi::getInstace()->getType() == 1)
+// 	{
+// 		curPackNum = PackageManager::getInstance()->getConSize(EICT_RoleWare);
+// 	}
+	int YuanBaoNum = /*((curPackNum + _addNum - 30) + curPackNum - 29) * _addNum / 2*/f_formula_helper::get_unlock_warehouse_cost(curPackNum,_addNum);
+	INT64 n64Diamond = PackageManager::getInstance()->getDiamond(); //获取钻石
+	INT64 n64YuanBao = PackageManager::getInstance()->getYuanBao(); //获取元宝
+	if (n64Diamond + n64YuanBao >= YuanBaoNum)
+	{
+		//int type = OpenPackageUi::getInstace()->getType();
+		PackageManager::getInstance()->extendPackage(_addNum, OpenPackageUi::getInstace()->getType());
+		this->removeFromParentAndCleanup(true);
+	}
+	else//元宝与礼券不足
+	{
+		std::ostringstream ostr;
+		ostr << YuanBaoNum;
+		std::string str = replaceStr(GET_STR(74), "***", ostr.str());
+		std::ostringstream ostr1;
+		ostr1 << str << GET_STR(164);
+		/*MessageBoxUi *messageBox = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,ostr1.str().c_str(), TEXT_UTF8_CHONGZHI, TEXT_UTF8_QUXIAO);
+		World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+		messageBox->signalOkBtnPressed.connect(PackageManager::getInstance(), &PackageManager::ToCharge);
+		messageBox->signalCancelBtnPressed.connect(OpenPackageUi::getInstace(), &OpenPackageUi::open);*/
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();		
+		RechargeNewUiLayer *layer = GET_UI(RechargeNewUi,WCT_RECHARGENEWUI)->getLayer();
+		if (!layer)
+			return;
+		layer->signalCancelBtnPressed.connect(OpenPackageUi::getInstace(), &OpenPackageUi::open);
+		this->removeFromParentAndCleanup(true);
+	}
+}
+
+void OpenPackageUiLayer::update_cost()
+{
+	int curPackNum = get_unlocked();
+
+	std::string tmp;
+	safe_sprintf(tmp,"%d",_addNum);
+	
+	packNumLabel->setString(tmp.c_str());
+
+	safe_sprintf(tmp,"%d",/*curPackNum - 29*/f_formula_helper::get_unlock_warehouse_cost(curPackNum,_addNum));
+	yuanBaoLabel->setString(tmp.c_str());
+}
+
+int OpenPackageUiLayer::get_unlocked()const
+{
+	int curPackNum = 0;
+	int type = OpenPackageUi::getInstace()->getType() ;
+	if (type == 0)
+	{
+		curPackNum = PackageManager::getInstance()->getConSize(EICT_Bag);
+	}
+	else if (type== 1)
+	{
+		curPackNum = PackageManager::getInstance()->getConSize(EICT_RoleWare);
+	}
+
+	return curPackNum;
+}
+
+size_t OpenPackageUiLayer::get_max() const
+{
+	int cnt_type = OpenPackageUi::getInstace()->getType() ;
+	return cnt_type==0?g_max_pakage_size:g_max_warehouse_size;
+}
+
+
+CCNode * Package::openUi()
+{
+	PackageUi *ui =  PackageUi::create();
+	_loadSpriteSheet = ui->_loadSpriteSheet;
+
+	if (ItemAutoUseDaojuTip::getInstace()->isOpen()) {
+		ItemAutoUseDaojuTip::getInstace()->close();
+	}
+
+	CoverChatUiMainSV evt;
+	evt.bCover = true;
+	SEND_EVENT(&evt);
+
+	return ui;
+}
+
+void Package::closeUI()
+{
+	UiInterface::closeUI();
+	ShopMgr::getInstance()->unLockItem();
+
+	CCNode* zzzNode = World::getInstance()->getScene()->getChildByTag(WCT_ZZZ_ITEM_TIPS_UI);
+	if (zzzNode)
+	{
+		World::getInstance()->getScene()->removeChildByTag(WCT_ZZZ_ITEM_TIPS_UI);
+	}
+
+	CoverChatUiMainSV evt;
+	evt.bCover = false;
+	SEND_EVENT(&evt);
+}
+
+PackageUi * Package::getUiLayer()
+{
+	return getUiNodeByTag<PackageUi>(WCT_PACKAGEUI);
+}
+
+void Package::updateData(int dataindex )
+{
+	PackageUi *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		ui->updatePackage(dataindex);
+	}
+}
+
+void Package::updateJinqian()
+{
+	PackageUi *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		ui->updateJinQian();
+	}
+}
+
+cocos2d::CCPoint Package::getItemPos( int index )
+{
+	PackageUi *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		return ui->getItemPos(index);
+	}
+	return ccp(0.f, 0.f);
+}
+
+cocos2d::CCRect Package::getItemRect( int index )
+{
+	PackageUi *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		return ui->getItemRect(index);
+	}
+	return CCRect(0.0f, 0.0f, 0.0f, 0.0f);
+}
+
+void Package::gotoIndexPage( int index )
+{
+	PackageUi *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		int page = index / (HORIZONTALCOUNT * VERTICALCOUNT);
+		ui->setSelectPage(page);
+	}
+}
+
+cocos2d::CCRect Package::getCloseBtnPos()
+{
+	PackageUi *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		return ui->getCloseBtnPos();
+	}
+
+	return CCRect();
+}
+
+void Package::changePackageBtn( bool change )
+{
+	PackageUi *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		ui->changePackageBtn(change);
+	}
+}
+
+
+cocos2d::CCPoint Package::getPagepos()
+{
+	PackageUi *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		return ui->getPagepos();
+	}
+
+	return CCPoint();
+}
+
+cocos2d::CCRect Package::getBtnPos(int tag)
+{
+	PackageUi *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		return ui->getBtnPos(tag);
+	}
+
+	return CCRect();
+}
+
+void Package::setBtnShow( bool showBtn )
+{
+	PackageUi *ui=getUiLayer();
+	if (ui!=NULL)
+	{
+		ui->setBtnShow(showBtn);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+bool PackageUi::init()
+{
+	_beginWithMovableItem = false;
+	_currentPage = 0;
+	m_nTmpEquipLevel = -1;
+
+	if(!CCLayer::init())
+		return false;
+
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("PackageUiLayer", PackageUiLoader::loader());
+	ccNodeLoaderLibrary->registerCCNodeLoader("TouchSprite", TouchSpriteLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode * node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "packageui.ccbi").c_str());
+	_loadSpriteSheet = ccbReader->getLoadedSpriteSheet();
+
+	//zhjl:去掉多余引用
+	//UiResourceMgr::getInstance()->retainPlistFile(_loadSpriteSheet);
+	ccbReader->release();
+	if(node != NULL) {
+		addChild(node);
+		_frame = static_cast<CCSprite*>(node->getChildByTag(0));
+		for(int i = 0; i < PACKAGE_PAGE_COUNT; i ++)
+		{
+			_pageSprite[i] = static_cast<TouchSprite*>(_frame->getChildByTag(i + 5));
+			_pageSpriteH[i] = static_cast<CCSprite*>(_frame->getChildByTag(i + 1));
+		}
+		_pageSprite[0]->signalTouched.connect(this, &PackageUi::onPage1Select);
+		_pageSprite[1]->signalTouched.connect(this, &PackageUi::onPage2Select);
+		_pageSprite[2]->signalTouched.connect(this, &PackageUi::onPage3Select);
+		_pageSprite[3]->signalTouched.connect(this, &PackageUi::onPage4Select);
+
+		_stallbtn = dynamic_cast<CCControlButton*>(node->getChildByTag(0)->getChildByTag(16));
+	}
+	
+	_yuanBao = Helper::replaceLabelTTFWithLabelFTAndRemove((static_cast<CCLabelTTF*>(_frame->getChildByTag(11))));
+	_bangDingYuanBao = Helper::replaceLabelTTFWithLabelFTAndRemove((static_cast<CCLabelTTF*>(_frame->getChildByTag(12))));
+	_coin =  Helper::replaceLabelTTFWithLabelFTAndRemove((static_cast<CCLabelTTF*>(_frame->getChildByTag(13))));
+	CC_ASSERT(_yuanBao != NULL && _bangDingYuanBao != NULL && _coin != NULL);
+
+// 	_sortbtn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(14));
+// 	_stallbtn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(15));
+// 	_instructbtn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(16));
+// 	_syzthenbtn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(17));
+// 	CC_ASSERT(_sortbtn != NULL &&_stallbtn != NULL &&_instructbtn != NULL && _syzthenbtn != NULL);
+// 	_sortbtn->setVisible(true);
+// 	_stallbtn->setVisible(true);
+// 	_instructbtn->setVisible(false);
+// 	_syzthenbtn->setVisible(false);
+
+
+	for(int i = 0; i < 5; i ++)
+	{
+		for(int j = 0; j < 4; j ++)
+		{
+			ItemNode *node = ItemNode::create();
+			float x = LEFTSPACE + i * HORIZONTALSPACE;
+			float y = _frame->getContentSize().height - (TOPSPACE + j * VERTICALSPACE);
+			node->setPosition(ccp(x, y));
+			node->setTag(j * 5 + i + INT_BEGIN);
+			node->setClickable(false);
+			_frame->addChild(node, 1);
+		}
+	}
+
+	updatePackage();
+	updateJinQian();
+
+	//_selectSprite = CCSprite::create();
+	//_selectSprite->initWithSpriteFrameName("cell");
+	_selectSprite = CCSprite::createWithSpriteFrameName("packageui_cell-bottom");
+	_frame->addChild(_selectSprite, 0);
+	_selectSprite->setVisible(false);
+
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1,true);
+
+	return true;
+}
+
+void PackageUi::updateJinQian()
+{
+	PackageManager *manager = PackageManager::getInstance();
+	setYuanBao(manager->getYuanBao());
+	setBangDingYuanBao(manager->getDiamond());
+	setCoin(manager->getJinBi());
+}
+
+void PackageUi::updatePackage(int dataindex)
+{
+	_selectIndex = -1;
+
+	if(!PackageManager::getInstance()->isInit())
+		WaitLoading::getInstance()->start();
+	else
+		WaitLoading::getInstance()->stop();
+	bool showSale = false;
+	ShopUiLayer* shop = (ShopUiLayer*)getUiNodeByTag<ShopUiLayer>(WCT_SHOPUI);
+	if (shop != NULL)//商店打开
+		showSale = true;
+	//根据当前页数，初始化背包ui;
+	int size = PackageManager::getInstance()->getConSize(EICT_Bag);
+
+	for(int i = 0; i < HORIZONTALCOUNT; i ++)
+	{
+		for(int j = 0; j < VERTICALCOUNT; j ++)
+		{
+			int index = j * HORIZONTALCOUNT + i;
+			ItemNode *node = getItemNode(index);
+			node->stopAnimation();
+//			node->removeQualityBox();
+			if(index + _currentPage * HORIZONTALCOUNT * VERTICALCOUNT >= size)
+			{
+				node->setBlock();
+				node->setLock(true);
+				node->clearBagItem();
+			}
+			else
+			{
+				PackageManager::ItemMap *itemMap = PackageManager::getInstance()->getItemMap(EICT_Bag);
+				f_item *item = PackageManager::getInstance()->getItem(*itemMap, (short)(index + _currentPage * HORIZONTALCOUNT * VERTICALCOUNT));
+				if(item == NULL)
+				{
+					node->setBlank();
+					node->clearBagItem();
+				}
+				else
+				{
+					node->initWithItem(item);
+					node->setEquipItemEffect(item,EICT_Bag);
+					node->setItemSaleEffect(item,showSale);
+					if(item->m_data.n16Index == dataindex){
+						node->runAddAnimation("E1_179");
+					}
+					//15级装备特效
+					if ( item != NULL)
+					{
+						if(MIsEquipment(item->get_item_type_id()))
+						{
+							f_equipment *equip = dynamic_cast<f_equipment*>(item);
+							CC_ASSERT(equip != NULL);
+							m_nTmpEquipLevel = equip->get_equip_consolidate_level();
+							if(8 <= m_nTmpEquipLevel && 12 > m_nTmpEquipLevel)
+//								node->runAnimation("qianghua15");						//【Ji：】15级以上装备特效
+								node->runAnimation("E1_95");
+							if(12 <= m_nTmpEquipLevel && 16 > m_nTmpEquipLevel)
+								node->runAnimation("E1_96");
+							if(m_nTmpEquipLevel == 16)
+								node->runAnimation("E1_97");
+//							if (!equip->is_not_idetified())
+//							{
+//								node->setQuality(equip->get_item_quality());			//【Ji：】
+// 								switch(equip->get_item_quality())
+// 								{
+// 								case 1:
+// 									node->setQualityBox("mainui_youxiu");break;
+// 								case 2:
+// 									node->setQualityBox("mainui_zhuoyue");break;
+// 								case 3:
+// 									node->setQualityBox("mainui_wanmei");break;
+// 								case 4:
+// 									node->setQualityBox("mainui_shishi");break;
+// 								case 5:
+// 									node->setQualityBox("mainui_chuanshuo");break;
+// 								}
+//							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+void PackageUi::updateEquipItem(f_item *item)
+{
+	f_equipment *equip = dynamic_cast<f_equipment*>(item);
+	if (equip)
+	{
+		ItemNode *tempEquipNode = NULL;
+		for(int i = 0; i < HORIZONTALCOUNT; i ++)
+		{
+			for(int j = 0; j < VERTICALCOUNT; j ++)
+			{
+				int index = j * HORIZONTALCOUNT + i;
+				tempEquipNode = getItemNode(index);
+				if (tempEquipNode->getFitemID() == equip->get_item_id())
+				{
+					//tempEquipNode->setEQuality(equip->get_item_quality());
+					tempEquipNode->initWithItem(equip);
+					tempEquipNode = NULL;
+					break;
+				}
+
+			}
+		}
+	}
+}
+
+void PackageUi::onEnter()
+{
+	_selectIndex = -1;
+
+	CCLayer::onEnter();
+	DropDragDelegate::getInstance()->addDropLayer(this);
+
+	if (IS_VALID_PTR(_stallbtn))
+	{
+		bool isShowStallBtn = KaifuHuodongMgr::getInstance()->getIosShowRecharge();
+		_stallbtn->setVisible(isShowStallBtn);
+	}
+
+	//[bing] debug
+	/*
+	CCNode* pNode = _frame->getChildByTag(1000);
+	CCFiniteTimeAction* pTintTo1 = CCTintTo::create(1, 255, 0, 0);
+	CCFiniteTimeAction* pTintTo2 = CCTintTo::create(1, 255, 255, 255);
+	CCActionInterval* pAI = CCSequence::create(pTintTo1, pTintTo2, NULL);
+	CCRepeatForever* pRF = CCRepeatForever::create(pAI);
+	pNode->runAction(pRF);
+	*/
+}
+
+void PackageUi::onExit()
+{
+	//CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "ICON", "");
+	std::string FullFileName ="";
+	FullFileName = uiDir + "SingleUI/beibao_mengban.png";
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName(FullFileName.c_str());
+	FullFileName = uiDir + "SingleUI/beibao_shang.png";
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName(FullFileName.c_str());
+	FullFileName = uiDir + "SingleUI/beibao_xia.png";
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName(FullFileName.c_str());
+	FullFileName = uiDir + "SingleUI/equip_naijiu0.png";
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName(FullFileName.c_str());
+
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("smeltui_point");
+	DropDragDelegate::getInstance()->removeDropLayer(this);
+
+	if (IS_UI_OPEN(WCT_EQUIP_TIPS_UI_TAG))
+	{
+		CLOSE_UI(WCT_EQUIP_TIPS_UI_TAG);
+	}
+	if(IS_UI_OPEN(WCT_QuickSale))
+	{
+		CLOSE_UI(WCT_QuickSale);
+		QuickSaleUI* ui = GET_UI(QuickSaleUI, WCT_QuickSale);
+		if(ui != NULL)
+		{
+			ui->SetCanClick(false);
+		}
+	}
+	CCLayer::onExit();
+	//PackageManager::getInstance()->destroyAllIconFrames();
+}
+
+
+//bool PackageUi::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+//{
+//	CC_ASSERT(_movingItem == NULL);
+//
+//	setMenuVisiable(false);
+//
+//	_beginWithMovableItem = false;
+//	//点击在frame上，返回ture
+//	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+//	const CCSize &frameSize = _frame->getContentSize();
+//	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+//	if(frameRect.containsPoint(framePoint))
+//	{
+//		int index = getItemUnderPoint(framePoint);
+//		PackageManager::ItemMap *itemMap = PackageManager::getInstance()->getItemMap(EICT_Bag);
+//		f_item *item = PackageManager::getInstance()->getItem(*itemMap, (short)(index + _currentPage * HORIZONTALCOUNT * VERTICALCOUNT));
+//		if(item != NULL)
+//		{
+//			setItemSelect(index);
+//			if(item->is_movable())
+//			{
+//				_beginWithMovableItem = true;
+//			}
+//		}
+//		_beginTouch = framePoint;
+//		return true;
+//	}
+//
+//	return false;
+//}
+//
+//void PackageUi::ccTouchMoved( CCTouch *pTouch, CCEvent *pEvent )
+//{
+//	if(_beginWithMovableItem)
+//	{
+//		if(_movingItem == NULL)
+//		{
+//			CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+//			if(ccpDistance(framePoint, _beginTouch) > 10.0f)
+//			{
+//				CCNode *node = getChildByTag(COPY_NODE_TAG);
+//				if(node == NULL)
+//				{
+//					node = ItemNode::create();
+//					node->setTag(COPY_NODE_TAG);
+//					addChild(node);
+//				}
+//				_movingItem =static_cast<ItemNode*>(node);
+//				getItemNode(_selectIndex)->copy(*_movingItem);
+//				CC_ASSERT(_movingItem != NULL);
+//				_movingItem->setVisible(true);
+//				_movingItem->setScale(1.5f);
+//			}
+//		}
+//
+//		if(_movingItem != NULL)
+//		{
+//			CCPoint point = convertTouchToNodeSpace(pTouch);
+//			_movingItem->setPosition(point);
+//		}
+//	}
+//}
+//
+//void PackageUi::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+//{
+//	if(_movingItem == NULL)
+//	{
+//		if(_beginWithMovableItem)
+//		{//判断为没有移动
+//			CCNode *menu = getMenuBtn();
+//			setMenuVisiable(true);
+//			menu->setPosition(convertTouchToNodeSpace(pTouch));
+//		}
+//		return;
+//	}
+//
+//	_movingItem->setScale(1.0f);
+//	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+//	int index = getItemUnderPoint(framePoint);
+//	if(index == _selectIndex || index < -1 || 
+//		index +  HORIZONTALCOUNT * VERTICALCOUNT * _currentPage >= PackageManager::getInstance()->getPocketSize())
+//	{//不移动
+//	}
+//	else
+//	{//可移动
+//		int indexAdd = HORIZONTALCOUNT * VERTICALCOUNT * _currentPage;
+//		PackageManager::getInstance()->changeBagItemPosition(_selectIndex + indexAdd, index + indexAdd);
+//	}
+//	_movingItem->setVisible(false);
+//
+//	_movingItem = NULL;
+//}
+
+void PackageUi::onPage1Select( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_11);
+	setSelectPage(0);
+}
+
+void PackageUi::onPage2Select( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_11);
+	setSelectPage(1);
+}
+
+void PackageUi::onPage3Select( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_11);
+	setSelectPage(2);
+}
+
+void PackageUi::onPage4Select( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_11);
+	setSelectPage(3);
+}
+
+void PackageUi::setSelectPage( int page )
+{
+	CC_ASSERT(page < PACKAGE_PAGE_COUNT && page >= 0);
+	if(page == _currentPage)
+		return;
+
+	for(int i = 0; i < PACKAGE_PAGE_COUNT; i ++)
+	{
+		_pageSpriteH[i]->setVisible(false);
+	}
+
+	_pageSpriteH[page]->setVisible(true);
+	_currentPage = page;	 
+	_selectSprite->setVisible(false);
+
+	updatePackage();
+}
+
+int PackageUi::getItemUnderPoint( const CCPoint &pos )//在背包中选中物品
+{
+	for(int i = 0; i < 5; i ++)
+	{
+		for(int j = 0; j < 4; j ++)
+		{
+			float x = LEFTSPACE + i * HORIZONTALSPACE;
+			float y = _frame->getContentSize().height - (TOPSPACE + j * VERTICALSPACE);//vvv
+			CCRect rect(x - ITEMNODE_CONTENTWIDTH / 2, y - ITEMNODE_CONTENTHEIGHT / 2, ITEMNODE_CONTENTWIDTH, ITEMNODE_CONTENTHEIGHT);
+			if(rect.containsPoint(pos))
+			{
+				return j * 5 + i + _currentPage * HORIZONTALCOUNT * VERTICALCOUNT;
+			}
+		}
+	}
+
+	return -1;
+}
+
+bool PackageUi::setItemSelect( int index )
+{
+	index -= _currentPage * HORIZONTALCOUNT * VERTICALCOUNT;
+	ItemNode *itemNode = getItemNode(index);
+	if(itemNode == NULL)
+		return false;
+	int y = index / HORIZONTALCOUNT;
+	int x = index % HORIZONTALCOUNT;
+
+	CCPoint pos(LEFTSPACE + x * HORIZONTALSPACE, 
+		_frame->getContentSize().height - (TOPSPACE + y * VERTICALSPACE));
+	_selectSprite->setPosition(pos);
+
+	if(!_selectSprite->isVisible())
+		_selectSprite->setVisible(true);
+
+	SetSelectIndex(index);
+	//_selectIndex = index;
+	return true;
+}
+
+ItemNode * PackageUi::getItemNode( int index )
+{
+	if(index < 0 || index >= HORIZONTALCOUNT * VERTICALCOUNT * 4)
+		return NULL;
+
+	return static_cast<ItemNode*>(_frame->getChildByTag(index + INT_BEGIN));
+}
+
+void PackageUi::setYuanBao( INT64 num )
+{
+	std::ostringstream ostr;
+// 	if(num >= 100000)
+// 	{
+// 		ostr << num / 10000 << GET_STR(9033).c_str();
+// 	}
+// 	else
+// 	{
+		ostr << num;
+//	}
+	_yuanBao->setString(ostr.str().c_str());
+}
+
+void PackageUi::setBangDingYuanBao( INT64 num )
+{
+	std::ostringstream ostr;
+// 	if(num >= 100000)
+// 	{
+// 		ostr << num / 10000 << GET_STR(9033).c_str();
+// 	}
+// 	else
+// 	{
+		ostr << num;
+//	}
+	_bangDingYuanBao->setString(ostr.str().c_str());
+}
+
+void PackageUi::setCoin( INT64 num )
+{
+	std::ostringstream ostr;
+	if(num >= 100000)
+	{
+		ostr << num / 10000 << GET_STR(9033).c_str();
+	}
+	else
+	{
+		ostr << num;
+	}
+	_coin->setString(ostr.str().c_str());
+}
+
+short PackageUi::getItem( CCTouch &touch, eGetResult &result )
+{
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(&touch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		int index = getItemUnderPoint(framePoint);
+		result = GR_SUCCESS;
+
+		//setItemSelect(-1);
+		return index;
+	}
+
+	result = GR_ERROR;
+	return -1;
+}
+
+short PackageUi::getItemBegin( CCTouch &touch, eGetResult &result )
+{
+	short index = getItem(touch, result);
+	setItemSelect(index);
+	return index;
+}
+
+short PackageUi::getItemEnd( CCTouch &touch, eGetResult &result, EItemConType src, short itemIndex )
+{
+	return getItem(touch, result);
+}
+
+bool PackageUi::onClicked( CCTouch &touch )//选中包中物品
+{
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(&touch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+
+		int index = getItemUnderPoint(framePoint);
+		if(index >= PackageManager::getInstance()->getConSize(EICT_Bag))
+		{
+			//int addNum = index - PackageManager::getInstance()->getConSize(EICT_Bag) + 1;
+			//PackageManager::getInstance()->doAddBlank(0,addNum);
+			OpenPackageUi::getInstace()->setType(0);
+			OpenPackageUi::getInstace()->open();
+			
+		}
+
+		f_item *item = PackageManager::getInstance()->getItem(EICT_Bag, (short)index);
+		if(item != NULL)
+		{
+			//[bing] 如果对话框开着 单击直接把装备信息发送到对话框上 mark 先屏蔽
+
+			/*ChatUiLayer *uiLayer=getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+			if(uiLayer->isVisible())
+			{
+				uiLayer->InputItemInfo( item );
+				return true;
+			}*///end
+			AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_15);
+			setItemSelect(index);
+			CCPoint pos = getItemPos(index);//获取位置
+			if(MIsEquipment(item->get_item_type_id()))
+			{
+				const ItemTypeData &typeData =PackageManager::getInstance()->getItemTypeData(item->get_item_type_id());
+				ePackageItemType eItemType = typeData.type;
+				if (PIT_Kungfu == eItemType || eItemType == PIT_KungfuExp)
+				{
+					//功法ui显示; 
+					GongfaTip::getInstace()->open();
+					GongfaTip::getInstace()->setPosition(pos);
+					GongfaTip::getInstace()->setData(dynamic_cast<f_equipment*>(item));
+				}
+				else
+				{
+					EquipTipUiLayer *ui = EquipTipUi::create();
+					ui->setIndex(index);		
+					if(IS_UI_OPEN(WCT_SHOPUI))
+					{
+						ui->showUi(dynamic_cast<f_equipment*>(item),false,false);				//【Ji：】
+						ui->setAllButtonOff(WCT_SHOPUI);
+					}
+					else if (IS_UI_OPEN(WCT_StorageUi))
+					{
+						ui->showUi(dynamic_cast<f_equipment*>(item),false,false);				//【Ji：】
+						ui->setAllButtonOff(WCT_StorageUi);
+					}
+					else if (IS_UI_OPEN(WCT_TradeUi))
+					{
+						ui->showUi(dynamic_cast<f_equipment*>(item),false,false);
+						ui->setAllButtonOff(WCT_Null);
+					}
+					else
+					{
+						ui->showUi(dynamic_cast<f_equipment*>(item));				//【Ji：】
+					}
+					//[bing] mark
+					
+// 					if (!item->is_locked())
+// 					{
+// 						ui->showEquipBtn();
+// 					}
+					
+					
+				}
+			}
+			else
+			{
+				bool is_storage_open =IS_UI_OPEN(WCT_StorageUi);
+
+				switch(item->get_item_type_id())
+				{
+				case ZZZTITLEZHAN:
+				case ZZZTITLEFA:
+				case ZZZTITLEDAO:
+					{
+						if (item->is_locked())//如果是锁定状态则不打开tip
+						{
+							return false;
+						}
+
+						ZZZTitleTipsUI* node = ZZZTitleTipsUI::getInstance()->open();
+						node->setData(item->get_item_type_id(),index);
+						node->setPlace(pos);
+						node->set_btn_type(is_storage_open?eToStorage:eUseBtn);
+						//node->setButtonVisible(true);
+						//ZZZTitleTipsUI::getInstance()->setData(m_dwTypeId);
+					}
+					break;
+				case ZZZFLYDRAGON:
+					{
+						if (item->is_locked())//如果是锁定状态则不打开tip
+						{
+							return false;
+						}
+
+						ZZZFLDTipsUI* node = ZZZFLDTipsUI::getInstance()->open();
+						node->setData(index);
+						node->setPlace(pos);
+						node->set_btn_type(is_storage_open?eToStorage:eUseBtn);
+						//node->setButtonVisible(true);
+					}
+					break;
+				case ZZZMANOR:
+					{
+						if (item->is_locked())//如果是锁定状态则不打开tip
+						{
+							return false;
+						}
+
+						ZZZManorTipsUI* node = ZZZManorTipsUI::getInstance()->open();
+						node->setData(index);
+						node->setPlace(pos);
+						node->set_btn_type(is_storage_open?eToStorage:eUseBtn);
+						//node->setButtonVisible(true);
+					}
+					break;
+				case ZZZSIGN:
+					{
+						if (item->is_locked())//如果是锁定状态则不打开tip
+						{
+							return false;
+
+						}
+						ZZZSignTipsUI* node = ZZZSignTipsUI::getInstance()->open();
+						node->setData(index);
+						node->setPlace(pos);
+						node->set_btn_type(is_storage_open?eToStorage:eUseBtn);
+						//node->setButtonVisible(true);
+					}
+					break;
+				default:
+					{
+						if (item->is_locked())//如果是锁定状态则不打开tip
+						{
+							return false;
+						}
+
+						ItemTip::getInstace()->open();//加载ccbi
+						ItemTip::getInstace()->setPosition(pos);//设置位置
+						//ItemTip::getInstace()->setDataId(item->get_item_type_id());
+						ItemTip::getInstace()->setData(item,true);
+						ItemTip::getInstace()->setOpenUiId(WCT_PACKAGEUI);
+						if (item->is_locked())//如果是锁定状态则不打开tip
+						{
+							ItemTip::getInstace()->hideOpBtn();
+						}
+
+						//先取数据库中找该物品tips显示类型 0=不显示,1=使用,2=合成,3=使用+合成,4=使用+批量使用 5= 使用+ 显示 6= 使用+ 批量 + 显示 7= 学习//add by XSea 2014.10.23
+// 						c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM PackageData WHERE TypeId = ?1");
+// 						cmd->set_integer32(1 , item->get_item_type_id());
+// 						c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 						int nIndex = 0; //显示类型索引
+// 						while(table->retrieve_row())
+// 						{
+// 							unsigned int idx = table->get_index("tipsBtnIdx");
+// 							nIndex = table->get_integer32(idx);
+// 						}
+// 						c_db_manager::getSingleton()->destroy_table(table);
+// 						c_db_manager::getSingleton()->end_operation(cmd);
+						const ItemTypeData& itemTypeData = PackageManager::getInstance()->getItemTypeData(item->get_item_type_id());
+
+						if(IS_UI_OPEN(WCT_SHOPUI))
+						{
+							ItemTip::getInstace()->showTypeButton(WCT_SHOPUI);
+						}
+						else if (IS_UI_OPEN(WCT_StorageUi))
+						{
+							ItemTip::getInstace()->showTypeButton(WCT_StorageUi);
+						}
+						else if (IS_UI_OPEN(WCT_TradeUi))
+						{
+							ItemTip::getInstace()->showTypeButton(WCT_Null);
+						}
+						else
+						{
+							ItemTip::getInstace()->showTipsButton(itemTypeData.byTipsBtnIdx);
+						}
+				
+						//检查是否需要显示批量使用按钮
+						/*if( ItemTip::getInstace()->IsShowAllUseBtn( item ) )
+							ItemTip::getInstace()->showAllUseBtn(true);
+						else
+							ItemTip::getInstace()->showAllUseBtn(false);*/
+					}
+					break;
+				}
+			}
+		}
+		return true;
+	}
+
+	return false;
+}
+
+bool PackageUi::onDoubleClicked( CCTouch &touch )
+{
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(&touch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		if (IS_UI_OPEN(WCT_TradeUi))
+		{
+			return false;
+		}
+		int index = getItemUnderPoint(framePoint);
+		setItemSelect(index);
+
+		if(index >= PackageManager::getInstance()->getConSize(EICT_Bag))
+		{
+			//int addNum = index - PackageManager::getInstance()->getConSize(EICT_Bag) + 1;
+			//PackageManager::getInstance()->doAddBlank(0,addNum);
+			OpenPackageUi::getInstace()->setType(0);
+			OpenPackageUi::getInstace()->open();
+			
+			CCLOG("double click");
+		}
+
+		f_item *item = PackageManager::getInstance()->getItem(EICT_Bag, (short)index);  
+
+		if(item != NULL && !item->is_locked())
+		{
+			if(MIsEquipment(item->get_item_type_id()))
+			{//双击装备
+				AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_13);//双击音效//add by vvv 2015.01.30
+				int posIndex = 0;
+				const EquipTypeData* t_data = PackageManager::getInstance()->getEquipTypeDataPointer(item->get_item_type_id());
+				if (t_data != NULL)
+				{
+					posIndex = t_data->posIndex;
+				}
+
+// 				c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 				cmd->set_integer32(1 , item->get_item_type_id());
+// 				c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 				while(table->retrieve_row())
+// 				{
+// 					unsigned int idx = table->get_index("PosIndex");
+// 					posIndex = table->get_integer32(idx);
+// 				}
+// 				c_db_manager::getSingleton()->destroy_table(table);
+// 				c_db_manager::getSingleton()->end_operation(cmd);
+
+				const ItemTypeData &typeData = PackageManager::getInstance()->getItemTypeData(item->get_item_type_id());
+				ePackageItemType eItemType = typeData.type;
+
+				if (PIT_Kungfu == eItemType  || eItemType == PIT_KungfuExp)
+				{
+					//do nothing;
+				}
+				else
+				{
+					if(posIndex == EEP_Ride)
+					{//坐骑装备
+						PackageManager::getInstance()->equipRide(item->get_item_id());
+					}
+					else
+					{
+						//如果是戒指或护腕，则找到一个空位或低级别的替换
+						if(posIndex == EEP_Finger1 || posIndex == EEP_Wrist1)
+						{
+							f_item *equipItem1 = PackageManager::getInstance()->getItem(EICT_Equip, (short)posIndex);
+							f_item *equipItem2 = PackageManager::getInstance()->getItem(EICT_Equip, (short)(posIndex + 1));
+							if(equipItem1 != NULL)
+							{
+								if(equipItem2 == NULL)
+								{
+									posIndex += 1;
+								}
+								else
+								{
+									f_equipment* equipTypeData1 = dynamic_cast<f_equipment*>(equipItem1);
+									f_equipment* equipTypeData2 = dynamic_cast<f_equipment*>(equipItem2);
+									if(equipTypeData1->get_equip()->nRating > equipTypeData2->get_equip()->nRating)
+										posIndex += 1;
+								}
+							}
+						}
+
+						PackageManager::getInstance()->changeItemPosition(EICT_Bag, EICT_Equip, (short)index, (short)posIndex);
+					}
+				}
+
+			}
+			else
+			{//双击使用
+				//若各类回城石在双修或是摆摊状态下无法使用
+				AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_13);//双击音效//add by vvv 2015.01.30
+				LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+				if (!IS_VALID_PTR(ploc))
+					return true;
+				if (ploc->isInRoleStateAny(RA_ShuangXiu) || ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))
+				{
+					if (!AutoActionMgr::getInstance()->CanItemUse(item->get_item_type_id()))
+					{
+						if (ploc->isInRoleStateAny(RA_Exchange))
+						{
+							ExchangeBusinessMgr::getInstance()->CancleExchange();
+						}
+						return true;
+					}
+				}
+				if(item->get_item_type_id() == EQUIPBOX)
+				{
+					_selectItemId = item->get_item_id();
+					showConfirmUseUi();
+				}
+				else
+				{
+					PackageManager::getInstance()->useBagItem((short)index);
+				}
+				//双击弹出宝箱抽奖;
+
+				//TODO:取消挂机
+				if ((AutoActionMgr::getInstance()->Get_Auto_Action()) && (!AutoActionMgr::getInstance()->CanItemUse(item->get_item_type_id())))//gx add
+				{
+					AutoActionMgr::getInstance()->Set_Auto_Action(false);
+				}
+			}
+		}
+
+		return true;
+	}
+
+	return false;
+}
+
+cocos2d::CCPoint PackageUi::getItemPos( short index )//物品位置
+{
+	//int page = index / (HORIZONTALCOUNT * VERTICALCOUNT);//行
+	int idx = index % (HORIZONTALCOUNT * VERTICALCOUNT);//hang
+	ItemNode *itemNode = getItemNode(idx);
+	return _frame->convertToWorldSpace(itemNode->getPosition());
+	//return ccp(x, y);
+}
+
+cocos2d::CCRect PackageUi::getItemRect( short index )
+{
+	//int page = index / (HORIZONTALCOUNT * VERTICALCOUNT);
+	int idx = index % (HORIZONTALCOUNT * VERTICALCOUNT);
+	ItemNode *itemNode = getItemNode(idx);
+	SetNodeTintTo(dynamic_cast<CCNode*>(itemNode));
+	CCPoint cp = itemNode->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = itemNode->getContentSize();
+	return CCRect(cp.x, cp.y, cs.width, cs.height);
+
+	//return ccp(x, y);
+}
+
+cocos2d::CCRect PackageUi::getCloseBtnPos()
+{
+	SetNodeTintTo(_frame->getChildByTag(1000));
+	CCSize size = _frame->getChildByTag(1000)->getContentSize();
+	CCPoint pos = _frame->getChildByTag(1000)->convertToWorldSpace(ccp(0, 0));
+	return CCRect(pos.x, pos.y, size.width, size.height);
+}
+
+void PackageUi::changePackageBtn(bool change)
+{
+	if (IS_UI_OPEN(WCT_MartialObtainUi))
+	{
+		//_instructbtn->setVisible(change);
+	}
+	if (IS_UI_OPEN(WCT_MartialEquipUi))
+	{
+		//_instructbtn->setVisible(!change);
+	}
+	//_syzthenbtn->setVisible(change);
+	//_stallbtn->setVisible(!change);
+}
+
+cocos2d::CCPoint PackageUi::getPagepos()
+{
+	CCPoint pos =  _pageSprite[0]->getPosition();
+	CCPoint pos2 = convertToWorldSpace(pos);
+	return pos2;
+}
+
+cocos2d::CCRect PackageUi::getBtnPos(int tag)
+{
+	CCNode *node = NULL;
+
+	if(tag == MT_InstructBtn)
+	{
+		node = _frame->getChildByTag(MT_InstructBtn);
+	}
+	if(node != NULL)
+	{
+		CCPoint pt = node->convertToWorldSpace(ccp(0, 0));
+		CCSize size = node->getContentSize();
+		return CCRect(pt.x, pt.y, size.width, size.height);
+	}
+
+	return CCRect();
+}
+
+void PackageUi::updateSaleEffect( bool isShow /*= true*/ )
+{
+	if(!PackageManager::getInstance()->isInit())
+		WaitLoading::getInstance()->start();
+	else
+		WaitLoading::getInstance()->stop();
+	//根据当前页数，初始化背包ui;
+	int size = PackageManager::getInstance()->getConSize(EICT_Bag);
+	for(int i = 0; i < HORIZONTALCOUNT; i ++)
+	{
+		for(int j = 0; j < VERTICALCOUNT; j ++)
+		{
+			int index = j * HORIZONTALCOUNT + i;
+			ItemNode *node = getItemNode(index);
+			if(index + _currentPage * HORIZONTALCOUNT * VERTICALCOUNT >= size)
+			{
+				node->setItemSaleEffect();
+				continue;
+			}
+			PackageManager::ItemMap *itemMap = PackageManager::getInstance()->getItemMap(EICT_Bag);
+			f_item *item = PackageManager::getInstance()->getItem(*itemMap, (short)(index + _currentPage * HORIZONTALCOUNT * VERTICALCOUNT));
+			if(item == NULL)
+			{
+				node->setItemSaleEffect();
+				continue;
+			}
+			node->setItemSaleEffect(item,isShow);
+		}
+	}
+}
+
+void PackageUi::setBtnShow( bool show )
+{
+	CCControlButton *sortBtn=dynamic_cast<CCControlButton*>(_frame->getChildByTag(14));
+	CCControlButton *shopBtn=dynamic_cast<CCControlButton*>(_frame->getChildByTag(15));
+	CCControlButton *stallBtn=dynamic_cast<CCControlButton*>(_frame->getChildByTag(16));
+	CCControlButton *storageBtn=dynamic_cast<CCControlButton*>(_frame->getChildByTag(99));
+	if (sortBtn!=NULL && shopBtn!=NULL && stallBtn!=NULL && storageBtn!=NULL)
+	{
+		sortBtn->setVisible(show);
+		shopBtn->setVisible(show);
+		stallBtn->setVisible(show);
+		storageBtn->setVisible(show);
+	}
+}
+void PackageUi :: showConfirmUseUi()
+{
+	std::string msg = /*StringMgr::getInstance()->getString(9184)*/GET_STR(9184);
+	MessageBoxUi* useConfirmUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,msg.c_str(),TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+	World::getInstance()->getScene()->addChild(useConfirmUi, WZ_MESSAGEBOX);
+	useConfirmUi->signalOkBtnPressed.connect(this, &PackageUi::onConfirmUseBtnPressed);
+	useConfirmUi->signalCancelBtnPressed.connect(this,&PackageUi::onCancelUseBtnPressed);
+}
+void PackageUi :: onConfirmUseBtnPressed()
+{
+	if (_selectItemId == -1)
+	{
+		return;
+	}
+
+	f_item* item = PackageManager::getInstance()->getItem(EICT_Bag,_selectItemId);
+	if (item != NULL)
+	{
+		if (item->get_item_type_id() == 1102012)
+		{
+			WanMeiGiftUiMgr::GetInstance()->SetItemId(_selectItemId);
+			WanMeiGiftUiMgr::GetInstance()->openWanMeiGiftUi();
+			return;
+		}
+
+		PackageManager::getInstance()->useBagItem(_selectItemId);
+	}
+
+	if (ItemAutoUseDaojuTip::getInstace()->isOpen())
+		ItemAutoUseDaojuTip::getInstace()->close();
+}
+void PackageUi :: onCancelUseBtnPressed()
+{
+	return;
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler PackageUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler PackageUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", PackageUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSortBtnPressed", PackageUiLayer::onSortBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onStallBtnPressed", PackageUiLayer::onStallBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onShopBtnPressed", PackageUiLayer::onShopBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onInstructBtnPressed", PackageUiLayer::onInstructBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOnekeySyzBtnPressed", PackageUiLayer::onOnekeySyzBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHeChengBtnPressed", PackageUiLayer::onHeChengBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onStorageBtnPressed", PackageUiLayer::onStorageBtnPressed);
+	return NULL;
+}
+
+bool PackageUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+
+void PackageUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	return;
+}
+
+void PackageUiLayer::onStorageBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )//仓库按钮
+{ 
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	LocalPlayer* role = RoleManager::getInstance()->getLocalPlayer();
+	//点卡功能暂时屏蔽
+	/*
+	if (!isShowLeftTime())
+	{
+		MessageBoxUi* boxUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(9429).c_str(),TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+		if(boxUi != NULL)
+		{
+			World::getInstance()->getScene()->addChild(boxUi, WZ_MESSAGEBOX);
+			boxUi->signalOkBtnPressed.connect(this, &PackageUiLayer::onConfirmBuyBtnPressed);
+		}
+	}
+	else
+	{
+		if (role->isRoleInStaticState())
+			return;
+		OPEN_UI(WCT_StorageUi);
+	}*/
+	if (role->isRoleInStaticState())
+		return;
+	OPEN_UI(WCT_StorageUi);
+}
+
+void PackageUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_PACKAGEUI);
+	if (IS_UI_OPEN(WCT_MartialObtainUi))
+	{
+		CLOSE_UI(WCT_MartialObtainUi);
+		GET_UI(MartialObtainUi,WCT_MartialObtainUi)->setInstructFrameShow(false);
+	}
+	if (IS_UI_OPEN(WCT_MartialEquipUi))
+	{
+		CLOSE_UI(WCT_MartialEquipUi);
+		GET_UI(MartialEquipUi,WCT_MartialEquipUi)->setInstructFrameShow(false);
+	}
+	if (IS_UI_OPEN(WCT_TradeUi))
+	{
+		CLOSE_UI(WCT_TradeUi);
+		ExchangeBusinessMgr::getInstance()->CancleExchange();
+	}
+
+	if (IS_UI_OPEN(WCT_StorageUi))
+	{
+		CLOSE_UI(WCT_StorageUi);
+	}
+}
+void PackageUiLayer::onSortBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_8);
+	PackageManager::getInstance()->reorderPackage();
+}
+
+void PackageUiLayer::onShopBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	OPEN_UI(WCT_SHOPUI);
+	GET_UI(ShopUi, WCT_SHOPUI)->setData(1);
+}
+
+void PackageUiLayer::onStallBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//zhjl:先暂时屏蔽摆摊
+	//ToolTip::getInstance()->push(GET_STR(50));
+
+	LocalPlayer* localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if (!localPlayer)
+		return;
+
+	MapManager* mapMgr = MapManager::getInstance();
+	unsigned int nCurMapId = mapMgr->getCurMapId();
+	if (MAPID_BIQICHENG == nCurMapId || (GUILD_HOME_MAP == nCurMapId && mapMgr->isStallArea(localPlayer)));
+	else
+	{
+		ToolTip::getInstance()->push(GET_STR(166).c_str());
+		return;
+	}
+	//检查开放等级
+	int nOpenLevel = GetFunOpenLevel(EFOL_Stall);
+	if( localPlayer->getLevel() < nOpenLevel )
+	{
+		ToolTip::getInstance()->push(GET_STR(9352).c_str());
+		return;
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	PlayerStallMgr::getInstance()->openStall();
+}
+
+void PackageUiLayer::onHeChengBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+
+	if (!IS_UI_OPEN(WCT_SHOPUI))
+	{
+		//LocalPlayer *ploc=RoleManager::getInstance()->getLocalPlayer();
+		//INT vip=ploc->getVIPLevel();
+		//点卡功能暂时屏蔽
+		/*
+		if (isShowLeftTime())
+		{
+			OPEN_UI(WCT_SHOPUI);
+			ShopMgr::getInstance()->onNpcTalk(1001004, 2000000003);
+			ShopMgr::getInstance()->setFollowShop(1);
+			GET_UI(ShopUi, WCT_SHOPUI)->setData(9);
+		}
+		else
+		{
+			MessageBoxUi* boxUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(9429).c_str(),TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+			if(boxUi != NULL)
+			{
+				World::getInstance()->getScene()->addChild(boxUi, WZ_MESSAGEBOX);
+				boxUi->signalOkBtnPressed.connect(this, &PackageUiLayer::onConfirmBuyBtnPressed);
+			}
+		}*/
+		OPEN_UI(WCT_SHOPUI);
+		ShopMgr::getInstance()->onNpcTalk(1001004, 2000000003);
+		ShopMgr::getInstance()->setFollowShop(1);
+		GET_UI(ShopUi, WCT_SHOPUI)->setData(9);
+	}
+	/*if (FragmentCompoundMgr::getInstance()->getFragmentItemMap().size() > 0)
+	{
+		//碎片合成
+		CLOSE_UI(WCT_PACKAGEUI);
+		OPEN_UI(WCT_FRAGMENTCOMPOUNDUI);
+	}
+	else
+	{//当前没有可合成道具
+		ToolTip::getInstance()->push("\xE5\xBD\x93\xE5\x89\x8D\xE6\xB2\xA1\xE6\x9C\x89\xE5\x8F\xAF\xE5\x90\x88\xE6\x88\x90\xE9\x81\x93\xE5\x85\xB7");
+	}*/
+}
+
+void PackageUiLayer::onOnekeySyzBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//发送一键融合消息;
+	PackageManager::getInstance()->auto_kungfuMergeInBag();
+}
+
+void PackageUiLayer::onInstructBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if (IS_UI_OPEN(WCT_MartialObtainUi))
+	{
+		GET_UI(MartialObtainUi,WCT_MartialObtainUi)->setInstructFrameShow(true);
+	}
+	if (IS_UI_OPEN(WCT_MartialEquipUi))
+	{
+		GET_UI(MartialEquipUi,WCT_MartialEquipUi)->setInstructFrameShow(true);
+	}
+}
+void PackageUiLayer :: onConfirmBuyBtnPressed()
+{
+	OPEN_UI(WCT_STOREUI);
+}

@@ -1,0 +1,452 @@
+#include "BuySetUi.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "CfgReader.h"
+#include "UiResourceMgr.h"
+#include "ItemNode.h"
+#include "PackageManager.h"
+#include "NumKeypad.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "ToolTip.h"
+#include "Helper.h"
+#include "StringMgr.h"
+#include "MallMgr.h"
+BuySetUi * BuySetUi::getInstance()
+{
+	static BuySetUi instance;
+	return &instance;
+}
+
+BuySetUi::BuySetUi()
+	: _signalBtnPressed(NULL)
+{
+
+}
+
+BuySetUi::~BuySetUi()
+{
+
+}
+
+void BuySetUi::open()
+{
+	if(isOpen())
+		return;
+	CCScene *scene = UiMgr::getInstance()->getCurScene();
+	if(scene != NULL)
+	{
+		CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+		ccNodeLoaderLibrary->registerCCNodeLoader("BuySetUiFrame", UiSpriteLoader<BuySetUiFrame>::loader());
+		cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+		CCNode *node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "buysetui.ccbi").c_str());
+		_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+		UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+		ccbReader->release();
+		if(node != NULL) {
+			scene->addChild(node, WZ_POPUI, WCT_BuySetUi);
+			CCSize size = CCDirector::sharedDirector()->getWinSize();
+			node->setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+			SetXianGouVisiabl(false);
+		}
+
+		_signalBtnPressed = new c_signal<void, bool, int>;
+
+		setNumKeyIsOpen(true);
+	}
+}
+
+void BuySetUi::close()
+{
+	if(!isOpen())
+		return;
+	NumKeypad::getInstance()->close();
+	SetXianGouVisiabl(false);
+	CCScene *scene = UiMgr::getInstance()->getCurScene();
+	if(scene != NULL)
+	{
+		scene->removeChildByTag(WCT_BuySetUi);
+	}
+
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+
+	CC_SAFE_DELETE(_signalBtnPressed);
+}
+
+bool BuySetUi::isOpen()
+{
+	return (getFrame() != NULL);
+}
+
+BuySetUiFrame * BuySetUi::getFrame()
+{
+	CCScene *scene = UiMgr::getInstance()->getCurScene();
+	if(scene != NULL)
+	{
+		BuySetUiFrame *uiNode = dynamic_cast<BuySetUiFrame*>(scene->getChildByTag(WCT_BuySetUi));
+		if(uiNode != NULL)
+			return uiNode;
+	}
+
+	return NULL;
+}
+void BuySetUi::SetXianGouVisiabl(bool IsShow)
+{
+	BuySetUiFrame *uiFrame = getFrame();
+	if(uiFrame != NULL)
+	{
+		uiFrame->SetXianGouVisiabl(IsShow);
+	}
+}
+void BuySetUi::setNumKeyIsOpen( bool value )
+{
+	BuySetUiFrame *uiFrame = getFrame();
+	if(uiFrame != NULL)
+	{
+		uiFrame->setNumKeyIsOpen(value);
+	}
+}
+
+void BuySetUi::setPrice( int price )
+{
+	BuySetUiFrame *uiFrame = getFrame();
+	if(uiFrame != NULL)
+	{
+		uiFrame->setPrice(price);
+	}
+}
+
+void BuySetUi::setDataId( unsigned int id , unsigned int unQuality)
+{
+	BuySetUiFrame *uiFrame = getFrame();
+	if(uiFrame != NULL)
+	{
+		uiFrame->setDataId(id,unQuality);
+	}
+}
+
+void BuySetUi::setNum( int num )
+{
+	BuySetUiFrame *uiFrame = getFrame();
+	if(uiFrame != NULL)
+	{
+		uiFrame->setNum(num);
+	}
+}
+void BuySetUi::SetXianGouNum(int num)
+{
+	BuySetUiFrame *uiFrame = getFrame();
+	if(uiFrame != NULL)
+	{
+		uiFrame->SetXianGouNum(num);
+	}
+}
+void BuySetUi::setMaxCount( int maxCount )
+{
+	BuySetUiFrame *uiFrame = getFrame();
+	if(uiFrame != NULL)
+	{
+		uiFrame->setMaxCount(maxCount);
+	}
+}
+
+void BuySetUi::setChangeIcon(const char *name)
+{
+	BuySetUiFrame *uiFrame = getFrame();
+	if (uiFrame != NULL)
+	{
+		uiFrame->setChangeIcon(name);
+	}
+}
+
+cocos2d::CCRect BuySetUi::getGuildBtnPos( int tag )
+{
+	BuySetUiFrame *uiFrame = getFrame();
+	if (uiFrame != NULL)
+	{
+		uiFrame->getGuildBtnPos(tag);
+	}
+	return CCRect();
+}
+
+void BuySetUi::invoke( bool ok,int num )
+{
+	if (_gcb)
+	{
+		_gcb(ok,num);
+	}
+}
+
+void BuySetUi::invokeAddItem(bool ok,int num)
+{
+	if (_icb)
+	{
+		_icb(ok,num);
+	}
+	//_icb = NULL;
+}
+
+void BuySetUi::setGuildBossAdd()
+{
+	BuySetUiFrame *uiFrame = getFrame();
+	if(uiFrame != NULL)
+	{
+		uiFrame->setGuildBossAdd();
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+BuySetUiFrame::BuySetUiFrame()
+	: _price(0)
+	,m_NumKeypad(true)
+	,b_touched(false)
+	, m_numLabel(NULL)
+	, m_priceLabel(NULL)
+{
+	m_XianGou = NULL;
+	m_XianGouNum = NULL;
+}
+
+BuySetUiFrame::~BuySetUiFrame()
+{
+
+}
+
+cocos2d::SEL_MenuHandler BuySetUiFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler BuySetUiFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", BuySetUiFrame::onOkBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCancelBtnPressed", BuySetUiFrame::onCancelBtnPressed);
+	return NULL;
+}
+
+void BuySetUiFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{	
+	CCNode *icon = getChildByTag(NT_Icon);//图标
+	m_XianGou = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(getChildByTag(6))));
+	m_XianGouNum = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(getChildByTag(7))));
+	ItemNode *itemNode = ItemNode::create();
+	itemNode->setBlank();
+	itemNode->setTag(NT_ItemNode);
+	itemNode->setPosition(icon->getPosition());
+	addChild(itemNode);
+	m_numLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(getChildByTag(NT_NumLabel)));
+	m_priceLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(getChildByTag(NT_PriceLabel)));	
+}
+void BuySetUiFrame::SetXianGouVisiabl(bool IsShow)
+{
+	m_XianGou->setVisible(IsShow);
+	m_XianGouNum->setVisible(IsShow);
+}
+void BuySetUiFrame::SetXianGouNum(int num)
+{	
+	CCString* str1 = CCString::createWithFormat("%d",num);
+	m_XianGouNum->setString(str1->getCString());
+
+}
+
+void BuySetUiFrame::onEnter()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+	setAllChildernButtonPriority(this, -1);
+// 	setAllChildernButtonEnable(this,false);
+// 	setAllChildernButtonEnable(this,true);
+	CCSprite::onEnter();
+}
+
+void BuySetUiFrame::onExit()
+{
+	CCSprite::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool BuySetUiFrame::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (!isVisible() || !isRunning() || !hasVisibleParents())
+	{
+		return false;
+	}
+	CCNode *node = getChildByTag(NT_NumNode);
+	CC_ASSERT(node != NULL);
+	if (MIsEquipment(itemId))
+	{
+		return true;
+	}
+
+	b_touched = isTouchOnNodeContent(node,pTouch);
+
+	return true;
+}
+
+void BuySetUiFrame::onOkBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_20);//vv
+	BuySetUi::getInstance()->_signalBtnPressed->emit(true, getNum());
+	BuySetUi::getInstance()->invoke(true,getNum());
+	BuySetUi::getInstance()->invokeAddItem(true,getNum());
+	BuySetUi::getInstance()->close();
+}
+
+void BuySetUiFrame::onCancelBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);//vv
+	//BuySetUi::getInstance()->_signalBtnPressed->emit(false, getNum());
+	BuySetUi::getInstance()->close();
+}
+
+void BuySetUiFrame::setPrice( int price )
+{
+	_price = price;
+}
+
+void BuySetUiFrame::setDataId( unsigned int id , unsigned int unQuality)
+{
+	const ItemTypeData &typeData = PackageManager::getInstance()->getItemTypeData(id);
+	itemId = id;
+	ItemNode *node = dynamic_cast<ItemNode*>(getChildByTag(NT_ItemNode));
+	CC_ASSERT(node != NULL);
+	node->setDataId(id,unQuality);
+
+	LabelFT *nameLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(getChildByTag(NT_Name)));
+	CC_ASSERT(nameLabel != NULL);
+	nameLabel->setString(typeData.name.c_str());
+
+	_stackNum = typeData.stackNumber;
+}
+
+int BuySetUiFrame::getNum()
+{
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_Num));
+	CC_ASSERT(label != NULL);
+	return atoi(label->getString());
+}
+
+int BuySetUiFrame::getPirce()
+{
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_SumPrice));
+	CC_ASSERT(label != NULL);
+	return atoi(label->getString());
+}
+
+void BuySetUiFrame::setNum( int num )
+{
+	CCLabelTTF *numLabel = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_Num));
+	CC_ASSERT(numLabel != NULL);
+	std::ostringstream ostrNum;
+	ostrNum << num;
+	numLabel->setString(ostrNum.str().c_str());
+
+	CCLabelTTF *priceLabel = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_SumPrice));
+	CC_ASSERT(priceLabel != NULL);
+	std::ostringstream ostrPrice;
+	ostrPrice << _price * getNum();
+	priceLabel->setString(ostrPrice.str().c_str());
+}
+
+int BuySetUiFrame::onAttach()
+{
+	return getNum();
+}
+
+void BuySetUiFrame::onNumChange( int num)
+{
+	setNum(num);
+}
+
+void BuySetUiFrame::onFinished( int num, int srcNum )
+{
+	setNum(num);
+}
+
+void BuySetUiFrame::onCancel( int num )
+{
+	setNum(num);
+}
+
+void BuySetUiFrame::setMaxCount( int maxCount )
+{
+	_stackNum = maxCount;
+}
+
+void BuySetUiFrame::setChangeIcon(const char *name)
+{
+	CCSprite * sprite = dynamic_cast<CCSprite*>(getChildByTag(NT_GoldIcon));
+	CC_ASSERT(sprite != NULL);
+	sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(name));
+}
+
+cocos2d::CCRect BuySetUiFrame::getGuildBtnPos( int tag )
+{
+	CCPoint pos = convertToWorldSpace(getChildByTag(NT_BtnOk)->getPosition());
+	return CCRect(pos.x - 50, pos.y - 20, 98, 38) ;
+}
+
+void BuySetUiFrame::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCNode *node = getChildByTag(NT_NumNode);
+	CC_ASSERT(node != NULL);
+
+	if(isTouchOnNodeContent(node, pTouch))
+	{
+		if(b_touched)
+		{
+			if ((itemId==1003011) 
+				|| (itemId == 1003012) 
+				|| (itemId == 1002004) 
+				|| (itemId == 1002005))
+			{
+				//此商品只能购买一个！
+				ToolTip::getInstance()->push(GET_STR(9517).c_str());
+				return;
+			}
+
+			if (m_NumKeypad)
+			{
+				NumKeypad::getInstance()->open();
+				NumKeypad::getInstance()->setPositionByContent(getChildByTag(NT_NumNode));
+				NumKeypad::getInstance()->attachToDelegate(this);
+				NumKeypad::getInstance()->setMaxNum(_stackNum);
+			}
+			b_touched = false;
+
+		}
+	}
+}
+
+
+void try_to_buy_goods_with_number_panel( unsigned int item_model_id,int price,int num/*=1*/,int currency_type /*=-1*/ )
+{
+	BuySetUi* ui = BuySetUi::getInstance();
+	ui->open();
+	//NewPlayerGuider::getInstance()->onUiOpen(WCT_BuySetUi);
+	ui->setDataId(item_model_id);
+	ui->setPrice(price);
+	//end
+	ui->setNum(num);
+	//BuySetUi::getInstance()->_signalBtnPressed->connect(this, &StoreUiItemFrame::onOkBtnPressed);
+// 	if (currency_type == 5)
+// 	{
+// 		BuySetUi::getInstance()->setChangeIcon("buysetui_rongyudian");
+// 	}
+	if(currency_type == 3)
+	{
+		BuySetUi::getInstance()->setChangeIcon("storeui_zuanshi");
+	}
+}
+
+void BuySetUiFrame::setGuildBossAdd()
+{
+	m_XianGou->setVisible(true);
+	m_XianGou->setString(STRING_TABLE["guild_boss_max_add_num"]);
+	m_numLabel->setString(STRING_TABLE["add_drop_num"]);
+	m_priceLabel->setString(STRING_TABLE["add_drop_contribute"]);
+	setChangeIcon("buysetui_gongxian");
+}

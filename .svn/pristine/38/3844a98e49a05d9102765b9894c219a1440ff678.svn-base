@@ -1,0 +1,2646 @@
+#include "NPCTalkUi.h"
+#include "CfgReader.h"
+#include "CmdAdapter.h"
+#include "BaseDefine.h"
+#include "World.h"
+#include "TaskTraceUi.h"
+#include "UiManager.h"
+#include "SQLCommand.h"
+#include "DBMgr.h"
+#include "ItemNode.h"
+#include "NewPlayerGuide.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "UiResourceMgr.h"
+#include "UiTools.h"
+#include "PackageManager.h"
+#include "RoleEquipUi.h"
+#include "TCPClient.h"
+#include "RemoteRoleStateMgr.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "NpcduihuanUi.h"
+#include "QuestMgr.h"
+#include "Auto_ActionMgr.h"
+#include "NumericalIniMgr.h"
+#include "Attres.h"
+#include "ExchangeBusinessMgr.h"
+#include "VIPMgr.h"
+#include "ActivityMgr.h"
+#include "InstanceMgr.h"
+#include "TransmitMgr.h"
+#include "HuoDongFuBenUi.h"
+#include "ItemTip.h"
+#include "EquipTipUi.h"
+#include "Helper.h"
+#include "MysteryShop.h"
+#include "PackageManager.h"
+#include "ExchangeMgr.h"
+#include "UiLoader.h"
+#include "NewPlayerGuide.h"
+#include "Helper.h"
+#include "FMBManager.h"
+#include "f_zhuzai_mgr.h"
+#include "GuildMgr.h"
+#include "LocalPlayer.h"
+#include "f_string_util.h"
+#include "GuildPublishUi.h"
+#include "WorldLevelMgr.h"
+bool NPCTalkUi::init()
+{
+	_npcName = NULL;
+	_finishedBtn = NULL;
+	_acceptBtn = NULL;
+	_contentView = NULL;
+//	_taskScr = NULL;
+	_container = NULL;
+//	_taskContainerNode = NULL;
+	_frame = NULL;
+	_portraitSp = NULL;
+	_talkBgSp = NULL;
+	_taskBgSp = NULL;
+	_content = NULL;
+	_taskContentLayer = NULL;
+	m_lingQuButton = NULL;
+	m_duoBeiButton = NULL;
+	m_duoBeiSprite = NULL;
+	_tag = 0;
+	_itemSpace = 20.0f;
+	_selectId = -1;
+	_finishedBtnShow = false;
+	_show = true;
+	m_bTask = false;
+	_tempRoleID = 0;
+	recordTaskId = 0;
+	_selectIndex = -1;
+	if(!CCLayer::init())
+		return false;
+
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("NPCUiLayer", NPCTalkUiLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode * node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "npcui.ccbi").c_str());
+
+	std::set<std::string>& resList = ccbReader->getLoadedSpriteSheet();
+	_plist = resList;
+	//CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	ccbReader->release();
+	//setPosition(winSize.width/2,winSize.height/2);
+	if(node != NULL) 
+	{
+		addChild(node);
+
+		UiMgr::getInstance()->setNodeCenter(node);
+		//CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+		//node->setPositionX(-winSize.width);
+		//node->setPositionX(node->getPositionX() + UiMgr::getInstance()->getOffsetX());
+		//node->setPositionY(node->getPositionY() + UiMgr::getInstance()->getOffsetY());
+		_layer=static_cast<CCLayer*>(node->getChildByTag(0));
+		_frame = static_cast<CCSprite*>(_layer->getChildByTag(NTT_CONTENTBG));
+		_portraitSp = dynamic_cast<CCSprite*>(_frame->getChildByTag(NTT_PORTRAIT));
+		_npcName = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_layer->getChildByTag(NTT_NPCNAME)));
+		_acceptBtn = static_cast<CCControlButton*>(_layer->getChildByTag(NTT_ACCEPTBTN));
+		_finishedBtn = static_cast<CCControlButton*>(_layer->getChildByTag(NTT_FINISHBTN));
+		//一键完成任务，双倍完成任务
+		_oneKeyCompleteTask = static_cast<CCControlButton*>(_layer->getChildByTag(NTT_ONEKEYCOMPLATETASK));
+		_doubleCompleteTask = static_cast<CCControlButton*>(_layer->getChildByTag(NTT_DOUBLECOMPLATETASK));
+		_acceptTask = static_cast<CCControlButton*>(_layer->getChildByTag(NTT_ACCEPTTASK));
+		finishJunxu = dynamic_cast<CCSprite*>(_layer->getChildByTag(100));
+		finishJunxu ->setVisible(true);
+		_talkBgSp = dynamic_cast<CCSprite*>(_frame->getChildByTag(NTT_TALKBG));
+		_talkBgSp->setZOrder(_frame->getZOrder()+2);
+		_taskBgSp = dynamic_cast<CCSprite*>(_frame->getChildByTag(NTT_TASKBG));
+		_taskBgSp->setZOrder(_frame->getZOrder()+2);								//为了NPC肖像显示
+		_content = static_cast<CCLayer*>(_talkBgSp->getChildByTag(NTT_CONTENT));
+		_taskContentLayer = dynamic_cast<CCLayer*>(_taskBgSp->getChildByTag(NTT_CONTENT));
+		_taskNameLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_taskBgSp->getChildByTag(NTT_TASKNAME)));
+		_taskGoalLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_taskBgSp->getChildByTag(NTT_TASKGOAL)));
+		_taskDesLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_taskBgSp->getChildByTag(NTT_TASKDES)));
+		_taskDesLabel->setDimensions(_taskContentLayer->getContentSize().width,0.0f);
+		_fubenNode = dynamic_cast<CCNode*>(_layer->getChildByTag(NTT_FUBENNODE));
+		_fubenNode->setZOrder(100);
+		_fubenOneLockSp = dynamic_cast<CCSprite*>(_fubenNode->getChildByTag(NTT_FUBENLOCKONE));
+		_fubenTwoLockSp = dynamic_cast<CCSprite*>(_fubenNode->getChildByTag(NTT_FUBENLOCKTWO));
+		_fubenThreeLockSp = dynamic_cast<CCSprite*>(_fubenNode->getChildByTag(NTT_FUBENLOCKTHREE));
+		_fubenOneBtn = dynamic_cast<CCControlButton*>(_fubenNode->getChildByTag(NTT_FUBEN_BTN_ONE));
+		_fubenTwoBtn = dynamic_cast<CCControlButton*>(_fubenNode->getChildByTag(NTT_FUBEN_BTN_TWO));
+		_fubenThreeBtn = dynamic_cast<CCControlButton*>(_fubenNode->getChildByTag(NTT_FUBEN_BTN_THREE));
+//		btnEffect = node->getChildByTag(8);//按钮特效的坐标node
+		CC_ASSERT(_npcName != NULL && _acceptBtn != NULL && _finishedBtn != NULL && _content != NULL && _frame != NULL && _portraitSp != NULL);
+
+		_contentView = CCScrollView::create(_content->getContentSize());
+//		_taskScr = CCScrollView::create(_taskContentLayer->getContentSize());
+		_content->addChild(_contentView);
+//		_taskContentLayer->addChild(_taskScr);
+
+		_container = CCNode::create();
+		_container->setZOrder(_talkBgSp->getZOrder()+1);
+		_container->setContentSize(_content->getContentSize());
+		_contentView->setContainer(_container);
+		_contentView->setTouchEnabled(true);
+		_contentView->setBounceable(true);
+		_contentView->setContentSize(_container->getContentSize());
+		_contentView->setDirection(kCCScrollViewDirectionVertical);
+		_contentView->setContentOffset(_contentView->minContainerOffset());
+		_container->set_enable_rect(false);
+		std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+		std::string sSESurround = sSEDir + "E1_39.plist";
+		//std::string sSEBtn = sSEDir + "renwuyindao.plist";
+		_plist.insert(sSESurround);
+		//_plist.insert(sSEBtn);
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSESurround.c_str());
+		//CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEBtn.c_str());
+
+		UiResourceMgr::getInstance()->retainPlistFile(_plist);
+
+		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1,true);
+
+		//创建缓存label
+		TTFConfig cfg;
+		cfg.fontFilePath = FT_FONTFACE;
+		cfg.fontSize = 16;
+		cfg.outlineSize =1;
+		for(int i = 0; i < 20; i ++)
+		{
+			LabelFT *label = LabelFT::createWithTTF(cfg,"");
+			_textCache.push_back(label);
+			label->retain();
+		}
+
+		//创建一个选择条
+		//CC_ASSERT(selectSprite == NULL);
+
+// 		selectSprite=CCSprite::create();
+// 		CCSpriteFrame *frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("npcui_xuanzhong");
+// 		CC_ASSERT(frame!=NULL);
+// 		selectSprite->setDisplayFrame(frame);
+// 		selectSprite->setVisible(false);
+// 		_container->addChild(selectSprite,1);
+
+		//[bing] 当NPC界面打开时关闭背包界面 避免新手引导卡住
+		CLOSE_UI(WCT_PACKAGEUI);
+
+		//_btnAcNode = this->getBtnSuperEffect();
+		//_btnAcNode->setPosition(node->getChildByTag(NTT_BTNSEPOS)->getPosition());
+		//node->addChild(_btnAcNode, RZN_EFFECT);
+
+		m_one_key_exp_beishu_bottom_icon = dynamic_cast<CCSprite*>(_layer->getChildByTag(NTT_ONE_KEY_FINISH_ICON));
+		m_finish_all_exp_beishu_bottom_icon = dynamic_cast<CCSprite*>(_layer->getChildByTag(NTT_FINISH_ALL_ICON));
+		if(m_one_key_exp_beishu_bottom_icon != NULL)
+		{
+			m_one_key_exp_beishu_bottom_icon->setVisible(false);
+		}
+		if(m_finish_all_exp_beishu_bottom_icon)
+		{
+			m_finish_all_exp_beishu_bottom_icon->setVisible(false);
+		}
+
+		m_zhuzai_node = _layer->getChildByTag(800);
+		CC_ASSERT(m_zhuzai_node);
+		m_zhuzai_node->setVisible(false);
+
+		Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_zhuzai_node->getChildByTag(4)));
+		m_call_title = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_zhuzai_node->getChildByTag(2)));
+		CC_ASSERT(m_call_title);
+		m_call_num = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_zhuzai_node->getChildByTag(3)));
+		CC_ASSERT(m_call_num);
+		m_player_num = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_zhuzai_node->getChildByTag(1)));
+		CC_ASSERT(m_player_num);
+
+		m_lingQuButton = dynamic_cast<CCControlButton*>(_layer->getChildByTag(NTT_LINGQUBUTTON));
+		CC_ASSERT(m_lingQuButton);
+		m_duoBeiButton = dynamic_cast<CCControlButton*>(_layer->getChildByTag(NTT_DUOBEIBUTTON));
+		CC_ASSERT(m_duoBeiButton);
+		m_duoBeiSprite = dynamic_cast<CCSprite*>(_layer->getChildByTag(NTT_DUOBEISPRITE));
+		CC_ASSERT(m_duoBeiSprite);
+
+		return true;
+	}
+	return false;
+}
+
+LabelFT * NPCTalkUi::getLabelFromCache()
+{
+	if (_textCache.empty())
+	{
+		return NULL;
+	}
+
+	LabelFT *label = _textCache.front();
+	_textCache.pop_front();
+
+	return label;
+
+// 	TextCache::iterator iter = _textCache.begin();
+// 	if(iter != _textCache.end())
+// 	{
+// 		LabelFT *label = *iter;
+// 		_textCache.pop_front();
+// 		return label;
+// 	}
+// 	return NULL;
+}
+
+void NPCTalkUi::addLabelToCache( LabelFT *label )
+{
+	CC_ASSERT(label != NULL);
+	_textCache.push_back(label);
+}
+
+void NPCTalkUi::clearLabelCache()
+{
+	for(TextCache::iterator iter = _textCache.begin(); iter != _textCache.end(); ++ iter)
+	{
+		(*iter)->release();
+	}
+	_textCache.clear();
+}
+
+void NPCTalkUi::onExit()
+{
+	clear();
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+	_plist.clear();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+	clearLabelCache();
+
+	UNREGISTER_EVENT(refresh_zhuzai_info,NPCTalkUi,on_event_refersh_zhuzai_info);
+}
+
+void NPCTalkUi::setTitle( const char *name )
+{
+	_npcName->setString(name);
+}
+
+void NPCTalkUi::setTitle( const wchar_t *name )
+{
+	char NPCName[128];
+	memset(NPCName, 0, sizeof(char) * 128);
+	Utf16ToUtf8(name, NPCName, 128, 0);
+	setTitle(NPCName);
+}
+
+void NPCTalkUi::updateList()
+{
+	if (m_bTask )
+	{
+// 		float height = 0.0;
+// 		for(TaskList::iterator iter = _tasks.begin(); iter != _tasks.end(); ++ iter)
+// 		{
+// 			const TaskListData &data = *iter;
+// 			height += data.viewHieght;
+// 		}
+// 		height += (_tasks.size() - 1) * _itemSpace;
+// 
+// 		if(height < _taskContentLayer->getContentSize().height)
+// 			height = _taskContentLayer->getContentSize().height;
+// 		_taskContainerNode->setContentSize(CCSize(_taskContentLayer->getContentSize().width, height));
+// 		float height2 = height;
+// 		for(TaskList::iterator iter = _tasks.begin(); iter != _tasks.end(); ++ iter)
+// 		{
+// 			const TaskListData &data = *iter;
+// 			CCNode *node = _taskContainerNode->getChildByTag(data.tag);
+// 			CC_ASSERT(node != NULL);
+// 			node->setPosition(ccp(0.0f, height2));
+// 			node->setZOrder(_npcName->getZOrder()+1);
+// 			height2 -= (data.viewHieght + _itemSpace);
+// 		}
+// 
+// 		_taskScr->setContentOffset(_taskScr->minContainerOffset());
+	}
+	else
+	{
+		//得到全部高度
+		float height = 0.0;
+		int itemCount = _tasks.size();
+		for(TaskList::iterator questItem = _tasks.begin(); questItem != _tasks.end(); ++questItem)
+		{
+			height += questItem->viewHieght;
+		}
+		height += itemCount * _itemSpace;
+
+		if(height < _content->getContentSize().height)
+			height = _content->getContentSize().height;
+
+		float setHeight = height;
+		for(TaskList::iterator iter = _tasks.begin(); iter != _tasks.end(); ++ iter)
+		{
+			const TaskListData &data = *iter;
+			CCNode *node = _container->getChildByTag(data.tag);
+			CC_ASSERT(node != NULL);
+			node->setZOrder(_npcName->getZOrder() + 1);
+			if(data.textType == TEXTT_NORMAL)
+			{
+				node->setPosition(ccp(0.0f, height));
+				setHeight = setHeight - data.viewHieght - _itemSpace / 2;
+			}
+			else
+			{
+				node->setPosition(ccp(0.0f, setHeight));
+				setHeight = setHeight - data.viewHieght - _itemSpace;
+			}
+		}
+		_container->setContentSize(CCSize(_content->getContentSize().width, height));
+		_contentView->setContentSize(_container->getContentSize());
+		_contentView->setContentOffset(_contentView->minContainerOffset());
+	}
+}
+
+void NPCTalkUi::updateVisableContent()
+{
+	if (m_bTask)
+	{
+		_taskBgSp->setVisible(true);
+		_talkBgSp->setVisible(false);
+	}
+	else
+	{
+		_taskBgSp->setVisible(false);
+		_talkBgSp->setVisible(true);
+	}
+}
+
+void NPCTalkUi::setText( const char *text )
+{
+	if(m_bTask)
+	{
+		return;
+	}
+	else
+	{
+		TaskList::iterator it = _tasks.begin();
+		if(it != _tasks.end())
+		{
+			TaskListData taskData = *it;
+			if(taskData.textType == TEXTT_NORMAL)
+			{//已经包含有文字，重新设置
+				//			CCLabelTTF *label;
+				// 			if (m_bTask)
+				// 			{
+				// 				label = static_cast<CCLabelTTF*>(_taskContainerNode->getChildByTag(taskData.tag));
+				// 			}
+				// 			else
+				// 			{
+				LabelFT *label = static_cast<LabelFT*>(_container->getChildByTag(taskData.tag));
+				//			}
+				CC_ASSERT(label != NULL);
+				ccColor3B color;
+				color.r = 0xfe;
+				color.g = 0xf8;
+				color.b = 0xd8;
+				label->setTextColor(Helper::converColor3B_2_4B(color));
+				label->setString(text);
+				taskData.viewHieght = label->getContentSize().height + 20.f;
+				_tasks.pop_front();
+				_tasks.push_front(taskData);
+				updateList();
+				return;
+			}
+		}
+
+		//新建label
+		TaskListData data;
+		LabelFT *label = getLabelFromCache();
+		if(label != NULL)
+		{
+			ccColor3B color;
+			color.r = 0xfe;
+			color.g = 0xf8;
+			color.b = 0xd8;
+			label->setTextColor(Helper::converColor3B_2_4B(color));
+			//label->setFontSize(16);
+			// 		if (m_bTask)
+			// 		{
+			// 			label->setDimensions(CCSize(_taskContentLayer->getContentSize().width, 0));
+			// 		}
+			// 		else
+			// 		{
+			label->setDimensions(_content->getContentSize().width, 0);
+			//		}
+			label->setString(text);
+			label->setAnchorPoint(ccp(0.0f, 1.0f));
+			label->setTag(_tag);
+			data.tag = _tag++;
+			data.textType = TEXTT_NORMAL;
+			data.viewHieght = label->getContentSize().height;
+			//_tag ++;
+			_tasks.push_front(data);
+			_twintasks.push_front(data);
+			// 		if ( m_bTask)
+			// 		{
+			// 			_taskContainerNode->addChild(label);
+			// 		}
+			// 		else
+			// 		{
+			_container->addChild(label);
+			//		}
+			updateList();
+		}
+	}
+	
+}
+
+void NPCTalkUi::setPortrait( const char* text )
+{
+	CCString* portraitStr = CCString::createWithFormat("Art/Portrait/%s.png",text);
+	_portraitSp->initWithFile(portraitStr->getCString());
+	_portraitSp->setAnchorPoint(ccp(0.0f,0.5f));
+	_portraitSp->setZOrder(_taskBgSp->getZOrder()-1);
+}
+
+void NPCTalkUi::setTaskAward(int index, eNPCTalkTag eType, int detailData ,int num/*默认为1*/)
+{
+	if (_taskBgSp->getChildByTag(index) == NULL)
+	{
+		return;
+	}
+	CCString* amountStr = NULL;
+	if (detailData > 100000 && eType == eNT_AMOUNT)
+	{
+		detailData = detailData / 10000;
+		amountStr = CCString::createWithFormat("%d%s", detailData , GET_STR(9033).c_str());
+	}else
+	{
+		amountStr = CCString::createWithFormat("%d", detailData);
+	}
+	if(1 == index || 2 == index)
+	{
+		GameActionNode* surroundAcNode = dynamic_cast<GameActionNode*>(_taskBgSp->getChildByTag(NTT_AWARDITEM + index));
+		if(surroundAcNode == NULL)
+		{
+			surroundAcNode = PackageManager::getInstance()->getSurrundSuperEffect();
+			surroundAcNode->setPosition(_taskBgSp->getChildByTag(index)->getPosition());
+			_taskBgSp->addChild(surroundAcNode);
+			surroundAcNode->setTag(NTT_AWARDITEM + index);
+			surroundAcNode->BeginAction(0.12f, true);
+		}
+	}
+	switch (eType)
+	{
+	case eNT_AMOUNT:
+		{
+			dynamic_cast<LabelFT*>(_taskBgSp->getChildByTag(index)->getChildByTag(NTT_AWARDLABEL))->setString(amountStr->getCString());
+			ItemNode* itemNode = dynamic_cast<ItemNode*>(_taskBgSp->getChildByTag(index)->getChildByTag(NTT_AWARDITEM + index));
+			if (itemNode != NULL)
+			{
+				switch(index)
+				{
+				case 1:
+					itemNode->setDataId(EXPITEMID);
+					break;
+				case 2:
+					itemNode->setDataId(JBITEMIDBIG);
+					break;
+				default:
+					break;
+				}
+			}
+		}
+		break;
+
+	case eNT_ITEMID:
+		if (0 == detailData)
+		{
+			_taskBgSp->getChildByTag(index)->setVisible(false);
+			break;
+		}
+		if (num > 100000 )
+		{
+			int countNum = num / 10000;
+			amountStr = CCString::createWithFormat("%d%s", countNum , GET_STR(9033).c_str());
+		}else
+		{
+			amountStr = CCString::createWithFormat("%d", num);
+		}
+		ItemNode* itemNode = dynamic_cast<ItemNode*>(_taskBgSp->getChildByTag(index)->getChildByTag(NTT_AWARDITEM + index));
+		if(itemNode == NULL)
+		{
+			itemNode = ItemNode::create();
+			_taskBgSp->getChildByTag(index)->addChild(itemNode);
+			itemNode->setPosition(ccp(0.0f,0.0f));
+			itemNode->getSurroundSE("E1_39");
+			itemNode->setTag(NTT_AWARDITEM + index);
+			itemNode->hideItemOpBtn();
+		}
+		itemNode->setDataId(detailData);
+		LabelFT* numLabel = dynamic_cast<LabelFT*>(_taskBgSp->getChildByTag(index)->getChildByTag(NTT_AWARDLABEL));
+		if (num>1)
+		{
+			numLabel->setVisible(true);
+			numLabel->setString(amountStr->getCString());
+			numLabel->setZOrder(itemNode->getZOrder()+1);
+			itemNode->setClickable(false);
+		}
+		else
+		{
+			numLabel->setVisible(false);
+			itemNode->setClickable(true);
+		}
+		//itemNode->setNum(num);
+		if (!_taskBgSp->getChildByTag(index)->isVisible())
+		{
+			_taskBgSp->getChildByTag(index)->setVisible(true);
+			itemNode->enableSurroundSE();
+		}
+			
+		break;
+	}
+}
+void NPCTalkUi::setJingYanBeishushow(bool isShow)
+{
+	if(m_one_key_exp_beishu_bottom_icon != NULL)
+	{
+		m_one_key_exp_beishu_bottom_icon->setVisible(isShow);
+	}
+	if(m_finish_all_exp_beishu_bottom_icon != NULL)
+	{
+		m_finish_all_exp_beishu_bottom_icon->setVisible(isShow);
+	}
+	
+}
+void NPCTalkUi::setFinishAward(unsigned short questID,bool isShow,const char* strName){
+	ItemNode* itemNode = dynamic_cast<ItemNode*>(_taskBgSp->getChildByTag(4)->getChildByTag(NTT_AWARDITEM + 4));
+	LabelFT* numLabel = dynamic_cast<LabelFT*>(_taskBgSp->getChildByTag(4)->getChildByTag(NTT_AWARDLABEL));
+	if (numLabel)
+	{
+		numLabel->setVisible(false);
+	}
+	if(itemNode == NULL)
+	{
+		itemNode = ItemNode::create();
+		_taskBgSp->getChildByTag(4)->addChild(itemNode);
+		itemNode->setPosition(ccp(0.0f,0.0f));
+		itemNode->getSurroundSE("E1_39");
+		itemNode->setTag(NTT_AWARDITEM + 4);
+	}
+	finishJunxu->initWithSpriteFrameName(strName);
+	if (!_taskBgSp->getChildByTag(4)->isVisible())
+	{
+		itemNode->enableSurroundSE();
+		_taskBgSp->getChildByTag(4)->setVisible(true);
+	}
+
+	//LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if(((questID > 500 && questID < 1000) || (questID > 2000 && questID <=3000))&& isShow)
+	{
+		itemNode->setVisible(true);
+		finishJunxu->setVisible(true);
+	//	_taskBgSp->getChildByTag(4)->setVisible(true);
+	}
+	else
+	{
+		itemNode->setVisible(false);
+		finishJunxu->setVisible(false);
+	//	_taskBgSp->getChildByTag(4)->setVisible(false);
+	}
+
+	int rewardItemId = 0;
+	int rewardItemNumber = 0;
+
+	QuestMgr::getInstance()->get_junxu_reward(questID,rewardItemId,rewardItemNumber);
+
+	itemNode->setDataId(rewardItemId);
+	itemNode->setNum(rewardItemNumber);
+	itemNode->setClickable(true);
+	itemNode->hideItemOpBtn();
+}
+
+const static INT APPEND_SP = 100000;
+const static INT APPEND_LB = 100001;
+
+void NPCTalkUi::appendDaJiangItem(unsigned int _taskId, const char *text, bool mainTask, bool isFinished, eTextType textType /* = TEXTT_TASK */)
+{	
+	recordTaskId = _taskId;
+	//_contentView->setDirection(kCCScrollViewDirectionHorizontal);
+	_contentView->setBounceable(false);
+	_contentView->setVisible(true);	
+
+	_fubenNode->setVisible(true);
+	CCSprite* selectSp = dynamic_cast<CCSprite*>(_fubenNode->getChildByTag(NTT_FUBEN_SELECT));
+	if (selectSp)
+	{
+		selectSp->setVisible(false);
+	}
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if (player == NULL)
+		return;
+	int level = InstanceMgr::getInstance()->getFubenLevle(FIRE_MASSACRE_MAP_1);
+	if (player->getLevel() < level)
+	{
+		//_fubenOneBtn->setTouchEnabled(false);
+		_fubenOneBtn->setEnabled(false);
+		_fubenOneLockSp->setVisible(true);
+	}
+	else
+	{
+		//_fubenOneBtn->setTouchEnabled(true);
+		_fubenOneBtn->setEnabled(true);
+		_fubenOneLockSp->setVisible(false);
+	}
+	level = InstanceMgr::getInstance()->getFubenLevle(GUARD_CUSTOMS_MAP);
+	if (player->getLevel() < level)
+	{
+		//_fubenTwoBtn->setTouchEnabled(false);
+		_fubenTwoBtn->setEnabled(false);
+		_fubenTwoLockSp->setVisible(true);
+	}
+	else
+	{
+		//_fubenTwoBtn->setTouchEnabled(true);
+		_fubenTwoBtn->setEnabled(true);
+		_fubenTwoLockSp->setVisible(false);
+	}
+	level = InstanceMgr::getInstance()->getFubenLevle(UNDERGROUND_PALACE_MAP);
+	if (player->getLevel() < level)
+	{
+		//_fubenThreeBtn->setTouchEnabled(false);
+		_fubenThreeBtn->setEnabled(false);
+		_fubenThreeLockSp->setVisible(true);
+	}
+	else
+	{
+		//_fubenThreeBtn->setTouchEnabled(true);
+		_fubenThreeBtn->setEnabled(true);
+		_fubenThreeLockSp->setVisible(false);
+	}
+
+	NewPlayerGuider::getInstance()->onClickDevil();
+}
+
+void NPCTalkUi::appendItem( unsigned short taskId, const char *text, bool mainTask, bool isFinished, eTextType textType /*= TEXTT_TASK*/, bool needShowSelect /*= true*/ )
+{
+	_contentView->setBounceable(true);
+	TaskListData data;
+	LabelFT *label_P = getLabelFromCache();
+	if(label_P != NULL)
+	{
+		CCSpriteFrame *frame=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("npcui_dianji");
+		CCSprite *click = CCSprite::create();
+		click->setAnchorPoint(ccp(0,1));
+		click->setPositionX(2);
+		click->setDisplayFrame(frame);
+		label_P->addChild(click,0,APPEND_SP);
+
+		TTFConfig cfg;
+		cfg.fontFilePath= FT_FONTFACE;
+		cfg.fontSize = 16;
+		cfg.outlineSize = 1;
+
+		LabelFT *label = LabelFT::createWithTTF(cfg,text);
+		//label->setFontSize(16);
+		label->setDimensions(_content->getContentSize().width, 0);
+		//label->setString(text);
+		label->setAnchorPoint(ccp(0.0f, 1.0f));
+		ccColor3B color;
+		color.r = 0xc4;
+		color.g = 0xfc;
+		color.b = 0x02;
+		label->setTextColor(Helper::converColor3B_2_4B(color));
+		label->setPositionX(click->getContentSize().width+10);
+		click->setPositionY(label->getPositionY());
+
+		label_P->addChild(label,0,APPEND_LB);
+		//float width = click->getContentSize().width + label->getContentSize().width;
+		float height = click->getContentSize().height;
+		label_P->setDimensions(200,height);
+		label_P->setAnchorPoint(ccp(0,0));
+
+		if (needShowSelect)
+		{
+			CCSpriteFrame *selectFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("npcui_xuanzhongbtnn");
+			CC_ASSERT(selectFrame!=NULL);
+			if (selectFrame)
+			{
+				CCSprite* selectSprite = CCSprite::create();
+				selectSprite->setDisplayFrame(selectFrame);
+				selectSprite->setTag(NTT_SELECTTag);
+				selectSprite->setAnchorPoint(ccp(0.0f,0.5f));
+				selectSprite->setPositionY(- label->getContentSize().height/2);
+				label_P->addChild(selectSprite,-1);
+			}
+		}
+
+		_container->addChild(label_P,0,_tag);
+
+		data.tag = _tag;
+		//data.viewHieght = label_P->getContentSize().height;
+		data.viewHieght = height;
+		data.id = taskId;
+		_tag ++;
+		data.textType = textType;
+		if (textType==TEXTT_SBK && taskId!=6 && taskId!=7)
+		{
+			CC_ASSERT(click!=NULL);
+			click->setVisible(false);
+			label->setPositionX(0);
+			label->setTextColor(Helper::converColor3B_2_4B(ccc3(255,255,255)));
+		}
+		if(isFinished)
+			data.taskState = TASKS_FINISHED;
+		else
+			data.taskState = TASKS_CANACCEPT;
+
+		bool insert = false;
+		if(mainTask)
+		{
+			data.taskType = TASKT_MAIN;
+			for(TaskList::iterator iter = _tasks.begin(); iter != _tasks.end(); ++ iter)
+			{
+				const TaskListData &taskData = *iter;
+				if(taskData.textType == TEXTT_TASK)
+				{
+					_tasks.insert(iter, data);
+					insert = true;  
+					break;
+				}
+			}
+		}
+		else
+		{
+			data.taskType = TASKT_BRANCH;
+			_tasks.push_back(data);
+			insert = true;
+		}
+
+		if(!insert)
+			_tasks.push_back(data);
+
+		updateList();
+	}
+}
+
+void NPCTalkUi::insertItem( int index, const char *text, bool mainTask, bool isFinished )
+{
+
+}
+
+/*
+void NPCTalkUi::erase( int index )
+{
+// 	if (m_bTask)
+// 	{
+// 		for(TaskList::iterator iter = _tasks.begin(); iter != _tasks.end();)
+// 		{
+// 			const TaskListData &data = *iter;
+// 			if(data.id == index)
+// 			{
+// 				CCLabelTTF *label = (CCLabelTTF*)_taskContainerNode->getChildByTag(data.tag);
+// 				addLabelToCache(label);
+// 				label->removeFromParent();
+// 				_tasks.erase(iter ++);
+// 			}
+// 			else
+// 			{
+// 				++ iter;
+// 			}
+// 		}
+// 	}
+// 	else
+// 	{
+		for(TaskList::iterator iter = _tasks.begin(); iter != _tasks.end();)
+		{
+			const TaskListData &data = *iter;
+			if(data.id == index)
+			{
+				LabelFT *label = (LabelFT*)_container->getChildByTag(data.tag);
+				addLabelToCache(label);
+				label->removeFromParent();
+				_tasks.erase(iter ++);
+			}
+			else
+			{
+				++ iter;
+			}
+		}
+//	}
+	updateList();
+}
+*/
+
+bool NPCTalkUi::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (!isVisible())
+	{
+		return false;
+	}
+	//点击在frame上，返回ture
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if (isVisible() && _frame->isVisible())
+	{
+		if(frameRect.containsPoint(framePoint))
+		{
+			_beginTouch = framePoint;
+
+			if (!m_bTask)
+			{
+				CCPoint point = _container->convertTouchToNodeSpace(pTouch);
+				TaskListData data = getItemUnderPoint(point);
+// 				if(data.textType == TEXTT_INSTANCE && recordTaskId != 1007001)
+// 				{
+// 					if(selectSprite)
+// 					{
+// 						selectSprite->setPosition(ccp(_container->getChildByTag(data.tag)->getPositionX()+NpcSpriteX,_container->getChildByTag(data.tag)->getPositionY()-NpcSpriteY));
+// 						selectSprite->setVisible(true);			
+// 					}
+// 					setSelectSprite(data);
+// 				}
+				if (TEXTT_SHOP  == data.textType)
+				{
+					if(data.id == 12)
+					{
+						if(PackageManager::getInstance()->GetIsGemOpen()>=1)
+						{
+							OPEN_UI(WCT_MysteryShopUi);
+							MysteryShopUi* ui = GET_UI(MysteryShopUi, WCT_MysteryShopUi);
+							if(ui != NULL)
+							{
+								ui->IsMysteryShop(false);
+							}
+						}
+						else
+						{
+							ToolTip::getInstance()->push(GET_STR(9513));
+						}
+
+						return true;
+					}
+					if(data.id == 11)
+					{
+						if(PackageManager::getInstance()->GetIsOpen()>=1)
+						{
+							OPEN_UI(WCT_MysteryShopUi);
+							MysteryShopUi* ui = GET_UI(MysteryShopUi, WCT_MysteryShopUi);
+							if(ui != NULL)
+							{
+								ui->IsMysteryShop(true);
+							}
+						}
+						else
+						{
+							ToolTip::getInstance()->push(GET_STR(9513));
+						}
+						return true;
+					}
+				}
+				if (recordTaskId != 1007001)
+				{
+					if (TEXTT_SBK == data.textType || TEXTT_NORMAL == data.textType || TEXTT_SHOP == data.textType || TEXTT_INSTANCE == data.textType 
+						|| TEXTT_SBK == data.textType || TEXTT_DARONGLU == data.textType || TEXTT_DUIHUAN == data.textType)
+					{
+						setSelectSprite(data);
+					}
+				}
+			}
+
+			return true;
+		}
+	}
+	return false;
+}
+
+void NPCTalkUi::autoSelect( unsigned short id )
+{
+	TaskListData data = getItemByID(id);
+	if(data.textType == TEXTT_TASK)
+	{
+		if(data.taskState == TASKS_FINISHED)
+		{
+			_acceptBtn->setVisible(false);
+			_finishedBtn->setVisible(true);
+			_finishedBtnShow = true;
+		}
+		else if(data.taskState == TASKS_CANACCEPT)
+		{
+			_acceptBtn->setVisible(true);
+			_finishedBtn->setVisible(false);
+			_finishedBtnShow = false;
+		}
+		_selectId = data.id;
+		signalSelectItem.emit(_selectId);
+	}
+}
+
+void NPCTalkUi::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		if(ccpDistance(_beginTouch, framePoint) < TOUCH_MOVE_DIS)
+		{
+			//查找在container上点击的位置
+			CCPoint contentPoint = _content->convertTouchToNodeSpace(pTouch);
+			const CCSize &contentSize = _content->getContentSize();
+			CCRect contentRect(0.0f, 0.0f, contentSize.width, contentSize.height);
+			if(contentRect.containsPoint(contentPoint))
+			{
+				CCPoint point;
+				if (m_bTask)
+				{
+//					point = _taskContainerNode->convertTouchToNodeSpace(pTouch);
+				}
+				else
+				{
+					point = _container->convertTouchToNodeSpace(pTouch);
+				}
+// 				ItemNode* itemNode = dynamic_cast<ItemNode*>(_taskBgSp->getChildByTag(4)->getChildByTag(NTT_AWARDITEM + 4));
+// 				if(itemNode&&_taskBgSp->getChildByTag(4)->isVisible()&&_taskBgSp->isVisible()){
+// 					CCPoint itemPoint = itemNode->convertTouchToNodeSpace(pTouch);
+// 					const CCSize &itemSize = itemNode->getContentSize();
+// 					CCRect itemRect(0.0f, 0.0f, itemSize.width, itemSize.height);
+// 					if(itemRect.containsPoint(itemPoint)){
+// 						ItemTip::getInstace()->open();
+// 						ItemTip::getInstace()->setDataId(itemNode->GetTypeId());
+// 						ItemTip::getInstace()->setPosition( _taskBgSp->convertToWorldSpace(ccp(itemNode->getPositionX(), itemNode->getPositionY() + itemSize.height * 1.2)));
+// 						ItemTip::getInstace()->hideOpBtn();
+// 					}
+// 				}
+				TaskListData data = getItemUnderPoint(point);
+				if(data.textType == TEXTT_TASK)
+				{
+					if (data.id == GuildMgr::getInstance()->getGuildTaskID())
+					{
+						LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+						if (lp->getLevel()<PUBLISHOPENLEVEL)
+						{
+							ToolTip::getInstance()->push(STRING_TABLE["get_task_level_limit"]);
+							return;
+						}
+						if (data.id == 0)
+						{
+							ToolTip::getInstance()->push(STRING_TABLE["guild_not_task"]);
+							return;
+						}
+					}
+					if(data.taskState == TASKS_FINISHED)
+					{
+						_acceptBtn->setVisible(false);
+						_finishedBtn->setVisible(true);
+						_finishedBtnShow = true;
+					}
+					else if(data.taskState == TASKS_CANACCEPT)
+					{
+						_acceptBtn->setVisible(true);
+						_finishedBtn->setVisible(false);
+						_finishedBtnShow = false;
+					}
+					_selectId = data.id;
+					signalSelectItem.emit(_selectId);
+				}
+				else if (data.textType == TEXTT_SHOP)
+				{
+					if(data.id != 11&&data.id != 12)
+					{
+						_selectId = data.id;
+						signalSelectItemShop.emit(_selectId);
+						show(false);
+						//关闭任务组队界面 避免点穿 //add by XSea 2014.11.07
+						World::getInstance()->getTaskTraceUi()->showUi(false);
+					}
+					
+				}
+				else if (data.textType == TEXTT_DARONGLU)
+				{
+					_selectId = data.id;
+					signalSelectDaronglu.emit(_selectId);
+					show(false);
+					//关闭任务组队界面 避免点穿 //add by XSea 2014.11.07
+					World::getInstance()->getTaskTraceUi()->showUi(false);
+				}
+				else if(data.textType == TEXTT_INSTANCE)
+				{
+					_selectId = data.id;
+					signalSelectItemInstance.emit(_selectId);
+
+					if(QuestMgr::getInstance()->get_cur_active_npc_id() == fmb_enter_npc_id)
+					{
+						show(false);
+					}
+// 					if (recordTaskId != 1007001)
+// 					{
+// 						_container->getChildByTag(NTT_SELECTTag)->setPosition(ccp(_container->getChildByTag(data.tag)->getPositionX()+NpcSpriteX,_container->getChildByTag(data.tag)->getPositionY()-NpcSpriteY));
+// 						_container->getChildByTag(NTT_SELECTTag)->setVisible(true);						
+// 					}
+				}
+				else if (data.textType==TEXTT_DUIHUAN)
+				{
+					show(false);
+					OPEN_UI(WCT_NPCduihuaUi);
+					GET_UI(NPCduihuanUi,WCT_NPCduihuaUi)->setType(data.id);
+					//showUi(false);
+				}
+				else if (data.textType == TEXTT_SBK)
+				{
+					_selectId = data.id;
+					if (data.id == 6)
+					{
+						//围观城主
+						if (_tempRoleID != 0)
+						{
+							GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPlayerId(_tempRoleID);
+							RemoteRoleStateMgr::getInstance()->RefreshRemoteRoleAllInfo(_tempRoleID);
+						}
+						else
+						{
+							ToolTip::getInstance()->push("\xE5\xBD\x93\xE5\x89\x8D\xE6\xB2\x99\xE5\xB7\xB4\xE5\x85\x8B\xE5\x9F\x8E\xE6\xB2\xA1\xE6\x9C\x89\xE8\xA1\x8C\xE4\xBC\x9A\xE5\x8D\xA0\xE9\xA2\x86\xEF\xBC\x8C\xE4\xB8\x8D\xE8\x83\xBD\xE5\x9B\xB4\xE8\xA7\x82\xE5\x9F\x8E\xE4\xB8\xBB");
+						}
+					}
+					else if (data.id == 7)
+					{
+						//领取祝福
+						if (_tempRoleID != 0)
+						{
+							NET_SIC_SBK_Get_blessing cmd;
+							TCP_CLIENT->send_net_cmd(&cmd, NP_NORMAL, false);
+						}
+						else
+							ToolTip::getInstance()->push(GET_STR(7166));
+					}
+				}
+			}
+		}
+	}
+}
+
+CCRect NPCTalkUi::getItemByIdx(int nIdx)
+{
+	int nSelIdx = 0;
+	for(TaskList::iterator iter = _tasks.begin(); iter != _tasks.end(); ++ iter)
+	{
+		const TaskListData &data = *iter;
+		//[bing] 如果是TEXTT_NORMAL不计算 只找可选项
+		if(data.textType == TEXTT_NORMAL)
+			continue;
+
+		if(nSelIdx++ != nIdx)
+			continue;
+
+//		CCNode *node;
+// 		if ( m_bTask)
+// 		{
+// 			node = _taskContainerNode->getChildByTag(data.tag);
+// 		}
+// 		else
+// 		{
+		CCNode *node = _container->getChildByTag(data.tag);
+//		}
+		node = node->getChildByTag(APPEND_LB);
+		CC_ASSERT(node != NULL);
+		/*
+		const CCPoint &pos = node->getPosition();
+		const CCSize &size = node->getContentSize();
+		return CCRect(pos.x, pos.y - data.viewHieght, size.width, data.viewHieght);
+		*/
+
+		SetNodeTintTo(node);
+		const CCPoint &pos = node->convertToWorldSpace(ccp(0, 0));
+		const CCSize &size = node->getContentSize();
+		return CCRect(pos.x, pos.y, size.width, size.height);
+	}
+
+	return CCRect();
+}
+
+NPCTalkUi::TaskListData NPCTalkUi::getItemUnderPoint( const CCPoint &point )
+{
+// 	if ( m_bTask)
+// 	{
+// 		for(TaskList::iterator iter = _tasks.begin(); iter != _tasks.end(); ++ iter)
+// 		{
+// 			const TaskListData &data = *iter;
+// 			CCNode *node = _taskContainerNode->getChildByTag(data.tag);
+// 			CC_ASSERT(node != NULL);
+// 			const CCPoint &pos = node->getPosition();
+// 			const CCSize &size = node->getContentSize();
+// 			CCRect itemRect(pos.x, pos.y - data.viewHieght, size.width, data.viewHieght);
+// 			if(itemRect.containsPoint(point))
+// 			{
+// 				return data;
+// 			}
+// 		}
+// 	}
+// 	else
+// 	{
+		for(TaskList::iterator iter = _tasks.begin(); iter != _tasks.end(); ++ iter)
+		{
+			const TaskListData &data = *iter;
+			CCNode *node = _container->getChildByTag(data.tag);
+			CC_ASSERT(node != NULL);
+			const CCPoint &pos = node->getPosition();
+			CCSize size;
+
+			LabelFT* ftLabel = dynamic_cast<LabelFT*>(node);
+			if (ftLabel)
+			{
+				size = ftLabel->getDimensions();
+			}
+			else
+				size = node->getContentSize();
+
+			CCRect itemRect(pos.x, pos.y - data.viewHieght, size.width, data.viewHieght);
+			if(itemRect.containsPoint(point))
+			{
+				return data;
+			}
+		}
+//	}
+
+	return TaskListData();
+}
+
+
+NPCTalkUi::TaskListData NPCTalkUi::getItemByID( unsigned short id )
+{
+	for(TaskList::iterator iter = _tasks.begin(); iter != _tasks.end(); ++ iter)
+	{
+		if(iter->id == id)
+			return *iter;
+	}
+
+	return TaskListData();
+}
+
+
+void NPCTalkUi::clear()
+{
+// 	if (m_bTask)
+// 	{
+// 		for(TaskList::iterator iter = _tasks.begin(); iter != _tasks.end(); ++ iter)
+// 		{
+// 			const TaskListData &data = *iter;
+// 			CCLabelTTF *label = (CCLabelTTF*)_taskContainerNode->getChildByTag(data.tag);
+// 			addLabelToCache(label);
+// 		}
+// 		_taskContainerNode->removeAllChildren();
+// 	}
+// 	else
+// 	{
+	for(TaskList::iterator iter = _tasks.begin(); iter != _tasks.end(); ++ iter)
+	{
+		const TaskListData &data = *iter;
+		LabelFT *label = (LabelFT*)_container->getChildByTag(data.tag);
+
+		label->removeAllChildren();
+		label->removeFromParent();
+// 		CCNode* sp = label->getChildByTag(APPEND_SP);
+// 		if (sp)
+// 		{
+// 			sp->removeFromParentAndCleanup(true);
+// 		}
+// 		CCNode* lb = label->getChildByTag(APPEND_LB);
+// 		if (lb)
+// 		{
+// 			lb->removeFromParentAndCleanup(true);
+// 			label->setContentSize(CCSizeMake(0.f,0.f));
+// 		}
+		label->setString("");
+		addLabelToCache(label);
+	}
+	for(TaskList::iterator iter = _twintasks.begin(); iter != _twintasks.end(); ++ iter)
+	{
+		const TaskListData &data = *iter;
+		if (data.textType == TEXTT_SBK)
+		{
+			LabelFT *label = (LabelFT*)_container->getChildByTag(data.tag);
+			CC_ASSERT(label);
+
+			label->removeAllChildren();
+			label->removeFromParent();
+			label->setString("");
+			addLabelToCache(label);
+		}
+	}
+	//_container->removeAllChildren();
+		
+//	}
+	_tasks.clear();
+	_twintasks.clear();
+	updateList();
+	recordTaskId = 0;
+	_tag =0;
+}
+
+void NPCTalkUi::onAcceptBtnPressed()
+{
+	GuildMgr* guildMgr = GuildMgr::getInstance();
+	if (_selectId == guildMgr->getGuildTaskID())
+	{
+		LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+		if (lp)
+		{
+			if (lp->getLevel() < PUBLISHOPENLEVEL)
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["get_task_level_limit"]);
+				return;
+			}
+			if (lp->getGuildID() <= 0 )
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["guild_miss"]);
+				return;
+			}
+			if (lp->getGetNumber() >= guildMgr->getMaxGetNum())
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["guild_not_get_num"]);
+				return;
+			}
+			if (guildMgr->getGuildTaskMax()<=0)
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["guild_not_enough_mission"]);
+				return;
+			}
+			if (QuestMgr::getInstance()->getGuildQuestState() == QS_GET)
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["guild_task_already_get"]);
+				return;
+			}
+		}
+	}
+	signalAccept.emit(_selectId);
+}
+
+void NPCTalkUi::onFinishedBtnPressed()
+{
+	signalFinished.emit(_selectId);
+}
+
+void NPCTalkUi::show( bool show )
+{
+	bool tmpShow = IS_UI_OPEN(WCT_NPCCHATUI) ? false : show;
+	if (_show == tmpShow)
+		return;
+
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if (lp->getAutoRunState())
+	{
+		lp->setAutoRunState(false);
+	}
+	//CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	_show = tmpShow;
+	if(tmpShow)
+	{
+		setVisible(true);
+		//setPosition(ccp(0.0f, 0.0f));
+		World::getInstance()->getTaskTraceUi()->showUi(false);
+		//CLOSE_UI(WCT_SonghuaUi);
+		CLOSE_ALL_UI();
+		CLOSE_UI(WCT_FubenSaoDangUI);
+		MessageBoxUi::clearSelf();
+		//关闭物品tips和装备tips
+		ItemTip::getInstace()->close();
+		EquipTipUiLayer* pNode = (EquipTipUiLayer*)World::getInstance()->getScene()->getChildByTag(WCT_EQUIP_TIPS_UI_TAG);
+		if(pNode)
+			pNode->close();
+		m_duoBeiButton->setVisible(false);
+		m_duoBeiSprite->setVisible(false);
+		m_lingQuButton->setVisible(false);
+	}
+	else
+	{
+		if(_fubenNode->isVisible())
+		{
+			//新手引导弱引导时，关闭UI要去除新手引导的蒙版
+			NewPlayerGuider::getInstance()->onSubUiShow(false);
+		}
+		_fubenNode->setVisible(false);
+		finishJunxu->setVisible(false);
+		setVisible(false);
+		//setPosition(ccp(-800.0f, 0.0f));
+		this->setBtnSEActive(false);
+		World::getInstance()->getTaskTraceUi()->showUi(true);
+		setJingYanBeishushow(false);
+		//CCNode* itemNode = _taskBgSp->getChildByTag(4);
+		//itemNode->removeAllChildrenWithCleanup(true);
+	}
+}
+
+void NPCTalkUi::showButton( bool show )
+{
+	m_bTask = show;
+	this->updateVisableContent();
+	if(show)
+	{
+		if(_finishedBtnShow)
+		{
+			_finishedBtn->setVisible(true);
+			_acceptBtn->setVisible(false);
+			signalBtnShow.emit(0, _selectId);
+		}
+		else
+		{
+			_acceptBtn->setVisible(true);
+			_finishedBtn->setVisible(false);
+			signalBtnShow.emit(1, _selectId); 
+		}
+	}
+	else
+	{
+		_acceptBtn->setVisible(false);
+		_finishedBtn->setVisible(false);
+	}
+	//this->setBtnSEActive(m_bTask);
+}
+void NPCTalkUi::showSpecialButton1(bool isShow)
+{
+	_oneKeyCompleteTask->setVisible(isShow);
+	_doubleCompleteTask->setVisible(isShow);
+	_acceptTask->setVisible(isShow);
+	finishJunxu->setVisible(isShow);
+}
+void NPCTalkUi::showSpecialButton(bool isShow)
+{
+	showSpecialButton1(isShow);
+	if(_finishedBtnShow)
+	{
+		_finishedBtn->setVisible(true);
+		_acceptBtn->setVisible(false);
+		showSpecialButton1(false);
+		//signalBtnShow.emit(0, _selectId);
+	}
+	else
+	{
+		_finishedBtn->setVisible(false);
+		_acceptBtn->setVisible(false);
+	}		
+}
+
+void NPCTalkUi::showButton( int btn )
+{
+	if(btn != 0)
+	{
+		if(btn == 2)
+		{
+			_finishedBtn->setVisible(true);
+			_acceptBtn->setVisible(false);
+			signalBtnShow.emit(0, _selectId);
+			_finishedBtnShow = true;
+		}
+		else if(btn == 1)
+		{
+			_acceptBtn->setVisible(true);
+			_finishedBtn->setVisible(false);
+			signalBtnShow.emit(1, _selectId);
+			_finishedBtnShow = false;
+		}
+	}
+	else
+	{
+		_acceptBtn->setVisible(false);
+		_finishedBtn->setVisible(false);
+	}
+}
+
+void NPCTalkUi::onSelectItem( unsigned int data )
+{
+	CCLOG("11111111111111");
+}
+
+cocos2d::CCRect NPCTalkUi::getGuideBtnPos()
+{
+	if(_finishedBtn != NULL)
+	{
+		CCPoint pos = _finishedBtn->convertToWorldSpace(ccp(0, 0));
+		CCSize size = _finishedBtn->getContentSize();
+		return CCRect(pos.x, pos.y, size.width, size.height);
+	}
+	return CCRect();
+}
+
+bool NPCTalkUi::getAcceptBtnPos(CCRect& rc)
+{
+	if(!_acceptBtn || !_acceptBtn->isVisible())
+		return false;
+
+	CCPoint cp = _acceptBtn->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = _acceptBtn->getContentSize();
+	rc.setRect(cp.x, cp.y, cs.width, cs.height);
+	return true;
+}
+
+bool NPCTalkUi::getFinishBtnPos(CCRect& rc)
+{
+	if(!_finishedBtn || !_finishedBtn->isVisible())
+		return false;
+
+	CCPoint cp = _finishedBtn->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = _finishedBtn->getContentSize();
+	rc.setRect(cp.x, cp.y, cs.width, cs.height);
+	return true;
+}
+
+bool NPCTalkUi::getFubenOneBtnPos(CCRect& rc)
+{
+	if(!_fubenOneBtn || !_fubenOneBtn->isVisible())
+		return false;
+
+	CCPoint cp = _fubenOneBtn->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = _fubenOneBtn->getContentSize();
+	rc.setRect(cp.x, cp.y, cs.width, cs.height);
+
+	return true;
+}
+
+void NPCTalkUi::setTaskText( eNPCTalkTag eType, const char* text)
+{
+	switch(eType)
+	{
+	case eNT_TASKNAME:
+		_taskNameLabel->setString(text);
+		break;
+	case eNT_TASKGOAL:
+		_taskGoalLabel->setString(text);
+		break;
+	case eNT_TASKDES:
+		_taskDesLabel->setString(text);
+		break;
+	}
+}
+
+GameActionNode* NPCTalkUi::getBtnSuperEffect()
+{
+	GameActionNode* btnSEAcNode = GameActionNode::create();
+// 	for (int i = 1; i < 99; ++i)
+// 	{
+// 		CCString* btnStr = CCString::createWithFormat("%s%02d", "renwuyindao", i);
+// 		if(!btnSEAcNode->AddTexture(btnStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+	btnSEAcNode->InitTextureWithSpriteFrame("renwuyindao");
+	return btnSEAcNode;
+}
+
+void NPCTalkUi::setBtnSEActive( bool bisActive )
+{
+	/*
+	if (bisActive)
+	{
+		if(!_btnAcNode->isVisible())
+			_btnAcNode->setVisible(true);
+		if(!_btnAcNode->GetActionState())
+			_btnAcNode->BeginAction(0.12, true);
+	}
+	else
+	{
+		if(_btnAcNode->isVisible())
+			_btnAcNode->setVisible(false);
+		if(_btnAcNode->GetActionState())
+			_btnAcNode->StopAction();
+	}
+	*/
+}
+
+void NPCTalkUi::setPlayerAudioEffect( std::string audioName )
+{
+	AudioPlayer::getSigletonPtr()->stopSoundNpcEffect();
+	AudioPlayer::getSigletonPtr()->playerSoundNpcEffect(audioName,false);
+}
+
+void NPCTalkUi::updateList2()
+{
+	if (m_bTask )
+	{
+
+	}
+	else
+	{
+		TaskList::iterator taskiter = _tasks.begin();
+		for(TaskList::iterator iter = _twintasks.begin(); iter != _twintasks.end(); ++iter, ++taskiter)
+		{
+			const TaskListData &data = *iter;
+			CCNode *node = _container->getChildByTag(data.tag);
+			CC_ASSERT(node != NULL);
+			node->setZOrder(_npcName->getZOrder()+1);
+			if (data.textType == TEXTT_SBK)
+			{
+				CCPoint pos = _container->getChildByTag((*taskiter).tag)->getPosition();
+				pos.x += 100.0f;
+				node->setPosition(pos);
+			}
+		}
+	}
+}
+
+void NPCTalkUi::appendItem2( unsigned short taskId, const char *text, bool mainTask, bool isFinished, eTextType textType /*= TEXTT_TASK*/ )
+{
+	TaskListData data;
+	LabelFT *label = getLabelFromCache();
+	if(label != NULL)
+	{
+		//label->setFontSize(16);
+		label->setDimensions(_content->getContentSize().width, 0);
+		//		}
+		label->setString(text);
+		label->setAnchorPoint(ccp(0.0f, 1.0f));
+		label->setTag(_tag);
+		ccColor3B color;
+		color.r = 0x00;
+		color.g = 0xb0;
+		color.b = 0xf0;
+		label->setTextColor(Helper::converColor3B_2_4B(color));
+		_container->addChild(label);
+		data.tag = _tag;
+		//data.viewHieght = label->getContentSize().height + 10.f;
+		data.viewHieght = label->getContentSize().height;
+		data.id = taskId;
+		_tag ++;
+		data.textType = textType;
+		if(isFinished)
+			data.taskState = TASKS_FINISHED;
+		else
+			data.taskState = TASKS_CANACCEPT;
+
+		bool insert = false;
+		if(mainTask)
+		{
+			data.taskType = TASKT_MAIN;
+			for(TaskList::iterator iter = _twintasks.begin(); iter != _twintasks.end(); ++ iter)
+			{
+				const TaskListData &taskData = *iter;
+				if(taskData.textType == TEXTT_TASK)
+				{
+					_twintasks.insert(iter, data);
+					insert = true;  
+					break;
+				}
+			}
+		}
+		else
+		{
+			data.taskType = TASKT_BRANCH;
+			_twintasks.push_back(data);
+			insert = true;
+		}
+
+		if(!insert)
+			_twintasks.push_back(data);
+
+		updateList2();
+	}
+}
+
+
+void NPCTalkUi::setSelectSprite( TaskListData data )
+{
+	if (_selectIndex == data.id)
+		return;
+
+	bool needChange = false;
+
+	CCNode* node = dynamic_cast<CCNode*>(_container->getChildByTag(data.tag));
+	if (node != NULL)
+	{
+		CCSprite* sprite = dynamic_cast<CCSprite*>(node->getChildByTag(NTT_SELECTTag));
+		if (sprite != NULL)
+		{
+			CCSpriteFrame *selectFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("npcui_xuanzhongbtnh");
+			if (selectFrame != NULL)
+			{
+				sprite->setDisplayFrame(selectFrame);
+				needChange = true;
+			}
+		}
+	}
+
+	if (_selectIndex != (short)-1 && needChange)
+	{
+		for(TaskList::iterator questItem = _tasks.begin(); questItem != _tasks.end(); ++questItem)
+		{
+			const TaskListData & itemData = *questItem;
+			if(questItem->id != _selectIndex)
+				continue;
+
+			CCNode* node = dynamic_cast<CCNode*>(_container->getChildByTag(itemData.tag));
+			if (node == NULL)
+				continue;
+
+			CCSprite* sprite = dynamic_cast<CCSprite*>(node->getChildByTag(NTT_SELECTTag));
+			if (sprite == NULL)
+				continue;
+
+			CCSpriteFrame *selectFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("npcui_xuanzhongbtnn");
+			if (selectFrame == NULL)
+				continue;
+
+			sprite->setDisplayFrame(selectFrame);
+		}
+	}
+
+	if (needChange)
+	{
+		_selectIndex = data.id;
+	}
+}
+
+void NPCTalkUi::setSelectIndex(int index)
+{
+	_selectIndex = index;
+}
+
+void NPCTalkUi::showSelectSprite()
+{
+	if (_selectIndex == -1)
+		return;
+	for(TaskList::iterator questItem = _tasks.begin(); questItem != _tasks.end(); ++questItem)
+	{
+		const TaskListData & itemData = *questItem;
+		if(questItem->id != _selectIndex)
+			continue;
+
+		CCNode* node = dynamic_cast<CCNode*>(_container->getChildByTag(itemData.tag));
+		if (node == NULL)
+			continue;
+
+		CCSprite* sprite = dynamic_cast<CCSprite*>(node->getChildByTag(NTT_SELECTTag));
+		if (sprite == NULL)
+			continue;
+
+		CCSpriteFrame *selectFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("npcui_xuanzhongbtnh");
+		if (selectFrame == NULL)
+			continue;
+
+		sprite->setDisplayFrame(selectFrame);
+	}
+}
+
+void NPCTalkUi::show_zhuzai( int type,int player_num,int call_num )
+{
+	if (type == 0)
+	{
+		m_call_title->setString(STRING_TABLE["call_title_monster"]);
+	}
+	else if(type ==1)
+	{
+		m_call_title->setString(STRING_TABLE["call_title_tb"]);
+	}
+	else
+	{
+		m_call_title->setString("");
+		m_call_num->setString("");
+	}
+	f_zhuzai_mgr* zhuzai_mgr = f_zhuzai_mgr::get_singleton_ptr();
+	int max_player_num = zhuzai_mgr->get_max_player_num_in_manor();
+	std::stringstream ss;
+	ss<<player_num<<"/"<<max_player_num;
+	m_player_num->setString(ss.str()	);
+	m_player_num->setColor(player_num >= max_player_num ? ccRED:ccGREEN);
+
+	if(type != 2)
+	{
+		int max_call = (type == 0)?zhuzai_mgr->get_call_boss_max_cnt():zhuzai_mgr->get_call_treasurebox_max_cnt();
+		ss.str("");
+		ss<<call_num <<"/"<<max_call;
+		m_call_num->setString(ss.str());
+		m_call_num->setColor(max_call <= call_num ?ccRED:ccGREEN);
+	}
+}
+
+void NPCTalkUi::refresh_zhuzzai_info(unsigned int npc_id)
+{
+	m_npc_cache = npc_id;
+
+	f_zhuzai_mgr& zhuzai_mgr = f_zhuzai_mgr::get_singleton();
+	bool lp_is_owner = zhuzai_mgr.lp_is_master_in_instance();
+	bool is_special_func_npc = zhuzai_mgr.is_special_func_npc(npc_id);
+
+	bool show = is_special_func_npc && lp_is_owner;
+	m_zhuzai_node->setVisible(show);
+
+	if (show)
+	{
+		st_zhuzai_info_local const& info = zhuzai_mgr.get_zhuzai_info();
+		int type = 0;
+		bool is_tb_npc = npc_id == 1143002;
+		if (npc_id == 1143001)
+			type= 2;
+		else if (npc_id == 1143002)
+			type =1;
+		else
+			type = 0;
+
+		int call_num = is_tb_npc?info.call_treaturebox_cnt:info.callboss_cnt;
+		
+		show_zhuzai(type,info.role_num,call_num);
+	}
+}
+
+void NPCTalkUi::onEnter()
+{
+	CCLayer::onEnter();
+	
+	REGISTER_EVENT(refresh_zhuzai_info,NPCTalkUi,on_event_refersh_zhuzai_info);
+}
+
+void NPCTalkUi::on_event_refersh_zhuzai_info( refresh_zhuzai_info* evt )
+{
+	refresh_zhuzzai_info(m_npc_cache);
+}
+
+void NPCTalkUi::guild_assign_btn_show()
+{
+	m_lingQuButton->setVisible(true);
+	m_duoBeiButton->setVisible(true);
+	m_duoBeiSprite->setVisible(true);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler NPCTalkUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler NPCTalkUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", NPCTalkUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onAcceptBtnPressed", NPCTalkUiLayer::onAcceptBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onFinishedBtnPressed", NPCTalkUiLayer::onFinishedBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onjieshouBtnPressed", NPCTalkUiLayer::onjieshouBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onshuangbeiBtnPressed", NPCTalkUiLayer::onshuangbeiBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onyijianBtnPressed", NPCTalkUiLayer::onyijianBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onfuben1BtnPressed", NPCTalkUiLayer::onfuben1BtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onfuben2BtnPressed", NPCTalkUiLayer::onfuben2BtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onfuben3BtnPressed", NPCTalkUiLayer::onfuben3BtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLingQuBtnPressed", NPCTalkUiLayer::onLingQuBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onDuoBeiBtnPressed", NPCTalkUiLayer::onDuoBeiBtnPressed);
+	
+	return NULL;
+}
+bool NPCTalkUiLayer::init()
+{
+	m_is_yuanbao_enough = false;
+	return true;
+}
+bool NPCTalkUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"shu1",CCLabelTTF *,_gold1);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"shu2",CCLabelTTF *,_gold2);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"shu3",CCLabelTTF *,_gold3);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"shu4",CCLabelTTF *,_gold4);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"shu5",CCLabelTTF *,_gold5);
+	return false;
+}
+
+void NPCTalkUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+
+	Helper::replaceLabelTTFWithLabelFTAndRemove(_gold1);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(_gold2);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(_gold3);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(_gold4);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(_gold5);
+	return;
+}
+
+void NPCTalkUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	NPCTalkUi *ui = dynamic_cast<NPCTalkUi*>(getParent());
+	CC_ASSERT(ui != NULL);
+	//ui->removeFromParentAndCleanup(true);
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	ui->show(false);
+}
+
+void NPCTalkUiLayer::onAcceptBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	NPCTalkUi *ui = dynamic_cast<NPCTalkUi*>(getParent());
+	CC_ASSERT(ui != NULL);
+	//ui->removeFromParentAndCleanup(true);
+	ui->onAcceptBtnPressed();
+	ui->show(false);
+}
+
+void NPCTalkUiLayer::onFinishedBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	NPCTalkUi *ui = dynamic_cast<NPCTalkUi*>(getParent());
+	CC_ASSERT(ui != NULL);
+	//ui->removeFromParentAndCleanup(true);
+	ui->onFinishedBtnPressed();
+	ui->show(false);
+}
+void NPCTalkUiLayer::onjieshouBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	NPCTalkUi *ui = dynamic_cast<NPCTalkUi*>(getParent());
+	CC_ASSERT(ui != NULL);
+	//ui->removeFromParentAndCleanup(true);
+	ui->onAcceptBtnPressed();
+	ui->show(false);
+	QuestMgr::getInstance()->setCanOpenNpcUi(true);
+	ui->setFinishWay(0);
+}
+void NPCTalkUiLayer::onshuangbeiBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )//之前的双倍完成，现在改为全部完成
+{
+	NPCTalkUi *ui = dynamic_cast<NPCTalkUi*>(getParent());
+	CC_ASSERT(ui != NULL);
+	ui->show(false);
+	if(PackageManager::getInstance()->getBlankCount(EICT_Bag) < 1)
+	{
+		ToolTip::getInstance()->push(GET_STR(7121).c_str());
+		return;
+	}
+
+	if(ui->GetSelectID() > 500 && ui->GetSelectID() < 800)	{
+		ui->setFinishWay(Finish_All);
+	}
+	else if(ui->GetSelectID() >= 800 && ui->GetSelectID() < 1000)
+	{
+		ui->setBiQiFinishWay(Finish_All);
+	}
+	onFinishedJunXuTask(Finish_All);
+	//QuestMgr::getInstance()->setIsOneAccept(true);
+}
+void NPCTalkUiLayer::onyijianBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	NPCTalkUi *ui = dynamic_cast<NPCTalkUi*>(getParent());
+	CC_ASSERT(ui != NULL);
+	ui->show(false);
+	if(ui->GetSelectID() > 500 && ui->GetSelectID() < 800)
+	{
+		ui->setFinishWay(One_Key_Finish);
+	}
+	else if(ui->GetSelectID() >= 800 && ui->GetSelectID() < 1000)
+	{
+		ui->setBiQiFinishWay(One_Key_Finish);
+	}
+	onFinishedJunXuTask(One_Key_Finish);
+	//QuestMgr::getInstance()->setIsOneAccept(true);
+}
+
+void NPCTalkUiLayer::onLingQuBtnPressed(cocos2d::CCObject* pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	LocalPlayer* localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if (localPlayer->can_guild_assign())
+	{
+		GuildMgr::getInstance()->sendGuildAssign(0);
+	}
+	NPCTalkUi *ui = dynamic_cast<NPCTalkUi*>(getParent());
+	CC_ASSERT(ui != NULL);
+	ui->show(false);
+}
+
+void NPCTalkUiLayer::onDuoBeiBtnPressed(cocos2d::CCObject* pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	GuildMgr* guild = GuildMgr::getInstance();
+	if (PackageManager::getInstance()->getYuanBao()<guild->getAssignCost())
+	{
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+		return;
+	}
+	std::string lingQuTiShi;
+	safe_sprintf(lingQuTiShi,
+		STRING_TABLE["lingqu_fenglu_tishi"],
+		guild->getAssignCost(),
+		guild->getAssignExp() * MUL_ASSIGN_REWARD,
+		guild->getAssignSilver() * MUL_ASSIGN_REWARD,
+		guild->getAssignContribution() * MUL_ASSIGN_REWARD);
+	MessageBoxUi* duoBeiBox=MessageBoxUi::createWithTwoBtn_LabelEx(TEXT_UTF8_TISHI,lingQuTiShi.c_str(),TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+	duoBeiBox->signalOkBtnPressed.connect(this,&NPCTalkUiLayer::buyAssignExp);
+	World::getInstance()->getScene()->addChild(duoBeiBox,WZ_MESSAGEBOX,WCT_MessageBox);
+}
+
+void NPCTalkUiLayer::buyAssignExp()
+{
+	LocalPlayer* localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if (localPlayer->can_guild_assign())
+	{
+		GuildMgr::getInstance()->sendGuildAssign(1);
+	}
+	NPCTalkUi *ui = dynamic_cast<NPCTalkUi*>(getParent());
+	CC_ASSERT(ui != NULL);
+	ui->show(false);
+}
+
+void NPCTalkUiLayer::onFinishedJunXuTask(int num)
+{
+	//const tagActiveData &activityData = RoleManager::getInstance()->getLocalPlayer()->getActiveData();
+	const std::vector<tagActiveProto>&activityProto = Attres::getInstance()->getActiveProtoList();
+	NPCTalkUi *ui = dynamic_cast<NPCTalkUi*>(getParent());
+	CC_ASSERT(ui != NULL);
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	if (!lp)
+		return;
+	//玩家状态检查 gx add
+	if (AutoActionMgr::getInstance()->Get_Auto_Action())
+	{
+		AutoActionMgr::getInstance()->Set_Auto_Action(false);
+	}
+	if (lp->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	if (lp->isInRoleStateAny(RA_Stall))
+	{
+		ToolTip::getInstance()->push(GET_STR(2102));
+		return;
+	}
+	if (lp->isInRoleStateAny(RA_Exchange))
+	{
+		ExchangeBusinessMgr::getInstance()->CancleExchange();
+		return;
+	}
+	//如果是军需任务
+	if((ui->GetSelectID() > 500) && (ui->GetSelectID() < 800))
+	{
+		//对于军需任务应该要检查一下完成次数	
+		int nJunxuCoun = VIPMgr::getInstance()->getLocalVipData().junxuRenwuTimes;
+		if ( lp->getRoleDayClearInfo(ERDCT_DAILY_TASKS_COUNT) >= nJunxuCoun )
+		{
+			ToolTip::getInstance()->push(GET_STR(2099));
+			return;
+		}
+		for( std::vector<tagActiveProto>::const_iterator iter = activityProto.begin(); iter != activityProto.end(); ++ iter)
+		{
+			const tagActiveProto &data = *iter;		
+			if( data.nOpenUi == EOP_JUNXU ) //军需
+			{
+				//玩家等级检查
+				if (lp->getLevel() < data.nLevel)
+				{
+					ToolTip::getInstance()->push(GET_STR(9092));
+					return;
+				}	
+				DailyQuestOneKeyFinsih(num);
+				return;
+			}
+		}
+	}
+	//如果是比奇任务
+	else if ((ui->GetSelectID() >= 800) && (ui->GetSelectID() < 1000))
+	{
+		int nBiQiCoun = VIPMgr::getInstance()->getLocalVipData().BiQiTasksCount;
+		if(lp->getRoleDayClearInfo(ERDCT_BIQI_TASKS_COUNT) >= nBiQiCoun)
+		{
+			ToolTip::getInstance()->push(GET_STR(2099));
+			return;
+		}
+		BiQiQuestOneKeyFinish(num, ui->GetSelectID());
+	}
+}
+
+void NPCTalkUiLayer::finishedJunXuTask()
+{
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	if (!lp)
+		return;
+	//如果元宝不足，则弹出充值提示框
+	if(!m_is_yuanbao_enough)
+	{
+		clearFinishWay();
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();			
+		return;	
+	}
+	NPCTalkUi *ui = dynamic_cast<NPCTalkUi*>(getParent());
+	CC_ASSERT(ui != NULL);
+	//const tagActiveData &activityData = RoleManager::getInstance()->getLocalPlayer()->getActiveData();
+	const std::vector<tagActiveProto>&activityProto = Attres::getInstance()->getActiveProtoList();
+	int index = 0;
+	/*
+	if(m_openUi == EOP_JUNXU)
+	{
+		index = JUN_XU_ID;
+	}
+	else if(m_openUi == EOP_BiQi)
+	{
+		index = BI_QI_ID;
+	}*/
+	for( std::vector<tagActiveProto>::const_iterator iter = activityProto.begin(); iter != activityProto.end(); ++ iter)
+	{
+		const tagActiveProto &data = *iter;		
+		if( data.nOpenUi == m_openUi ) //军需
+		{
+			break;
+		}
+		index++;
+	}
+
+	s_quest_detail const* quest  = QuestMgr::getInstance()->getQuestDetail(ui->GetSelectID());
+	if (quest)
+	{
+		s_quest_detail const& detail = *quest;
+		if (detail.type == Type_Daily)
+		{
+			lp->sendActivedone(index, ui->getFinishWay(), ui->GetSelectID(), detail.accept_id);
+		}
+		else if (Type_BiQi == detail.type)
+		{
+			lp->sendActivedone(index, ui->getBiQiFinishWay(), ui->GetSelectID(), detail.accept_id);
+		}
+	}
+// 	std::map<unsigned short,s_quest_detail>questList = QuestMgr::getInstance()->getQuestList();
+// 	if(questList.size() != 0)
+// 	{
+// 		s_quest_detail detail;
+// 		std::map<unsigned short,s_quest_detail>::iterator iter = questList.find(ui->GetSelectID());
+// 		if(iter != questList.end())
+// 		{
+// 			detail = iter->second;
+// 			if(ui->GetSelectID() > 500 && ui->GetSelectID() < 800)
+// 			{
+// 				lp->sendActivedone(index, ui->getFinishWay(), ui->GetSelectID(), detail.accept_id);
+// 			}
+// 			else if(ui->GetSelectID() >= 800 && ui->GetSelectID() < 1000)
+// 			{
+// 				lp->sendActivedone(index, ui->getBiQiFinishWay(), ui->GetSelectID(), detail.accept_id);
+// 			}
+// 		}
+// 	}
+}
+
+void NPCTalkUiLayer ::clearFinishWay()
+{
+	NPCTalkUi *ui = dynamic_cast<NPCTalkUi*>(getParent());
+	CC_ASSERT(ui != NULL);
+	ui->setFinishWay(0);
+	ui->setBiQiFinishWay(0);
+}
+void NPCTalkUiLayer::DailyQuestOneKeyFinsih(int num)
+{
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if(lp == NULL)
+	{
+		return;
+	}
+	m_openUi = EOP_JUNXU;
+	//玩家元宝检查
+	int needYuanbao = 0;//一键完成所需要的元宝与礼券
+	std::string strBasic = "";
+	int finishType = num;
+	if (One_Key_Finish == finishType)
+	{
+		needYuanbao = NumericalIniMgr::getInstance()->GetKuaisuDanbeiYuanbao();
+		strBasic = GET_STR(2291);
+	}
+	else if (Finish_All == finishType)
+	{
+		needYuanbao = (10 - lp->getRoleDayClearInfo(ERDCT_DAILY_TASKS_COUNT)) * NumericalIniMgr::getInstance()->GetKuaisuDanbeiYuanbao();
+		strBasic = GET_STR(2292);
+	}
+	else
+	{
+		return;
+	}
+	//INT64 nDiamond = PackageManager::getInstance()->getDiamond();
+	INT64 nYuanbao = PackageManager::getInstance()->getYuanBao();
+	//若是单倍完成
+	if (nYuanbao < needYuanbao)
+	{			
+		m_is_yuanbao_enough = false;
+	}
+	else
+	{
+		m_is_yuanbao_enough = true;
+	}
+
+	std::ostringstream ostr;
+	ostr << needYuanbao;
+	string boxMessage;
+	if(num == One_Key_Finish)//一键完成
+	{ 
+		boxMessage = replaceStr(GET_STR(9197),"10",ostr.str().c_str());
+	}
+	else if(num == Finish_All)//全部完成
+	{ 
+		boxMessage = replaceStr(GET_STR(9198), "**", ostr.str().c_str());
+	}
+	MessageBoxUi* finishBox = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,boxMessage.c_str(),TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+	World::getInstance()->getScene()->addChild(finishBox,WZ_MESSAGEBOX);
+	finishBox->signalOkBtnPressed.connect(this,&NPCTalkUiLayer::finishedJunXuTask);
+	finishBox->signalCancelBtnPressed.connect(this,&NPCTalkUiLayer::clearFinishWay);
+}
+
+void NPCTalkUiLayer::BiQiQuestOneKeyFinish(int num, int questId)
+{
+	//std::map<unsigned short,s_quest_detail> questList = QuestMgr::getInstance()->getQuestList();
+	QuestMgr* quest_mgr = QuestMgr::getInstance();
+	s_quest_detail const* quest  = quest_mgr->getQuestDetail(questId);
+	if (!quest)
+	{
+		return;
+	}
+
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if(lp == NULL)
+	{
+		return;
+	}
+// 	if(questList.size() == 0)
+// 	{
+// 		return;
+// 	}
+	m_openUi = EOP_BiQi;
+	//玩家元宝检查
+	int needYuanbao = 0;//一键完成所需要的元宝与礼券
+	float beishu = 0; //比奇任务一键完成或者全部完成经验倍数
+	if (One_Key_Finish == num)
+	{
+		std::list<biQiOneKeyFinishData> biqiData = NumericalIniMgr::getInstance()->get_BiQi_OneKeyFinishMessage();
+		std::list<biQiOneKeyFinishData>::iterator iter = biqiData.begin();
+		int index = 0;
+		while(iter != biqiData.end())
+		{
+			if(index == lp->getRoleDayClearInfo(ERDCT_BIQI_TASKS_COUNT))
+			{
+				biQiOneKeyFinishData data = *iter;
+				needYuanbao = data.m_BiQi_yuanbao_num;
+				beishu = data.m_BiQi_jingyan_beishu;
+				break;
+			}
+			++index;
+			++iter;
+		}
+		//needYuanbao = NumericalIniMgr::getInstance()->GetKuaisuDanbeiYuanbao();
+	}
+	else if (Finish_All == num)
+	{
+		std::list<biQiOneKeyFinishData> finishAllBiQiData = NumericalIniMgr::getInstance()->get_BiQi_FinishAllMessage();
+		//int leftCount = VIPMgr::getInstance()->getLocalVipData().BiQiTasksCount - lp->getRoleDayClearInfo(ERDCT_BIQI_TASKS_COUNT);
+		std::list<biQiOneKeyFinishData>::iterator iter = finishAllBiQiData.begin();
+		int index = 0;
+		while(iter != finishAllBiQiData.end())
+		{
+			if(index == lp->getRoleDayClearInfo(ERDCT_BIQI_TASKS_COUNT))
+			{
+				biQiOneKeyFinishData data = *iter;
+				needYuanbao = data.m_BiQi_yuanbao_num;
+				beishu = data.m_BiQi_jingyan_beishu;
+				break;
+			}
+			++index;
+			++iter;
+		}
+	}
+	else
+	{
+		return;
+	}
+	INT64 nYuanbao = PackageManager::getInstance()->getYuanBao();
+	//检查元宝是否足够
+	if (nYuanbao < needYuanbao)
+	{	
+		m_is_yuanbao_enough = false;
+	}
+	else
+	{
+		m_is_yuanbao_enough = true;
+	}
+	string boxMessage;
+	std::ostringstream ostr;
+// 	std::map<unsigned short,s_quest_detail>::iterator iterQuest = questList.find(questId);
+// 	if(iterQuest == questList.end())
+// 	{
+// 		return;
+// 	}
+	s_quest_detail const& curQuest = *quest;
+	int totalExp=0;
+	if(num == One_Key_Finish)
+	{
+		totalExp = curQuest.reward_exp * beishu * WorldLevelMgr::getInstance()->getWorldLevelAddedExpPercentByType(E_ADDED_BIQI_EXP_PER)/100;
+	}
+	else if(num == Finish_All)
+	{
+		//totalExp = curQuest.reward_exp * beishu * (VIPMgr::getInstance()->getLocalVipData().BiQiTasksCount - lp->getRoleDayClearInfo(ERDCT_BIQI_TASKS_COUNT));
+		int quest_id = questId;
+		int total_exp = 0;
+		for(int i = 0; i < (VIPMgr::getInstance()->getLocalVipData().BiQiTasksCount - lp->getRoleDayClearInfo(ERDCT_BIQI_TASKS_COUNT)); ++i)
+		{
+// 			std::map<unsigned short, s_quest_detail>::iterator iter = questList.find(quest_id);
+// 			if(iter == questList.end())
+// 			{
+// 				return;
+// 			}
+//			s_quest_detail cur_quest;
+//			cur_quest = iter->second;
+
+			s_quest_detail const* qd = quest_mgr->getQuestDetail(quest_id);
+			s_quest_detail const& cur_quest = *qd;
+			if (qd)
+			{
+				total_exp = total_exp + cur_quest.reward_exp ;
+				quest_id = cur_quest.next_qid;
+			}
+			if(quest_id == 0)
+			{
+				break;
+			}
+		}
+		totalExp = total_exp * beishu * WorldLevelMgr::getInstance()->getWorldLevelAddedExpPercentByType(E_ADDED_BIQI_EXP_PER)/100;
+	}
+	CCString* strExp = NULL;
+	if(totalExp > 100000)
+	{
+		totalExp = totalExp/10000;
+		strExp = CCString::createWithFormat("%d%s",totalExp,GET_STR(9033).c_str());
+	}
+	else
+	{
+		strExp = CCString::createWithFormat("%d",totalExp);
+	}
+	if(num == One_Key_Finish)//一键完成
+	{ 
+		ostr.str("");
+		ostr << needYuanbao;
+		string price  = replaceStr(GET_STR(9410),"*",ostr.str().c_str());
+		string jingyan = replaceStr(price,"**",strExp->getCString());
+		ostr.str("");
+		ostr << beishu;
+		string beishunumber = replaceStr(jingyan,"***",ostr.str().c_str());
+		boxMessage = beishunumber;
+	}
+	else if(num == Finish_All)//全部完成
+	{ 
+		ostr.str("");
+		ostr << needYuanbao;
+		string price  = replaceStr(GET_STR(9411),"*",ostr.str().c_str());
+		string jingyan = replaceStr(price,"**",strExp->getCString());
+		ostr.str("");
+		ostr << beishu;
+		string beishunumber = replaceStr(jingyan,"***",ostr.str().c_str());
+		boxMessage = beishunumber;
+	}
+	MessageBoxUi* finishBox = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,boxMessage.c_str(),TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+	World::getInstance()->getScene()->addChild(finishBox,WZ_MESSAGEBOX);
+	finishBox->signalOkBtnPressed.connect(this,&NPCTalkUiLayer::finishedJunXuTask);
+	finishBox->signalCancelBtnPressed.connect(this,&NPCTalkUiLayer::clearFinishWay);
+}
+
+void NPCTalkUiLayer::onfuben1BtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//InstanceMgr::getInstance()->gotoFireFuben();
+	setSelect(1);
+	OPEN_UI(WCT_HuoDongFuBenUi);
+	//新手引导弱引导时，关闭UI要去除新手引导的蒙版
+	NewPlayerGuider::getInstance()->onClickDevil();
+
+	HuoDongFuBenUiLayer* layer = (HuoDongFuBenUiLayer*)getUiNodeByTag<HuoDongFuBenUiLayer>(WCT_HuoDongFuBenUi);
+	if (layer)
+	{
+		layer->updateUi(1);
+	}
+}
+
+void NPCTalkUiLayer::onfuben2BtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//InstanceMgr::getInstance()->gotoCustomsFuben();
+	setSelect(2);
+	OPEN_UI(WCT_HuoDongFuBenUi);
+	HuoDongFuBenUiLayer* layer = (HuoDongFuBenUiLayer*)getUiNodeByTag<HuoDongFuBenUiLayer>(WCT_HuoDongFuBenUi);
+	if (layer)
+	{
+		layer->updateUi(2);
+	}
+}
+
+void NPCTalkUiLayer::onfuben3BtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//InstanceMgr::getInstance()->gotoPalaceFuben();
+	setSelect(3);
+	OPEN_UI(WCT_HuoDongFuBenUi);
+	HuoDongFuBenUiLayer* layer = (HuoDongFuBenUiLayer*)getUiNodeByTag<HuoDongFuBenUiLayer>(WCT_HuoDongFuBenUi);
+	if (layer)
+	{
+		layer->updateUi(3);
+	}
+}
+
+void NPCTalkUiLayer::setSelect( int index )
+{
+	if (index < 1 || index > 3)
+		return;
+	CCLayer* layer = dynamic_cast<CCLayer*>(getChildByTag(0));
+	CCNode* fubenNode = dynamic_cast<CCNode*>(layer->getChildByTag(NPCTalkUi::NTT_FUBENNODE));
+	CCSprite* fubenOneLockSp = dynamic_cast<CCSprite*>(fubenNode->getChildByTag(NPCTalkUi::NTT_FUBENLOCKONE));
+	CCSprite* fubenTwoLockSp = dynamic_cast<CCSprite*>(fubenNode->getChildByTag(NPCTalkUi::NTT_FUBENLOCKTWO));
+	CCSprite* fubenThreeLockSp = dynamic_cast<CCSprite*>(fubenNode->getChildByTag(NPCTalkUi::NTT_FUBENLOCKTHREE));
+	CCSprite* selectSp = dynamic_cast<CCSprite*>(fubenNode->getChildByTag(NPCTalkUi::NTT_FUBEN_SELECT));
+	if (selectSp == NULL)
+	{
+		selectSp = CCSprite::createWithSpriteFrameName("npcui_xuanzhongkuang");
+		selectSp->setTag(NPCTalkUi::NTT_FUBEN_SELECT);
+		selectSp->setAnchorPoint(ccp(0.5,0.5));
+		fubenNode->addChild(selectSp);
+	}
+	selectSp->setVisible(true);
+	if (index == 1)
+	{
+		selectSp->setPosition(fubenOneLockSp->getPosition());
+	}
+	else if (index == 2)
+	{
+		selectSp->setPosition(fubenTwoLockSp->getPosition());
+	}
+	else if (index == 3)
+	{
+		selectSp->setPosition(fubenThreeLockSp->getPosition());
+	}
+}
+
+CCNode * StatueWorshipUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["MoBaiUiLayer"] = UiLayerLoader<StatueWorshipUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("mobai", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+void StatueWorshipUi::closeUI()
+{
+	UiInterface::closeUI();
+
+	//新手引导弱引导时，打开新的UI要去除新手引导的蒙版
+	NewPlayerGuider::getInstance()->onSubUiShow(false);
+}
+
+bool StatueWorshipUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if(isTouchOnNodeContent(_mainPanel, pTouch)) {
+		return true;
+	}
+
+	return false;
+}
+
+void StatueWorshipUiLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+
+cocos2d::extension::SEL_CCControlHandler StatueWorshipUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", StatueWorshipUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onQianChengBtnPressed", StatueWorshipUiLayer::onNormalWorshipBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onYanBaoQiFuBtnPressed", StatueWorshipUiLayer::onBaiBaoYuanBaoWorshipBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", StatueWorshipUiLayer::onOkBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCancelBtnPressed", StatueWorshipUiLayer::onCancelBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChaKanBtnPressed", StatueWorshipUiLayer::onChaKanBtnPressed);
+
+	return NULL;
+}
+
+bool StatueWorshipUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+
+cocos2d::SEL_MenuHandler StatueWorshipUiLayer::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+void StatueWorshipUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+
+	signalSelectNormalWorship.connect(ExchangeMgr::getInstance() , &ExchangeMgr::onSelect);
+	signalSelectBaiBaoYuanBaoWorship.connect(ExchangeMgr::getInstance() , &ExchangeMgr::onSelectForBaiBaoYuanBao);
+
+	_mainPanel = dynamic_cast<CCNode*>(pNode->getChildByTag(0));
+	_popupDlg = dynamic_cast<CCNode*>(pNode->getChildByTag(7));
+	_nodeInfo = dynamic_cast<CCNode*>(_mainPanel->getChildByTag(6));
+	_labelExpTitle = dynamic_cast<CCLabelTTF*>(_mainPanel->getChildByTag(8));
+	_labelExp = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_mainPanel->getChildByTag(9)));
+	_nodeStatue = dynamic_cast<CCNode*>(_popupDlg->getChildByTag(3));
+	_nodeYunBao = dynamic_cast<CCNode*>(_popupDlg->getChildByTag(4));
+
+	_mainPanel->setVisible(true);
+	_popupDlg->setVisible(false);
+
+	_labelTypeName = static_cast<CCLabelTTF*>(_nodeInfo->getChildByTag(1));
+	_labelPower = static_cast<CCLabelTTF*>(_nodeInfo->getChildByTag(2));
+	_labelName = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_nodeInfo->getChildByTag(3)));
+	_labelPowerValue = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_nodeInfo->getChildByTag(4)));
+
+	_labelStatueNum = static_cast<CCLabelTTF*>(_nodeStatue->getChildByTag(5));
+
+	_labelNormalExp = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_nodeStatue->getChildByTag(7)));
+	_labelYuanBaoExp = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_nodeYunBao->getChildByTag(7)));
+
+	_normalWorshipBtn = static_cast<CCControlButton*>(_mainPanel->getChildByTag(2));
+	_costWorshipBtn = static_cast<CCControlButton*>(_mainPanel->getChildByTag(3));
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+
+	return;
+}
+
+void StatueWorshipUiLayer::onCloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_STATUEWORSHIP);
+}
+
+void StatueWorshipUiLayer::onNormalWorshipBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	signalSelectNormalWorship.emit(_selectId);
+	NewPlayerGuider::getInstance()->onClickWorship(true);
+}
+
+void StatueWorshipUiLayer::onBaiBaoYuanBaoWorshipBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if (!lp){
+		return;
+	}
+
+	NewPlayerGuider::getInstance()->onClickWorship(false);
+
+	int nOpenLevel = GetFunOpenLevel(EFOL_HeroWorship);
+	if (lp->getLevel() < nOpenLevel)
+	{
+		ToolTip::getInstance()->push(GET_STR(2183));
+		return;
+	}
+
+	//首先判断该玩家今日是否已经元宝膜拜过
+	if (lp->getRoleDayClearInfoTwo(ERDCT_STATUE_MORSHIP_YB) >= 1)
+	{
+		ToolTip::getInstance()->push(GET_STR(2179));
+		return;
+	}
+
+	// 判断是否有英雄雕像
+	if (PackageManager::getInstance()->getItem(EICT_Bag, (unsigned int)DIAOXIANG_ITEM))
+	{
+		this->showDiaoXiangDlg(true);
+	}
+	else
+	{
+		this->showYuanBaoDlg(true);
+	}
+}
+
+void StatueWorshipUiLayer::onChaKanBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc) {
+		return;
+	}
+
+	unsigned int playerID = RoleManager::getInstance()->getDiaoXiangRoleIdByRoleType(ploc->getRoleType());
+
+	if (playerID != 0)
+	{
+		GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPlayerId(playerID);
+		GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPopupPreUiOnClose(true);
+		GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPopTag(RRP_MOBAI);
+		RemoteRoleStateMgr::getInstance()->RefreshRemoteRoleAllInfo(playerID);
+	}
+	else
+	{
+		ToolTip::getInstance()->push(GET_STR(9555));
+	}
+}
+
+void StatueWorshipUiLayer::onOkBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	signalSelectBaiBaoYuanBaoWorship.emit(_selectId);
+	showYuanBaoDlg(false);
+	showDiaoXiangDlg(false);
+}
+
+void StatueWorshipUiLayer::onCancelBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	showYuanBaoDlg(false);
+	showDiaoXiangDlg(false);
+}
+
+
+void StatueWorshipUiLayer::updateInfo()
+{
+	_selectId = 0;
+	_normalWorship = true;
+	_nodeStatue->setVisible(false);
+	_nodeYunBao->setVisible(false);
+
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc) {
+		return;
+	}
+
+	std::string name = RoleManager::getInstance()->getDiaoXiangNpcNameByRoleType(ploc->getRoleType());
+
+	_labelName->setString(name.c_str());
+	
+	char str[256] = {0};
+
+	sprintf(str, "%d", RoleManager::getInstance()->getDiaoXiangNpcPowerByRoleType(ploc->getRoleType()));
+	_labelPowerValue->setString(str);
+
+	switch(ploc->getRoleType()) {
+	case RT_MWARRIOR:
+		_labelTypeName->setString(GET_STR(9544).c_str());
+		break;
+	case RT_WWARRIOR:
+		_labelTypeName->setString(GET_STR(9545).c_str());
+		break;
+	case RT_MMAGE:
+		_labelTypeName->setString(GET_STR(9546).c_str());
+		break;
+	case RT_WMAGE:
+		_labelTypeName->setString(GET_STR(9547).c_str());
+		break;
+	case RT_MTAOIST:
+		_labelTypeName->setString(GET_STR(9548).c_str());
+		break;
+	case RT_WTAOIST:
+		_labelTypeName->setString(GET_STR(9549).c_str());
+		break;
+	}
+
+	_labelPower->setString(GET_STR(9550).c_str());
+
+	// 已经膜拜过
+	if (ploc->getRoleDayClearInfo(ERDCT_Xili_LIMIT_SOMETHING) >= 1)
+	{
+		_labelExpTitle->setVisible(false);
+		_labelExp->setVisible(false);
+
+		_normalWorshipBtn->setEnabled(false);
+	}
+	else
+	{
+		_normalWorshipBtn->setEnabled(true);
+		_labelExpTitle->setVisible(true);
+		_labelExp->setVisible(true);
+
+		unsigned int exp = RoleManager::getInstance()->getDiaoXiangMoBaiExp(ploc->getLevel(), ploc->getRoleType(), true);
+		sprintf(str, "%d", exp);
+		_labelExp->setString(str);
+	}
+
+	if (ploc->getRoleDayClearInfoTwo(ERDCT_STATUE_MORSHIP_YB) >= 1)
+	{
+		_costWorshipBtn->setEnabled(false);
+	}
+	else
+	{
+		_costWorshipBtn->setEnabled(true);
+	}
+}
+
+void StatueWorshipUiLayer::showDiaoXiangDlg(bool show)
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc) {
+		return;
+	}
+
+	_popupDlg->setVisible(show);
+	_nodeStatue->setVisible(true);
+	_nodeYunBao->setVisible(false);
+
+	char str[128] = {0};
+
+	f_item* item = PackageManager::getInstance()->getItem(EICT_Bag, (unsigned int)DIAOXIANG_ITEM);
+
+	sprintf(str, "%d/1", item ? item->get_item_number() : 0);
+	_labelStatueNum->setString(str);
+
+	unsigned int exp = RoleManager::getInstance()->getDiaoXiangMoBaiExp(ploc->getLevel(), ploc->getRoleType(), false);
+	sprintf(str, "%d", exp);
+	_labelNormalExp->setString(str);
+}
+
+void StatueWorshipUiLayer::showYuanBaoDlg(bool show)
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc) {
+		return;
+	}
+
+	_popupDlg->setVisible(show);
+	_nodeStatue->setVisible(false);
+	_nodeYunBao->setVisible(true);
+
+	char str[128] = {0};
+
+	unsigned int exp = RoleManager::getInstance()->getDiaoXiangMoBaiExp(ploc->getLevel(), ploc->getRoleType(), false);
+	sprintf(str, "%d", exp);
+	_labelYuanBaoExp->setString(str);
+}
+
+bool StatueWorshipUiLayer::getBtnRect(bool isNormal, CCRect& rc)
+{
+	if(_normalWorshipBtn == NULL || _costWorshipBtn == NULL)
+		return false;
+
+	CCNode* tempNode;
+	if(isNormal){
+		tempNode = _normalWorshipBtn;
+	}else{
+		tempNode = _costWorshipBtn;
+	}
+	
+	CCPoint cp = tempNode->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = tempNode->getContentSize();
+	rc.setRect(cp.x, cp.y, cs.width, cs.height);
+
+	return true;
+}

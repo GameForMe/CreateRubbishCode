@@ -1,0 +1,3196 @@
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ActionProto.h"
+#include "TCPClient.h"
+#include "QuestMgr.h"
+#include "RoleInfoProto.h"
+#include "RoleEquipUi.h"
+#include "RoleRingUi.h"
+#include "World.h"
+#include "CmdAdapter.h"
+#include "Phyx.h"
+#include "MessageDispatcher.h"
+#include "ShuangXiuMgr.h"
+#include "Monster.h"
+#include "UiTools.h"
+#include "RoleHeadUi.h"
+#include "UiManager.h"
+#include "NameMgr2.h"
+#include "SkillAnimManager.h"
+#include "AutoActionProto.h"
+
+#include "RoleAttrUi.h"
+#include "DBMgr.h"
+#include "ActionProto.h"
+#include "Base.h"
+#include "MountUi.h"
+#include "RoleDefine.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "InstanceMgr.h"
+#include "CrossSceneUI.h"
+#include "MapManager.h"
+#include "SelectRole.h"
+#include "WorldPacket.h"
+#include "CommonMsgDefine.h"
+#include "GuildMgr.h"
+#include "Auto_ActionMgr.h"
+#include "PlayerStallUi.h"
+#include "SkillManager.h"
+#include "PlayerState.h"
+#include "ForgingDecomUI.h"
+#include "ForgingMgr.h"
+#include <fstream>
+
+#include <boost/range/algorithm.hpp>
+#include <boost/local_function.hpp>
+#include<boost/foreach.hpp>
+
+#include "cc_profiler.h"
+#include "TeamMgr.h"
+#include "SocialMgr.h"
+#include "NumericalIniMgr.h"
+#include "GameEventDefine.h"
+#include "f_zhuzai_mgr.h"
+#include "BloodFightMgr.h"
+#include "WorldLevelMgr.h"
+//extern std::ofstream testOf;
+//extern int gRoleNum;
+unsigned int const Status1 = 2910192;
+//int sendTimes = 0;
+
+
+struct ResetMountUI;
+
+RoleManager::RoleManager()
+	: _currentSelected(INVALID_ID)
+	, _lastSendTime(0.f)
+	, _showSelfRoleName(true)
+	, _hideRemoteRole(false)
+	, _hideRemoteEffect(false)
+	, _localPlayer(NULL)
+	, _forceShowOther(false)
+	,currentRoleIsCanLive(1)
+	,_TargetRole(NULL)
+{
+	init_max_lv_table();
+	init_ride_data();
+
+	init_avator_display_data();
+}
+
+RoleManager * RoleManager::getInstance()
+{
+	static RoleManager manager;
+	return &manager;
+}
+
+void RoleManager::init()
+{
+	if (_localPlayer == NULL)
+	{
+		_loading = false;
+		_localPlayer = new LocalPlayer;
+		_localPlayer->_sigPathFinished.connect(QuestMgr::getInstance() , &QuestMgr::onPathFinished);
+		_localPlayer->_sigPathFinished.connect(MapManager::getInstance() , &MapManager::on_pathfind_end);
+
+		//TODO 注册网络消息
+		TCP_CLIENT->register_net_cmd("NET_SIS_avatar_equip_change", this, &RoleManager::onRoleEquipChange);
+		TCP_CLIENT->register_net_cmd("NET_SIS_set_role_state", this, &RoleManager::onSetRoleState);
+		TCP_CLIENT->register_net_cmd("NET_SIS_unset_role_state", this, &RoleManager::onUnsetRoleState);
+		TCP_CLIENT->register_net_cmd("NET_SIS_practice_to_all", this, &RoleManager::onSetPractice);
+		TCP_CLIENT->register_net_cmd("NET_SIS_get_diaoxiang_name", this, &RoleManager::onDiaoXiangName);
+		//TCP_CLIENT->register_net_cmd("NET_SIS_get_guild_name", this, &RoleManager::onGetGuildName);
+		TCP_CLIENT->register_net_cmd("NET_SIS_change_pk_value", this, &RoleManager::onPkValueChanged);
+		TCP_CLIENT->register_net_cmd("NET_SIS_Team_Equip_Info", this, &RoleManager::onTeamEquipInfo);
+		TCP_CLIENT->register_net_cmd("NET_SIS_avatar_equip", this, &RoleManager::onRoleFashionChanged);
+		TCP_CLIENT->register_net_cmd("NET_SIS_add_role_buffer", this, &RoleManager::onAddRoleBuff);
+		TCP_CLIENT->register_net_cmd("NET_SIS_remove_role_buffer", this, &RoleManager::onRemoveRoleBuff);
+		TCP_CLIENT->register_net_cmd("NET_SIS_set_state", this, &RoleManager::onRoleSetState);
+		TCP_CLIENT->register_net_cmd("NET_SIS_unset_state", this, &RoleManager::onRoleUnSetState);
+		TCP_CLIENT->register_net_cmd("NET_SIS_begin_ride", this, &RoleManager::onRoleRide);
+		TCP_CLIENT->register_net_cmd("NET_SIS_cancel_ride", this, &RoleManager::onRoleUnRide);
+		TCP_CLIENT->register_net_cmd("NET_SIS_tog_ride", this, &RoleManager::onTogRide);
+		TCP_CLIENT->register_net_cmd("NET_SIS_get_raid_att", this, &RoleManager::onSyncRideData);
+		TCP_CLIENT->register_net_cmd("NET_SIS_play_scene_effect", this, &RoleManager::onPlaySceneEffect);
+
+		TCP_CLIENT->register_net_cmd("NET_SIS_update_role_buffer", this, &RoleManager::on_buff_update);
+
+		REG_GUILD_NAME_CB(this, &RoleManager::onGetGuildName);
+		syncRideData();
+		
+	}
+	//TODO 
+	//_localPlayer->setId()
+}
+
+void RoleManager::destory()
+{
+	if(_localPlayer)
+	{
+		_localPlayer->removeFromMap();
+
+		delete _localPlayer;
+		_localPlayer = NULL;
+
+		_guildNameTmp.clear();
+		_diaoxiangName.clear();
+
+		//TODO: 注销网络消息
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_avatar_equip_change", this, &RoleManager::onRoleEquipChange);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_set_role_state", this, &RoleManager::onSetRoleState);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_unset_role_state", this, &RoleManager::onUnsetRoleState);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_practice_to_all", this, &RoleManager::onSetPractice);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_get_diaoxiang_name", this, &RoleManager::onDiaoXiangName);
+		//TCP_CLIENT->unregister_net_cmd("NET_SIS_get_guild_name", this, &RoleManager::onGetGuildName);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_change_pk_value", this, &RoleManager::onPkValueChanged);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_Team_Equip_Info", this, &RoleManager::onTeamEquipInfo);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_avatar_equip", this, &RoleManager::onRoleFashionChanged);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_add_role_buffer", this, &RoleManager::onAddRoleBuff);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_remove_role_buffer", this, &RoleManager::onRemoveRoleBuff);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_set_state", this, &RoleManager::onRoleSetState);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_unset_state", this, &RoleManager::onRoleUnSetState);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_begin_ride", this, &RoleManager::onRoleRide);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_cancel_ride", this, &RoleManager::onRoleUnRide);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_tog_ride", this, &RoleManager::onTogRide);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_get_raid_att", this, &RoleManager::onSyncRideData);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_play_scene_effect",this,&RoleManager::onPlaySceneEffect);
+
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_update_role_buffer", this, &RoleManager::on_buff_update);
+
+		UNREG_GUILD_NAME_CB(this, &RoleManager::onGetGuildName);
+	}
+}
+
+Role * RoleManager::findRole( unsigned int roleId, bool addReqIfNotFind /*= false*/, bool reqProxy /*= true */)
+{
+	if(roleId == _localPlayer->getId())
+		return _localPlayer;
+
+	RoleMap::iterator iter = _remoteRole.find(roleId);
+	if(iter != _remoteRole.end())
+	{
+		std::set<unsigned int>::iterator iter2 = _fadeOutList.find(roleId);
+		if(iter2 != _fadeOutList.end())
+		{
+			if(addReqIfNotFind)
+				_fadeOutList.erase(iter2);
+			else
+				return NULL;
+		}
+		//CC_ASSERT(_roleRequestBlock.find(roleId) == _roleRequestBlock.end());
+
+		return iter->second;
+	}
+
+	Role *proxy = findProxy(roleId);
+
+// 	if(addReqIfNotFind && (proxy == NULL || reqProxy))
+// 	{
+// 		addRoleRequest(roleId);
+// 	}
+
+	return proxy;
+}
+
+RoleManager::RoleMap RoleManager::getAllRemotePlayer()
+{
+	RoleMap remoteRole;
+	for(RoleMap::iterator iter = _remoteRole.begin(); iter != _remoteRole.end(); ++ iter)
+	{
+		std::set<unsigned int>::iterator iter2 = _fadeOutList.find(iter->first);
+		if(iter2 == _fadeOutList.end())
+		{
+			Role *role = iter->second;
+			if(role->getCreatureType() == CT_PLAYER)
+			{
+				remoteRole[iter->first] = role;
+			}
+		}
+		//bool bFind = false;
+		//for(std::list<Role*>::iterator iter3 = _fadeOutList.begin();iter3!=_fadeOutList.end(); ++iter3)
+		//{
+		//	if((*iter3)->getId() == iter->first)
+		//	{
+		//		bFind = true;
+		//		break;
+		//	}
+		//}
+
+		//if(!bFind)
+		//{
+		//	Role *role = iter->second;
+		//	if(role->getCreatureType() == CT_PLAYER)
+		//	{
+		//		remoteRole[iter->first] = iter->second;
+		//	}
+		//}
+	}
+	return remoteRole;
+}
+
+RoleManager::RoleMap RoleManager::getAllRemoteRole()
+{
+	_selectRoleMaps.clear();
+	for(RoleMap::iterator iter = _remoteRole.begin(); iter != _remoteRole.end(); ++ iter)
+	{
+		std::set<unsigned int>::iterator iter2 = _fadeOutList.find(iter->first);
+		if(iter2 == _fadeOutList.end())
+		{
+			_selectRoleMaps[iter->first] = iter->second;
+		}
+		//bool bFind = false;
+		//for(std::list<Role*>::iterator iter3 = _fadeOutList.begin();iter3!=_fadeOutList.end(); ++iter3)
+		//{
+		//	if((*iter3)->getId() == iter->first)
+		//	{
+		//		bFind = true;
+		//		break;
+		//	}
+		//}
+
+		//if(!bFind)
+		//{
+		//	Role *role = iter->second;
+		//	remoteRole[iter->first] = iter->second;
+		//}
+	}
+	return _selectRoleMaps;
+}
+ 
+void RoleManager::AddRole( Role* role )
+{
+	//RoleMap::iterator iter =_remoteRole.find(role->getId());
+	//CC_ASSERT(iter == _remoteRole.end());
+	//CC_ASSERT(role->getCreatureType() != CT_Proxy);
+	_remoteRole[role->getId()] = role;
+}
+
+void RoleManager::addProxy( Role *role )
+{
+	RoleMap::iterator iter =_roleProxyMap.find(role->getId());
+	CC_ASSERT(iter == _roleProxyMap.end());
+	
+	//CC_ASSERT(role->getCreatureType() == CT_Proxy);
+	_roleProxyMap[role->getId()] = role;
+}
+
+void RoleManager::showRoleNameTypeByCondition(Role *role)
+{
+	unsigned int mapID = MapManager::getInstance()->getCurMapId();
+	bool resCondition1 = BF_BATTLE_MAP == mapID;
+	if (resCondition1)
+	{
+		bool isFriend = BloodFightMgr::getInstance()->getIsFriendTypeByRoleID(role->getId());
+		eNameShowMode pTyep = isFriend ? PNSM_BattleWe : PNSM_BattleEnemy;
+		Player* player = dynamic_cast<Player*>(role);
+		if (player)
+		{
+			player->switchNameShowMode(pTyep);
+			if (!isFriend)
+				player->setName(STRING_TABLE["BF_Player_Hide_Name"]);
+			player->showGuidName(false);
+		}
+	}
+}
+
+bool RoleManager::getPetOwnerNameByCondition(string& str,Role *role)
+{
+	unsigned int mapID = MapManager::getInstance()->getCurMapId();
+	bool resCondition1 = BF_BATTLE_MAP == mapID;
+	if (resCondition1)
+	{
+		bool isFriend = BloodFightMgr::getInstance()->getIsFriendTypeByRoleID(role->getOwnerId());
+		if (!isFriend)
+		{
+			str.assign(STRING_TABLE["BF_Player_Hide_Name"]);
+			role->setNameColor(ccc3(255,0,0));
+			return true;
+		}
+		else
+		{
+			role->setNameColor(ccc3(0,255,0));
+		}
+	}
+	return false;
+}
+
+void RoleManager::showRoleHeadHpUiByCondition(Role *role)
+{
+	bool isShowHp = isForceShowRoleHpBar();
+	role->showRoleHeadHpUi(isShowHp);
+}
+
+//根据条件强制显示hp
+bool RoleManager::isForceShowRoleHpBar()
+{
+	unsigned int mapID = MapManager::getInstance()->getCurMapId();
+	bool resCondition1 = BF_BATTLE_MAP == mapID || BF_PREPARE_MAP == mapID;
+	return resCondition1;
+}
+
+// void RoleManager::addRoleRequest( unsigned int roleId )
+// {
+// 	return;
+// 
+// 	//if(roleId == _localPlayer->getId())
+// 	//	return;
+// 
+// 	//!从阻塞列队中找到，不添加
+// 	//if(_roleRequestBlock.find(roleId) != _roleRequestBlock.end())
+// 	//	return;
+// 
+// 	//!从请求列表中消除
+// 	//for(std::list<unsigned int>::iterator iter = _roleRequestPair.begin();iter!=_roleRequestPair.end();)
+// 	//{
+// 	//	if(*iter==roleId)
+// 	//	{
+// 	//		_roleRequestPair.erase(iter++);
+// 	//	}
+// 	//	else
+// 	//	{
+// 	//		iter ++;
+// 	//	}
+// 	//}
+// 	_roleRequestPair.insert(roleId);
+// 	//_roleRequestPair.push_back(roleId);
+// 	//_roleRequestBlock.insert(roleId);
+// 	_roleRequestBlock[roleId] = 0.f;
+// }
+
+// void RoleManager::cancelRoleRequest( unsigned int roleID )
+// {
+// 	return;
+// 	//!得到回应了，需要从阻塞列表中移除
+// 	std::map<unsigned int, float>::iterator  iter = _roleRequestBlock.find(roleID);
+// 	if(iter!=_roleRequestBlock.end())
+// 		_roleRequestBlock.erase(iter);
+// 
+// 	//!得到回应了，不需要再发送了
+// 	std::set<unsigned int>::iterator iter2 = _roleRequestPair.find(roleID);
+// 	if(iter2 != _roleRequestPair.end())
+// 		_roleRequestPair.erase(iter2);
+// 	//bool bFind = false;
+// 	//for(std::list<unsigned int>::iterator iter = _roleRequestPair.begin();iter!=_roleRequestPair.end(); iter ++)
+// 	//{
+// 	//	if(*iter==roleID)
+// 	//	{
+// 	//		bFind=true;
+// 	//		_roleRequestPair.erase(iter);
+// 	//		break;
+// 	//	}
+// 	//}
+// }
+
+// void RoleManager::sendRoleRequestOne(unsigned int id)
+// {
+// 	NET_SIC_get_remote_role_state msg;
+// 	msg.dw_role_id[0] = id;
+// 	msg.nRoleNum = 1;
+// 	TCP_CLIENT->send_net_cmd(&msg, NP_NORMAL, false);
+// }
+// 
+// void RoleManager::sendRoleRequest()
+// {
+// 	unsigned char byTemp[sizeof(NET_SIC_get_remote_role_state)+sizeof(unsigned int)*100];
+// 	NET_SIC_get_remote_role_state* pSend = (NET_SIC_get_remote_role_state*)byTemp;
+// 	pSend->id = message_id_crc("NET_SIC_get_remote_role_state");
+// 	pSend->nRoleNum = 0;
+// 	//while( !_roleRequestPair.empty() )
+// 	//{
+// 	//	unsigned int dwID = _roleRequestPair.front();
+// 	//	pSend->dw_role_id[pSend->nRoleNum++] = dwID;
+// 	//	_roleRequestPair.pop_front();
+// 	//	if( pSend->nRoleNum >= 100)
+// 	//		break;
+// 	//}
+// 
+// 	for(std::set<unsigned int>::iterator iter = _roleRequestPair.begin(); iter != _roleRequestPair.end();)
+// 	{
+// 		unsigned int dwID = *iter;
+// 		pSend->dw_role_id[pSend->nRoleNum++] = dwID;
+// 		_roleRequestPair.erase(iter ++);
+// 		if( pSend->nRoleNum >= 100)
+// 			break;
+// 	}
+// 
+// 	if( pSend->nRoleNum > 0 )
+// 	{
+// 		pSend->size = sizeof(NET_SIC_get_remote_role_state)
+// 			+ sizeof(unsigned int) * (pSend->nRoleNum - 1);
+// 
+// 		//for(int i = 0; i < pSend->nRoleNum; i ++)
+// 		//{
+// 		//	testOf << pSend->dw_role_id[i] << "		send role msg to server" << std::endl;
+// 		//}
+// 
+// 		TCP_CLIENT->send_net_cmd(pSend, NP_NORMAL, false);
+// 
+// 		//sendTimes ++;
+// 		//CCLog("sendTimes = %d, num = %d", sendTimes, pSend->nRoleNum);
+// 	}
+// }
+
+void RoleManager::changeGuildNameByOldGuidID( DWORD oldId,DWORD newId,string name)
+{
+	NameMgr2::getInstance()->updateGuildName(newId,name);
+	//GuildMgr::getInstance()->setGuildDesc(newId,name);
+	//GuildMgr::getInstance()->changeWarGuid(oldId,newId);
+
+	if (getLocalPlayer()->getGuildID() == oldId)
+	{
+		getLocalPlayer()->setGuild(newId);
+		getLocalPlayer()->setGuildName(name);
+	}
+	RoleMap::iterator iter = _remoteRole.begin();
+	while(iter != _remoteRole.end())
+	{
+		//int t_ID = iter->first;
+		Role* t_role = iter->second;
+		//需要进行修改
+		if (t_role->getGuildID() == oldId)
+		{
+			t_role->setGuild(newId);
+			t_role->setGuildName(name);
+
+		}
+		iter++;
+	}
+}
+
+unsigned int RoleManager::onRemoveRemote( s_net_cmd * cmd )
+{
+	//TODO 删除玩家
+	return 0;
+}
+
+unsigned int RoleManager::onInitLocalPlayer( s_net_cmd *cmd )
+{
+	//TODO
+	return 0;
+}
+
+unsigned int RoleManager::onGetRemoteRole( s_net_cmd *cmd )
+{
+	//TODO
+	return 0;
+}
+
+void RoleManager::update( float dt )
+{
+	//remark by gh remind me!!
+// 	std::map<unsigned int, float> tempMap;
+// 	std::map<unsigned int, float>::iterator iter = _roleRequestBlock.begin();
+// 	for(; iter != _roleRequestBlock.end(); )
+// 	{
+// 		iter->second += dt;
+// 		if(iter->second > 5.f)
+// 		{
+// 			//CCLog("lose roleId = %d", iter->first);
+// 			//_roleRequestPair.push_back(iter->first);
+// 			//iter = _roleRequestBlock.erase(iter);
+// 			tempMap[iter->first] = iter->second;
+// 		}
+// 
+// 		++ iter;
+// 	}
+// 
+// 	if (!tempMap.empty())
+// 	{
+// 		std::map<unsigned int, float>::iterator It = tempMap.begin();
+// 		while(It != tempMap.end())
+// 		{
+// 			std::map<unsigned int, float>::iterator findIt = _roleRequestBlock.find(It->first);
+// 			if (findIt!=_roleRequestBlock.end())
+// 			{
+// 				 _roleRequestBlock.erase(findIt);
+// 			}
+// 			++It;
+// 		}
+// 	}
+// 	tempMap.clear();
+
+	//TODO 更新死亡角色
+	//for(std::list<Role*>::iterator iter = _fadeOutList.begin(); iter != _fadeOutList.end(); iter ++)
+	//{
+	//	Role *role = *iter;
+	//	role->stopAni();
+	//	//role->removeFromMap();
+
+	//	RoleMap::iterator iter2 = _remoteRole.find(role->getId());
+	//	CC_ASSERT(iter2!= _remoteRole.end());
+	//	_remoteRole.erase(iter2);
+	//	delete role;
+	//}
+	//_fadeOutList.clear();
+
+// 	for(std::set<unsigned int>::iterator iter = _fadeOutList.begin(); iter != _fadeOutList.end(); ++ iter)
+// 	{
+// 		//Role *role = *iter;
+// 		//role->stopAni();
+// 		//role->removeFromMap();
+// 
+// 		RoleMap::iterator iter2 = _remoteRole.find(*iter);
+// 		CC_ASSERT(iter2!= _remoteRole.end());
+// 		Role *role = iter2->second;
+// 		role->stopAni();
+// 		_remoteRole.erase(iter2);
+// 		delete role;
+// 	}
+// 	_fadeOutList.clear();
+
+	//帧处理消失的远程role，每帧一个，好像没什么问题
+	int num = 0;
+	for(std::set<unsigned int>::iterator iter = _fadeOutList.begin(); iter != _fadeOutList.end();)
+	{
+		RoleMap::iterator iter2 = _remoteRole.find(*iter);
+		CC_ASSERT(iter2!= _remoteRole.end());
+		Role *role = iter2->second;
+		role->stopAni();
+		_remoteRole.erase(iter2);
+		CCProfileBegin("deleteRole");
+		delete role;
+		CCProfileEnd("deleteRole");
+
+		_fadeOutList.erase(iter++);
+		num++;
+		if (num >= 20)
+			break;
+	}
+
+
+	//TODO
+	/*//屏蔽请求角色的信息，现在改为服务器直接发送。
+	_lastSendTime += dt;
+	if(_lastSendTime > 0.5f)
+	{
+		if(!CrossSceneUI::getInstance()->isInCross())
+		{
+			_lastSendTime = 0.f;
+			//sendRoleRequest();
+		}
+	}
+	*/
+
+	_localPlayer->update(dt);
+
+	static profile_util::cc_timer _timer;
+	if (_timer.get_milliseconds() >= 100)
+	{
+		_timer.reset();
+		{
+			CCProfile("Role update");
+			RoleMap::iterator iter = _remoteRole.begin();
+			RoleMap::iterator end = _remoteRole.end();
+			for(/*RoleMap::iterator iter = _remoteRole.begin()*/; iter != end; ++iter )
+			{
+				Role *role = iter->second;
+				role->update(dt);
+			}
+		}
+
+		{
+			CCProfile("RoleProxy update");
+			RoleMap::iterator iter = _roleProxyMap.begin();
+			RoleMap::iterator end = _roleProxyMap.end();
+			for(/*RoleMap::iterator iter = _roleProxyMap.begin()*/; iter != end; ++iter )
+			{
+				Role *role = iter->second;
+				role->update(dt);
+			}
+		}
+		//TODO 本地玩家是否在安全区域
+	}
+}
+
+void RoleManager::freeRole( unsigned int roleId )
+{
+	CCProfileBegin("FreeRole");
+	Phyx::getInstance()->removePhyxObject(roleId);
+	if(roleId == _localPlayer->getId())
+		return;
+
+	if(roleId == _currentSelected)
+	{
+		changeSelect(INVALID_ID);
+		//_currentSelected = INVALID_ID;
+		//World::getInstance()->cb(_currentSelected);
+	}
+	//CCProfileEnd("FreeRole");
+	//CCLOG("freeRole:%d", roleId);
+	releaseProxy(roleId);
+	CCProfileEnd("FreeRole");
+
+	RoleMap::iterator iter = _remoteRole.find(roleId);
+	if(iter == _remoteRole.end())
+	{
+		World::getInstance()->removeRemoteRole(roleId);
+		World::getInstance()->removeRemoteCreature(roleId);
+		return;
+	}
+
+	Role *role = iter->second;
+
+	//!从需求列表中删除
+// 	std::set<unsigned int>::iterator iter2 = _roleRequestPair.find(roleId);
+// 	if(iter2 != _roleRequestPair.end())
+// 		_roleRequestPair.erase(iter2);
+	if((role->getCreatureType() != CT_MONSTER /*&& role->getCreatureType() != CT_NPC*/) || role->getTypeID() == HUOQIANGSHUTYPEID ||
+		role->getTypeID() == MONSTERKULOUID || role->getTypeID() == MONSTERSHENGSHOUID ||
+		role->getTypeID() == LIHUATYPEID || role->getTypeID() == DANGAOTYPEID)
+	{
+		_fadeOutList.insert(roleId);
+	}
+// 	else if (role->getCreatureType() == CT_NPC)
+// 	{
+// 
+// 	}
+	else
+	{//如果是怪物则实际不删除
+		Monster *monster = static_cast<Monster*>(role);
+		if(monster->getRealDelete())
+		{
+			_fadeOutList.insert(roleId);
+		}
+		else
+		{
+			_remoteRole.erase(roleId);
+			_monstCache[roleId] = role;
+			role->setVisiable(false);
+			//清除状态
+			role->stopAllRingEffect(); //死亡结束所有特戒特效
+			role->setColorPoisoning(255,255,255);//解毒效果
+			role->delColorHoc();//解麻痹效果
+
+		}
+	}
+	//CCProfileEnd("FreeRole");
+
+}
+
+long long RoleManager::pickRole( const CCPoint &pickPoint, Role** pRole, ePickRoleType prt /*= PRT_Default */, bool useBound /*= true*/)
+{
+	long long roleId = -1;
+
+	CCPoint pos = _localPlayer->getPosition();
+	const CCRect &bound = _localPlayer->getBoundBox();
+	if(!_localPlayer->isDead() && bound.containsPoint(ccpSub(pickPoint, pos)))
+	{
+		roleId = _localPlayer->getId();
+	}
+
+	std::list<Role*> selectRole;
+
+	for(RoleMap::iterator iter = _remoteRole.begin(); iter != _remoteRole.end(); ++ iter)
+	{
+		Role *role = iter->second;
+
+		CCPoint pos = role->getPosition();
+		const CCRect &bound = role->getBoundBox();
+		if(!role->isDead() && 
+			_utf_length(role->getName()) != 0&&
+			bound.containsPoint(ccpSub(pickPoint, pos)) )		//是火墙就当没选中
+		{
+			if (RoleManager::getInstance()->isCanShowThisRole(role))
+				selectRole.push_back(role);
+			//CCLog("-----------------pickRole::yiCongYuanChengWanJiaLieBiaoLiHuoQuDao:NPC 1");
+			//roleId = role->getId();
+		}
+	}
+
+	//代理角色数据和状态机不全，先不能点选
+// 	for(RoleMap::iterator iter = _roleProxyMap.begin(); iter != _roleProxyMap.end(); ++ iter)
+// 	{
+// 		Role *role = iter->second;
+// 
+// 		CCPoint pos = role->getPosition();
+// 		const CCRect &bound = role->getBoundBox();
+// 		if(!role->isDead() && 
+// 			bound.containsPoint(ccpSub(pickPoint, pos)))
+// 		{
+// 			if (RoleManager::getInstance()->isCanShowOtherPlayer(role))
+// 				selectRole.push_back(role);
+// 			//roleId = role->getId();
+// 		}
+// 	}
+
+	if(prt == PRT_Default || prt == PRT_End)
+	{
+		ePickRoleType pt = PRT_End;
+		for(std::list<Role*>::iterator iter = selectRole.begin(); iter != selectRole.end(); ++ iter)
+		{
+			Role *role = *iter;
+			ePickRoleType tmpPt = getPickType(role);
+			CC_ASSERT(tmpPt != PRT_Default);
+			if(tmpPt < pt)
+			{
+				pt = tmpPt;
+				roleId = role->getId();
+				//CCLog("-----------------pickRole::roleIdHuoQuDaoLe:NPC 1");
+				*pRole = role;
+			}
+		}
+	}
+	else
+	{
+		CC_ASSERT(prt > PRT_Default && prt < PRT_End);
+		for(std::list<Role*>::iterator iter = selectRole.begin(); iter != selectRole.end(); ++ iter)
+		{
+			Role *role = *iter;
+			ePickRoleType tmpPt = getPickType(role);
+			CC_ASSERT(tmpPt != PRT_Default);
+			if(tmpPt == prt)
+			{
+				roleId = role->getId();
+				*pRole = role;
+				break;
+			}
+		}
+	}
+
+	return roleId;
+}
+
+void RoleManager::set_select_role_id( unsigned int roleId )
+{
+	if(_currentSelected == roleId)
+		return;
+
+	if(roleId == _localPlayer->getId())
+		return;
+
+	//if(_currentSelected != INVALID_ID)
+	//{
+	//	Role *role = findRole(_currentSelected, false);
+	//	if(role != NULL)
+	//		role->setSelected(false);
+	//}
+
+	//Role *role = findRole(roleId, false);
+	//if(role != NULL)
+	//	role->setSelected(true);
+
+	changeSelect(roleId);
+	//_currentSelected = roleId;
+
+	//World::getInstance()->cb(_currentSelected);
+
+	//TODO 角色被选中
+}
+
+void RoleManager::showAllRole( bool show /*= true*/ )
+{
+	CC_ASSERT(_localPlayer != NULL);
+	_localPlayer->setVisiable(show);
+
+	for(RoleMap::iterator iter = _remoteRole.begin(); iter != _remoteRole.end(); ++ iter)
+	{
+		Role *role = iter->second;
+		role->setVisiable(show);
+	}
+
+	for(RoleMap::iterator iter = _roleProxyMap.begin(); iter != _roleProxyMap.end(); ++ iter)
+	{
+		Role *role = iter->second;
+		role->setVisiable(show);
+	}
+}
+void RoleManager::showAllPlayer( bool show /*= true*/ )
+{
+	CC_ASSERT(_localPlayer != NULL);
+	_localPlayer->setVisiable(show);
+
+	for(RoleMap::iterator iter = _remoteRole.begin(); iter != _remoteRole.end(); ++ iter)
+	{
+		Role *role = iter->second;
+		if (role->getCreatureType()==CT_PLAYER)
+			role->setVisiable(show);
+	}
+}
+
+void RoleManager::showAllOtherRole( bool show /*= true*/ )
+{
+	//int needNum = 0;
+	//unsigned int localId = _localPlayer->getId();
+	for(RoleMap::iterator iter = _remoteRole.begin(); iter != _remoteRole.end();++ iter)
+	{
+		Role *role = iter->second;
+		if(IS_PLAYER(role->getId()) && role->getCreatureType() == CT_PLAYER)
+		{
+			role->setVisiable(show);
+			SkillAnimManager::getInstance()->setSkillEffectVisible(role->getId(),SKILLMOFADUNID,show);
+			Player* player = dynamic_cast<Player*>(role);
+			if (show)
+			{
+				player->setFirstUpdate(true);
+				player->initFsm();
+				player->loadAnimate();
+				player->update(0.f);
+			}
+			else
+				player->destroyFsm();
+		}
+		if (role->getCreatureType() == CT_MONSTER && isPet(role->getTypeID()) && !_localPlayer->isMyPet(role->getId()))
+		{
+			role->setVisiable(show);
+			Monster* monster = dynamic_cast<Monster*>(role);
+			if (show)
+			{
+				monster->setFirstUpdate(true);
+				monster->initFsm();
+				monster->loadAnimate();
+				monster->update(0.f);
+			}
+			else
+				monster->destroyFsm();
+		}
+	}
+}
+
+void RoleManager::freeAll()
+{
+	clearAllRemote();
+	
+	if(_localPlayer)
+	{
+		if (World::getInstance()->getRepetLoginState() == false)
+		{
+			delete _localPlayer;
+			_localPlayer = NULL;
+		}
+	}
+	//CC_ASSERT(gRoleNum == 0);
+}
+
+void RoleManager::clearAllRemote(bool deleteNewMapRole /*= true*/)
+{
+	for(RoleMap::iterator iter = _roleProxyMap.begin(); iter != _roleProxyMap.end();)
+	{
+		Role *role = iter->second;
+		if(!role->isNewMapRole() || deleteNewMapRole)
+		{
+			delete role;
+			_roleProxyMap.erase(iter ++);
+		}
+		else
+		{
+			++iter;
+		}
+	}
+
+// 	if(deleteNewMapRole)
+// 	{
+// 		_roleRequestPair.clear();
+// 		//_roleRequestBlock.clear();
+// 	}
+
+	//for(std::list<Role*>::iterator iter = _fadeOutList.begin(); iter != _fadeOutList.end(); iter ++)
+	//{
+	//	Role *role = *iter;
+	//	RoleMap::iterator siter = _remoteRole.find(role->getId());
+	//	if(siter!=_remoteRole.end())
+	//		_remoteRole.erase(siter);
+	//	delete role;
+	//}
+	//_fadeOutList.clear();
+	_fadeOutList.clear();
+
+	for(RoleMap::iterator iter = _remoteRole.begin(); iter != _remoteRole.end();)
+	{
+		Role *role = iter->second;
+		if(!role->isNewMapRole() || deleteNewMapRole)
+		{
+			delete role;
+			_remoteRole.erase(iter ++);
+		}
+		else
+		{
+			++iter;
+		}
+	}
+
+	for(RoleMap::iterator iter = _monstCache.begin(); iter != _monstCache.end(); ++ iter)
+	{
+		Role *role = iter->second;
+		delete role;
+	}
+	_monstCache.clear();
+
+	ClearNpc();
+}
+Role * RoleManager::findRoleByProtoTypeID( unsigned int roleTypeID )
+{
+	unsigned int typeID = roleTypeID;
+	bool BOOST_LOCAL_FUNCTION(RoleMap::value_type const& one,bind typeID)
+	{
+		Role* pRole = one.second;
+		return pRole->getTypeID() == typeID;
+	}BOOST_LOCAL_FUNCTION_NAME(CustomFinder)
+	
+	BOOST_AUTO(iter,boost::find_if(_remoteRole,CustomFinder));
+	if (iter != _remoteRole.end())
+	{
+		return iter->second;
+	}
+
+	return NULL;
+}
+void RoleManager::clearAllRemotePlayer()
+{
+	for(RoleMap::iterator iter = _roleProxyMap.begin(); iter != _roleProxyMap.end();)
+	{
+		Role *role = iter->second;
+		if(IS_PLAYER(role->getId()))
+		{
+			delete role;
+			_roleProxyMap.erase(iter ++);
+		}
+		else
+		{
+			++iter;
+		}
+	}
+
+// 	for(std::set<unsigned int>::iterator iter = _roleRequestPair.begin(); iter != _roleRequestPair.end();)
+// 	{
+// 		unsigned int roleId = *iter;
+// 		if(IS_PLAYER(roleId))
+// 		{
+// 			_roleRequestPair.erase(iter ++);
+// 		}
+// 		else
+// 		{
+// 			++ iter;
+// 		}
+// 	}
+
+
+	for(std::set<unsigned int>::iterator iter = _fadeOutList.begin(); iter != _fadeOutList.end();)
+	{
+		unsigned int roleId = *iter;
+		if(IS_PLAYER(roleId))
+		{
+			_fadeOutList.erase(iter ++);
+		}
+		else
+		{
+			++ iter;
+		}
+	}
+
+	for(RoleMap::iterator iter = _remoteRole.begin(); iter != _remoteRole.end();)
+	{
+		Role *role = iter->second;
+		if(IS_PLAYER(role->getId()))
+		{
+			delete role;
+			_remoteRole.erase(iter ++);
+		}
+		else
+		{
+			++iter;
+		}
+	}
+}
+
+Role * RoleManager::getMonstFromCache( unsigned int id )
+{
+	RoleMap::iterator iter = _monstCache.find(id);
+	if(iter != _monstCache.end())
+	{
+		Role *role = iter->second;
+		_monstCache.erase(iter);
+		return role;
+	}
+	//for(std::list<Role*>::iterator iter = _monstCache.begin(); iter != _monstCache.end(); iter ++)
+	//{
+	//	Role *role = *iter;
+	//	if(role->getId() == id)
+	//	{
+	//		_monstCache.erase(iter); //取出后从列表中删除
+	//		return role;
+	//	}
+	//}
+
+	return NULL;
+}
+
+unsigned int RoleManager::onRoleEquipChange( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_avatar_equip_change"))
+	{
+		NET_SIS_avatar_equip_change * msg = (NET_SIS_avatar_equip_change*)cmd;
+		Role *role = findRole(msg->dw_role_id);
+		if(role != NULL && role->getCreatureType() == CT_PLAYER)
+		{
+			Player *player = dynamic_cast<Player*>(role);
+			//外观属性
+			player->setDisplayAttr((ePlayerDisplayAttr)msg->EquipDisplay.byDisplayPos, msg->EquipDisplay.dw_data_id);
+			player->loadAnimate();			
+			if(player->getId() == _localPlayer->getId())
+			{
+				GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->updateDisplay();
+				GET_UI(RoleRingUi, WCT_ROLERINGUI)->updateDisplay();
+				//player->updateLocalSBKMasterEffect(player->getId());
+			}
+			if (msg->pos == 12 && msg->dw_data_id == 9431003 || msg->dw_data_id == 9430003)
+			{
+				if(msg->isEquip)
+					player->updateSBKMasterEffect(msg->isEquip);
+			}	
+		}
+	}
+	return 0;
+}
+
+unsigned int RoleManager::onSetRoleState( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_set_role_state"))
+	{
+		NET_SIS_set_role_state *msg = (NET_SIS_set_role_state*)cmd;
+		Player *role = dynamic_cast<Player*>(findRole(msg->dw_role_id));
+		if(role != NULL)
+		{
+			if ((msg->eState & ERS_Stall) != 0)
+			{
+				role->setAttribute(RA_Stall, msg->eState & ERS_Stall);
+				//role->setAttribute(RA_ShuangXiu, msg->eState & ERS_ComPractice);
+				if(role->getAttribute(RA_Stall) != 0)
+				{
+					role->enterStallState();
+				}
+				SkillData *skillData = SkillManager::getInstance()->getSkillData(SKILLMOFADUNTYPEID,true);
+				if(role->getCreatureType() != CT_Proxy&& (role->getRoleType() == RT_WMAGE || role->getRoleType() == RT_MMAGE) && skillData != NULL)
+				{//如果是法师，自动释放魔法盾					
+					SkillAnimManager::getInstance()->stopBuffer(msg->dw_role_id,skillData->proto->id);
+				}		
+				//if(role->getAttribute(RA_ShuangXiu) != 0)
+				//{
+				//	role->enterShuangxiuState();
+				//	ShuangXiuMgr::getInstance()->runAnimation(role->getId(), )
+				//}
+			}
+
+			if ((msg->eState & ERS_Exchange) != 0)
+			{
+				role->setAttribute(RA_Exchange,msg->eState & ERS_Exchange);
+			}
+
+			if((msg->eState & ERS_Combat) != 0)
+			{
+				role->setAttribute(RA_BattleMode, msg->eState & ERS_Combat);
+			}
+			if((msg->eState & ERS_IsGrayName) != 0)
+			{
+				if( NULL != MapManager::getInstance() && MapManager::getInstance()->mapDangerousValue(MapManager::getInstance()->getCurMapId()) != Map_PK)
+					role->setAttribute(RA_IsGrayName,1);
+			}
+			if((msg->eState & ERS_Hang) != 0)
+			{
+				role->setAttribute(RA_Hang, msg->eState & ERS_Hang);
+			}
+		}
+	}
+	
+	return 0;
+}
+
+unsigned int RoleManager::onUnsetRoleState( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_unset_role_state"))
+	{
+		NET_SIS_unset_role_state *msg = (NET_SIS_unset_role_state*)cmd;
+		Player *role = dynamic_cast<Player*>(findRole(msg->dw_role_id));
+		LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+		if(role != NULL)
+		{
+			if((msg->eState & ERS_Stall) != 0)
+			{
+				role->setAttribute(RA_Stall,  0);
+				role->exitStallState(lp->getId() == role->getId() ? true : false);
+				PlayerStallUiLayer* layer = (PlayerStallUiLayer*)getUiNodeByTag<PlayerStallUiLayer>(WCT_StallUi);
+				if (layer)
+				{
+					layer->CloseStall(msg->dw_role_id);
+				}
+
+			}
+
+			if((msg->eState & ERS_ComPractice) != 0)
+			{
+				role->setAttribute(RA_ShuangXiu, 0);
+				role->exitShuangxiuState();
+				ShuangXiuMgr::getInstance()->stopAnimation(role->getId());
+				if (lp && lp->getId() == msg->dw_role_id)
+				{
+					lp->setAcceptShuangXiu(false);
+				}
+			}
+
+			if ((msg->eState & ERS_Exchange) != 0)
+			{
+				role->setAttribute(RA_Exchange,0);
+			}
+			if ((msg->eState & ERS_IsGrayName) != 0)
+			{
+				role->setAttribute(RA_IsGrayName,0);
+			}
+			if((msg->eState & ERS_Combat) != 0)
+			{
+				role->setAttribute(RA_BattleMode, 0);
+			}
+
+			if((msg->eState & ERS_Hang) != 0)
+			{
+				role->setAttribute(RA_Hang, 0);
+			}
+		}
+	}
+
+	return 0;
+}
+
+unsigned int RoleManager::onSetPractice( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_practice_to_all"))
+	{
+		NET_SIS_practice_to_all *msg = (NET_SIS_practice_to_all*)cmd;
+		Player *role1 = dynamic_cast<Player*>(findRole(msg->dwSrcRoleID));
+		Player *role2 = dynamic_cast<Player*>(findRole(msg->dwDesRoleID));
+		if(role1 != NULL)
+		{
+			role1->setAttribute(RA_ShuangXiu, 1);
+			role1->enterShuangxiuState();
+		}
+		if(role2 != NULL)
+		{
+			role2->setAttribute(RA_ShuangXiu, 1);
+			role2->enterShuangxiuState();
+		}
+
+		ShuangXiuMgr::getInstance()->runAnimation(msg->dwSrcRoleID, msg->dwDesRoleID);
+	}
+
+	return 0;
+}
+
+unsigned int RoleManager::onDiaoXiangName( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_get_diaoxiang_name"))
+	{
+		//获取比奇城雕像名字并刷新
+		NET_SIS_get_diaoxiang_name *msg = (NET_SIS_get_diaoxiang_name*)cmd;
+		
+		Role* status = NULL;
+		unsigned int typeId = 0;
+		for(unsigned int idx = 0; idx< 6; ++idx)
+		{
+			typeId = Status1+ idx/2;
+			//判断雕像性别
+			if(idx % 2 == 0)
+			{//条件成立为女	
+				typeId += 3;
+			}
+			//获取雕像、雕像名称并设置名字
+			_diaoxiangName[typeId] = convertName(msg->szDiaoName[idx]).empty()?_diaoxiangName[typeId]:convertName(msg->szDiaoName[idx]);
+			_diaoxiangPower[typeId] = msg->dwPower[idx];
+			_diaoxiangId[typeId] = msg->dwId[idx];
+			_diaoxiangLevel[typeId] = msg->dwLevel[idx];
+			status = findRoleByProtoTypeID(typeId);
+			if(status)
+			{
+				status->setName(_diaoxiangName[typeId].c_str());
+				status = NULL;
+			}
+		}
+	}
+	return 0;
+}
+
+std::string RoleManager::getDiaoXiangNpcName( unsigned int id )
+{
+	std::map<unsigned int, std::string>::iterator iter = _diaoxiangName.find(id);
+	if(iter != _diaoxiangName.end())
+	{
+		return iter->second;
+	}
+	return "";
+}
+
+std::string RoleManager::getDiaoXiangNpcNameByRoleType( unsigned int type )
+{
+	unsigned int typeId = 0;
+	switch(type){
+	case RT_MWARRIOR:
+		typeId = 2910192;
+		break;
+	case RT_WWARRIOR:
+		typeId = 2910195;
+		break;
+	case RT_MMAGE:
+		typeId = 2910193;
+		break;
+	case RT_WMAGE:
+		typeId = 2910196;
+		break;
+	case RT_MTAOIST:
+		typeId = 2910194;
+		break;
+	case RT_WTAOIST:
+		typeId = 2910197;
+		break;
+	}
+
+	return getDiaoXiangNpcName(typeId);
+}
+
+unsigned int RoleManager::getDiaoXiangNpcPower( unsigned int id )
+{
+	std::map<unsigned int, unsigned int>::iterator iter = _diaoxiangPower.find(id);
+	if(iter != _diaoxiangPower.end())
+	{
+		return iter->second;
+	}
+
+	return 0;
+}
+
+unsigned int RoleManager::getDiaoXiangNpcPowerByRoleType( unsigned int type )
+{
+	unsigned int typeId = getNpcIdByRoleType(type);
+
+	return getDiaoXiangNpcPower(typeId);
+}
+
+unsigned int RoleManager::getDiaoXiangRoleId( unsigned int id )
+{
+	std::map<unsigned int, unsigned int>::iterator iter = _diaoxiangId.find(id);
+	if(iter != _diaoxiangId.end())
+	{
+		return iter->second;
+	}
+
+	return 0;
+}
+
+unsigned int RoleManager::getDiaoXiangRoleIdByRoleType( unsigned int type )
+{
+	unsigned int typeId = getNpcIdByRoleType(type);
+
+	return getDiaoXiangRoleId(typeId);
+}
+
+unsigned int RoleManager::getDiaoXiangLevel(unsigned int id)
+{
+	std::map<unsigned int, unsigned int>::iterator iter = _diaoxiangLevel.find(id);
+	if(iter != _diaoxiangLevel.end())
+	{
+		return iter->second;
+	}
+
+	return 0;
+}
+
+unsigned int RoleManager::getDiaoXiangLevelByRoleType(unsigned int type)
+{
+	unsigned int typeId = getNpcIdByRoleType(type);
+
+	return getDiaoXiangLevel(typeId);
+}
+
+unsigned int RoleManager::getDiaoXiangMoBaiExp(int roleLevel, unsigned int type, bool normalMobai)
+{
+	int nOpenLevel = GetFunOpenLevel(EFOL_HeroWorship);
+	if (roleLevel < nOpenLevel)
+	{
+		return 0;
+	}
+
+	std::vector<unsigned int>& exp_bases = NumericalIniMgr::getInstance()->getMobaiExpValues();
+	int Exp_Group = exp_bases.size();
+
+	unsigned int exp = 0;
+	int npcLevel = getDiaoXiangLevelByRoleType(type);
+
+	int arolelvl = floor(roleLevel/5.0f);
+	if (arolelvl > Exp_Group - 1)
+	{
+		arolelvl = Exp_Group - 1;
+	}
+
+	int mult = normalMobai ? 1 : 2;
+	int diaoXiangMult = 1; // 雕像倍率
+
+	if (npcLevel > roleLevel)
+	{
+		exp = ((npcLevel - roleLevel) * 10000 * diaoXiangMult + exp_bases[arolelvl]) * mult;
+	}
+	else
+	{
+		float conf = (roleLevel - npcLevel + 2) * 0.5f;
+		if (npcLevel < 10)
+		{
+			conf = 0.5f;
+		}
+
+		exp = (20000 * conf + exp_bases[arolelvl]) * mult;
+	}
+	exp = exp * WorldLevelMgr::getInstance()->getWorldLevelAddedExpPercentByType(E_ADDED_STATUE_EXP_PER)/100;
+	return exp;
+}
+
+unsigned int RoleManager::getNpcIdByRoleType(unsigned int type)
+{
+	unsigned int typeId = 0;
+	switch(type){
+	case RT_MWARRIOR:
+		typeId = 2910192;
+		break;
+	case RT_WWARRIOR:
+		typeId = 2910195;
+		break;
+	case RT_MMAGE:
+		typeId = 2910193;
+		break;
+	case RT_WMAGE:
+		typeId = 2910196;
+		break;
+	case RT_MTAOIST:
+		typeId = 2910194;
+		break;
+	case RT_WTAOIST:
+		typeId = 2910197;
+		break;
+	}
+
+	return typeId;
+}
+
+std::string RoleManager::getGuildName( unsigned int roleId, unsigned int guildId )
+{
+	std::string guildName;
+	bool hasName = NameMgr2::getInstance()->queryGuildName(guildId, guildName);
+	if(hasName)
+	{
+		return guildName;
+	}
+	else
+	{
+		RoleGuildNameTmp::iterator iter = _guildNameTmp.find(guildId);
+		if(iter != _guildNameTmp.end())
+		{
+			iter->second.insert(roleId);
+		}
+		else
+		{
+			std::set<unsigned int> roleVector;
+			roleVector.insert(roleId);
+			_guildNameTmp[guildId] = roleVector;
+		}
+
+		return "";
+	}
+}
+
+void RoleManager::setDiaoXiangNpcName(std::string name,unsigned int id)
+{
+	_diaoxiangName[id] = name;
+}
+
+void RoleManager::onGetGuildName( unsigned int guildId, const std::string& guildName )
+{
+	//通知需要的角色更新guildName显示
+	RoleGuildNameTmp::iterator iter = _guildNameTmp.find(guildId);
+	if(iter != _guildNameTmp.end())
+	{
+		const std::set<unsigned int> &roles = iter->second;
+		for(std::set<unsigned int>::iterator iter2 = roles.begin(); iter2 != roles.end(); ++iter2)
+		{
+			Role *role = findRole(*iter2);
+			if(role != NULL)
+			{
+				role->setGuild(iter->first);
+			}
+		}
+		_guildNameTmp.erase(iter);
+	}
+}
+
+void RoleManager::updateRoleGuildName()
+{
+	for(RoleMap::iterator iter = _remoteRole.begin(); iter != _remoteRole.end(); ++ iter)
+	{
+		Role *role = iter->second;
+		if(role->getCreatureType() == CT_PLAYER)
+			role->setGuild(role->getGuildID());
+	}
+}
+
+unsigned int RoleManager::onPkValueChanged( s_net_cmd *cmd )
+{
+	NET_SIS_change_pk_value *msg = (NET_SIS_change_pk_value*)cmd;
+	Role *role = findRole(msg->dw_role_id);
+	if(role != NULL)
+	{
+		if(msg->LuckYouLess== -1)
+		{
+			ToolTip::getInstance()->push(GET_STR(9219).c_str());
+		}
+		role->setAttribute(RA_PKVALUE, msg->iPKValue);
+		//刷新UI
+		GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->updateAttr();
+	}
+	return 0;	
+}
+
+void RoleManager::releaseProxy( unsigned int id )
+{
+	RoleMap::iterator iter = _roleProxyMap.find(id);
+	if(iter != _roleProxyMap.end())
+	{
+		//testOf << id << "	release proxy" << std::endl;
+		CC_ASSERT(iter->second->getCreatureType() == CT_Proxy);
+		delete iter->second;
+		_roleProxyMap.erase(iter);
+	}
+}
+
+Role *RoleManager::findProxy( unsigned int id )
+{
+	RoleMap::iterator iter = _roleProxyMap.find(id);
+	if(iter != _roleProxyMap.end())
+	{
+		return iter->second;
+	}
+	return NULL;
+}
+
+Role * RoleManager::findNearestRole()
+{
+	float dis = 1000000.f;
+	CCPoint lpPos = getLocalPlayer()->getPosition();
+	Role *nearRole = NULL;
+	for(RoleMap::iterator iter = _remoteRole.begin(); iter != _remoteRole.end(); ++ iter)
+	{
+		Role *role = iter->second;
+
+		if(!canAttack(role, false))
+			continue;
+
+		float roleDis = ccpDistance(role->getPosition(), lpPos);
+		if(roleDis < dis)
+		{
+			dis = roleDis;
+			nearRole = role;
+		}
+	}
+
+	return nearRole;
+}
+
+bool RoleManager::isRoleInFadeOut( unsigned int roleId)
+{
+	//for(std::list<Role*>::iterator iter3 = _fadeOutList.begin();iter3!=_fadeOutList.end(); ++iter3)
+	//{
+	//	if((*iter3)->getId()==roleId)
+	//		return true;
+	//}
+	//return false;
+	std::set<unsigned int>::iterator iter = _fadeOutList.find(roleId);
+	if(iter != _fadeOutList.end())
+		return true;
+	return false;
+}
+
+unsigned int RoleManager::onTeamEquipInfo( s_net_cmd *cmd )
+{
+	NET_SIS_Team_Equip_Info *msg = (NET_SIS_Team_Equip_Info*)cmd;
+	Role *role = RoleManager::getInstance()->findRole(msg->dw_RoleID);
+	if(role==NULL){
+		return NULL;
+	}
+	if(RoleManager::getInstance()->getLocalPlayer()->getId() != msg->dw_RoleID)
+	{
+		role->setAttribute(RA_BATTLE_POINT, msg->st_EquipTeamInfo.n32_Rating);
+	}
+	else{
+		RoleManager::getInstance()->getLocalPlayer()->setAttribute(RA_BATTLE_POINT, msg->st_EquipTeamInfo.n32_Rating);
+	}
+	return 0;
+}
+
+bool RoleManager::canAttack( unsigned int roleId, bool selectPet /*= true */,bool IsGiveTip)
+{
+	//不能打自己
+	if (roleId==getLocalPlayer()->getId())
+		return false;
+	//自己的骷髅圣兽，不能攻击
+	if (roleId==SkillManager::getInstance()->getKulouID()
+		|| roleId==SkillManager::getInstance()->getShengshouID())
+		return false;
+
+/*
+	long IsNoRoleId = roleId;
+	if (IsNoRoleId <= 0)
+	{
+		return true;
+	}*/
+	Role *role = findRole(roleId);
+	if(role == NULL)
+		return false;
+	
+	return canAttack(role, selectPet,IsGiveTip);
+}
+
+bool RoleManager::canAttack( const Role *role, bool selectPet /*= true */,bool IsGiveTip)
+{
+	CC_ASSERT(role != NULL);
+
+	unsigned int roleId = role->getId();
+	//不能打自己
+	if (roleId==getLocalPlayer()->getId())
+		return false;
+	//自己的骷髅圣兽，不能攻击
+	if (roleId==SkillManager::getInstance()->getKulouID()
+		|| roleId==SkillManager::getInstance()->getShengshouID())
+		return false;
+	int bm = _localPlayer->getAttribute(RA_BATTLEMODE);
+	bool bIsTeammate = TeamMgr::getInstance()->is_teammate(roleId);
+	if(bIsTeammate)
+	{
+		if(IsGiveTip)
+		{
+			ToolTip::getInstance()->push(GET_STR(9335));
+		}
+		return false;
+	}
+
+	
+	if(role->getCreatureType() == CT_NPC || isRoleInFadeOut(role->getId()) || _utf_length(role->getName()) == 0)
+		return false;
+
+	//gx add 2013.10.22 死亡的玩家不会自动选中
+	if (CT_PLAYER == role->getCreatureType())
+	{
+		if (role->isDead())
+		{
+			return false;
+		}
+	}
+	//end
+	if(!selectPet)
+	{
+		if(isPet(role->getTypeID()))
+			return false;
+	}
+	if(MapManager::getInstance()->checkRoleArea(roleId) == MapManager::MapArea::AT_Safe || MapManager::getInstance()->checkRoleArea(getLocalPlayer()->getId()) ==  MapManager::MapArea::AT_Safe)
+	{
+		if(CT_PLAYER == role->getCreatureType())
+		{
+			if(IsGiveTip)
+			{
+				ToolTip::getInstance()->push(GET_STR(2426));
+			}
+			return false;
+		}
+			
+	}
+
+	if(bm == ERolePK_Peace)
+	{
+		if(role->getCreatureType() == CT_PLAYER)
+		{
+			return false;
+		}
+		else
+		{
+			for(int i = 0; i < MONSTER_CANNTHIT_NUM; i ++)
+			{
+				if(g_MonsterCanntHit[i] == role->getTypeID())
+					return false;
+			}
+
+			//宝宝圣兽要判断其主人的
+			if (isPet(role->getTypeID()))
+			{
+				return canAttack(role->getOwnerId());
+			}
+		}
+	}
+
+	else if(bm == ERolePK_Guild)
+	{
+		unsigned int mapID = MapManager::getInstance()->getCurMapId();
+		bool bIsLeague = GuildMgr::getInstance()->isLeagueGuild(role->getGuildID());
+		if(bIsLeague)
+		{
+			if(mapID == SBK_MAP_CRC_ID)
+			{
+				if(MapManager::getInstance()->checkRoleArea(roleId) != MapManager::MapArea::AT_NoPunish)//AT_NoPunish
+				{
+					return false;
+				}
+			}
+			else
+			{
+				return false;
+			}
+
+		}	
+		if (2820664524 != mapID)//特殊对待比武场，这里行会模式也能打同行会的人
+		{
+			//行会模式不攻击骷髅，神兽
+			if(role->getCreatureType() == CT_PLAYER && role->getGuildID() == _localPlayer->getGuildID())
+				return false;	//行会模式无法攻击同行会成员
+
+			//宝宝圣兽要判断其主人的
+			if (isPet(role->getTypeID()))
+			{
+				return canAttack(role->getOwnerId());
+			}
+		}
+		else//若在比武场中
+		{
+			if (isPet(role->getTypeID()))
+				return false;
+		}
+	}
+	else if(bm == ERolePK_Justice)
+	{
+		bool resultJustic = JusticeCan(findRole(roleId));
+		if(resultJustic == false)
+		{
+			return resultJustic;
+		}
+	}
+	
+return true;
+}
+bool RoleManager::JusticeCan( Role *role)
+{
+	if(role == NULL)
+	{
+		return false;
+	}
+	if(role->getCreatureType() == CT_PLAYER)
+	{
+		int TargetPkValue = role->getAttribute(RA_PKVALUE);
+		int IsGrayNAME = role->getAttribute(RA_IsGrayName);
+		if(TargetPkValue < 2 && IsGrayNAME == 0)
+		{
+			return false;
+		}
+		else
+		{
+			return true;
+		}
+	}
+	else
+	{
+		return true;
+	}
+	
+}
+void RoleManager::showFashion( bool show )
+{
+	if(_localPlayer == NULL)
+		return;
+
+	if(_localPlayer->isFashion() != show)
+	{
+		NET_SIC_fashion cmd;
+		cmd.fasion_flag = show;
+		TCP_CLIENT->send_net_cmd(&cmd, NP_INSIGNIFICANT, true);
+	}
+}
+
+unsigned int RoleManager::onRoleFashionChanged( s_net_cmd *cmd )
+{
+	NET_SIS_avatar_equip *msg = (NET_SIS_avatar_equip*)cmd;
+	Player *player = dynamic_cast<Player*>(findRole(msg->dw_role_id));
+	if(player != NULL)
+	{
+		//player->setFashion(msg->fasion_flag?true:false);
+		player->sync_display_flag(msg->fasion_flag);
+		for(int i = PDA_Body; i < PDA_End; i ++)
+		{
+			player->setDisplayAttr((ePlayerDisplayAttr)msg->sAvatarEquip.AvatarEquip[i].byDisplayPos, msg->sAvatarEquip.AvatarEquip[i].dw_data_id);
+		}
+		player->loadAnimate();
+		player->updateGongFaRealmEffect(GambleMgr::getInstance()->m_curGongFaRealm);
+
+		if(player->getId() == _localPlayer->getId())
+		{
+			GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->updateDisplay();
+			GET_UI(RoleRingUi, WCT_ROLERINGUI)->updateDisplay();
+		}
+	}
+	return 0;
+}
+
+//加buff
+unsigned int RoleManager::onAddRoleBuff( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_add_role_buffer"))
+	{
+		NET_SIS_add_role_buffer *msg = (NET_SIS_add_role_buffer*)cmd;
+		SkillAnimManager::getInstance()->useBuffer(msg->Buff.dwBuffTypeID, msg->dw_role_id, msg->dw_role_id);
+		LocalPlayer *lp = getLocalPlayer();
+		if(msg->dw_role_id == lp->getId()) //本地玩家
+		{
+			lp->addPLBuffer(msg->Buff.dwBuffTypeID,msg->Buff.dwSrcRoleId,msg->Buff.nWarpTimes);
+			RoleHeadUi *roleHeadUi = World::getInstance()->getRoleHeadUi();
+			if(roleHeadUi != NULL)
+			{
+				roleHeadUi->setBuffCD(msg->Buff.dwBuffTypeID, msg->Buff.nPersistTimeLeft, msg->Buff.nMaxPersistTime,msg->Buff.nWarpTimes);
+			}
+
+			//加速惩罚眩晕弹框提示
+			if (3004500==msg->Buff.dwBuffTypeID)
+			{
+				CCScene* scene = World::getInstance()->getScene();
+				if (scene)
+				{
+					MessageBoxUi *msgUi = MessageBoxUi::createWithOneBtn(TEXT_UTF8_TISHI, GET_STR(9566).c_str(), TEXT_UTF8_QUEDING);
+					scene->addChild(msgUi, WZ_MESSAGEBOX);
+				}
+			}
+
+			if(3010401==msg->Buff.dwBuffTypeID)//无敌buff
+			{
+				lp->setColorPoisoning(255,255,121);
+			}
+			//播特效 特殊处理特戒引发技能的特效 技能id/100
+			switch( msg->Buff.dwBuffTypeID / 100 )
+			{
+			case 90001:
+				lp->setColorHoc();//麻痹效果
+				break;
+			case 90002: //灼烧
+				lp->runAddFireRingDot(); //灼烧特效
+				break;
+			case 90003: //加盾
+				lp->runAddShieldRingHot(); //加盾特效
+				break;
+			case 90004: //恢复
+				lp->runAddHpRingHot(); //恢复特效
+				break;
+			case 10302: //中毒
+			case 20301: //中毒
+				lp->setColorPoisoning(39,255,39); //中毒效果
+				break;
+			}
+		}
+		else //远端玩家
+		{
+			Role* pRemotRole = findRole( msg->dw_role_id ); //找远端玩家
+			if( pRemotRole ) //如果远端玩家存在
+			{
+				if(pRemotRole->getCreatureType() == CT_PLAYER){
+					((Player*)pRemotRole)->addPLBuffer(msg->Buff.dwBuffTypeID,msg->Buff.dwSrcRoleId,msg->Buff.nWarpTimes);//存储buff
+				}
+
+				if(3010401==msg->Buff.dwBuffTypeID)//无敌buff
+				{
+					pRemotRole->setColorPoisoning(255,255,121);
+				}
+				//播特效 特殊处理特戒引发技能的特效 技能id/100
+				switch( msg->Buff.dwBuffTypeID / 100 )
+				{
+				case 90001:
+					pRemotRole->setColorHoc(); //麻痹效果
+					break;
+				case 90002: //灼烧
+					pRemotRole->runAddFireRingDot(); //灼烧特效
+					break;
+				case 90003: //加盾
+					pRemotRole->runAddShieldRingHot(); //加盾特效
+					break;
+				case 90004: //恢复
+					pRemotRole->runAddHpRingHot(); //恢复特效
+					break;
+				case 10302: //中毒
+				case 20301: //中毒
+					pRemotRole->setColorPoisoning(39,255,39); //中毒效果
+					break;
+				}
+			}
+		}
+	}
+	return 0;
+}
+
+//减buff
+unsigned int RoleManager::onRemoveRoleBuff( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_remove_role_buffer"))
+	{
+		NET_SIS_remove_role_buffer *msg = (NET_SIS_remove_role_buffer*)cmd;
+		SkillAnimManager::getInstance()->stopBuffer(msg->dw_role_id,msg->dwBuffTypeID);
+		LocalPlayer *lp = getLocalPlayer();
+		if(msg->dw_role_id == lp->getId()) //本地玩家
+		{
+			RoleHeadUi *roleHeadUi = World::getInstance()->getRoleHeadUi();
+			if(roleHeadUi != NULL)
+			{
+				roleHeadUi->setBuffCD(msg->dwBuffTypeID, 0, 0);
+			}
+
+			lp->removeBufferId(msg->dwBuffTypeID);
+			if(3010401==msg->dwBuffTypeID)//解除无敌buff
+			{
+				lp->setColorPoisoning(255,255,255);
+			}
+			//停止特效 特殊处理特戒引发技能的特效 技能id/100
+			switch( msg->dwBuffTypeID / 100 )
+			{
+			case 90001:
+				lp->delColorHoc();//解麻痹效果
+				break;
+			case 90002: //灼烧
+				lp->stopAddFireRingDot(); //停止灼热特效
+				break;
+			case 90003: //加盾
+				lp->stopAddShieldRingHot(); //停止加盾特效
+				break;
+			case 90004: //恢复
+				lp->stopAddHpRingHot(); //停止恢复特效
+				break;
+			case 10302: //解毒
+			case 20301: //解毒
+				lp->setColorPoisoning(255,255,255);//解毒效果
+				break;
+			}
+		}
+		else //远端玩家
+		{
+			Role* pRemotRole = findRole( msg->dw_role_id ); //找远端玩家
+			if( pRemotRole ) //如果远端玩家存在
+			{
+				if(pRemotRole->getCreatureType() == CT_PLAYER){
+					((Player*)pRemotRole)->removePLBuffer(msg->dwBuffTypeID);//删除存储的buff
+				}
+				if(3010401==msg->dwBuffTypeID)//解除无敌buff
+				{
+					pRemotRole->setColorPoisoning(255,255,255);
+				}
+				//停止效 特殊处理特戒引发技能的特效 技能id/100
+				switch( msg->dwBuffTypeID / 100 )
+				{
+				case 90001:
+					pRemotRole->delColorHoc();//解麻痹效果
+					break;
+				case 90002: //灼烧
+					pRemotRole->stopAddFireRingDot(); //停止灼热特效
+					break;
+				case 90003: //加盾
+					pRemotRole->stopAddShieldRingHot(); //停止加盾特效
+					break;
+				case 90004: //恢复
+					pRemotRole->stopAddHpRingHot(); //停止恢复特效
+					break;
+				case 10302: //解毒
+				case 20301: //解毒
+					pRemotRole->setColorPoisoning(255,255,255);//解毒效果
+					break;
+				}
+			}
+		}
+	}
+	return 0;
+}
+
+void RoleManager::addNewMapRole()
+{
+	for(RoleMap::iterator iter = _roleProxyMap.begin(); iter != _roleProxyMap.end(); ++ iter)
+	{
+		Role *role = iter->second;
+		role->setAsNewMapRole(false);
+		role->addToMap();
+	}
+
+	for(RoleMap::iterator iter = _remoteRole.begin(); iter != _remoteRole.end(); ++ iter)
+	{
+		Role *role = iter->second;
+		role->setAsNewMapRole(false);
+		role->addToMap();
+	}
+}
+
+// void RoleManager::autoSelectCanAttackRole()
+// {
+// 	AutoActionMgr::getInstance()->update_select_enemy();
+// }
+
+void RoleManager::hideOtherRole( bool hide )
+{
+	_hideRemoteRole = hide;
+	if(isHideOtherRole())
+	{
+		//clearAllRemotePlayer();
+		//showAllOtherRole(false);
+		set_select_role_id(INVALID);
+		SetTargetRole(NULL);
+	}
+	else
+	{
+		//showAllOtherRole();
+	}
+}
+
+void RoleManager::hideOtherEffect( bool hide )
+{
+	_hideRemoteEffect = hide;
+	if(hide)
+	{
+		SkillAnimManager::getInstance()->removeAllRemoteRoleSkill();
+	}
+
+	ShuangXiuMgr::getInstance()->showAnim(!hide);
+}
+
+bool RoleManager::isPet( unsigned int typeId )
+{
+	if((typeId >= 2211003 && typeId <= 2211011) ||
+		(typeId >= 2203019 && typeId <= 2203027))
+		return true;
+
+	return false;
+}
+
+RoleManager::DisplayData const* RoleManager::getDisplayData( unsigned int id )
+{
+	auto finder=  _displayMap.find(id);
+	if (finder != _displayMap.end())
+	{
+		return &finder->second;
+	}
+
+	return NULL;
+// 	if(id == 0 || id == -1)
+// 	{
+// 		return nullptr;
+// 	}
+// 
+// 	DisplayMap::iterator iter = _displayMap.find(id);
+// 	if(iter == _displayMap.end())
+// 	{
+// 		c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM DisplayData WHERE Id = ?1");
+// 		cmd->set_integer32(1 , id);
+// 		c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 		DisplayData displayData;
+// 		while(table->retrieve_row())
+// 		{
+// 			unsigned int idx = table->get_index("AnimFile");
+// 			displayData._animFile = table->get_text(idx);
+// 			idx = table->get_index("red");
+// 			displayData._r = (unsigned char)table->get_integer32(idx);
+// 			idx = table->get_index("green");
+// 			displayData._g = (unsigned char)table->get_integer32(idx);
+// 			idx = table->get_index("blue");
+// 			displayData._b = (unsigned char)table->get_integer32(idx);
+// 			idx = table->get_index("specialEffectId");
+// 			displayData.effectId = (unsigned int)table->get_integer32(idx);
+// 
+// 			//[bing] add 2014.6.9
+// 			idx = table->get_index("zhiye");
+// 			displayData._zhiye = (unsigned int)table->get_integer32(idx);
+// 			idx = table->get_index("suitnum");
+// 			displayData._suitnum = (unsigned int)table->get_integer32(idx);
+// 		}
+// 		c_db_manager::getSingleton()->destroy_table(table);
+// 		c_db_manager::getSingleton()->end_operation(cmd);
+// 		_displayMap[id] = displayData;
+// 		return &_displayMap[id];
+// 	}
+// 	else
+// 	{
+// 		return &iter->second;
+// 	}
+}
+
+RoleManager::DisplayData const* RoleManager::getAvatarDisplayData(unsigned int id)
+{
+	auto finder = _AvatarDisplayMap.find(id);
+	if (finder != _AvatarDisplayMap.end())
+	{
+		return &finder->second;
+	}
+
+	return NULL;
+// 	if(id == 0 || id == -1)
+// 	{
+// 		return nullptr;
+// 	}
+// 
+// 	DisplayMap::iterator iter = _AvatarDisplayMap.find(id);
+// 	if(iter == _AvatarDisplayMap.end())
+// 	{
+// 		c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM AvatarDisplayData WHERE Id = ?1");
+// 		cmd->set_integer32(1 , id);
+// 		c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 		DisplayData displayData;
+// 		while(table->retrieve_row())
+// 		{
+// 			unsigned int idx = table->get_index("AnimFile");
+// 			displayData._animFile = table->get_text(idx);
+// 			idx = table->get_index("red");
+// 			displayData._r = (unsigned char)table->get_integer32(idx);
+// 			idx = table->get_index("green");
+// 			displayData._g = (unsigned char)table->get_integer32(idx);
+// 			idx = table->get_index("blue");
+// 			displayData._b = (unsigned char)table->get_integer32(idx);
+// 			idx = table->get_index("specialEffectId");
+// 			displayData.effectId = (unsigned int)table->get_integer32(idx);
+// 
+// 			//[bing] add 2014.6.9
+// 			idx = table->get_index("zhiye");
+// 			displayData._zhiye = (unsigned int)table->get_integer32(idx);
+// 			idx = table->get_index("suitnum");
+// 			displayData._suitnum = (unsigned int)table->get_integer32(idx);
+// 		}
+// 		c_db_manager::getSingleton()->destroy_table(table);
+// 		c_db_manager::getSingleton()->end_operation(cmd);
+// 		_AvatarDisplayMap[id] = displayData;
+// 		return &_AvatarDisplayMap[id] ;
+// 	}
+// 	else
+// 	{
+// 		return &iter->second;
+// 	}
+}
+
+ePickRoleType RoleManager::getPickType( Role *role )
+{
+	 eCreatureType creatureType = role->getCreatureType();
+	 switch(creatureType)
+	 {
+	 case CT_NPC:
+		 return PRT_Npc;
+	 case CT_MONSTER:
+		 return PRT_Monster;
+	 case CT_Proxy:
+		 return PRT_Proxy;
+	 case CT_PLAYER:
+		if(static_cast<Player*>(role)->isStallState())
+			return PRT_Stall;
+		return PRT_Player;
+	 }
+	 return PRT_Default;
+}
+
+unsigned int RoleManager::onRoleSetState( s_net_cmd *cmd )
+{
+	NET_SIS_set_state *msg = (NET_SIS_set_state*)cmd;
+	Role *role = findRole(msg->dw_role_id);
+	if(role != NULL)
+	{
+		role->setRoleState(msg->eState, true);
+		if (role->getCreatureType() == CT_MONSTER)
+		{
+			Monster *pMonster = static_cast<Monster*>(role);
+			//RoleManager::CreatureInfo creatureInfo = RoleManager::getInstance()->getCreatureInfo(pMonster->getTypeID());
+			stCreateProto const* proto = getCreatureProto(pMonster->getTypeID());
+			if (proto && proto->nBossType == 1)
+			{
+				pMonster->setBossHeighten(pMonster->getTypeID(),false);
+			}
+		}
+	}
+	return 0;
+}
+
+unsigned int RoleManager::onRoleUnSetState( s_net_cmd *cmd )
+{
+	NET_SIS_unset_state *msg = (NET_SIS_unset_state*)cmd;
+	Role *role = findRole(msg->dw_role_id);
+	if(role != NULL)
+	{
+		role->setRoleState(msg->eState, false);
+	}
+	return 0;
+}
+
+void RoleManager::sendRideMsg(int index)//上马
+{
+	//若处于双修或是摆摊中，不能骑马
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (0==ploc->getMaPaiLevel())
+	{
+		if (!IS_VALID_PTR(ploc))
+			return;
+		if (ploc->isInRoleStateAny(RA_BattleMode) || ploc->isInRoleStateAny(RA_Hang))
+		{
+			//ToolTip::getInstance()->push(GET_STR(2199));
+			return;
+		}
+		if (ploc->isInRoleStateAny(RA_ShuangXiu) || ploc->isInRoleStateAny(RA_Stall))
+		{
+			ToolTip::getInstance()->push(GET_STR(2199));
+			return;
+		}
+		if (InstanceMgr::getInstance()->IsPlayerInInstanceMap())//副本不能骑乘
+		{
+			unsigned int mapID = MapManager::getInstance()->getCurMapId();
+			if (mapID != GUILD_HOME_MAP)
+			{
+				ToolTip::getInstance()->push(GET_STR(2200));
+				return;
+			}
+		}
+	}
+	//获取坐骑的名字和选择的序号
+	//NET_SIC_begin_ride msg;
+
+	//int sexType = RoleManager::getInstance()->getLocalPlayer()->getAttribute(RA_SEX);
+	int rideLv = index * 10 + 1 - 10; //坐骑等级是从1开始，所以还要再-10
+	if (rideLv > 120)
+	{
+		rideLv = 120;
+	}
+	/*c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM RideData WHERE level = ?1");
+	cmd->set_integer32(1 , rideLv);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	std::string rideName;
+	while(table->retrieve_row())
+	{
+		unsigned int idx;
+		if (sexType == 0)
+		{
+			idx = table->get_index("animFile_Woman");
+			rideName = table->get_text(idx);
+		}else{
+			idx = table->get_index("animFile_Man");
+			rideName = table->get_text(idx);
+		}
+	}
+
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);*/
+	//坐骑等级(INT)
+	WorldPacket C2G_Msg(NET_C2G_PROC_RIDING_BY_RIDE_LV);	//组装消息头
+	C2G_Msg << rideLv;
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);		//发送
+
+	//msg.nLevel = GET_UI(MountUi, WCT_MountUi)->GetSelectRide(); //坐骑等级
+	//TCP_CLIENT->send_net_cmd(&msg, NP_NORMAL, false);
+}
+
+//下马
+void RoleManager::sendUnRideMsg()
+{
+	NET_SIC_cancel_ride msg;
+	TCP_CLIENT->send_net_cmd(&msg, NP_NORMAL, false);
+}
+
+unsigned int RoleManager::onRoleRide( s_net_cmd *cmd )
+{
+	NET_SIS_begin_ride *msg = (NET_SIS_begin_ride*)cmd;
+	if(msg->dwError == E_Success)
+	{
+		Player *player = dynamic_cast<Player*>(findRole(msg->dwRoleID));
+		if(player != NULL)
+		{
+			player->setRideLv(msg->nLevel);
+			player->enterRideState(msg->dwUseRideLv);
+
+			CC_ASSERT(msg->dwMapID == MapManager::getInstance()->getCurMapId());
+			player->setPosition(ccp(msg->curPos[0],msg->curPos[2]));
+		}
+		GET_UI(MountUi, WCT_MountUi)->updateData();
+	}
+	else
+	{
+		if (26 == msg->dwError)
+		{
+			LocalPlayer* ploc = getLocalPlayer();
+			if(ploc)
+			{
+				if (ploc->getRideButtonFlag())
+				{
+					ToolTip::getInstance()->push(GET_STR(2210));
+					ploc->setRideButtonFlag(false);
+				}
+			}
+		}
+	}
+
+	return 0;
+}
+
+unsigned int RoleManager::onRoleUnRide( s_net_cmd *cmd )
+{
+	NET_SIS_cancel_ride *msg = (NET_SIS_cancel_ride*)cmd;
+	if(msg->dwError == E_Success)
+	{
+		/*LocalPlayer *lp = getLocalPlayer();
+		if( lp != NULL )
+			lp->exitRideState(); //下马*/
+		Player *player = dynamic_cast<Player*>(findRole(msg->dwRoleID));
+		if(player != NULL)
+		{
+			player->exitRideState();
+			player->updateTitleUi();
+
+			CC_ASSERT(msg->dwMapID == MapManager::getInstance()->getCurMapId());
+			player->setPosition(ccp(msg->curPos[0],msg->curPos[2]));
+			/*	if (lp->getAutoRunState())
+			{
+			lp->setAutoRunState(true);
+			lp->playAutoRunEffect();
+			}*/
+			//player->stateMachine()->ChangeState(LocalPlayerStateAttack::getInstance());
+			//player->setCanRideInSafe(true);
+		}
+		GET_UI(MountUi, WCT_MountUi)->updateData();
+		
+	}
+
+	return 0;
+}
+
+RoleManager::RideData const* RoleManager::getRideData( unsigned int lv )const
+{
+	auto finder= _rideData.find(lv);
+	if (finder != _rideData.end())
+	{
+		return finder->second.get();
+	}
+
+	return NULL;
+	/*
+	RideDataMap::iterator iter = _rideData.find(lv);
+	if(iter == _rideData.end())
+	{
+		c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM RideData WHERE level = ?1");
+		cmd->set_integer32(1 , lv);
+		c_sql_table* table = c_db_manager::getSingleton()->create_table();
+		RideData rideData;
+		while(table->retrieve_row())
+		{
+			unsigned int idx = table->get_index("effect");
+			rideData.effect = table->get_integer32(idx);
+			idx = table->get_index("name");
+			rideData.rideName = table->get_text(idx);
+			idx = table->get_index("life");
+			rideData.life = table->get_integer32(idx);
+			idx = table->get_index("mana");
+			rideData.mana = table->get_integer32(idx);
+			idx = table->get_index("hit");
+			rideData.hit = table->get_integer32(idx);
+			idx = table->get_index("miss");
+			rideData.miss = table->get_integer32(idx);
+			idx = table->get_index("double");
+			rideData.baoji = table->get_integer32(idx);
+			idx = table->get_index("mianbao");
+			rideData.mianbao = table->get_integer32(idx);
+			idx = table->get_index("zhandouli");
+			rideData.battlePt = table->get_integer32(idx);
+			idx = table->get_index("speed");
+			rideData.speed = table->get_integer32(idx);
+			idx = table->get_index("lvl");
+			rideData.lvExp = table->get_integer32(idx);
+			idx = table->get_index("shadowFile");
+			rideData.shadowFile = table->get_text(idx);
+			idx = table->get_index("suit");
+			rideData.suit = table->get_integer32(idx);
+			idx = table->get_index("animFile_Man");
+			rideData.animFile_M = table->get_text(idx);
+			idx = table->get_index("animFile_Woman");
+			rideData.animFile_F = table->get_text(idx);
+			idx = table->get_index("animFile_Zuoqi");
+			rideData.animFile_Z = table->get_text(idx);
+			idx = table->get_index("animFile_Effect1");
+			rideData.animFile_T1 = table->get_text(idx);
+			idx = table->get_index("animFile_Effect2");
+			rideData.animFile_T2 = table->get_text(idx);
+			idx = table->get_index("animFile_Effect3");
+			rideData.animFile_T3 = table->get_text(idx);
+			idx = table->get_index("showTest");
+			rideData.introduce = table->get_text(idx);
+			idx = table->get_index("showtitle");
+			rideData.imageFile = table->get_text(idx);
+			idx = table->get_index("getTitle");
+			rideData.titleID = table->get_integer32(idx);
+		}
+		c_db_manager::getSingleton()->destroy_table(table);
+		c_db_manager::getSingleton()->end_operation(cmd);
+		_rideData[lv] = rideData;
+		return rideData;
+	}
+	else
+	{
+		return iter->second;
+	}
+	*/
+}
+
+RoleManager::RideModeData RoleManager::getRideModeData( unsigned int id, int gender )
+{
+	if(id == 0 || id == -1)
+	{
+		return RideModeData();
+	}
+
+	unsigned int realId = id * 10 + gender;
+
+	RideModeDataMap::iterator iter = _rideModeData.find(realId);
+	if(iter == _rideModeData.end())
+	{
+		c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM RideModeData WHERE modeId = ?1");
+		cmd->set_integer32(1 , id);
+		c_sql_table* table = c_db_manager::getSingleton()->create_table();
+		RideModeData rideData;
+		while(table->retrieve_row())
+		{
+			unsigned int idx = table->get_index("gender");
+			int g = table->get_integer32(idx);
+			if(g != gender)
+				continue;
+
+			idx = table->get_index("animFile");
+			rideData.animFile = table->get_text(idx);
+			idx = table->get_index("name");
+			rideData.rideName = table->get_text(idx);
+			idx = table->get_index("photo");
+			rideData.photo = table->get_text(idx);
+			idx = table->get_index("life");
+			rideData.life = table->get_integer32(idx);
+			idx = table->get_index("mana");
+			rideData.mana = table->get_integer32(idx);
+			idx = table->get_index("hit");
+			rideData.hit = table->get_integer32(idx);
+			idx = table->get_index("miss");
+			rideData.miss = table->get_integer32(idx);
+			idx = table->get_index("double");
+			rideData.baoji = table->get_integer32(idx);
+			idx = table->get_index("mianbao");
+			rideData.mianbao = table->get_integer32(idx);
+			idx = table->get_index("zhandouli");
+			rideData.battlePt = table->get_integer32(idx);
+			idx = table->get_index("speed");
+			rideData.speed = table->get_integer32(idx);
+			idx = table->get_index("lvl");
+			rideData.lvl = table->get_integer32(idx);
+			idx = table->get_index("showEffect");
+			rideData.showEffect = table->get_integer32(idx);
+			idx = table->get_index("changeName");
+			rideData.changeName = table->get_integer32(idx);
+			idx = table->get_index("canraid");
+			rideData.canRideInSafe = (table->get_integer32(idx) != 0);
+		}
+		c_db_manager::getSingleton()->destroy_table(table);
+		c_db_manager::getSingleton()->end_operation(cmd);
+		_rideModeData[realId] = rideData;
+		return rideData;
+	}
+	else
+	{
+		return iter->second;
+	}
+}
+
+RoleManager::SpecialEffectData RoleManager::getSpecialEffectData( unsigned int id )
+{
+	if(id == (unsigned int) -1)
+	{
+		return SpecialEffectData();
+	}
+
+	SpecialEffectDataMap::iterator iter = _specialEffectData.find(id);
+	if(iter == _specialEffectData.end())
+	{
+		c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM SpecialEffect WHERE id = ?1");
+		cmd->set_integer32(1 , id);
+		c_sql_table* table = c_db_manager::getSingleton()->create_table();
+		SpecialEffectData data;
+		while(table->retrieve_row())
+		{
+			int idx = table->get_index("animFile");
+			data.animFile = table->get_text(idx);
+			idx = table->get_index("count");
+			data.count = table->get_integer32(idx);
+			idx = table->get_index("effectIndex");
+			data.index = table->get_integer32(idx);
+			idx = table->get_index("offsetX");
+			data.offsetX = table->get_integer32(idx);
+			idx = table->get_index("offsetY");
+			data.offsetY = table->get_integer32(idx);
+			idx = table->get_index("red");
+			data.red = table->get_integer32(idx);
+			idx = table->get_index("green");
+			data.green = table->get_integer32(idx);
+			idx = table->get_index("blue");
+			data.blue = table->get_integer32(idx);
+		}
+		c_db_manager::getSingleton()->destroy_table(table);
+		c_db_manager::getSingleton()->end_operation(cmd);
+		_specialEffectData[id] = data;
+		return data;
+	}
+	else
+	{
+		return iter->second;
+	}
+}
+
+void RoleManager::togRide( int mode )
+{
+	LocalPlayer* ploc = getLocalPlayer();
+	if (!ploc)
+		return;
+	//判断是否已经满级
+	if (f_zhuzai_mgr::get_singleton_ptr()->localplayer_is_zhuzai())
+	{
+		if (ploc->getRoleDayClearInfo(ERDCT_RideTogTimes) >= CFG(int,"max_feed_time_zhuzaizhe",50))
+		{
+			ToolTip::getInstance()->push(GET_STR(2187));
+			return;
+		}
+		if (ploc->getRideLv() >= CFG(int,"max_ride_lv_zhuzaizhe",120))
+		{
+			ToolTip::getInstance()->push(GET_STR(2197));
+			return;
+		}
+	}
+	else
+	{
+		if (ploc->getRoleDayClearInfo(ERDCT_RideTogTimes) >= CFG(int,"max_feed_time",30))
+		{
+			ToolTip::getInstance()->push(GET_STR(2187));
+			return;
+		}
+		if (ploc->getRideLv() >= CFG(int,"max_ride_lv",100))
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["ridemaxlevel_feizhuzaizhe"]);
+			return;
+		}
+	}
+	NET_SIC_tog_ride cmd;
+	cmd.byType = mode;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_NORMAL, false);
+}
+//gx add
+unsigned int RoleManager::onTogRide( s_net_cmd *cmd )
+{
+	NET_SIS_tog_ride *msg = (NET_SIS_tog_ride*)cmd;
+	if (0 == msg->dw_error_code)
+	{
+		if (msg->nExp <= 0)
+			return 0;
+		//std::ostringstream ostr;
+		//ostr.str("");
+		//std::ostringstream ostr_temp;
+		//if (msg->nCritNum > 0)
+		//{
+		//	ostr_temp.str("");
+		//	ostr_temp << msg->nCritNum;
+		//	std::string strtmp = replaceStr(GET_STR(2192),"*",ostr_temp.str());
+		//	ostr << strtmp << ",";
+		//}
+		//{
+		//	ostr_temp.str("");
+		//	ostr_temp << msg->nExp;
+		//	std::string strtmp = replaceStr(GET_STR(2193),"*",ostr_temp.str());
+		//	ostr << strtmp;
+		//}
+		//ToolTip::getInstance()->push(ostr.str(),1);
+		GET_UI(MountUi, WCT_MountUi)->onTog(msg->nCritNum, msg->nExp);
+	}
+	return 0;
+}
+
+void RoleManager::syncRideData()
+{
+	NET_SIC_get_raid_att cmd;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_IDLE, true);
+}
+
+unsigned int RoleManager::onSyncRideData( s_net_cmd *cmd )
+{
+	ResetMountUI res;
+	NET_SIS_get_raid_att *msg = (NET_SIS_get_raid_att*)cmd;
+	if(_localPlayer != NULL)
+	{
+		int oldStep = 0;
+		int oldGrade = 0;
+		int newStep = 0;
+		int newGrade = 0;
+		//首先获得升级前的阶，等
+		VLevel2StepGrade(_localPlayer->getRideLv(),oldStep,oldGrade);//gx add
+		_localPlayer->setCurRideExp(msg->nCurExp);
+ 		_localPlayer->setMaPaiLevel(msg->nMaPai);
+ 		_localPlayer->setMaPaiInc(msg->fMaPaiInc);
+		_localPlayer->setRoleDayClearInfo(ERDCT_RideTogTimes,msg->nTogMounts);
+		//_localPlayer->setUseRideLv(msg->dwUseRideLv);
+		if( _localPlayer->getRideLv() != msg->nLevel )
+		{
+			_localPlayer->setRideLv(msg->nLevel);
+			//GET_UI(MountUi, WCT_MountUi)->updateData();
+			MountUiFrame * frame = getUiNodeByTag<MountUiFrame>(WCT_MountUi);
+			if(frame != NULL)
+			{
+				frame->updateData();
+			}
+
+			//if( _localPlayer->getUseRideLv()> msg->dwUseRideLv )
+			//{
+			//	_localPlayer->enterRideState(msg->dwUseRideLv);
+			//	GET_UI(MountUi, WCT_MountUi)->updateData();
+			//}
+		}
+		
+		//初次获取该数据不更新
+		if (!_localPlayer->getRideInit())
+		{
+			_localPlayer->setRideInit();
+			return 0;
+		}
+		//得到升级后的阶等
+		VLevel2StepGrade(_localPlayer->getRideLv(),newStep,newGrade);
+		if ((oldStep != newStep) || (oldGrade != newGrade))//说明是升星啦，可以给提示
+		{
+			std::string str_basic = GET_STR(2196);
+			std::ostringstream ostr;
+			ostr.str("");
+			ostr << newStep;
+			std::string str_tmp = replaceStr(str_basic,"**",ostr.str());
+			ostr.str("");
+			ostr << newGrade;
+			std::string str_tmp1 = replaceStr(str_tmp,"*",ostr.str());
+			ToolTip::getInstance()->push(str_tmp1);
+		}
+
+		//如果在骑乘状态，才骑乘最新获得的坐骑
+		if( newStep > oldStep && _localPlayer->getUseRideLv() != 0 && _localPlayer->getUseRideLv() != INVALID)
+		{
+// 			int nMountStage = 0;
+// 			if ((msg->nLevel % 10) == 0)
+// 			{
+// 				nMountStage = msg->nLevel / 10;
+// 			}
+// 			else
+// 			{
+// 				nMountStage = msg->nLevel / 10 + 1;
+// 			}
+			sendRideMsg( newStep );
+		}
+		SEND_EVENT(&res);
+	}
+
+	return 0;
+}
+
+// RoleManager::CreatureInfoMap RoleManager::GetCreatureMap()
+// {
+// 	return _creatureInfo;
+// }
+
+// RoleManager::CreatureInfo RoleManager::getCreatureInfo( unsigned int id )
+// {
+// 	if(id == 0 || id == (unsigned int) -1)
+// 		return CreatureInfo();
+// 
+// 	CreatureInfoMap::iterator iter = _creatureInfo.find(id);
+// 	if(iter == _creatureInfo.end())
+// 	{
+// 		CreatureInfo info;
+// 		c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM CreatureInfo WHERE AnimaterId = ?1");
+// 		cmd->set_integer32(1 , id);
+// 		c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 		while(table->retrieve_row())
+// 		{
+// 			unsigned int idx = table->get_index("AnimaterFileName");
+// 			info.animFile = table->get_text(idx);
+// 			idx = table->get_index("CreatureName");
+// 			info.creatureName = table->get_text(idx);
+// 			idx = table->get_index("Context");
+// 			info.Context = table->get_text(idx);
+// 			idx = table->get_index("xpos");
+// 			info.posx = table->get_integer32(idx);
+// 			idx = table->get_index("ypos");
+// 			info.posy = table->get_integer32(idx);
+// 			idx = table->get_index("map");
+// 			info.mapid = table->get_text(idx);
+// 			idx = table->get_index("funtype");
+// 			info.funtype = table->get_integer32(idx);
+// 			idx = table->get_index("funid");
+// 			info.funid = table->get_integer32(idx);
+// 			idx = table->get_index("Level");
+// 			info.level = table->get_integer32(idx);
+// 			idx = table->get_index("boss");
+// 			info.boss = table->get_integer32(idx);
+// 			idx = table->get_index("hpRatio");
+// 			info.hpRatio = table->get_double(idx);
+// 			idx = table->get_index("msgID");
+// 			info.msgID = table->get_integer32(idx);
+// 			idx = table->get_index("effectName");
+// 			info.effectName = table->get_text(idx);
+// 			idx = table->get_index("bodyRatio");
+// 			info.bodyRatio = table->get_integer32(idx);
+// 			idx = table->get_index("attsound");
+// 			info.attSound = table->get_text(idx);
+// 			idx = table->get_index("diesound");
+// 			info.dieSound = table->get_text(idx);
+// 			idx = table->get_index("type");
+// 			info._type = table->get_integer32(idx);
+// 		}
+// 		c_db_manager::getSingleton()->destroy_table(table);
+// 		c_db_manager::getSingleton()->end_operation(cmd);
+// 
+// 		if(!info.animFile.empty())
+// 			_creatureInfo[id] = info;
+// 
+// 		return info;
+// 	}
+// 	else
+// 	{
+// 		return iter->second;
+// 	}
+// }
+
+
+RoleManager::Npctalk RoleManager::getNpctalk( unsigned int npctalkid )
+{
+	if(npctalkid == 0 || npctalkid == (unsigned int) -1)
+		return Npctalk();
+
+	NpctalkMap::iterator iter = _Npctalk.find(npctalkid);
+	if (iter == _Npctalk.end())
+	{
+		Npctalk info;
+		_Npctalk[npctalkid] = info;
+		return info;
+	}
+	else
+	{
+		return iter->second;
+	}
+	
+// 	if(iter == _Npctalk.end())
+// 	{
+// 		Npctalk info;
+// 		c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Npctalk WHERE id = ?1");
+// 		cmd->set_integer32(1 , npctalkid);
+// 		c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 		while(table->retrieve_row())
+// 		{
+// 			info.id = npctalkid;
+// 
+// 			unsigned int idx = table->get_index("stand_time");
+// 			info.standtime = table->get_integer32(idx);
+// 
+// 			idx = table->get_index("display_time");
+// 			info.displaytime = table->get_integer32(idx);
+// 
+// 			idx = table->get_index("stand_odds");
+// 			info.standodds = table->get_integer32(idx);
+// 
+// 			idx = table->get_index("stand_chat1");
+// 			info.standchats1 = table->get_text(idx);
+// 
+// 			idx = table->get_index("stand_chat2");
+// 			info.standchats2 = table->get_text(idx);
+// 
+// 			idx = table->get_index("stand_chat3");
+// 			info.standchats3 = table->get_text(idx);
+// 
+// 			idx = table->get_index("fight_time");
+// 			info.fighttime = table->get_integer32(idx);
+// 
+// 			idx = table->get_index("fight_odds");
+// 			info.fightodds = table->get_integer32(idx);
+// 
+// 			idx = table->get_index("fight_chat1");
+// 			info.fightchats1 = table->get_text(idx);
+// 
+// 			idx = table->get_index("fight_chat2");
+// 			info.fightchats2 = table->get_text(idx);
+// 
+// 			idx = table->get_index("fight_chat3");
+// 			info.fightchats3 = table->get_text(idx);
+// 
+// 		}
+// 		c_db_manager::getSingleton()->destroy_table(table);
+// 		c_db_manager::getSingleton()->end_operation(cmd);
+// 
+// 		_Npctalk[npctalkid] = info;
+// 
+// 		return info;
+// 	}
+// 	else
+// 	{
+// 		return iter->second;
+// 	}
+}
+
+void RoleManager::initNpcTalkDataFromXML()
+{
+	f_data_set dataset;
+	std::list<std::string> fields;
+	bool ret = dataset.load("Config/db/Npctalk.xml","id",&fields);
+	CC_ASSERT(ret);
+	_Npctalk.clear();
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		Npctalk data;
+		data.id = dataset.get_int("id",one.c_str(),0);
+		data.standtime = dataset.get_int("stand_time",one.c_str(),0);
+		data.displaytime = dataset.get_int("display_time",one.c_str(),0);
+		data.standodds = dataset.get_int("stand_odds",one.c_str(),0);
+		data.standchats1 = dataset.get_string("stand_chat1",one.c_str(),"0");
+		data.standchats2 = dataset.get_string("stand_chat2",one.c_str(),"0");
+		data.standchats3 = dataset.get_string("stand_chat3",one.c_str(),"0");
+		data.fighttime = dataset.get_int("fight_time",one.c_str(),0);
+		data.fightodds = dataset.get_int("fight_odds",one.c_str(),0);
+		data.fightchats1 = dataset.get_string("fight_chat1",one.c_str(),"0");
+		data.fightchats2 = dataset.get_string("fight_chat2",one.c_str(),"0");
+		data.fightchats3 = dataset.get_string("fight_chat3",one.c_str(),"0");
+		_Npctalk[data.id] = data;
+	});
+}
+
+void RoleManager::SetShowSelfRoleName( bool isShow )
+{
+	_showSelfRoleName = isShow;
+
+	LocalPlayer *localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if( localPlayer )
+	{
+		//是否显示本地玩家名字
+		localPlayer->setName(localPlayer->getName(), isShow);
+		//是否显示本地玩家vip图片
+		localPlayer->setVIPLevel(localPlayer->getLocVIPLevel(), isShow);
+		if( isShow )
+		{
+			unsigned int _guildID = localPlayer->getGuildID();
+			std::string guildName = RoleManager::getInstance()->getGuildName(localPlayer->getId(), _guildID);
+			if(!guildName.empty())
+			{
+				//ccColor3B guildColor;
+				if(_guildID == GuildMgr::getInstance()->getSBKGuildId())
+				{
+					//guildColor = ccc3(0xb4, 0x00, 0xff);
+					guildName += "\xE3\x80\x90\xE6\xB2\x99\xE3\x80\x91";
+				}
+// 				else 
+// 				{
+// 					guildColor = ccc3(0xff, 0x5a, 0x00);
+// 				}
+// 
+// 				if(_guildID == RoleManager::getInstance()->getLocalPlayer()->getGuildID())
+// 				{
+// 					guildColor = ccc3(0x00, 0x7d, 0xe2);//原来的颜色(0x00,0x0c,0xff)太深了
+// 				}
+// 				//add by XSea 2014.11.22 显示行会名
+// 				localPlayer->setGuildNameColor(guildColor);
+				localPlayer->updateGuildNameColor();
+				localPlayer->setGuildName(guildName);
+				
+			}
+			std::string strName = SocialMgr::getInstance()->GetSpouseName();
+			if(strName != "")
+			{
+				localPlayer->setSpouseName(strName,localPlayer->getAttribute(RA_SEX));
+			}
+			
+		}
+		else
+		{
+			//不显示行会名
+			localPlayer->setGuildName("");
+			localPlayer->setSpouseName("",-1);
+		}
+	}
+}
+
+unsigned int RoleManager::onPlaySceneEffect( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_play_scene_effect"))
+	{
+		NET_SIS_play_scene_effect * msg = (NET_SIS_play_scene_effect*)cmd;
+
+		Role *role = findRole(msg->dwObjID);
+		if(role != NULL && role->getCreatureType() == CT_MONSTER)
+		{
+			Monster *pMonster = static_cast<Monster*>(role);
+
+			//RoleManager::CreatureInfo creatureInfo = RoleManager::getInstance()->getCreatureInfo(pMonster->getTypeID());
+			stCreateProto const* proto = getCreatureProto(pMonster->getTypeID());
+			if (proto && proto->nBossType == 1)
+			{
+				if (pMonster->getBossHeighten(pMonster->getTypeID()) == false)
+				//if (role->getAttribute(RA_HP) < role->getAttribute(RA_MaxHP) * creatureInfo.hpRatio && role->getBossHeighten(role->getTypeID()) == false)
+				{
+					if (proto->fBodyRatio> 0)
+					{
+						pMonster->setScale(proto->fBodyRatio);
+					}
+
+					if (msg->dwEffectID == 0)
+					{
+						pMonster->runHeightenEffect(proto->strEffectName,RZN_WEAPONFRONT,Role::NT_HeighterEffect);
+						pMonster->runCreatureSpreakPaoPao(proto->nMsgID,9.0f);
+					}
+					else	
+					{
+						if (msg->dwEffectID == 60000001)// the transmit effect from sever
+						{
+							pMonster->runTransmitEffect_UP("E1_120",11.0f);
+						}
+						else if (msg->dwEffectID == 60000002)
+						{
+							pMonster->runTransmitEffect_UP("E1_150",-11.0f);
+						}
+					}
+					//ToolTip::getInstance()->push(GET_STR(creatureInfo.msgID),9.0f);
+
+					pMonster->setBossHeighten(pMonster->getTypeID(),true);
+				}
+			}
+		}
+	}
+	return 0;
+}
+
+Role * RoleManager::findNpc( unsigned int roleId )
+{
+	RoleMap::iterator iter = _npcRole.find(roleId);
+	if(iter != _npcRole.end())
+	{
+		return iter->second;
+	}
+	return NULL;
+}
+
+void RoleManager::AddNpc( Role* role )
+{
+// 	RoleMap::iterator iter =_npcRole.find(role->getId());
+// 	if (iter != _npcRole.end())
+// 		return;
+	//CC_ASSERT(role->getCreatureType() != CT_Proxy);
+	_npcRole[role->getId()] = role;
+
+	//方便用model_id找到npc，并且检测地图npc的model_id的唯一性
+	//unsigned int model_id = role->getTypeID();
+	//auto finder =_model_id_to_role_map.find(model_id);
+	//CC_ASSERT(finder == _model_id_to_role_map.end());
+
+	//_model_id_to_role_map[model_id] = role;
+
+	AddRole(role);
+}
+
+void RoleManager::ClearNpc()
+{
+	/*for(RoleMap::iterator iter = _npcRole.begin(); iter != _npcRole.end(); iter++)
+	{
+		Role *role = iter->second;
+		delete role;
+	}*/
+	_npcRole.clear();
+
+	//_model_id_to_role_map.clear();
+}
+
+unsigned int RoleManager::getNpcId()
+{
+	//预留2000npc
+	unsigned int MID_CREATURE_ID = 3000000000 - 2000;
+	return _npcRole.size() + MID_CREATURE_ID;
+}
+
+bool RoleManager::isCanShowOtherPlayer( Role* role )
+{
+// 	if (isHideOtherRole())
+// 	{
+// 		if (role->getId() != _localPlayer->getId())
+// 		{
+// 			if (IS_PLAYER(role->getId()) && role->getCreatureType() == CT_PLAYER)
+// 			{
+// 				return false;
+// 			}
+// 			if (role->getCreatureType() == CT_MONSTER && isPet(role->getTypeID()) && !(_localPlayer->isMyPet(role->getId())))
+// 			{
+// 				return false;
+// 			}
+// 		}
+// 	}
+	return true;
+}
+
+
+bool RoleManager::isCanShowThisRole( Role* role )
+{
+	if (isHideOtherRole())
+	{
+		if (role->getId() != _localPlayer->getId())
+		{
+			if (IS_PLAYER(role->getId()) && role->getCreatureType() == CT_PLAYER)
+			{
+				return false;
+			}
+			if (role->getCreatureType() == CT_MONSTER && isPet(role->getTypeID()) && !(_localPlayer->isMyPet(role->getId())))
+			{
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+stCreateProto const* RoleManager::getCreatureProto( unsigned int id )
+{
+	return CreatureCacheData::get_singleton().getProto(id);
+}
+
+void RoleManager::tryToUseSkill( unsigned int playerID )
+{
+	Player* player = dynamic_cast<Player*>(findRole(playerID,false,false));
+	if (player)
+	{
+		player->on_useSkill();
+	}
+}
+
+bool RoleManager::isInFadeList( unsigned int id ) const
+{
+	auto iter= std::find(_fadeOutList.begin(),_fadeOutList.end(),id);
+	return iter != _fadeOutList.end();
+}
+
+void RoleManager::changeSelect( int newId )
+{
+	_currentSelected = newId;
+	World::getInstance()->onChangeSelect(_currentSelected);
+}
+
+void RoleManager::updateAllGuildColor( enumUpdateGuildColorType index /*= EUGCT_all*/ )
+{
+	if (getLocalPlayer() == NULL)
+	{
+		return;
+	}
+	getLocalPlayer()->updateGuildNameColor();
+	unsigned int guildID = getLocalPlayer()->getGuildID();
+	if (EUGCT_all || EUGCT_sbk)
+	{
+		for (RoleMap::iterator iter =_remoteRole.begin();iter != _remoteRole.end();++iter)
+		{
+			Role* role = iter->second;
+			if (role)
+			{
+				role->updateGuildNameColor();
+			}
+		}
+		return;
+	}
+	if (EUGCT_league)
+	{
+		if (getLocalPlayer()->haveGuild())
+		{
+			for (RoleMap::iterator iter =_remoteRole.begin();iter != _remoteRole.end();++iter)
+			{
+				Role* role = iter->second;
+				if (role->getGuildID() == guildID)
+				{
+					role->updateGuildNameColor();
+				}
+				else if (GuildMgr::getInstance()->isLeagueGuild(role->getGuildID()))
+				{
+					role->updateGuildNameColor();
+				}
+			}
+		}
+		return;
+	}
+	if (EUGCT_war)
+	{
+		if (getLocalPlayer()->haveGuild())
+		{
+			for (RoleMap::iterator iter =_remoteRole.begin();iter != _remoteRole.end();++iter)
+			{
+				Role* role = iter->second;
+				if (role->getGuildID() == guildID)
+				{
+					role->updateGuildNameColor();
+				}
+				else if (GuildMgr::getInstance()->isWarGuild(role->getGuildID()))
+				{
+					role->updateGuildNameColor();
+				}
+			}
+		}
+		return;
+	}
+}
+
+unsigned int RoleManager::on_buff_update( s_net_cmd* cmd )
+{
+	NET_SIS_update_role_buffer* msg = (NET_SIS_update_role_buffer*)cmd;
+	Role* pRemotRole = findRole( msg->dw_role_id ); //找远端玩家
+	Player* player = dynamic_cast<Player*>(pRemotRole);
+	if( player ) //如果远端玩家存在
+	{
+		player->update_player_buff(msg->Buff);
+	}
+
+	return 0;
+}
+
+void RoleManager::init_max_lv_table()
+{
+	f_data_set data_set;
+	std::list<std::string> fields;
+	bool ret =data_set.load("Config/db/PlayerMaxExp.xml","Level",&fields);
+	CC_ASSERT(ret);
+	std::for_each(	fields.begin(),
+					fields.end(),
+					[&](std::string const& one)
+	{
+		int indx = data_set.get_int("Level",one.c_str());
+		INT64 max_exp = data_set.get_int64("MaxExp",one.c_str());
+		m_role_max_exp.insert(std::make_pair(indx,max_exp));
+	});
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM PlayerMaxExp WHERE Level = ?1");
+// 	cmd->set_integer32(1 , level);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("MaxExp");
+// 		_curMaxExp = table->get_integer32(idx);
+// 	}
+// 
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+}
+
+void RoleManager::init_ride_data()
+{
+	f_data_set data_set;
+	std::list<std::string> fields;
+	bool ret =data_set.load("Config/db/RideData.xml","level",&fields);
+	CC_ASSERT(ret);
+	std::for_each(	fields.begin(),
+					fields.end(),
+					[&](std::string const& one)
+	{
+		unsigned int lv = data_set.get_int("level",one.c_str());
+		
+		ride_data_ptr data_ptr(new RideData);
+		data_ptr->effect = data_set.get_int("effect",one.c_str(),0);
+		data_ptr->rideName = data_set.get_string("name",one.c_str(),"");
+		data_ptr->life = data_set.get_int("life",one.c_str(),0);
+		data_ptr->mana = data_set.get_int("mana",one.c_str(),0);
+		data_ptr->hit = data_set.get_int("hit",one.c_str(),0);
+		data_ptr->miss = data_set.get_int("miss",one.c_str(),0);
+		data_ptr->baoji = data_set.get_int("double",one.c_str(),0);
+		data_ptr->mianbao = data_set.get_int("mianbao",one.c_str(),0);
+		data_ptr->battlePt = data_set.get_int("zhandouli",one.c_str(),0);
+		data_ptr->speed = data_set.get_int("speed",one.c_str(),0);
+		data_ptr->lvExp = data_set.get_int("lvl",one.c_str(),0);
+		data_ptr->shadowFile = data_set.get_string("shadowFile",one.c_str(),"");
+		data_ptr->suit = data_set.get_int("suit",one.c_str(),0);
+		data_ptr->animFile_M = data_set.get_string("animFile_Man",one.c_str(),"");
+		data_ptr->animFile_F = data_set.get_string("animFile_Woman",one.c_str(),"");
+		data_ptr->animFile_Z = data_set.get_string("animFile_Zuoqi",one.c_str(),"");
+		data_ptr->animFile_T1 = data_set.get_string("animFile_Effect1",one.c_str(),"");
+		data_ptr->animFile_T2 = data_set.get_string("animFile_Effect2",one.c_str(),"");
+		data_ptr->animFile_T3 = data_set.get_string("animFile_Effect3",one.c_str(),"");
+		data_ptr->introduce = data_set.get_string("showTest",one.c_str(),"");
+		data_ptr->imageFile = data_set.get_string("showtitle",one.c_str(),"");
+		data_ptr->titleID = data_set.get_int("getTitle",one.c_str(),0);
+
+		_rideData[lv] = data_ptr;
+	});
+
+}
+
+void RoleManager::init_avator_display_data()
+{
+	f_data_set data_set;
+	std::list<std::string> fields;
+	bool ret =data_set.load("Config/db/AvatarDisplayData.xml","Id",&fields);
+	CC_ASSERT(ret);
+	std::for_each(	fields.begin(),
+					fields.end(),
+					[&](std::string const& one)
+	{
+		DisplayData displayData;
+
+		unsigned int id = data_set.get_int("Id",one.c_str());
+
+		displayData._animFile = data_set.get_string("AnimFile",one.c_str(),"");
+		displayData._r = (unsigned char)data_set.get_int("red",one.c_str(),0);
+		displayData._g = (unsigned char)data_set.get_int("green",one.c_str(),0);
+		displayData._b = (unsigned char)data_set.get_int("blue",one.c_str(),0);
+		displayData.effectId = data_set.get_int("specialEffectId",one.c_str(),0);
+		displayData._zhiye =(unsigned int) data_set.get_int("zhiye",one.c_str(),0);
+		displayData._suitnum = (unsigned int)data_set.get_int("suitnum",one.c_str(),0);
+
+		_AvatarDisplayMap[id] = displayData;
+	});
+
+	data_set.clear();
+	fields.clear();
+	ret =data_set.load("Config/db/DisplayData.xml","Id",&fields);
+	CC_ASSERT(ret);
+	std::for_each(	fields.begin(),
+		fields.end(),
+		[&](std::string const& one)
+	{
+		DisplayData displayData;
+
+		unsigned int id = data_set.get_int("Id",one.c_str());
+
+		displayData._animFile = data_set.get_string("AnimFile",one.c_str(),"");
+		displayData._r = (unsigned char)data_set.get_int("red",one.c_str(),0);
+		displayData._g = (unsigned char)data_set.get_int("green",one.c_str(),0);
+		displayData._b = (unsigned char)data_set.get_int("blue",one.c_str(),0);
+		displayData.effectId = data_set.get_int("specialEffectId",one.c_str(),0);
+		displayData._zhiye =(unsigned int) data_set.get_int("zhiye",one.c_str(),0);
+		displayData._suitnum = (unsigned int)data_set.get_int("suitnum",one.c_str(),0);
+
+		_displayMap[id] = displayData;
+	});
+
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM AvatarDisplayData WHERE Id = ?1");
+// 	cmd->set_integer32(1 , id);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	DisplayData displayData;
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("AnimFile");
+// 		displayData._animFile = table->get_text(idx);
+// 		idx = table->get_index("red");
+// 		displayData._r = (unsigned char)table->get_integer32(idx);
+// 		idx = table->get_index("green");
+// 		displayData._g = (unsigned char)table->get_integer32(idx);
+// 		idx = table->get_index("blue");
+// 		displayData._b = (unsigned char)table->get_integer32(idx);
+// 		idx = table->get_index("specialEffectId");
+// 		displayData.effectId = (unsigned int)table->get_integer32(idx);
+// 
+// 		//[bing] add 2014.6.9
+// 		idx = table->get_index("zhiye");
+// 		displayData._zhiye = (unsigned int)table->get_integer32(idx);
+// 		idx = table->get_index("suitnum");
+// 		displayData._suitnum = (unsigned int)table->get_integer32(idx);
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+// 	_AvatarDisplayMap[id] = displayData;
+// 	return &_AvatarDisplayMap[id] ;
+}
+
+// Role const* RoleManager::get_npc_by_model_id( unsigned int model_id ) const
+// {
+// 	auto iter = _model_id_to_role_map.find(model_id);
+// 	if (iter != _model_id_to_role_map.end())
+// 	{
+// 		return iter->second;
+// 	}
+// 
+// 	return nullptr;
+// }

@@ -1,0 +1,1784 @@
+#include "MountUi.h"
+#include "ItemNode.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "PackageManager.h"
+#include "UiTools.h"
+#include "ClientCfg.h"
+#include "MessageBoxUi.h"
+#include "StringMgr.h"
+#include "World.h"
+#include "RoleDefine.h"
+#include "EquipTipUi.h"
+#include "ToolTip.h"
+#include "TCPClient.h"
+#include "CommonMsgDefine.h"
+#include "WorldPacket.h"
+#include "RoleManager.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "CfgReader.h"
+#include "UiResourceMgr.h"
+#include "NumericalIniMgr.h"
+#include "CheckButton.h"
+#include "TouchSprite.h"
+#include "f_string_util.h"
+#include "CommonClient.h"
+#include "TextTip.h"
+#include "Attres.h"
+#include "f_string_table.h"
+#include "NewPlayerGuide.h"
+#include "GameEventDefine.h"
+#include "f_zhuzai_mgr.h"
+
+//////////////////////////////////////////////////////////////////////////
+MountUi::MountUi()
+{
+
+}
+
+CCNode * MountUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["MountUiFrame"] = UiSpriteLoader<MountUiFrame>::loader();
+	nodeLoaders["TouchSprite"] = TouchSpriteLoader::loader();
+	nodeLoaders["CheckButton"] = CheckButtonLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("mountui", nodeLoaders, _loadSpriteSheet);
+	if(uiNode != NULL)
+	{
+		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+		uiNode->setPosition(ccp(winSize.width / 2.0f , winSize.height / 2.0f + 25.0f));
+
+		//RoleManager::getInstance()->syncRideData();
+	}
+	return uiNode;
+}
+void MountUi::updateData()
+{
+	MountUiFrame * frame = getUiNodeByTag<MountUiFrame>(WCT_MountUi);
+	if(frame != NULL)
+	{
+		frame->updateDataBydwMountStage();
+	}
+}
+
+void MountUi::onRideLVUp()
+{
+	MountUiFrame * frame = getUiNodeByTag<MountUiFrame>(WCT_MountUi);
+	if(frame != NULL)
+	{
+		frame->onRideLVUp();
+	}
+}
+
+void MountUi::onMountResult(s_net_cmd *cmd)
+{
+	MountUiFrame * frame = getUiNodeByTag<MountUiFrame>(WCT_MountUi);
+	if(frame != NULL)
+	{
+		frame->onMountResult(cmd);
+	}
+}
+
+void MountUi::onTog( int times, int exp )
+{
+	MountUiFrame * frame = getUiNodeByTag<MountUiFrame>(WCT_MountUi);
+	if(frame != NULL)
+	{
+		frame->onTog(times, exp);
+	}
+}
+
+bool MountUi::getAutoRide()
+{
+	return _autoRide;
+}
+
+void MountUi::setAutoRide( bool autoRide )
+{
+	_autoRide=autoRide;
+}
+
+void MountUi::setMountConfig()
+{
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	unsigned int roleID = ploc->getId();
+	std::stringstream ss;
+	ss<<"set"<<"_"<<roleID;
+	_autoRide=ClientCfg::getInstance()->getInt(ss.str(), "autoRide", 0) ? true: false;
+}
+
+void MountUi::setMaPaiAction()
+{
+	MountUiFrame * frame = getUiNodeByTag<MountUiFrame>(WCT_MountUi);
+	if(frame != NULL)
+	{
+		frame->setMaPaiAction();
+	}
+}
+
+//获取当前选择想骑的坐骑
+/*
+int MountUi::GetSelectRide()
+{
+	unsigned int _dwMountStage = 0;
+	MountUiFrame * frame = getUiNodeByTag<MountUiFrame>(WCT_MountUi);
+	if(frame != NULL)
+	{
+		_dwMountStage = frame->_dwMountStage;
+		//根据不同图片的编号写死
+		switch(_dwMountStage)
+		{
+		case 1: //第一张
+			return 10;
+			break;
+		case 2: //第二张
+			return 20;
+			break;
+		case 3: //第三张
+			return 30;
+			break;
+		case 4: //第四张
+			return 40;
+			break;
+		case 5: //第五张
+			return 50;
+			break;
+		case 6: //第六张
+			return 60;
+			break;
+		case 7: //第七张
+			return 70;
+			break;
+		case 8: //第八张
+			return 80;
+			break;
+		case 9: //第九张
+			return 90;
+			break;
+		case 10: //第十张
+			return 100;
+			break;
+		case 11： //第十一张
+			return 100;
+			break;
+		case 12: //第十二张
+			return 100;
+			break;
+		default:
+			return 10;
+		}
+	}
+	return -1;
+}*/
+
+//////////////////////////////////////////////////////////////////////////
+
+MountUiFrame::MountUiFrame()
+	: _expProgress(NULL)
+	, _nextRideLable(NULL)
+	, _checkBtn(NULL)
+	, _autoNode(NULL)
+	, _maPaiTip(NULL)
+	, _maPaiDesc(NULL)
+	, maPaiActionNode(NULL)
+	, m_weijihuotishi(NULL)
+	, m_weijihuoFT(NULL)
+	, m_weijihuoFrame(NULL)
+{
+
+}
+
+MountUiFrame::~MountUiFrame()
+{
+	CC_SAFE_DELETE(_expProgress);
+}
+
+cocos2d::SEL_MenuHandler MountUiFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler MountUiFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", MountUiFrame::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onUnloadBtnPressed", MountUiFrame::onUnloadBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRideBtnPressed", MountUiFrame::onRideBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGoldRaiseBtnPressed", MountUiFrame::onGoldRaiseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onQmjbBtnPressed", MountUiFrame::onUpgradeBtnPressed);//表 功能变化，方法互换里就可以
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onUpgradeBtnPressed", MountUiFrame::onQmjbBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onYjjcBtnPressed", MountUiFrame::onYjjcBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLeftBtnPressed",  MountUiFrame::onLeftBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRightBtnPressed", MountUiFrame::onRightBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "ontitleBtnPressed", MountUiFrame::onChengHaoBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onMaPaiBtnPressed", MountUiFrame::onMaPaiBtnPressed);
+	return NULL;
+}
+
+void MountUiFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{   
+	_fightNumAcNode = NULL;
+
+	_expProgress = new ProgressBar;
+	_expProgress->initBarWithSprite(static_cast<CCSprite*>(getChildByTag(NT_ExpBar)));
+	_expProgress->addToParent(this);
+
+	ItemNode *itemNode = ItemNode::create();
+	itemNode->setBlank();
+	itemNode->setTag(NT_EquipIconItemNode);
+	itemNode->setPosition(getChildByTag(NT_EquipIcon)->getPosition());
+	addChild(itemNode);
+
+	m_BGFrame= dynamic_cast<CCSprite*>(getChildByTag(NT_Photo));
+
+	_maPaiDesc=getChildByTag(NT_MaPaiDesc);
+	_maPaiDesc->setVisible(false);
+
+
+	upsign_1 = dynamic_cast<CCSprite*>(getChildByTag(NT_UPSGIN_1));
+	upsign_2 = dynamic_cast<CCSprite*>(getChildByTag(NT_UPSGIN_2));
+	upsign_3 = dynamic_cast<CCSprite*>(getChildByTag(NT_UPSGIN_3));
+	upsign_4 = dynamic_cast<CCSprite*>(getChildByTag(NT_UPSGIN_4));
+	upsign_5 = dynamic_cast<CCSprite*>(getChildByTag(NT_UPSGIN_5));
+	upsign_6 = dynamic_cast<CCSprite*>(getChildByTag(NT_UPSGIN_6));
+
+	_dwMountStage = getState(); 
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string sSEFightFire = sSEDir + "E1_50.plist";
+	_plist.insert(sSEFightFire);
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEFightFire.c_str());
+	_fightNumAcNode = this->getFightSupeerEffect();
+	this->addChild(_fightNumAcNode, RZN_EFFECT);
+	_fightNumAcNode->setPosition(this->getChildByTag(NT_FightNumSE)->getPosition());
+	_fightNumAcNode->setScale(0.8f);
+	_fightNumAcNode->BeginAction(0.07f, true);
+	this->getChildByTag(NT_FightNumSP)->setZOrder(RZN_EFFECT+1);
+
+	_fightNumBLabel = CCLabelBMFont::create();
+	_fightNumBLabel->setFntFile("Art/Scene/fontNum.fnt");
+	_fightNumBLabel->setAnchorPoint(ccp(0.0f, 0.5f));
+	_fightNumBLabel->setScale(0.7f);
+	_fightNumBLabel->setPosition(getChildByTag(NT_FightNumPosLabel)->getPosition());
+	this->addChild(_fightNumBLabel, RZN_EFFECT+1);
+	_fightNumBLabel->setTag(NT_BattlePointLab);
+	this->getChildByTag(NT_FightNumPosLabel)->setVisible(false);
+
+	_checkBtn = dynamic_cast<CheckButton*>(getChildByTag(NT_AutoRide));
+	CC_ASSERT(_checkBtn != NULL);
+	_checkBtn->signalStateChanged.connect(this, &MountUiFrame::onAutoSetCheckRide);
+
+	_autoNode = dynamic_cast<CCNode*>(getChildByTag(NT_AutoRideSp));
+
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	unsigned int roleID = ploc->getId();
+	std::string ss;
+	safe_sprintf(ss,"set_%u",roleID);
+	GET_UI(MountUi, WCT_MountUi)->setAutoRide(ClientCfg::getInstance()->getInt(ss.c_str(), "autoRide", 0) ? true: false);
+	_checkBtn->setCheck(ClientCfg::getInstance()->getInt(ss.c_str(), "autoRide", 0) ? true: false);
+
+	m_weijihuoFT = Helper::replaceLabelTTFWithLabelFTAndRemove(m_weijihuotishi);
+
+	CCLabelTTF* speedValue = dynamic_cast<CCLabelTTF*>(this->getChildByTag(NT_SpeedWord));
+	if(speedValue != NULL)
+	{
+		Helper::replaceLabelTTFWithLabelFTAndRemove(speedValue);
+	}
+	CCNode* node = this->getChildByTag(NT_MpLeftCntFather);
+	if(node != NULL)
+	{
+		CCLabelTTF* peiyang = dynamic_cast<CCLabelTTF*>(node->getChildByTag(NT_Today_PeiYang_CiShu));
+		if(peiyang != NULL)
+		{
+			Helper::replaceLabelTTFWithLabelFTAndRemove(peiyang);
+		}
+	}
+
+	runLevelUpAnimation(false);
+	updateHideSomeControls();
+	updateDataBydwMountStage(true);
+}
+
+void MountUiFrame::onAutoSetCheckRide(CheckButton *checkBtn, bool check)
+{
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+	{
+		//[bing] 如果开着界面强关LP会先于HookSetUi释放 所以如果为NULL就不要存了表示是强关
+		return;
+	}
+
+	unsigned int roleID = ploc->getId();
+	std::string ss;
+	safe_sprintf(ss,"set_%u",roleID);
+	ClientCfg::getInstance()->setInt(ss.c_str(), "autoRide", check);
+	if (check)
+	{
+		int rideLv = _dwMountStage * 10 + 1 - 10; //坐骑等级是从1开始，所以还要再-10
+		if (rideLv > 120)
+		{
+			rideLv = 120;
+		}
+		ploc->setSelectRideLv(rideLv);
+	}
+	else
+	{
+		ploc->setSelectRideLv(0);
+	}
+	GET_UI(MountUi, WCT_MountUi)->setAutoRide(check);
+}
+
+void MountUiFrame::onEnter()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	CCSprite::onEnter();
+	REGISTER_EVENT(ResetMountUI,MountUiFrame,resetMountUI);
+}
+
+unsigned int MountUiFrame::onMountResult(s_net_cmd *cmd)
+{
+	return 0;
+}
+
+void MountUiFrame::onExit()
+{
+	CCSprite::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+
+	AnimationCache::releaseDefList(_animateList);
+	AnimationCache::getInstance()->releaseSinEffect("uizuoqitexiao");
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+
+	ClientCfg::getInstance()->flush();
+	UNREGISTER_EVENT(ResetMountUI,MountUiFrame,resetMountUI);
+	clearMaPaiAction();
+}
+
+bool MountUiFrame::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	movieBeginPoint = this->convertTouchToNodeSpace(pTouch);
+	clearMaPaiAction();
+	if(isTouchOnNodeContent(this, pTouch))
+	{
+		CCNode *iconNode = getChildByTag(NT_EquipIcon);
+		if(isTouchOnNodeContent(iconNode, pTouch))
+		{
+			f_equipment *equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(EICT_Equip, (short)EEP_Ride));
+			if(equip != NULL)
+			{
+				iconNode->convertToWorldSpace(ccp(0, 0));
+				EquipTipUiLayer *ui = EquipTipUi::create();
+//				ui->showUi(worldPos, equip);
+				ui->showUi(equip);				//【Ji：】
+				ui->showUnloadBtn();		//[bing] mark
+				ui->setIndex(EEP_Ride);
+			}
+		}
+		if (_maPaiTip)
+		{
+			if (!isTouchOnNodeContent(_maPaiTip,pTouch))
+			{
+				_maPaiTip->setVisible(false);
+			}
+		}
+
+		if (_maPaiDesc)
+		{
+			_maPaiDesc->setVisible(false);
+		}
+
+		for (int tag=NT_MAPAI_AttHp;tag<=NT_MAPAI_AttMb;tag++)
+		{
+			LabelFT* maPaiLabel = /*dynamic_cast<LabelFT*>(getChildByTag(tag))*/Helper::getLabelFTByParentAndTag(this,tag);
+			if (isTouchOnNodeContent(maPaiLabel, pTouch))
+			{
+				setMaPaiLabelTouch(pTouch,maPaiLabel);
+			}
+		}
+		return true;
+	}
+	return false;
+}
+
+void MountUiFrame::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+	movieEndPoint = this->convertTouchToNodeSpace(pTouch);	
+	CCNode *node = this->getChildByTag(0);
+	const CCSize nodeSize = node->getContentSize();
+	CCRect nodeRect(node->getPositionX()-220, node->getPositionY(), nodeSize.width, nodeSize.height);
+	if (!nodeRect.containsPoint(movieBeginPoint))
+	{
+		return;
+	}
+	CCPoint ptStart = pTouch->getStartLocation();
+	CCPoint ptEnd = pTouch->getLocation();
+	if (abs(ptEnd.x - ptStart.x) < 50)
+	{
+		return;
+	}
+
+	if (movieBeginPoint.x < movieEndPoint.x)
+	{
+		CCControlButton* pBtn = (CCControlButton*)getChildByTag(200);
+		pBtn->setTitleColorForState(ccc3(0, 0, 0) , CCControlStateNormal);
+		pBtn->setTitleColorForState(ccc3(0, 0, 0) , CCControlStateSelected);
+		if(_dwMountStage<= 1)
+			return;
+
+		_dwMountStage--;
+		ShowUIInfo();
+		updateDataBydwMountStage();
+	}
+	else if (movieBeginPoint.x == movieEndPoint.x)
+	{
+
+	}
+	else
+	{
+		setCurShowRide();
+	}
+}
+
+void MountUiFrame::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	clearMaPaiAction();
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_MountUi);
+}
+
+void MountUiFrame::onLeftBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	clearMaPaiAction();
+	CCControlButton* pBtn = (CCControlButton*)getChildByTag(200);
+	pBtn->setTitleColorForState(ccc3(0, 0, 0) , CCControlStateNormal);
+	pBtn->setTitleColorForState(ccc3(0, 0, 0) , CCControlStateSelected);
+
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_21);
+	if(_dwMountStage<= 1)
+	{
+		return;
+	}
+	_dwMountStage--;
+	ShowUIInfo();
+	updateDataBydwMountStage();
+}
+
+void MountUiFrame::onRightBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	clearMaPaiAction();
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_21);
+	setCurShowRide();
+}
+
+void MountUiFrame::onMaPaiBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	clearMaPaiAction();
+	LocalPlayer* lp=RoleManager::getInstance()->getLocalPlayer();
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_14);
+	static bool palyAudioFlag = false;
+	palyAudioFlag = !palyAudioFlag;
+	if (palyAudioFlag)
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundNpcEffect(SOUND_STORE1,false);
+	}
+	else
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundNpcEffect(SOUND_STORE2,false);
+	}
+	if (0==lp->getMaPaiLevel())
+	{
+		MessageBoxUi* maPaiBox=MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,STRING_TABLE["have_not_mapai_tips"],TEXT_UTF8_QUXIAO,STRING_TABLE["li_ji_qian_wang"]);
+		maPaiBox->signalCancelBtnPressed.connect(this,&MountUiFrame::togGetMaPai);
+		World::getInstance()->getScene()->addChild(maPaiBox,WZ_MESSAGEBOX,WCT_MessageBox);
+	}
+	else
+	{
+		_maPaiDesc=getChildByTag(NT_MaPaiDesc);
+		_maPaiDesc->retain();
+		CCNode* parent=_maPaiDesc->getParent();
+		_maPaiDesc->removeFromParent();
+		parent->addChild(_maPaiDesc);
+		_maPaiDesc->setVisible(true);
+
+		RoleManager::RideData const* rideData_ptr=RoleManager::getInstance()->getRideData(lp->getRideLv());
+		RoleManager::RideData const& rideData = *rideData_ptr;
+		Helper::getLabelFTByParentAndTag(_maPaiDesc,2);
+		float maPaiInc=lp->getMaPaiInc();
+		setAttrabute(_maPaiDesc,MP_Hp,rideData.life*(1+maPaiInc),rideData.life*(1+maPaiInc));
+		setAttrabute(_maPaiDesc,MP_Mp,rideData.mana*(1+maPaiInc),rideData.mana*(1+maPaiInc));
+		setAttrabute(_maPaiDesc,MP_Mz,rideData.hit*(1+maPaiInc),rideData.hit*(1+maPaiInc));
+		setAttrabute(_maPaiDesc,MP_Sb,rideData.miss*(1+maPaiInc),rideData.miss*(1+maPaiInc));
+		setAttrabute(_maPaiDesc,MP_Bj,rideData.baoji*(1+maPaiInc),rideData.baoji*(1+maPaiInc));
+		setAttrabute(_maPaiDesc,MP_Mb,rideData.mianbao*(1+maPaiInc),rideData.mianbao*(1+maPaiInc));
+	}	
+}
+
+void MountUiFrame::togGetMaPai()
+{
+	CLOSE_UI(WCT_MountUi);
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+	OpenChongZhiUI ocz;
+	SEND_EVENT(&ocz);
+}
+
+void MountUiFrame::onChengHaoBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	clearMaPaiAction();
+	if (_maPaiTip==NULL)
+	{
+		_maPaiTip=getChildByTag(NT_MaPaiTip);
+		_maPaiTip->retain();
+		CCNode* parent=_maPaiTip->getParent();
+		_maPaiTip->removeFromParent();
+		CCSize pSize=_maPaiTip->getContentSize();
+		_maPaiTip->setAnchorPoint(ccp(1.0,0.5));
+		parent->addChild(_maPaiTip);
+		_maPaiTip->release();
+	}
+	_maPaiTip->setVisible(true);
+	_maPaiTip->setPosition(getChildByTag(NT_ChengHao)->getPositionX(),getChildByTag(NT_ChengHao)->getPositionY()-10);
+
+	LabelFT* titleLabel = Helper::getLabelFTByParentAndTag(_maPaiTip,1);
+	LabelFT* desLabel = Helper::getLabelFTByParentAndTag(_maPaiTip,2);
+	CC_ASSERT(titleLabel !=NULL);
+	CC_ASSERT(desLabel !=NULL);
+	unsigned int rideLv = _dwMountStage * 10;
+	RoleManager::RideData const* rideData = RoleManager::getInstance()->getRideData(rideLv);
+	const tagTitleProto* proto=Attres::getInstance()->getTitleProto(rideData->titleID);
+	titleLabel->setString(proto->stName.c_str());
+	std::string str = proto->stDesc;
+	std::replace(str.begin(), str.end(), '\\', '\n');
+	desLabel->setString(str.c_str());
+}
+
+void MountUiFrame::setMaPaiLabelTouch(CCTouch * pTouch,LabelFT* maPaiLabel)
+{
+	if (_maPaiTip==NULL)
+	{
+		_maPaiTip=getChildByTag(NT_MaPaiTip);
+		_maPaiTip->retain();
+		CCNode* parent=_maPaiTip->getParent();
+		_maPaiTip->removeFromParent();
+		CCSize pSize=_maPaiTip->getContentSize();
+		_maPaiTip->setAnchorPoint(ccp(1.0,0.5));
+		parent->addChild(_maPaiTip);
+		_maPaiTip->release();
+	}
+	_maPaiTip->setVisible(true);
+	_maPaiTip->setPosition(getChildByTag(35)->getPositionX(),getChildByTag(35)->getPositionY()-10);
+
+	LabelFT* titleLabel = Helper::getLabelFTByParentAndTag(_maPaiTip,1);
+	LabelFT* desLabel = Helper::getLabelFTByParentAndTag(_maPaiTip,2);
+	CC_ASSERT(titleLabel !=NULL);
+	CC_ASSERT(desLabel !=NULL);
+	titleLabel->setString(STRING_TABLE["mapai_title"]);
+
+	if (0==RoleManager::getInstance()->getLocalPlayer()->getMaPaiLevel())
+	{
+		desLabel->setString(STRING_TABLE["mapai_descn"]);
+	}
+	else
+	{
+		desLabel->setString(STRING_TABLE["mapai_desc1"]);
+	}
+}
+
+bool MountUiFrame::ShowUIInfo()
+{
+	m_BGFrame->removeAllChildrenWithCleanup(true);
+
+	CCString* bgstr = CCString::createWithFormat("%s%d","mount", _dwMountStage);
+	CCSprite* sprite = CCSprite::createWithSpriteFrameName(bgstr->getCString());
+	if(!sprite)
+	{
+		return false;
+	}
+	m_BGFrame->setDisplayFrame(sprite->displayFrame());
+	
+// 	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "ICON", "");
+// 	std::string FullFileName = uiDir + "dot-click.png";
+	//m_TitleFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(FullFileName.c_str());
+	//m_Title = CCSprite::create();
+	//m_Title->initWithFile("dot-click");
+// 	bgstr->CCString::createWithFormat("dot-click");
+//     CCSprite * sprite1 = CCSprite::createWithSpriteFrameName(bgstr->getCString());
+// 	if(!sprite1)
+// 		return false;
+	
+/*
+	switch(_dwMountStage)
+	{
+	  case 0:
+	    m_Title->setPosition(ccp(220,129));
+		break;
+	  case 1:
+			m_Title->setPosition(ccp(220,129));
+			break;
+      case 2:
+			m_Title->setPosition(ccp(240,129));
+			break;
+	  case 3:
+			m_Title->setPosition(ccp(260,129));
+			break;
+	  case 4:
+		  m_Title->setPosition(ccp(280,129));
+		  break;
+	  case 5:
+		  m_Title->setPosition(ccp(300,129));
+		  break;
+	}*/
+	
+// 	bgstr = CCString::createWithFormat("chapter%d.png", _dwMountStage);
+// 	sprite = CCSprite::createWithSpriteFrameName(bgstr->getCString());
+// 	if(!sprite)
+// 		return false; 
+// 	  CCSprite *m_Title;
+// 	m_Title->setDisplayFrame(sprite->displayFrame());
+	
+	return true;
+}
+
+void MountUiFrame::onUnloadBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	clearMaPaiAction();
+	f_item *item = PackageManager::getInstance()->getItem(EICT_Equip, (short)EEP_Ride);
+	if(item != NULL)
+	{
+		//背包已满，无法卸载坐骑;
+		if (PackageManager::getInstance()->getBlankCount() <= 0)
+		{
+			ToolTip::getInstance()->push(GET_STR(2221));
+			return;
+		}
+
+		PackageManager::getInstance()->unEquipRide(item->get_item_id());
+	}
+}
+
+void MountUiFrame::onRideBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+ {
+	 clearMaPaiAction();
+	if(RoleManager::getInstance()->getLocalPlayer()->getAttribute(RA_RideState) != 0)
+	{
+		RoleManager::getInstance()->sendUnRideMsg();
+	}
+	else
+	{
+		LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+		if(!ploc)
+			return;
+
+		if ( !MapManager::getInstance()->canCurMapRide())
+		{
+			ToolTip::getInstance()->push(GET_STR(7223));
+			return;
+		}
+		else
+		{
+			if ( MapManager::getInstance()->getCurMapCanRideWithMaPai() || MapManager::getInstance()->IsInSafeArea() == true )
+			{
+				if (0==ploc->getMaPaiLevel())
+				{
+					ToolTip::getInstance()->push(GET_STR(7195));
+					return;
+				}
+			}
+		}
+		if (ploc->isInRoleStateAny(RA_BattleMode) || ploc->isInRoleStateAny(RA_Hang))//只是点击给提示，sendRideMsg中去掉，否则自动骑乘会提示
+		{
+			ToolTip::getInstance()->push(GET_STR(2199));
+		}
+		ploc->setRideButtonFlag(true);//设置是由于按钮点击而向服务器发消息
+		RoleManager::getInstance()->sendRideMsg(_dwMountStage);//?????vvv是这样做么  加参数_dwMountStage
+	}
+}
+
+void MountUiFrame::onGoldRaiseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )//金币培养
+{
+	clearMaPaiAction();
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_25);
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	unsigned int roleID = ploc->getId();
+	std::string ss;
+	safe_sprintf(ss,"set_%u",roleID);
+	int tip = ClientCfg::getInstance()->getInt(ss.c_str(), "goldTip", 0);
+	if(tip != 0)
+	{
+		togGold();
+	}
+	else
+	{
+		MessageBoxUi *messageBox = MessageBoxUi::createWithTwoBtnWithCheck(GET_STR(94).c_str(), GET_STR(98).c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO, false);
+		messageBox->signalOkBtnPressed.connect(this, &MountUiFrame::togGold);
+		messageBox->signalCheckStateChange.connect(this, &MountUiFrame::togGoldTip);
+		World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+	}	
+}
+
+void MountUiFrame::onQmjbBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )//钻石培养
+{
+	clearMaPaiAction();
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_25);
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	unsigned int roleID = ploc->getId();
+	std::string ss;
+	safe_sprintf(ss,"set_%u",roleID);
+	int tip = ClientCfg::getInstance()->getInt(ss.c_str(), "lqpyTip", 0);
+	if(tip != 0)
+	{
+		togLqpy();
+	}
+	else
+	{
+		MessageBoxUi *messageBox = MessageBoxUi::createWithTwoBtnWithCheck(GET_STR(95).c_str(), GET_STR(98).c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO, false);
+		messageBox->signalOkBtnPressed.connect(this, &MountUiFrame::togLqpy);
+		messageBox->signalCheckStateChange.connect(this, &MountUiFrame::togLqpyTip);
+		World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+	}
+}
+
+void MountUiFrame::onUpgradeBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )//快马加鞭
+{
+	clearMaPaiAction();
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_25);
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	unsigned int roleID = ploc->getId();
+	std::string ss;
+	safe_sprintf(ss,"set_%u",roleID);
+	int tip = ClientCfg::getInstance()->getInt(ss.c_str(), "qmjbTip", 0);
+	if(tip != 0)
+	{
+		togQmjb();
+	}
+	else
+	{
+		MessageBoxUi *messageBox = MessageBoxUi::createWithTwoBtnWithCheck(GET_STR(96).c_str(), GET_STR(98).c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO, false);
+		messageBox->signalOkBtnPressed.connect(this, &MountUiFrame::togQmjb);
+		messageBox->signalCheckStateChange.connect(this, &MountUiFrame::togQmjbTip);
+		World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+	}
+}
+
+void MountUiFrame::onYjjcBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )//一骑绝尘
+{
+	clearMaPaiAction();
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_25);
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	int vipLevel = ploc->getVIPLevel();
+	if (vipLevel < 7)
+	{
+		RechargeNewUiMgr::GetInstance()->setCurrentRechargeState(7);
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+		return ;
+	}
+	unsigned int roleID = ploc->getId();
+	std::string ss;
+	safe_sprintf(ss,"set_%u",roleID);
+	int tip = ClientCfg::getInstance()->getInt(ss.c_str(), "yjjcTip", 0);
+	if(tip != 0)
+	{
+		togYjjc();
+	}
+	else
+	{
+		MessageBoxUi *messageBox = MessageBoxUi::createWithTwoBtnWithCheck(GET_STR(97).c_str(), GET_STR(98).c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO, false);
+		messageBox->signalOkBtnPressed.connect(this, &MountUiFrame::togYjjc);
+		messageBox->signalCheckStateChange.connect(this, &MountUiFrame::togYjjcTip);
+		World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+	}
+}
+
+void MountUiFrame::setWidgetVisible(bool widgetVisible)
+{
+// 	upsign_1->setVisible(widgetVisible);
+// 	upsign_2->setVisible(widgetVisible);
+// 	upsign_3->setVisible(widgetVisible);
+// 	upsign_4->setVisible(widgetVisible);
+// 	upsign_5->setVisible(widgetVisible);
+// 	upsign_6->setVisible(widgetVisible);
+// 
+// 	LabelFT *label_1 = dynamic_cast<LabelFT*>(getChildByTag(NT_NEXT_AttHp));
+// 	LabelFT *label_2 = dynamic_cast<LabelFT*>(getChildByTag(NT_NEXT_AttMp));
+// 	LabelFT *label_3 = dynamic_cast<LabelFT*>(getChildByTag(NT_NEXT_AttMz));
+// 	LabelFT *label_4 = dynamic_cast<LabelFT*>(getChildByTag(NT_NEXT_AttSb));
+// 	LabelFT *label_5 = dynamic_cast<LabelFT*>(getChildByTag(NT_NEXT_AttBj));
+// 	LabelFT *label_6 = dynamic_cast<LabelFT*>(getChildByTag(NT_NEXT_AttMb));
+// 	CC_ASSERT((label_1 != NULL) && (label_2 != NULL) && (label_3 != NULL) && (label_4 != NULL) && (label_5 != NULL) && (label_6 != NULL));
+// 
+// 	label_1->setVisible(widgetVisible);
+// 	label_2->setVisible(widgetVisible);
+// 	label_3->setVisible(widgetVisible);
+// 	label_4->setVisible(widgetVisible);
+// 	label_5->setVisible(widgetVisible);
+// 	label_6->setVisible(widgetVisible);
+}
+
+void MountUiFrame::setIntroduceLabel(RoleManager::RideData rideData)
+{
+	LabelFT* IntroduceLabel_1 = Helper::getLabelFTByParentAndTag(this,NT_Introduce_1);
+	LabelFT* IntroduceLabel_2 = Helper::getLabelFTByParentAndTag(this,NT_Introduce_2);
+	LabelFT* IntroduceLabel_3 = Helper::getLabelFTByParentAndTag(this,NT_Introduce_3);
+	CCControlButton* chenghao = dynamic_cast<CCControlButton*>(getChildByTag(NT_ChengHao));
+
+	IntroduceLabel_1->setString(rideData.introduce);
+	IntroduceLabel_1->setAlignment(LEFT);
+	
+	if (IntroduceLabel_1 && IntroduceLabel_2 && IntroduceLabel_3 )
+	{
+		if (rideData.imageFile=="0")
+		{
+			IntroduceLabel_1->setAnchorPoint(ccp(0.0,1.0));
+			IntroduceLabel_2->setVisible(false);
+			IntroduceLabel_3->setVisible(false);
+			chenghao->setVisible(false);
+		}
+		else
+		{
+			IntroduceLabel_1->setAnchorPoint(ccp(0.5,0.5));
+			IntroduceLabel_2->setVisible(true);
+			IntroduceLabel_3->setVisible(true);
+			chenghao->setVisible(true);
+			chenghao->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(rideData.imageFile.c_str()),CCControlStateNormal);
+			chenghao->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(rideData.imageFile.c_str()),CCControlStateHighlighted);
+		}
+	}
+}
+
+void MountUiFrame::setLabelString()
+{
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	//unsigned int curExp = lp->getCurRideExp();
+	float fMaPaiInc = lp->getMaPaiInc();
+
+	unsigned int curRideLv = lp->getRideLv();//角色当前的坐骑等级
+	unsigned int rideLv = _dwMountStage * 10;
+	unsigned int rideNextLv = curRideLv + 1;
+
+	RoleManager* role_mgr = RoleManager::getInstance();
+
+	RoleManager::RideData const* curRideData_ptr = role_mgr ->getRideData(curRideLv);
+	RoleManager::RideData const& curRideData = *curRideData_ptr;
+
+	RoleManager::RideData const* rideData_ptr = role_mgr ->getRideData(rideLv);
+	RoleManager::RideData const& rideData = *rideData_ptr;
+
+	RoleManager::RideData const* nextRideData_ptr = role_mgr ->getRideData(rideNextLv);
+	RoleManager::RideData const& nextRideData = *nextRideData_ptr;
+
+	setIntroduceLabel(rideData);
+
+	//bool isZhuZaiZhe = f_zhuzai_mgr::get_singleton_ptr()->localplayer_is_zhuzai();
+
+	if (curRideLv >= /*CFG(int,"max_ride_lv_zhuzaizhe",120)*/get_max_ride_lv(true))
+	{
+		upsign_1->setVisible(false);
+		upsign_2->setVisible(false);
+		upsign_3->setVisible(false);
+		upsign_4->setVisible(false);
+		upsign_5->setVisible(false);
+		upsign_6->setVisible(false);
+
+		LabelFT *label_1 = Helper::getLabelFTByParentAndTag(this,NT_NEXT_AttHp);
+		LabelFT *label_2 = Helper::getLabelFTByParentAndTag(this,NT_NEXT_AttMp)/*dynamic_cast<LabelFT*>(getChildByTag(NT_NEXT_AttMp))*/;
+		LabelFT *label_3 = Helper::getLabelFTByParentAndTag(this,NT_NEXT_AttMz)/*dynamic_cast<LabelFT*>(getChildByTag(NT_NEXT_AttMz))*/;
+		LabelFT *label_4 = Helper::getLabelFTByParentAndTag(this,NT_NEXT_AttSb)/*dynamic_cast<LabelFT*>(getChildByTag(NT_NEXT_AttSb))*/;
+		LabelFT *label_5 =  Helper::getLabelFTByParentAndTag(this,NT_NEXT_AttBj)/*dynamic_cast<LabelFT*>(getChildByTag(NT_NEXT_AttBj))*/;
+		LabelFT *label_6 = Helper::getLabelFTByParentAndTag(this,NT_NEXT_AttMb)/*dynamic_cast<LabelFT*>(getChildByTag(NT_NEXT_AttMb))*/;
+
+		if(label_1)
+			label_1->setVisible(false);
+		if(label_2)
+			label_2->setVisible(false);
+		if(label_3)
+			label_3->setVisible(false);
+		if(label_4)
+			label_4->setVisible(false);
+		if(label_5)
+			label_5->setVisible(false);
+		if(label_6)
+			label_6->setVisible(false);
+	}
+	else if (_dwMountStage<getState())
+	{
+		setAttrabute(this, NT_NEXT_AttHp, curRideData.life,(curRideData.life));
+		setAttrabute(this, NT_NEXT_AttMp, curRideData.mana,(curRideData.mana));
+		setAttrabute(this, NT_NEXT_AttMz, curRideData.hit,(curRideData.hit) );
+		setAttrabute(this, NT_NEXT_AttSb, curRideData.miss,(curRideData.miss) );
+		setAttrabute(this, NT_NEXT_AttBj, curRideData.baoji,(curRideData.baoji) );
+		setAttrabute(this, NT_NEXT_AttMb, curRideData.mianbao,(curRideData.mianbao));
+	}
+	else if(_dwMountStage==getState())
+	{
+		setAttrabute(this, NT_NEXT_AttHp, nextRideData.life,(nextRideData.life));
+		setAttrabute(this, NT_NEXT_AttMp, nextRideData.mana,(nextRideData.mana));
+		setAttrabute(this, NT_NEXT_AttMz, nextRideData.hit,(nextRideData.hit) );
+		setAttrabute(this, NT_NEXT_AttSb, nextRideData.miss,(nextRideData.miss) );
+		setAttrabute(this, NT_NEXT_AttBj, nextRideData.baoji,(nextRideData.baoji) );
+		setAttrabute(this, NT_NEXT_AttMb, nextRideData.mianbao,(nextRideData.mianbao));
+	}
+	else if (_dwMountStage>getState())
+	{
+		RoleManager::RideData const* nextLvData_ptr=RoleManager::getInstance()->getRideData(_dwMountStage*10);
+		RoleManager::RideData const& nextLvData  = * nextLvData_ptr;
+		setAttrabute(this, NT_NEXT_AttHp,nextLvData.life,(nextLvData.life));
+		setAttrabute(this, NT_NEXT_AttMp,nextLvData.mana,(nextLvData.mana));
+		setAttrabute(this, NT_NEXT_AttMz,nextLvData.hit,(nextLvData.hit));
+		setAttrabute(this, NT_NEXT_AttSb,nextLvData.miss,(nextLvData.miss));
+		setAttrabute(this, NT_NEXT_AttBj,nextLvData.baoji,(nextLvData.baoji));
+		setAttrabute(this, NT_NEXT_AttMb,nextLvData.mianbao,(nextLvData.mianbao));
+	}
+
+	setAttrabute(this, NT_AttHp, curRideData.life,(curRideData.life));
+	setAttrabute(this, NT_AttMp, curRideData.mana,(curRideData.mana));
+	setAttrabute(this, NT_AttMz, curRideData.hit,(curRideData.hit) );
+	setAttrabute(this, NT_AttSb, curRideData.miss,(curRideData.miss) );
+	setAttrabute(this, NT_AttBj, curRideData.baoji,(curRideData.baoji) );
+	setAttrabute(this, NT_AttMb, curRideData.mianbao,(curRideData.mianbao));
+	if (0==lp->getMaPaiLevel())
+	{
+		setMaPaiAttrabute(NT_MAPAI_AttHp, 0 );
+		setMaPaiAttrabute(NT_MAPAI_AttMp, 0 );
+		setMaPaiAttrabute(NT_MAPAI_AttMz, 0 );
+		setMaPaiAttrabute(NT_MAPAI_AttSb, 0 );
+		setMaPaiAttrabute(NT_MAPAI_AttBj, 0 );
+		setMaPaiAttrabute(NT_MAPAI_AttMb, 0 );
+	}
+	else
+	{
+		setMaPaiAttrabute(NT_MAPAI_AttHp, curRideData.life * fMaPaiInc );
+		setMaPaiAttrabute(NT_MAPAI_AttMp, curRideData.mana * fMaPaiInc );
+		setMaPaiAttrabute(NT_MAPAI_AttMz, curRideData.hit * fMaPaiInc );
+		setMaPaiAttrabute(NT_MAPAI_AttSb, curRideData.miss * fMaPaiInc );
+		setMaPaiAttrabute(NT_MAPAI_AttBj, curRideData.baoji * fMaPaiInc );
+		setMaPaiAttrabute(NT_MAPAI_AttMb, curRideData.mianbao * fMaPaiInc );
+	}
+}
+
+void MountUiFrame::setMaPaiAttrabute(eNodeTag att,int val)
+{
+	LabelFT* labelft = Helper::getLabelFTByParentAndTag(this,att);
+	CC_ASSERT(labelft != NULL);
+	if (labelft)
+	{
+		std::string ostr;
+		safe_sprintf(ostr,"+%d",val);
+		labelft->setString(ostr.c_str());
+	}
+}
+
+void MountUiFrame::updateDataBydwMountStage( bool changeSpeed /*= false*/ )
+{
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	unsigned int curExp = lp->getCurRideExp();
+
+	if (0==lp->getMaPaiLevel())
+	{
+		CCControlButton* maPai=dynamic_cast<CCControlButton*>(getChildByTag(NT_MaPai));
+		setButtonSpriteFrame(maPai,"mount_lingpaibtnd","mount_lingpaibtnd","mount_lingpaibtnd");
+	}
+	else
+	{
+		CCControlButton* maPai=dynamic_cast<CCControlButton*>(getChildByTag(NT_MaPai));
+		setButtonSpriteFrame(maPai,"mount_lingpaibtnn","mount_lingpaibtnh","mount_lingpaibtnd");
+	}
+
+	unsigned int curRideLv = lp->getRideLv();//角色当前的坐骑等级
+	unsigned int rideLv = _dwMountStage * 10;
+	unsigned int rideNextLv = curRideLv + 1;
+
+	RoleManager* role_mgr = RoleManager::getInstance();
+
+	RoleManager::RideData const* curRideData_ptr = role_mgr ->getRideData(curRideLv);
+	RoleManager::RideData const& curRideData = *curRideData_ptr;
+	RoleManager::RideData const* rideData_ptr = role_mgr ->getRideData(rideLv);
+	RoleManager::RideData const& rideData = *rideData_ptr;
+	RoleManager::RideData const* nextRideData_ptr = role_mgr ->getRideData(rideNextLv);
+	//RoleManager::RideData const& nextRideData = *nextRideData_ptr;
+
+	setLabelString();
+
+	CCNode* maPaiDesc = getChildByTag(NT_MaPaiDesc);
+	maPaiDesc->setVisible(false);
+
+	//RoleManager::RideModeData rideModeData = RoleManager::getInstance()->getRideModeData(rideId, lp->getAttribute(RA_SEX));
+
+	int grade , grade2 , star , star2;
+	VLevel2StepGrade(curRideLv, grade, star);
+	VLevel2StepGrade(rideLv, grade2, star2);
+	setMountGrade(grade2);//左右按钮按照固定等级设置名字和阶段
+	if((_dwMountStage - 1)< grade)
+	{
+		setMountStar(NUM_RAID_GRADE);//星级按当前经验设定
+	}
+	else if((_dwMountStage - 1) > grade)
+	{
+		setMountStar(0);
+	}
+	else
+	{
+		if(curRideLv % NUM_RAID_GRADE != 0)
+		{
+			setMountStar(curRideLv % NUM_RAID_GRADE);
+		}
+		else
+		{
+			setMountStar(NUM_RAID_GRADE);
+		}
+	}
+
+	//左右按钮点击的时候经验不动
+	int stat = ride_rich_max_lv(curRideLv);
+	if (stat != 0)
+		setExp(100,100);
+	else
+		setExp(curExp, curRideData.lvExp);
+
+	if(stat != 0)
+		setExpStr(stat ==1?STRING_TABLE["ridemaxlevel_feizhuzaizhe"] : STRING_TABLE["ridemaxlevel_normal"]);
+
+// 	bool is_zhuzai = f_zhuzai_mgr::get_singleton_ptr()->localplayer_is_zhuzai();
+// 
+// 	if (is_zhuzai)
+// 	{
+// 		if (curRideLv >= /*CFG(int,"max_ride_lv_zhuzaizhe",120)*/get_max_ride_lv(true))
+// 		{
+// 			setExpStr(STRING_TABLE["ridemaxlevel_normal"]);
+// 		}
+// 	}
+// 	else
+// 	{
+// 		if (curRideLv >= /*CFG(int,"max_ride_lv",100)*/get_max_ride_lv(false)) 
+// 		{
+// 			setExpStr(STRING_TABLE["ridemaxlevel_feizhuzaizhe"]);
+// 		}
+// 	}
+
+	//设置坐骑纸娃娃文件名字
+	//_dwMountStage = grade + 1;
+// 	std::string ridePicName = CCString::createWithFormat("%s%d","mount",_dwMountStage)->getCString();
+// 	setPhoto(ridePicName.c_str());
+	setTogTimes(lp->getRoleDayClearInfo(ERDCT_RideTogTimes));
+	showTogTimes(curRideLv < /*CFG(int,"max_ride_lv_zhuzaizhe",120)*/get_max_ride_lv(true));
+	//更新金币，钻石，元宝数
+	setRes(PackageManager::getInstance()->getJinBi(), PackageManager::getInstance()->getDiamond(), PackageManager::getInstance()->getYuanBao());
+	
+	setBattlePoint(curRideData.battlePt);
+	if (changeSpeed)
+	{
+		setSpeed(rideData.speed);
+	}
+	setRideButtonState();  //根据当前等级判断是否可以骑乘的设置
+	updateLeftAndRightBtn();
+	updateCheckBtn();
+	ShowUIInfo();
+}
+
+void MountUiFrame::updateLeftAndRightBtn()
+{
+	CCControlButton* leftBtn=(CCControlButton*)getChildByTag(200);
+	CCControlButton* rightBtn=(CCControlButton*)getChildByTag(201);
+	bool isZhuZaiZhe = f_zhuzai_mgr::get_singleton_ptr()->localplayer_is_zhuzai();
+	int state=getState();
+	if (-1==state)
+	{
+		return;
+	}
+	leftBtn->setVisible(true);
+	rightBtn->setVisible(true);
+	if(1==_dwMountStage)
+	{
+		leftBtn->setVisible(false);
+	}
+	else
+	{
+		if (isZhuZaiZhe)
+		{
+			if (CFG(int,"max_ride_step_zhuzaizhe",12) == _dwMountStage)
+			{
+				rightBtn->setVisible(false);
+			}
+		}
+		else
+		{
+			if(_dwMountStage==state+2 ||CFG(int,"max_ride_step_zhuzaizhe",12)==_dwMountStage)
+			{
+				rightBtn->setVisible(false);
+			}
+		}
+	}
+}
+
+int MountUiFrame::getState()
+{
+	LocalPlayer* player=RoleManager::getInstance()->getLocalPlayer();
+	if (!player)
+	{
+		return -1;
+	}
+	unsigned int curStateLv=player->getRideLv();
+	int state=0;
+	if (0==(curStateLv%10))
+	{
+		state=curStateLv/10;
+	}
+	else
+	{
+		state=curStateLv/10+1;
+	}
+	return state;
+}
+
+void MountUiFrame::updateData()
+{
+	updateDataBydwMountStage();
+}
+
+void MountUiFrame::setMountGrade( int grade )
+{
+	std::string iconStr;
+	safe_sprintf(iconStr,"mountui_order%d",grade);//等级顺序
+	std::string nameStr;
+	safe_sprintf(nameStr,"mount_name%d",grade);//等级顺序vv
+	std::string labStr;
+	safe_sprintf(labStr,STRING_TABLE["jie"],grade);// 等级+阶
+
+	CCSprite *iconSprite = dynamic_cast<CCSprite*>(getChildByTag(NT_GradeIcon));//2  /等级
+	iconSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(iconStr.c_str()));
+
+	CCSprite *nameSprite=dynamic_cast<CCSprite*>(getChildByTag(52));//vv
+	nameSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(nameStr.c_str()));//vv
+
+	//CCLabelTTF *lab = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_GradeLab));//3
+	LabelFT* labft = Helper::getLabelFTByParentAndTag(this,NT_GradeLab);
+	if (labft)
+	{
+		labft->setString(labStr.c_str());
+		labft->setVisible(false);
+	}
+}
+
+void MountUiFrame::setMountStar( int star )
+{
+	for(int i = 0; i < 10; i ++)
+	{
+		CCNode *starNode = getChildByTag(NT_StarBegin + i);
+		if(starNode != NULL)
+		{
+			if(i < star)
+			{
+				starNode->setVisible(true);
+			}
+			else
+			{
+				starNode->setVisible(false);
+			}
+		}
+	}
+}
+
+void MountUiFrame::setExp( int cur, int max )
+{
+	if(_expProgress != NULL)
+	{
+		_expProgress->setProgress(cur, max);
+	}
+}
+
+void MountUiFrame::setExpStr( std::string str )
+{
+	if (_expProgress)
+	{
+		_expProgress->setString(str);
+	}
+}
+
+void MountUiFrame::setRes( INT64 gold, INT64 liquan, INT64 yuanbao )
+{
+// 	CCLabelTTF *goldLab = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_GoldLab));
+// 	CCLabelTTF *liquanLab = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_GiftCertificate));
+// 	CCLabelTTF *yuanbaoLab = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_Yuanbao));
+// 
+// 	CC_ASSERT((goldLab != NULL) && (liquanLab != NULL) && (yuanbaoLab != NULL));
+	LabelFT* goldLabft = Helper::getLabelFTByParentAndTag(this,NT_GoldLab);
+	LabelFT* liquanLabft = Helper::getLabelFTByParentAndTag(this,NT_GiftCertificate);
+	LabelFT* yuanbaoLabft =Helper::getLabelFTByParentAndTag(this,NT_Yuanbao);
+	CC_ASSERT((goldLabft != NULL) && (liquanLabft != NULL) && (yuanbaoLabft != NULL));
+	std::ostringstream goldStr;
+	if (gold >= 10000)
+	{
+		gold = gold / 10000;
+		goldStr << gold << GET_STR(9033).c_str();
+	}else
+	{
+		goldStr << gold;
+	}
+	if (goldLabft)
+	{
+		goldLabft->setString(goldStr.str().c_str());
+	}
+
+	std::ostringstream liquanStr;
+// 	if(liquan > 100000)
+// 	{
+// 		liquanStr << liquan / 10000 << GET_STR(9033).c_str();
+// 	}
+// 	else
+// 	{
+		liquanStr << liquan;
+//	}
+	if (liquanLabft)
+	{
+		liquanLabft->setString(liquanStr.str().c_str());
+	}
+
+	std::ostringstream yuanbaoStr;
+// 	if(yuanbao > 100000)
+// 	{
+// 		yuanbaoStr << yuanbao / 10000 << GET_STR(9033).c_str();
+// 	}
+// 	else
+// 	{
+		yuanbaoStr << yuanbao;
+//	}
+	if (yuanbaoLabft)
+	{
+		yuanbaoLabft->setString(yuanbaoStr.str().c_str());
+	}
+}
+
+void MountUiFrame::setEquipId( int id )
+{
+	ItemNode *itemNode = dynamic_cast<ItemNode*>(getChildByTag(NT_EquipIconItemNode));
+	if(id == 0)
+		itemNode->setBlank();
+	else
+		itemNode->setDataId(id);
+}
+
+void MountUiFrame::setBattlePoint( int bt )
+{
+	CC_ASSERT(_fightNumBLabel != NULL);
+	LocalPlayer* localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	CC_ASSERT(localPlayer);
+	if ( 0 != localPlayer->getMaPaiLevel() )
+	{
+		bt += bt * localPlayer->getMaPaiInc();
+	}
+	std::ostringstream ostr;
+	ostr << bt;
+	_fightNumBLabel->setString(ostr.str().c_str());
+}
+
+void MountUiFrame::setSpeed( int speed )
+{
+// 	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_SpeedLab));	
+// 	CC_ASSERT(label != NULL);
+	LabelFT* labelft = Helper::getLabelFTByParentAndTag(this,NT_SpeedLab);
+	CC_ASSERT(labelft != NULL);
+	if (labelft)
+	{
+		std::ostringstream ostr;
+		ostr << speed;
+		labelft->setString(ostr.str());
+	}
+}
+
+void MountUiFrame::setAttrabute(CCNode* node, eNodeTag att, int val,int dif )
+{
+// 	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(getChildByTag(att));
+// 	//CCLabelTTF *label2 = dynamic_cast<CCLabelTTF*>(getChildByTag(att * 4));
+// 	CC_ASSERT(label != NULL);//label != NULL &&     && label2 !=  NULL
+	//label2->setColor(ccc3(100, 255, 100));
+	LabelFT* labelft = Helper::getLabelFTByParentAndTag(node,att);
+	CC_ASSERT(labelft != NULL);
+	if (labelft)
+	{
+		std::ostringstream ostr;
+		ostr << "" << val; 
+		std::ostringstream ostr2;  //"\xE2\x86\x91" 
+		ostr2<< "" << dif;
+		labelft->setString(ostr.str().c_str());
+		//label2->setString(ostr2.str().c_str());
+	}
+}
+
+void MountUiFrame::setPhoto( const std::string &photo )///????
+{
+	if(photo.empty())
+		return;
+
+	m_BGFrame= dynamic_cast<CCSprite*>(getChildByTag(NT_Photo));
+	m_BGFrame->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(photo.c_str()));
+}
+
+void MountUiFrame::onRideLVUp()
+{
+	runLevelUpAnimation();
+}
+
+void MountUiFrame::runLevelUpAnimation(bool show /*= true*/)
+{
+	CCNode *node = getChildByTag(NT_LevUpEffect);
+	if(node == NULL)
+	{
+		node = CCSprite::create();
+		//node->setAnchorPoint(ccp(0.0, 1.0));
+		node->setTag(NT_LevUpEffect);
+		node->setPosition(ccp(255.f, 175.f));
+		addChild(node);
+	}
+
+	node->setVisible(show);
+
+/*
+	if(_animateList.empty())
+	{
+		AnimationCache::createDefList(1, _animateList, false);
+		AnimationCache::getInstance()->getSinEffect(0,"uizuoqitexiao", _animateList);
+	}
+
+	BSAnimate *animate = _animateList[0];
+	node->stopAllActions();
+	node->runAction(animate);*/
+}
+
+void MountUiFrame::togGold()
+{
+	//使用金币培养
+	INT64 bagJB = PackageManager::getInstance()->getJinBi();
+	//add by XSea 2014.10.30 改为读数值表
+	if (bagJB < NumericalIniMgr::getInstance()->GetMoneyRaidMoney())
+	{
+		ToolTip::getInstance()->push(GET_STR(2188));
+		return;
+	}
+	updateHideSomeControls();
+	RoleManager::getInstance()->togRide(0);
+}
+void MountUiFrame::noticeRecharge()
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+}
+void MountUiFrame::togLqpy()
+{
+	//使用10礼券或10元宝
+	if ((PackageManager::getInstance()->getDiamond() < 10) && (PackageManager::getInstance()->getYuanBao() < 10))
+	{
+		//add by vvv 2014.11.03 当元宝不足时，弹出充值界面，代替文字提示
+		//MessageBoxUi *messageBox = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(7024).c_str(), TEXT_UTF8_RECHARGE, TEXT_UTF8_QUXIAO);//充值，取消
+		//messageBox->signalOkBtnPressed.connect(this, &MountUiFrame::noticeRecharge);
+		//messageBox->signalCheckStateChange.connect(this, &MountUiFrame::togGoldTip);
+		//World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+	}
+	updateHideSomeControls();
+	RoleManager::getInstance()->togRide(1);
+}
+
+void MountUiFrame::togQmjb()
+{
+	//使用100元宝
+	if (PackageManager::getInstance()->getYuanBao() < 100)
+	{
+// 		ToolTip::getInstance()->push(GET_STR(2190));
+// 		return;
+		//add by vvv 2014.11.03 当元宝不足时，弹出充值界面，代替文字提示
+		//MessageBoxUi *messageBox = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(7024).c_str(), TEXT_UTF8_RECHARGE, TEXT_UTF8_QUXIAO);//充值，取消
+		//messageBox->signalOkBtnPressed.connect(this, &MountUiFrame::noticeRecharge);
+		//messageBox->signalCheckStateChange.connect(this, &MountUiFrame::togGoldTip);
+		//World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+	}
+	updateHideSomeControls();
+	RoleManager::getInstance()->togRide(2);
+}
+
+void MountUiFrame::togYjjc()
+{
+	//使用1000元宝
+	if (PackageManager::getInstance()->getYuanBao() < 1000)
+	{
+// 		ToolTip::getInstance()->push(GET_STR(2191));
+// 		return;
+		//add by vvv 2014.11.03
+		//MessageBoxUi *messageBox = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(7024).c_str(), TEXT_UTF8_RECHARGE, TEXT_UTF8_QUXIAO);//充值，取消
+		//messageBox->signalOkBtnPressed.connect(this, &MountUiFrame::noticeRecharge);
+		//messageBox->signalCheckStateChange.connect(this, &MountUiFrame::togGoldTip);
+		//World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+	}
+	updateHideSomeControls();
+	RoleManager::getInstance()->togRide(3);
+}
+
+void MountUiFrame::togGoldTip( bool state )
+{
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	unsigned int roleID = ploc->getId();
+	std::stringstream ss;
+	ss<<"set"<<"_"<<roleID;
+	ClientCfg::getInstance()->setInt(ss.str(), "goldTip", state ? 1 : 0);
+}
+
+void MountUiFrame::togLqpyTip( bool state )
+{
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	unsigned int roleID = ploc->getId();
+	std::stringstream ss;
+	ss<<"set"<<"_"<<roleID;
+	ClientCfg::getInstance()->setInt(ss.str(), "lqpyTip", state ? 1 : 0);
+}
+
+void MountUiFrame::togQmjbTip( bool state )
+{
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	unsigned int roleID = ploc->getId();
+	std::stringstream ss;
+	ss<<"set"<<"_"<<roleID;
+	ClientCfg::getInstance()->setInt(ss.str(), "qmjbTip", state ? 1 : 0);
+}
+
+void MountUiFrame::togYjjcTip( bool state )
+{
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	unsigned int roleID = ploc->getId();
+	std::stringstream ss;
+	ss<<"set"<<"_"<<roleID;
+	ClientCfg::getInstance()->setInt(ss.str(), "yjjcTip", state ? 1 : 0);
+}
+
+void MountUiFrame::setTogTimes( int times )//剩余次数
+{
+// 	std::ostringstream ostr;
+// 	ostr << times << "/" << DAY_TOG_RIDE_TIMES;
+// 	static_cast<CCLabelTTF*>(getChildByTag(NT_TogTimes))->setString(ostr.str().c_str());
+// 	_fightNumBLabel->setString(ostr.str().c_str());
+	int maxTime;
+	if (f_zhuzai_mgr::get_singleton_ptr()->localplayer_is_zhuzai())
+	{
+		maxTime = CFG(int,"max_feed_time_zhuzaizhe",50);
+	}
+	else
+	{
+		maxTime = CFG(int,"max_feed_time",30);
+	}
+
+	std::string tmp;
+	safe_sprintf(tmp,"%d/%d",times,maxTime);
+	CCNode* node = this->getChildByTag(NT_MpLeftCntFather);
+	if(node != NULL)
+	{
+		LabelFT* labelft = Helper::getLabelFTByParentAndTag(node,NT_MpLeftCnt);
+		if(labelft != NULL)
+		{
+			labelft->setString(tmp.c_str());
+		}
+	}
+}
+
+void MountUiFrame::onTog( int times, int exp )
+{
+	std::string str;
+	if(times != 0)
+	{ 
+		std::ostringstream ostr;
+		ostr << times;
+		std::ostringstream ostr1;
+		ostr1 << exp;
+		str = replaceStr(GET_STR(2192), "*", ostr.str()) + "\n" + ostr1.str() + GET_STR(2193);
+	}
+	else
+	{
+		std::ostringstream ostr1;
+		ostr1 << exp;
+		str = ostr1.str() + GET_STR(2193);
+	}
+
+	CCLabelBMFont *label = CCLabelBMFont::create();
+	label->setFntFile("Art/Scene/fontNum3.fnt");
+	label->setPosition(ccp(255.f, 250.f));
+	label->setString(str.c_str());
+	label->setColor(ccc3(255, 243, 48));
+	label->setAnchorPoint(ccp(0.5f, 0.5f));
+	label->setAlignment(kCCTextAlignmentCenter);
+	addChild(label);
+
+	//CCJumpTo *jumpTo = CCJumpTo::create(0.8f, ccp(255.f, 300.f), 110, 1);
+	CCScaleTo *scaleTo = CCScaleTo::create(0.1f, 1.5f, 1.5f);
+	CCFadeOut *fadeOut = CCFadeOut::create(0.9f);
+	//CCSpawn *spawn = CCSpawn::createWithTwoActions(jumpTo, scaleTo);
+	CCSequence *s = CCSequence::createWithTwoActions(scaleTo, fadeOut);
+	CCSequence *action = CCSequence::createWithTwoActions(s, CCCallFuncN::create(HideAnimationCallback::getInstance(), SEL_CallFuncN(&HideAnimationCallback::animationCallback)));
+	label->runAction(action);
+}
+
+GameActionNode* MountUiFrame::getFightSupeerEffect()
+{
+	GameActionNode* fireSEAcNode = GameActionNode::create();
+// 	for (int i=1; i<99; ++i)
+// 	{
+// 		CCString* fireStr = CCString::createWithFormat("%s%02d", "E1_50", i);
+// 		if(!fireSEAcNode->AddTexture(fireStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+	fireSEAcNode->InitTextureWithSpriteFrame("E1_50");
+	return fireSEAcNode;
+}
+
+cocos2d::CCRect MountUiFrame::GetBtnPos( int nTag )
+{
+	CCNode* node = dynamic_cast<CCNode*>(getChildByTag(nTag));
+	if (node)
+	{
+		CCPoint cp = node->convertToWorldSpace(ccp(0.0f, 0.0f));
+		CCSize cs = node->getContentSize();
+		return CCRect(cp.x, cp.y, cs.width, cs.height);
+	}
+	return CCRect(0, 0, 0, 0);
+}
+
+void MountUiFrame::updateHideSomeControls()
+{
+// 	bool reach_max = ride_rich_max_lv();
+// 	if (reach_max)
+// 	{
+// 		//setExp(0,0);
+// 	}
+// 
+// 	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+// 	if (ploc->getRideLv() < 120)
+// 	{
+// 		return;
+// 	}
+// 	setExp( 0, 0 );
+// 	_expProgress->setVisible(false);
+// 	CCNode* node = getChildByTag(6);
+// 	node->setVisible(false);
+// 	node = getChildByTag(1000);
+// 	node->setVisible(false);
+// 	node = getChildByTag(1001);
+// 	node->setVisible(false);
+// 	node = getChildByTag(1005);
+// 	node->setVisible(false);
+// 	node = getChildByTag(1003);
+// 	node->setVisible(false);
+// 	node = getChildByTag(1004);
+// 	node->setVisible(false);
+}
+
+bool MountUiFrame::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,mpLeftCnt);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,mpCntRoot);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*, m_weijihuoFrame);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_weijihuotishi);
+													    
+	mpLeftCnt->setTag(NT_MpLeftCnt);
+	return false;
+}
+
+void MountUiFrame::updateCheckBtn()
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if (player == NULL)
+		return;
+	if (_checkBtn == NULL || _autoNode == NULL)
+		return;
+	unsigned int selectRideLv = player->getSelectRideLv();
+	if (selectRideLv == 0 ||  GET_UI(MountUi, WCT_MountUi)->getAutoRide() == false)
+	{
+		_checkBtn->setCheck(false);
+		//return;
+	}
+	int curSelectStage = 0;
+	if ((selectRideLv % 10) == 0)
+	{
+		curSelectStage = selectRideLv / 10;
+	}
+	else
+	{
+		curSelectStage = selectRideLv / 10 + 1;
+	}
+	if (curSelectStage == _dwMountStage)
+	{
+		if (GET_UI(MountUi, WCT_MountUi)->getAutoRide() == false)
+		{
+			_checkBtn->setCheck(false);
+		}
+		else
+		{
+			_checkBtn->setCheck(true);
+		}
+	}
+	else
+	{
+		_checkBtn->setCheck(false);
+	}
+	unsigned int rideLv = player->getRideLv();
+	int maxStage = 0;
+	if ((rideLv % 10) == 0)
+	{
+		maxStage = rideLv / 10;
+	}
+	else
+	{
+		maxStage = rideLv / 10 + 1;
+	}
+	if (_dwMountStage > maxStage)
+	{
+		_checkBtn->setVisible(false);
+		_autoNode->setVisible(false);
+	}
+	else
+	{
+		_checkBtn->setVisible(true);
+		_autoNode->setVisible(true);
+	}
+}
+
+void MountUiFrame::setMaPaiAction()
+{
+	std::string maPaiActionFile = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_212.plist";
+	_plist.insert(maPaiActionFile);
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(maPaiActionFile.c_str());
+	maPaiActionNode = GameActionNode::create();
+	maPaiActionNode->InitTextureWithSpriteFrame("E1_212");
+	this->addChild(maPaiActionNode);
+	maPaiActionNode->setPosition(this->getChildByTag(NT_MaPai)->getPosition());
+	maPaiActionNode->BeginAction(0.07f, true);
+
+	CCPoint positionMaPai=getChildByTag(NT_MaPai)->getPosition();
+	CCSize sizeMaPai=getChildByTag(NT_MaPai)->getContentSize();
+	CCPoint positionMount=this->getPosition();
+	CCSize sizeMount=this->getContentSize();
+	float rectX=positionMaPai.x+positionMount.x-sizeMount.width/2.0-sizeMaPai.width/2.0-5.0;
+	float rectY=positionMaPai.y+positionMount.y-sizeMount.height/2.0-sizeMaPai.height/2.0-5.0;
+	NewPlayerGuider::getInstance()->SetClip(CCRect(rectX,rectY,sizeMaPai.width+10.0,sizeMaPai.height+10.0));
+}
+
+void MountUiFrame::resetMountUI(ResetMountUI* res)
+{
+	_dwMountStage = getState(); 
+	updateDataBydwMountStage(true);
+}
+
+void MountUiFrame::clearMaPaiAction()
+{
+	if (maPaiActionNode)
+	{
+		maPaiActionNode->playAnimOnce(0,true,0);
+		maPaiActionNode=NULL;
+		NewPlayerGuider::getInstance()->clear(true);
+	}
+	if (_maPaiTip!=NULL)
+	{
+		_maPaiTip->setVisible(false);
+	}
+}
+
+// void MountUiFrame::setNextRideLv()
+// {
+// 	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+// 	unsigned int rideLv = lp->getRideLv();
+// 
+// }
+
+void MountUiFrame::setCurShowRide()
+{
+	bool isZhuZaiZhe = f_zhuzai_mgr::get_singleton_ptr()->localplayer_is_zhuzai();
+// 	if (isZhuZaiZhe)
+// 	{
+		if (_dwMountStage+1 > CFG(int,"max_ride_step_zhuzaizhe",12))
+		{
+			return;
+		}
+/*	}*/
+// 	else
+// 	{
+// 		if(_dwMountStage+1 > CFG(int,"max_ride_step",10))
+// 		{
+// 			return;
+// 		}
+// 	}
+
+	int stage = getState();
+
+	if (!isZhuZaiZhe)
+	{
+		if (_dwMountStage >= stage + 2)  //只显示当前等阶后两阶
+		{
+			return;
+		}
+	}
+
+	_dwMountStage++;
+	updateDataBydwMountStage();
+	if(!ShowUIInfo())
+	{
+		_dwMountStage--;
+	}
+}
+
+void MountUiFrame::setRideButtonState()
+{
+	unsigned int curRideLv = RoleManager::getInstance()->getLocalPlayer()->getRideLv();//角色当前的坐骑等级
+	unsigned int rideLv = _dwMountStage * 10;
+	CCControlButton *rideBtn = dynamic_cast<CCControlButton*>(getChildByTag(NT_RideBtn));
+	bool isRide = (RoleManager::getInstance()->getLocalPlayer()->getAttribute(RA_RideState)!=0);
+	if (curRideLv >= rideLv - 9)
+	{//可以骑乘
+		rideBtn->setVisible(true);
+		rideBtn->setTouchEnabled(true);//设置可以点击vv
+		m_weijihuoFT->setVisible(false);
+		m_weijihuoFrame->setVisible(false);
+		if(isRide)
+		{
+			setButtonSpriteFrame(rideBtn, "xiama-convention", "xiama-click", "xiama-click");
+		}
+		else
+		{
+
+			setButtonSpriteFrame(rideBtn, "qicheng-convention", "qicheng-click", "qicheng-click");
+		}
+	}
+	else
+	{//不能骑乘 
+		rideBtn->setTouchEnabled(false);///设置不可以点击vv
+		rideBtn->setVisible(false);
+		std::string title;
+		std::string format = "weijihuo_title";
+		if (_dwMountStage>CFG(int,"max_ride_step",10))
+		{
+			if (!f_zhuzai_mgr::get_singleton_ptr()->localplayer_is_zhuzai())
+			{
+				format = "weijihuo_title_chaoguo";
+			}
+		}
+		safe_sprintf(title,STRING_TABLE[format.c_str()],_dwMountStage-1);
+		m_weijihuoFT->setVisible(true);
+		m_weijihuoFT->setString(title.c_str());
+		m_weijihuoFrame->setVisible(true);
+		m_weijihuoFrame->setContentSize(CCSize(m_weijihuoFT->getContentSize().width+10,m_weijihuoFrame->getContentSize().height));
+		//setButtonSpriteFrame(rideBtn, "qicheng-noclick", "qicheng-click", "qicheng-click");
+	}
+}
+
+int MountUiFrame::ride_rich_max_lv(int cur_lv) const
+{
+	bool is_zhuazai  =f_zhuzai_mgr::get_singleton().localplayer_is_zhuzai();
+	int max_lv = /*is_zhuazai:CFG(int,"max_ride_lv_zhuzaizhe",120):CFG(int,"max_ride_lv",100)*/get_max_ride_lv(is_zhuazai);
+
+	bool b_max =  cur_lv >= max_lv;
+	return b_max?(is_zhuazai?2:1):0;
+}
+
+unsigned int MountUiFrame::get_max_ride_lv( bool is_zhuzai ) const
+{
+	return is_zhuzai ? CFG(int,"max_ride_lv_zhuzaizhe",120)  : CFG(int,"max_ride_lv",100);
+}

@@ -1,0 +1,2608 @@
+#include "TCPClient.h"
+#include "LocalPlayer.h"
+#include "TaskTraceUi.h"
+#include "StringMgr.h"
+#include "MessageBoxUi.h"
+#include "World.h"
+#include "FriendUi.h"
+#include "PackageManager.h"
+#include "ChatMgr.h"
+#include "FilterMgr.h"
+#include "RoleInfoUi.h"
+#include "UiTools.h"
+#include "Auto_ActionMgr.h"
+#include "ToolTip.h"
+#include "NameMgr2.h"
+#include "Jiehun.h"
+#include "ConcernMgr.h"
+#include "SonghuaUi.h"
+#include "CommonDefine.h"
+#include "RoleManager.h"
+#include "HookSetUi.h"
+#include "NewPlayerGuide.h"
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+#include "wzolJni.h"
+#endif
+bool Bigger(const tagFriendGeneralInfo &taginfo1,const tagFriendGeneralInfo &taginfo2)
+{
+	return taginfo1.bySex > taginfo2.bySex;
+}
+bool Smaller(const tagFriendGeneralInfo &taginfo1,const tagFriendGeneralInfo &taginfo2)
+{
+	return taginfo1.bySex < taginfo2.bySex;
+}
+
+SocialMgr::SocialMgr():m_TempRoleID(-1)
+					  ,m_TempGiftReceiveName("")
+					  ,m_ComPracticePartner(-1)
+					  ,b_IsInStatePractice(false)
+					  ,m_SpouseID(-1)
+					  ,m_SpouseNameStr("")
+					  ,bySendLevel(1)
+					  ,b_CancelComfirming(false)
+					  ,m_TempNameCrcRoleID(0)
+{
+	memset(m_TempName,0,sizeof(m_TempName));
+	memset(&m_RoleSocialData,0,sizeof(tagRoleSocialInfo));
+	m_RoleSocialData.byStar = 1;
+}
+SocialMgr::~SocialMgr()
+{
+	/*m_friend_vector.clear();
+	m_black_vector.clear();
+	memset(m_TempName,0,sizeof(m_TempName));
+	memset(&m_RoleSocialData,0,sizeof(tagRoleSocialInfo));*/
+
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_role_make_friend" , this , &SocialMgr::onServerAddFriend);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_role_cancel_friend" , this , &SocialMgr::onServerDelFriend);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_move_to_black_list" , this , &SocialMgr::onServerAddBlack);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_delete_black_list" , this , &SocialMgr::onServerDelBlack);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_send_friend_list" , this , &SocialMgr::onServerInitFriendInfo);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_send_black_list" , this , &SocialMgr::onServerInitBlackInfo);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_update_friend_state" , this , &SocialMgr::onServerUpdateFriendState);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_login_to_friend" , this , &SocialMgr::onServerFriendLogin);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_logout_to_friend" , this , &SocialMgr::onServerFriendLogout);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_send_gift_to_friend" , this , &SocialMgr::OnServerSendFlowers);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_invite_practice_to_both" , this , &SocialMgr::OnServerInvitePlayerToBoth);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_invite_practice_to_src" , this , &SocialMgr::OnServerInvitePlayerReply);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_unset_role_state" , this , &SocialMgr::OnServerCancleComPractice);
+
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_propose_to_both" , this , &SocialMgr::OnServerMaleProposeToBoth);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_propose_reply_to_both" , this , &SocialMgr::OnServerFemaleReplyToBoth);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_role_divorce_to_both" , this , &SocialMgr::OnServerPlayerDivorce);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_set_role_card" , this , &SocialMgr::OnServerSetRoleSocialData);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_get_role_card" , this , &SocialMgr::OnServerInitRoleSocialData);
+}
+void SocialMgr::Destroy()
+{
+	m_friend_vector.clear();
+	m_black_vector.clear();
+	memset(m_TempName,0,sizeof(m_TempName));
+	memset(&m_RoleSocialData,0,sizeof(tagRoleSocialInfo));
+	m_RoleSocialData.byStar = 1;
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_role_make_friend" , this , &SocialMgr::onServerAddFriend);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_role_cancel_friend" , this , &SocialMgr::onServerDelFriend);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_make_friend_notice" , this , &SocialMgr::onServerBeAddFriend);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_move_to_black_list" , this , &SocialMgr::onServerAddBlack);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_delete_black_list" , this , &SocialMgr::onServerDelBlack);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_send_friend_list" , this , &SocialMgr::onServerInitFriendInfo);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_send_black_list" , this , &SocialMgr::onServerInitBlackInfo);
+	
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_update_friend_state" , this , &SocialMgr::onServerUpdateFriendState);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_login_to_friend" , this , &SocialMgr::onServerFriendLogin);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_logout_to_friend", this , &SocialMgr::onServerFriendLogout);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_login_to_black" , this , &SocialMgr::onServerBlackLogin);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_logout_to_black", this , &SocialMgr::onServerBlackLogout);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_login_to_enemy" , this , &SocialMgr::onServerEnemyLogin);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_logout_to_enemy", this , &SocialMgr::onServerEnemyLogout);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_send_gift_to_friend" , this , &SocialMgr::OnServerSendFlowers);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_invite_practice_to_both" , this , &SocialMgr::OnServerInvitePlayerToBoth);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_invite_practice_to_src" , this , &SocialMgr::OnServerInvitePlayerReply);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_unset_role_state" , this , &SocialMgr::OnServerCancleComPractice);
+
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_propose_to_both" , this , &SocialMgr::OnServerMaleProposeToBoth);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_propose_reply_to_both" , this , &SocialMgr::OnServerFemaleReplyToBoth);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_role_divorce_to_both" , this , &SocialMgr::OnServerPlayerDivorce);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_set_role_card" , this , &SocialMgr::OnServerSetRoleSocialData);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_role_card" , this , &SocialMgr::OnServerInitRoleSocialData);
+
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_qbjj_reward" , this , &SocialMgr::OnServerGetQbjjReward);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_update_role_script_data" , this , &SocialMgr::OnServerSetRedZuiFlag);
+
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_login_to_spouse" , this , &SocialMgr::OnServerSpouseLogin);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_logout_to_spouse" , this , &SocialMgr::OnServerSpouseLogout);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_send_enemy_list" , this , &SocialMgr::OnServerEnemy_List);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_add_enemy" , this , &SocialMgr::OnServerAddEnemy);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_remote_role_divorce",this,&SocialMgr::OnServerRemotePlayerDivorce);
+
+	UNREG_NAME_CB(this , &SocialMgr::onGetName);
+
+}
+SocialMgr* SocialMgr::getInstance()
+{
+	static SocialMgr mgr;
+	return &mgr;
+}
+void SocialMgr::Init()
+{
+	TCP_CLIENT->register_net_cmd("NET_SIS_role_make_friend" , this , &SocialMgr::onServerAddFriend);
+	TCP_CLIENT->register_net_cmd("NET_SIS_role_cancel_friend" , this , &SocialMgr::onServerDelFriend);
+	TCP_CLIENT->register_net_cmd("NET_SIS_make_friend_notice" , this , &SocialMgr::onServerBeAddFriend);
+	TCP_CLIENT->register_net_cmd("NET_SIS_move_to_black_list" , this , &SocialMgr::onServerAddBlack);
+	TCP_CLIENT->register_net_cmd("NET_SIS_delete_black_list" , this , &SocialMgr::onServerDelBlack);
+	TCP_CLIENT->register_net_cmd("NET_SIS_send_friend_list" , this , &SocialMgr::onServerInitFriendInfo);
+	TCP_CLIENT->register_net_cmd("NET_SIS_send_black_list" , this , &SocialMgr::onServerInitBlackInfo);
+	
+	TCP_CLIENT->register_net_cmd("NET_SIS_update_friend_state" , this , &SocialMgr::onServerUpdateFriendState);
+	//
+	TCP_CLIENT->register_net_cmd("NET_SIS_login_to_friend" , this , &SocialMgr::onServerFriendLogin);
+	TCP_CLIENT->register_net_cmd("NET_SIS_logout_to_friend" , this , &SocialMgr::onServerFriendLogout);
+	TCP_CLIENT->register_net_cmd("NET_SIS_login_to_black" , this , &SocialMgr::onServerBlackLogin);
+	TCP_CLIENT->register_net_cmd("NET_SIS_logout_to_black", this , &SocialMgr::onServerBlackLogout);
+	TCP_CLIENT->register_net_cmd("NET_SIS_login_to_enemy" , this , &SocialMgr::onServerEnemyLogin);
+	TCP_CLIENT->register_net_cmd("NET_SIS_logout_to_enemy", this , &SocialMgr::onServerEnemyLogout);
+	//
+	TCP_CLIENT->register_net_cmd("NET_SIS_send_gift_to_friend" , this , &SocialMgr::OnServerSendFlowers);
+	//
+	TCP_CLIENT->register_net_cmd("NET_SIS_invite_practice_to_both" , this , &SocialMgr::OnServerInvitePlayerToBoth);
+	TCP_CLIENT->register_net_cmd("NET_SIS_invite_practice_to_src" , this , &SocialMgr::OnServerInvitePlayerReply);
+	TCP_CLIENT->register_net_cmd("NET_SIS_unset_role_state" , this , &SocialMgr::OnServerCancleComPractice);
+
+	TCP_CLIENT->register_net_cmd("NET_SIS_propose_to_both" , this , &SocialMgr::OnServerMaleProposeToBoth);
+	TCP_CLIENT->register_net_cmd("NET_SIS_propose_reply_to_both" , this , &SocialMgr::OnServerFemaleReplyToBoth);
+	TCP_CLIENT->register_net_cmd("NET_SIS_role_divorce_to_both" , this , &SocialMgr::OnServerPlayerDivorce);
+	TCP_CLIENT->register_net_cmd("NET_SIS_set_role_card" , this , &SocialMgr::OnServerSetRoleSocialData);
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_role_card" , this , &SocialMgr::OnServerInitRoleSocialData);
+
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_qbjj_reward" , this , &SocialMgr::OnServerGetQbjjReward);
+	TCP_CLIENT->register_net_cmd("NET_SIS_update_role_script_data" , this , &SocialMgr::OnServerSetRedZuiFlag);
+
+	TCP_CLIENT->register_net_cmd("NET_SIS_login_to_spouse" , this , &SocialMgr::OnServerSpouseLogin);
+	TCP_CLIENT->register_net_cmd("NET_SIS_logout_to_spouse" , this , &SocialMgr::OnServerSpouseLogout);
+	TCP_CLIENT->register_net_cmd("NET_SIS_send_enemy_list" , this , &SocialMgr::OnServerEnemy_List);
+	TCP_CLIENT->register_net_cmd("NET_SIS_add_enemy" , this , &SocialMgr::OnServerAddEnemy);
+	TCP_CLIENT->register_net_cmd("NET_SIS_delete_enemy_list" , this , &SocialMgr::OnServerDelEnemy);
+	TCP_CLIENT->register_net_cmd("NET_SIS_remote_role_divorce",this,&SocialMgr::OnServerRemotePlayerDivorce);
+
+	REG_NAME_CB(this , &SocialMgr::onGetName);
+
+	//向服务器请求本地玩家的社交数据
+	InitRoleSocialData();
+	m_TempNameCrcRoleID = 0;
+	//单独向服务器请求本地玩家配偶名称
+	std::string name;
+	if (!IS_VALID(GetSpouseID()))
+	{
+		SetSpouseName("");
+		return;
+	}
+	//获取配偶姓名
+	std::string rolename;
+	if(NameMgr2::getInstance()->queryName(GetSpouseID(),rolename))
+	{
+		SetSpouseName(name);
+	}
+	return;
+}
+/**************************Client2Server*********************************/
+void SocialMgr::onAddFriend(unsigned int destRoleID, bool bRecoverBlackList /*= false*/, const std::string* name)
+{
+	if (!IS_VALID(destRoleID))
+	{
+		return;
+	}
+	//是否已是好友
+	if (has_friend(destRoleID) || (name && has_friend(name->c_str())))
+	{
+		ToolTip::getInstance()->push(GET_STR(102));
+		return;
+	}
+	//是否超过好友人数上限
+	if (get_friend_num() >= MAX_FRIENDNUM)
+	{
+		ToolTip::getInstance()->push(GET_STR(101));
+		return;
+	}
+	//黑名单成员无法添加好友
+	if (!bRecoverBlackList && (has_black(destRoleID) || (name && has_black(name->c_str()))))
+	{
+		ToolTip::getInstance()->push(GET_STR(103));
+		return;
+	}
+	//加好友的玩家必定在本地玩家视野内
+	//新增在聊天频道中可以关注
+	if (!name)
+	{
+		Role* pRole = RoleManager::getInstance()->findRole(destRoleID);
+		if (!IS_VALID_PTR(pRole))//若不在视野内
+		{
+			std::string tmpStr;
+			if (NameMgr2::getInstance()->queryName(destRoleID,tmpStr))
+			{
+				wchar_t tmp[X_SHORT_NAME];
+				memset(tmp, 0, sizeof(tmp));
+				Utf8ToUtf16(tmpStr.c_str(), tmp, X_SHORT_NAME, 0);
+				memcpy(m_TempName,tmp,sizeof(wchar_t)*X_SHORT_NAME);
+				m_TempNameList.push_back(tmpStr.c_str());
+			}
+			else
+			{
+				return;
+			}
+		}
+		else//若在视野内
+		{
+			if (CT_PLAYER != pRole->getCreatureType())
+				return;
+			Player* pPlayer = (Player*)pRole;
+			if (!IS_VALID_PTR(pPlayer))
+				return;
+			memset(m_TempName,0,sizeof(m_TempName));
+			//
+			if (0 == _utf_length(pPlayer->getName()))
+			{
+				return;
+			}
+			memcpy(m_TempName,pPlayer->getName(),sizeof(wchar_t)*X_SHORT_NAME);
+			char tmpStr[X_SHORT_NAME] = {0};
+			Utf16ToUtf8(m_TempName,tmpStr, X_SHORT_NAME, 0);
+			m_TempNameList.push_back(tmpStr);
+		}
+	}
+	else
+	{
+		m_TempNameList.push_back(*name);
+	}
+	
+	NET_SIC_role_make_friend cmd;
+	cmd.uDestRoleID	= destRoleID;
+	if (name)
+	{
+		cmd.dwRoleNameCrc = name_crc32(convertWName(*name));
+	}
+	TCP_CLIENT->send_net_cmd(&cmd , NP_INSIGNIFICANT , false);
+	
+}
+void SocialMgr::onDelFriend(unsigned int destRoleID)
+{
+	if (!IS_VALID(destRoleID))
+	{
+		return;
+	}
+	//删除的好友一定要在好友列表中，否则无效
+	if (!has_friend(destRoleID))
+	{
+		return;
+	}
+	//已在上边进行防护，可以直接使用下面的判断
+	size_t i;
+	for (i = 0;i<m_friend_vector.size();i++)
+	{
+		if (destRoleID == m_friend_vector[i].uFriendID)
+		{
+			break;
+		}
+	}
+	
+	char vStr[128];
+	memset(vStr, 0, sizeof(char) * 128);
+	Utf16ToUtf8(m_friend_vector[i].friendName, vStr, 128, 0);
+	std::string str;
+	str.assign(vStr);
+	m_TempRoleID = destRoleID;
+	std::stringstream ss;
+	ss<<GET_STR(116)<<str;
+	MessageBoxUi *delFriendUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, ss.str().c_str(), "\xE7\xA1\xAE\xE5\xAE\x9A","\xE5\x8F\x96\xE6\xB6\x88");
+	World::getInstance()->getScene()->addChild(delFriendUi, WZ_MESSAGEBOX);
+	delFriendUi->signalOkBtnPressed.connect(this, &SocialMgr::SendDelFriend);
+}
+void SocialMgr::SendDelFriend()
+{
+	NET_SIC_role_cancel_friend cmd;
+	cmd.uDestRoleID = m_TempRoleID;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_INSIGNIFICANT,false);
+}
+void SocialMgr::onAddBlack(unsigned int destRoleID, const std::string* name)
+{
+	if (!IS_VALID(destRoleID))
+	{
+		return;
+	}
+	//不能拉黑自己
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	if (destRoleID == ploc->getId())
+		return;
+	//已在黑名单中
+	if (has_black(destRoleID) || (name && has_black(name->c_str())))
+	{
+		ToolTip::getInstance()->push(GET_STR(105));
+		return;
+	}
+	//黑名单人数已满
+	if (get_black_num() >= MAX_BLACKLIST)
+	{
+		ToolTip::getInstance()->push(GET_STR(104));
+		return;
+	}
+	m_TempRoleID = destRoleID;
+	//获取拉黑玩家的名称,
+	if (has_friend(destRoleID)/* || (name && has_friend(name->c_str()))*/)
+	{
+		//直接拿来用，为什么需要判断?
+		bool BOOST_LOCAL_FUNCTION(tagFriendInfo_ const& info,bind destRoleID)
+		{
+			return info.uFriendID == destRoleID;
+		}BOOST_LOCAL_FUNCTION_NAME(Finder);
+
+		BOOST_AUTO(iter, boost::find_if(m_friend_vector,Finder));
+		if (iter != m_friend_vector.end())
+		{
+			memset(m_TempName,0,sizeof(m_TempName));
+			memcpy(m_TempName,(*iter).friendName,sizeof(wchar_t)*X_SHORT_NAME);
+		}
+// 		for (size_t i = 0;i< m_friend_vector.size();i++)
+// 		{
+// 			wchar_t wName[256] = {0};
+// 			convertWName(*name, wName);
+// 			if (m_friend_vector[i].uFriendID == destRoleID || wcscmp(m_friend_vector[i].friendName, wName) == 0)
+// 			{
+// 				memset(m_TempName,0,sizeof(m_TempName));
+// 				memcpy(m_TempName,m_friend_vector[i].friendName,sizeof(wchar_t)*X_SHORT_NAME);
+// 				break;
+// 			}
+// 		}
+	}
+	else
+	{
+		if (!name)
+		{
+			//新增从聊天框中拉黑
+			Role* pRole = RoleManager::getInstance()->findRole(destRoleID);
+			if (!IS_VALID_PTR(pRole))//若不在视野内，肯定是从聊天框得到，而且肯定得到了该玩家的名称
+			{
+				std::string tmpStr;
+				if (NameMgr2::getInstance()->queryName(destRoleID,tmpStr))
+				{
+					wchar_t tmp[X_SHORT_NAME];
+					memset(tmp, 0, sizeof(tmp));
+					Utf8ToUtf16(tmpStr.c_str(), tmp, X_SHORT_NAME, 0);
+
+					memcpy(m_TempName,tmp,sizeof(wchar_t)*X_SHORT_NAME);
+				}
+				else
+				{
+					return;
+				}
+			}
+			else//若在视野内
+			{
+				if (CT_PLAYER != pRole->getCreatureType())
+					return;
+				Player* pPlayer = (Player*)pRole;
+				if (!IS_VALID_PTR(pPlayer))
+					return;
+				memset(m_TempName,0,sizeof(m_TempName));
+				if (0 == _utf_length(pPlayer->getName()))
+				{
+					return;
+				}
+				memcpy(m_TempName,pPlayer->getName(),sizeof(wchar_t)*X_SHORT_NAME);
+			}
+		}
+	}
+
+	std::string str;
+	if (!name)
+	{
+		char vStr[128];
+		memset(vStr, 0, sizeof(char) * 128);
+		Utf16ToUtf8(m_TempName, vStr, 128, 0);
+		m_TempNameCrcRoleID = name_crc32(m_TempName);
+		str.assign(vStr);
+	}
+	else
+	{
+		m_TempNameCrcRoleID = name_crc32(convertWName(*name));
+		str.assign(*name);
+	}
+	std::stringstream ss;
+	ss<<"\xE5\xB0\x86"<<str<<"\xE6\x8B\x89\xE9\xBB\x91";
+	MessageBoxUi *delBlackUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, ss.str().c_str(), "\xE7\xA1\xAE\xE5\xAE\x9A","\xE5\x8F\x96\xE6\xB6\x88");
+	World::getInstance()->getScene()->addChild(delBlackUi, WZ_MESSAGEBOX);
+	delBlackUi->signalOkBtnPressed.connect(this, &SocialMgr::SendAddBlack);
+	
+}
+void SocialMgr::SendAddBlack()
+{
+	NET_SIC_move_to_black_list cmd;
+	cmd.uDestRoleID = m_TempRoleID;
+	cmd.dwRoleNameCrc = m_TempNameCrcRoleID;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_INSIGNIFICANT,false);
+}
+void SocialMgr::onDelBlack(unsigned int destRoleID)
+{
+	//不需要给玩家确认提示
+	if (!IS_VALID(destRoleID))
+	{
+		return;
+	}
+	NET_SIC_delete_black_list cmd;
+	cmd.uDestRoleID = destRoleID;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_INSIGNIFICANT,false);
+}
+
+/**************************Server2Client***********************/
+unsigned int SocialMgr::onServerAddFriend(s_net_cmd *cmd)
+{
+	NET_SIS_role_make_friend * msg= (NET_SIS_role_make_friend*)cmd;
+	//若成功
+	if (0 == msg->dw_error_code)
+	{
+		tagFriendInfo_ tempInfo;
+		memset(&tempInfo,0,sizeof(tagFriendInfo));
+		tempInfo.uFriendID = msg->uDestRoleID;
+		tempInfo.bOnline = msg->bOnline;
+		tempInfo.nLevel = msg->nLevel;
+		tempInfo.eClassType = (EClassType)(msg->eClassType);
+		tempInfo.bySex = msg->by_sex;
+		tempInfo.n32Rating = msg->n32Rating;
+		if (!m_TempNameList.empty())
+		{
+			//std::list<std::string>::iterator iter = m_TempNameList.begin();
+			std::string tempData = m_TempNameList.front();
+			wchar_t friendName[X_SHORT_NAME] = {0};
+			Utf8ToUtf16(tempData.c_str(),friendName,X_SHORT_NAME, 0);
+			memcpy(tempInfo.friendName,friendName,sizeof(wchar_t)*X_SHORT_NAME);
+			m_TempNameList.pop_front();
+		}
+		else
+		{
+			memcpy(tempInfo.friendName,m_TempName,sizeof(wchar_t)*X_SHORT_NAME);
+		}
+
+		//考虑师徒加好友的情况
+		if ('\0' == m_TempName[0])
+		{
+			std::string roleName = "";
+			NameMgr2::getInstance()->queryName(tempInfo.uFriendID,roleName);//肯定能找到
+			if (!roleName.empty())
+			{
+				Utf8ToUtf16(roleName.c_str(), tempInfo.friendName, X_SHORT_NAME, 0);
+			}
+		}
+		//end
+		m_friend_vector.push_back(tempInfo);
+		//ui更新
+		GET_UI(FriendUi, WCT_FRIENDUI)->updateUiData();
+		//提示玩家成功关注某个好友
+		char vStr[128];
+		memset(vStr, 0, sizeof(char) * 128);
+		Utf16ToUtf8(tempInfo.friendName, vStr, 128, 0);
+		std::string str;
+		str.assign(vStr);
+		//!成为您的好友
+		std::stringstream ss;
+		ss<<str<<GET_STR(235);
+		ToolTip::getInstance()->push(ss.str());
+		//UI接口函数需求 RefreshFriendList()
+	}
+	else if(E_Friend_Target_Black_List == msg->dw_error_code)
+	{
+		ToolTip::getInstance()->push(GET_STR(103));
+	}
+	else if(E_Friend_Target_Already_Exit == msg->dw_error_code)
+	{
+		ToolTip::getInstance()->push(GET_STR(102));
+	}
+	else if (E_Friend_Max_Num == msg->dw_error_code)
+	{
+		ToolTip::getInstance()->push(GET_STR(101));
+	}
+	else
+	{
+		//do nothing
+		ToolTip::getInstance()->push(GET_STR(178));
+	}
+	return 0;
+}
+unsigned int SocialMgr::onServerDelFriend(s_net_cmd *cmd)
+{
+	NET_SIS_role_cancel_friend* msg = (NET_SIS_role_cancel_friend*)cmd;
+	//若成功
+	if (0 == msg->dw_error_code)
+	{
+		//删除该好友
+		delFriend(msg->uDestRoleID);
+		//ui更新
+		GET_UI(FriendUi, WCT_FRIENDUI)->updateUiData();
+		//UI接口函数需求 RefreshFriendList()
+	}
+	else
+	{
+		// do nothing
+	}
+	return 0;
+}
+
+unsigned int SocialMgr::onServerBeAddFriend(s_net_cmd *cmd)
+{
+	NET_SIS_make_friend_notice* msg = (NET_SIS_make_friend_notice*)cmd;
+	if (msg->dw_role_id != (DWORD)(-1) && msg->dw_role_id != 0)
+	{
+		if (SocialMgr::getInstance()->has_friend(msg->dw_role_id))
+			return 0;
+		char temp[512];
+		memset(temp, 0, sizeof(char) * 512);
+		Utf16ToUtf8(msg->name, temp, 512, 0);
+		ConcernMgr::getInstance()->addData(msg->dw_role_id,ECT_friend,msg->sex,msg->vipLevel,temp);
+		RoleHeadUi* ui = World::getInstance()->getRoleHeadUi();
+		if(ui)
+			ui->showConcern(ECT_friend);
+	}
+	return 0;
+}
+
+unsigned int SocialMgr::onServerAddBlack(s_net_cmd *cmd)
+{
+	NET_SIS_move_to_black_list* msg = (NET_SIS_move_to_black_list*)cmd;
+	//若成功
+	if (0 == msg->dw_error_code)
+	{
+		tagBlackInfo_ blackInfo;
+		memset(&blackInfo,0,sizeof(tagBlackInfo));
+		blackInfo.uBlackID = msg->uDestRoleID;
+		blackInfo.nLevel = msg->nLevel;
+		blackInfo.eClassType = (EClassType)(msg->eClassType);
+		blackInfo.bySex = msg->by_sex;
+		blackInfo.bOnline = msg->bOnline;
+		//memcpy(blackInfo.blackName,m_TempName,sizeof(wchar_t)*X_SHORT_NAME);
+		memset(blackInfo.blackName, 0, sizeof(blackInfo.blackName));
+		std::string tempName = "";
+		if (NameMgr2::getInstance()->queryName(blackInfo.uBlackID, tempName))
+		{
+			Utf8ToUtf16(tempName.c_str(), blackInfo.blackName, X_SHORT_NAME, 0);
+		}
+		m_black_vector.push_back(blackInfo);
+		//若拉黑的玩家已经是自身好友，则需要在好友数组中删除
+		if (has_friend(msg->uDestRoleID))
+		{
+			delFriend(msg->uDestRoleID);
+		}
+		//UI接口函数需求 RefreshFriendList()
+		//ui更新
+		GET_UI(FriendUi, WCT_FRIENDUI)->updateUiData();
+	}
+	else if(E_Black_Target_Already_Exit == msg->dw_error_code)
+	{
+		ToolTip::getInstance()->push(GET_STR(105));
+	}
+	else if(E_Black_Max_Num == msg->dw_error_code)
+	{
+		ToolTip::getInstance()->push(GET_STR(104));
+	}
+	else
+	{
+		//do nothing;
+	}
+	return 0;
+}
+unsigned int SocialMgr::onServerDelBlack(s_net_cmd *cmd)
+{
+	NET_SIS_delete_black_list* msg = (NET_SIS_delete_black_list*)cmd;
+	//若成功
+	if (0 == msg->dw_error_code)
+	{
+		delBlack(msg->uDestRoleID);
+		//UI接口函数需求 RefreshFriendList()
+		//ui更新
+		GET_UI(FriendUi, WCT_FRIENDUI)->updateUiData();
+	}
+	else
+	{
+		//do nothing
+	}
+	return 0;
+}
+unsigned int SocialMgr::onServerInitFriendInfo(s_net_cmd *cmd)
+{
+	NET_SIS_send_friend_list * msg = (NET_SIS_send_friend_list*)cmd;
+	tagFriendInfo_ tmpStruct;
+	memset(&tmpStruct,0,sizeof(tagFriendInfo));
+	m_friend_vector.clear();//在向服务器要信息前，需要清空数组
+	for (int i = 0;i < msg->n_num;i++)
+	{
+		tmpStruct.uFriendID = msg->FriendInfo[i].uFriendID;
+		tmpStruct.nLevel = (int)(msg->FriendInfo[i].nLevel);
+		tmpStruct.eClassType = (EClassType)(msg->FriendInfo[i].eClassType);
+		tmpStruct.bySex = msg->FriendInfo[i].bySex;
+		tmpStruct.bOnline = msg->FriendInfo[i].bOnline;
+		tmpStruct.n32Rating = msg->FriendInfo[i].n32Rating;
+		memset(tmpStruct.friendName,0,sizeof(tmpStruct.friendName));
+
+		//获取远程玩家的名字
+		std::string rolename;
+		if(NameMgr2::getInstance()->queryName(msg->FriendInfo[i].uFriendID , rolename))
+		{
+			wchar_t tmp[X_SHORT_NAME];
+			memset(tmp, 0, sizeof(tmp));
+			Utf8ToUtf16(rolename.c_str(), tmp, X_SHORT_NAME, 0);
+
+			memcpy(tmpStruct.friendName,tmp,sizeof(wchar_t)*X_SHORT_NAME);
+		}
+
+		m_friend_vector.push_back(tmpStruct);
+
+	}
+	return 0;
+}
+unsigned int SocialMgr::onServerInitBlackInfo(s_net_cmd *cmd)
+{
+	NET_SIS_send_black_list* msg = (NET_SIS_send_black_list*)cmd;
+	tagBlackInfo_ tmpStruct;
+	memset(&tmpStruct,0,sizeof(tagBlackInfo));
+	m_black_vector.clear();//在向服务器要信息前，需要清空数组
+	for (int i = 0;i < msg->n_num;i++)
+	{
+		tmpStruct.uBlackID = msg->BlackInfo[i].uBlackID;
+		tmpStruct.nLevel = msg->BlackInfo[i].nLevel;
+		tmpStruct.eClassType = (EClassType)(msg->BlackInfo[i].eClassType);
+		tmpStruct.bySex = msg->BlackInfo[i].bySex;
+		tmpStruct.bOnline = msg->BlackInfo[i].bOnline;
+		memset(tmpStruct.blackName,0,sizeof(tmpStruct.blackName));
+		//获取远程玩家的名字
+		std::string rolename;
+		if(NameMgr2::getInstance()->queryName(msg->BlackInfo[i].uBlackID , rolename))
+		{
+			wchar_t tmp[X_SHORT_NAME];
+			memset(tmp, 0, sizeof(tmp));
+			Utf8ToUtf16(rolename.c_str(), tmp, X_SHORT_NAME, 0);
+
+			memcpy(tmpStruct.blackName,tmp,sizeof(wchar_t)*X_SHORT_NAME);
+		}
+		m_black_vector.push_back(tmpStruct);
+	}
+	return 0;
+}
+
+void SocialMgr::onGetName(unsigned int roleid , const std::string& name)
+{
+	//先看好友
+	size_t i;
+	for (i = 0;i<m_friend_vector.size();i++)
+	{
+		if (roleid == m_friend_vector[i].uFriendID)
+		{
+			tagFriendInfo_& friendData = m_friend_vector[i];
+			wchar_t tmp[X_SHORT_NAME];
+			memset(tmp, 0, sizeof(wchar_t) * X_SHORT_NAME);
+			Utf8ToUtf16(name.c_str(), tmp, X_SHORT_NAME, 0);
+
+			memcpy(friendData.friendName,tmp,sizeof(wchar_t)*X_SHORT_NAME);
+			break;
+		}
+	}
+	//再看黑名单
+	for (i = 0;i<m_black_vector.size();i++)
+	{
+		if (roleid == m_black_vector[i].uBlackID)
+		{
+			tagBlackInfo_& blackData = m_black_vector[i];
+
+			wchar_t tmp[X_SHORT_NAME];
+			memset(tmp, 0, sizeof(wchar_t) * X_SHORT_NAME);
+			Utf8ToUtf16(name.c_str(), tmp, X_SHORT_NAME, 0);
+
+			memcpy(blackData.blackName,tmp,sizeof(wchar_t)*X_SHORT_NAME);
+			break;
+		}
+	}
+	//考虑配偶
+	if (roleid == GetSpouseID())
+	{
+		SetSpouseName(name);
+		RoleManager::getInstance()->SetShowSelfRoleName(GET_UI(HookSetUi,WCT_HookSetUi)->gameSetData().isShowRoleName == 1);
+		//TODO:roleinfoUI
+		GET_UI(RoleInfoUi, WCT_RoleInfoUi)->updateData(RoleManager::getInstance()->getLocalPlayer()->getId());
+	}
+
+	for (i = 0;i<m_enemy_vector.size();i++)
+	{
+		if (roleid == m_enemy_vector[i].dwEnemyID)
+		{
+			tagEnemyInfo& blackData = m_enemy_vector[i];
+
+			wchar_t tmp[X_SHORT_NAME];
+			memset(tmp, 0, sizeof(wchar_t) * X_SHORT_NAME);
+			Utf8ToUtf16(name.c_str(), tmp, X_SHORT_NAME, 0);
+
+			memcpy(blackData.enemyName,tmp,sizeof(wchar_t)*X_SHORT_NAME);
+			break;
+		}
+	}
+	return;
+}
+unsigned int SocialMgr::onServerFriendLogout(s_net_cmd *cmd)
+{
+	NET_SIS_logout_to_friend* msg = (NET_SIS_logout_to_friend*)cmd;
+	for (size_t i = 0;i<m_friend_vector.size();i++)
+	{
+		tagFriendInfo_& friendData = m_friend_vector[i];
+		if (msg->dw_role_id == friendData.uFriendID)
+		{
+			friendData.bOnline = 0;
+			friendData.nLevel = msg->level;
+			FriendUiLayer *uilayer = getUiNodeByTag<FriendUiLayer>(WCT_FRIENDUI);
+			if (uilayer)
+			{
+				uilayer->updateUiData();
+			}
+			//若该好友是本地玩家的队友，则在组队系统中进行下线提示
+			if (TeamMgr::getInstance()->is_teammate(msg->dw_role_id))
+				return 0;
+			//师傅上下线，徒弟上下线不在这里提示 gx add 2013.12.13
+			if (MasterPrenticeMgr::getInstance()->Is_XiaoHuoBan(msg->dw_role_id))
+			{
+				LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+				if(!ploc)
+					return 0;
+				//本地玩家是师傅
+				if (MasterPrenticeMgr::getInstance()->IsMaster_Local(ploc->getId()))
+				{
+					return 0;
+				}
+				//本地玩家是徒弟
+				else
+				{
+					if (msg->dw_role_id == MasterPrenticeMgr::getInstance()->GetMasterID())
+					{
+						return 0;
+					}
+				}
+			}
+			//end
+			
+			//提示玩家某个好友下线
+			char vStr[128];
+			memset(vStr, 0, sizeof(char) * 128);
+			Utf16ToUtf8(friendData.friendName, vStr, 128, 0);
+			std::string str;
+			str.assign(vStr);
+			std::stringstream ss;
+			ss<<GET_STR(106)<<str<<GET_STR(107);
+			ToolTip::getInstance()->push(ss.str());
+			break;
+		}
+	}
+	return 0;
+}
+unsigned int SocialMgr::onServerFriendLogin(s_net_cmd *cmd)
+{
+	NET_SIS_login_to_friend* msg = (NET_SIS_login_to_friend*)cmd;
+	for (size_t i = 0;i<m_friend_vector.size();i++)
+	{
+		tagFriendInfo_& friendData = m_friend_vector[i];
+		if (msg->dw_role_id == friendData.uFriendID)
+		{
+			friendData.bOnline = 1;
+			friendData.n32Rating = msg->n32Rating;
+			FriendUiLayer *uilayer = getUiNodeByTag<FriendUiLayer>(WCT_FRIENDUI);
+			if (uilayer)
+			{
+				uilayer->updateUiData();
+			}
+			//若该好友是本地玩家的队友，则在组队系统中进行上线提示
+			if (TeamMgr::getInstance()->is_teammate(msg->dw_role_id))
+				return 0;
+			//师傅上下线，徒弟上下线不在这里提示 gx add 2013.12.13
+			if (MasterPrenticeMgr::getInstance()->Is_XiaoHuoBan(msg->dw_role_id))
+			{
+				LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+				if(!ploc)
+					return 0;
+				//本地玩家是师傅
+				if (MasterPrenticeMgr::getInstance()->IsMaster_Local(ploc->getId()))
+				{
+					return 0;
+				}
+				//本地玩家是徒弟
+				else
+				{
+					if (msg->dw_role_id == MasterPrenticeMgr::getInstance()->GetMasterID())
+					{
+						return 0;
+					}
+				}
+			}
+			//end
+			//提示玩家某个好友上线
+			char vStr[128];
+			memset(vStr, 0, sizeof(char) * 128);
+			Utf16ToUtf8(friendData.friendName, vStr, 128, 0);
+			std::string str;
+			str.assign(vStr);
+			std::stringstream ss;
+			ss<<GET_STR(106)<<str<<GET_STR(108);
+			ToolTip::getInstance()->push(ss.str());
+			break;
+		}
+	}
+	return 0;
+}
+unsigned int SocialMgr::onServerUpdateFriendState(s_net_cmd *cmd)
+{
+	NET_SIS_update_friend_state* msg = (NET_SIS_update_friend_state*)cmd;
+	for (int i = 0;i<msg->n_num;i++)
+	{
+		for (size_t j = 0;j<m_friend_vector.size();j++)
+		{
+			if (msg->FriUpdate[i].dw_role_id == m_friend_vector[j].uFriendID)
+			{
+				tagFriendInfo_& data = m_friend_vector[j];
+				data.bOnline = msg->FriUpdate[i].bOnline;
+				data.nLevel = msg->FriUpdate[i].nLevel;
+				data.n32Rating = msg->FriUpdate[i].n32Rating;
+			}
+		}
+	}
+
+	//ui更新
+	GET_UI(FriendUi, WCT_FRIENDUI)->updateUiData();
+
+	return 0;
+}
+/****************************UI调用函数实现***************************/
+//函数功能：好友主界面调用函数，返回相应的结构体数组
+//入口参数：type,标签页类型（好友，黑名单，附近的人）；output_vector,返回的结构体数组；
+//			bOnLine:若为true则仅显示在线的好友，否则显示全部（默认显示全部好友）。
+//返回值：无
+//修改说明：
+void SocialMgr::ShowOnlineRoleOrNot(EFriendTypeList type,friendGeneral_vector& output_vector,bool bOnLine /* = false */)
+{
+	tagFriendGeneralInfo tmpFGInfo;
+	memset(&tmpFGInfo,0,sizeof(tagFriendGeneralInfo));
+	output_vector.clear();
+	switch (type)
+	{
+	case EF_FRIEND:
+		{
+			friend_vector::iterator iter;
+			for( iter=m_friend_vector.begin(); iter!=m_friend_vector.end(); ++iter )
+			{
+				tagFriendInfo_& friendInfo = *iter;
+				//若仅显示在线好友
+				if (bOnLine)
+				{
+					if (friendInfo.bOnline)
+					{
+						memset(tmpFGInfo.name,0,sizeof(tmpFGInfo.name));
+						memcpy(tmpFGInfo.name,friendInfo.friendName,sizeof(wchar_t)*X_SHORT_NAME);
+						tmpFGInfo.uRoleID = friendInfo.uFriendID;
+						tmpFGInfo.nLevel = friendInfo.nLevel;
+						tmpFGInfo.eClassType = (EClassType)(friendInfo.eClassType);
+						tmpFGInfo.bySex = friendInfo.bySex;
+						tmpFGInfo.isOnline = friendInfo.bOnline;
+						tmpFGInfo.n32Rating = friendInfo.n32Rating;
+						//仅当有名称后，才添加
+						if (tmpFGInfo.name[0] != '\0')
+						{
+							output_vector.push_back(tmpFGInfo);
+						}
+					}
+				}
+				//全部显示
+				else
+				{
+					memset(tmpFGInfo.name,0,sizeof(tmpFGInfo.name));
+					memcpy(tmpFGInfo.name,friendInfo.friendName,sizeof(wchar_t)*X_SHORT_NAME);
+					tmpFGInfo.uRoleID = friendInfo.uFriendID;
+					tmpFGInfo.nLevel = friendInfo.nLevel;
+					tmpFGInfo.eClassType = (EClassType)(friendInfo.eClassType);
+					tmpFGInfo.bySex = friendInfo.bySex;
+					tmpFGInfo.isOnline = friendInfo.bOnline;
+					tmpFGInfo.n32Rating = friendInfo.n32Rating;
+					if (tmpFGInfo.name[0] != '\0')
+					{
+						output_vector.push_back(tmpFGInfo);
+					}
+				}
+			}
+		}
+		break;
+	case EF_BLACK:
+		{
+			black_vector::iterator iter;
+			for( iter=m_black_vector.begin(); iter!=m_black_vector.end(); ++iter )
+			{
+				tagBlackInfo_& blackInfo = *iter;
+				//全部显示
+				//memset(tmpFGInfo.name,0,sizeof(tmpFGInfo.name));
+				//memcpy(tmpFGInfo.name,blackInfo.blackName,sizeof(wchar_t)*X_SHORT_NAME);
+				tmpFGInfo.uRoleID = blackInfo.uBlackID;
+				tmpFGInfo.nLevel = blackInfo.nLevel;
+				tmpFGInfo.eClassType = (EClassType)(blackInfo.eClassType);
+				tmpFGInfo.bySex = blackInfo.bySex;
+				tmpFGInfo.isOnline = blackInfo.bOnline;
+				if (blackInfo.blackName[0] == '\0')
+				{
+					std::string tempName = "";
+					if (NameMgr2::getInstance()->queryName(blackInfo.uBlackID, tempName))
+					{
+						memset(blackInfo.blackName, 0, sizeof(blackInfo.blackName));
+						Utf8ToUtf16(tempName.c_str(), blackInfo.blackName, X_SHORT_NAME, 0);
+					}
+				}
+				if (blackInfo.blackName[0] != '\0')
+				{
+					memset(tmpFGInfo.name,0,sizeof(tmpFGInfo.name));
+					memcpy(tmpFGInfo.name,blackInfo.blackName,sizeof(wchar_t)*X_SHORT_NAME);
+					output_vector.push_back(tmpFGInfo);
+				}
+			}
+		}
+		break;
+	case EF_ENEMY:
+		{
+			enemy_vector::iterator iter;
+			for( iter=m_enemy_vector.begin(); iter!=m_enemy_vector.end(); ++iter )
+			{
+				tagEnemyInfo& enemyInfo = *iter;
+				//全部显示
+				memset(tmpFGInfo.name,0,sizeof(tmpFGInfo.name));
+				memcpy(tmpFGInfo.name,enemyInfo.enemyName,sizeof(wchar_t)*X_SHORT_NAME);
+				tmpFGInfo.uRoleID = enemyInfo.dwEnemyID;
+				tmpFGInfo.nLevel = enemyInfo.nLevel;
+				tmpFGInfo.eClassType = (EClassType)(enemyInfo.eClassType);
+				tmpFGInfo.bySex = enemyInfo.bySex;
+				tmpFGInfo.isEnemy = true;
+				tmpFGInfo.isWatch = enemyInfo.isWatch;
+				tmpFGInfo.nKillNum = enemyInfo.killNum;
+				tmpFGInfo.nBeKillNum = enemyInfo.beKillNum;
+				tmpFGInfo.isOnline = enemyInfo.bOnline;
+				if (enemyInfo.enemyName[0] != '\0')
+				{
+					output_vector.push_back(tmpFGInfo);
+				}
+			}
+		}
+		break;
+	case EF_SURROUNDBY:
+		{
+			//遍历玩家视野范围内的玩家信息
+			int count = 0;
+			RoleManager::RoleMap tmpRoleMap;
+			tmpRoleMap = RoleManager::getInstance()->getAllRemotePlayer();
+			RoleManager::RoleMap::iterator iter = tmpRoleMap.begin();
+			for(;iter!= tmpRoleMap.end(); ++iter)
+			{
+				Role* tmpRole = iter->second;
+				if (!tmpRole)
+					continue;
+				memset(tmpFGInfo.name,0,sizeof(tmpFGInfo.name));
+				memcpy(tmpFGInfo.name,tmpRole->getName(),sizeof(wchar_t)*X_SHORT_NAME);
+				tmpFGInfo.uRoleID = iter->first;
+				tmpFGInfo.nLevel = tmpRole->getLevel();
+				tmpFGInfo.bySex = tmpRole->getAttribute(RA_SEX);
+				tmpFGInfo.eClassType = (EClassType)(tmpRole->getAttribute(RA_ROLETYPE));
+				tmpFGInfo.isOnline = true;
+				tmpFGInfo.n32Rating = tmpRole->getAttribute(RA_BATTLE_POINT);
+				if (tmpFGInfo.name[0] != '\0')
+				{
+					output_vector.push_back(tmpFGInfo);
+					if (count >= MAX_SURROUNDBY - 1)
+					{
+						break;
+					}
+					count++;
+				}
+				
+			}//end for
+			//对output_vector重新排序，若当前玩家是男淫，则该数组女性角色排前；
+			//否则男性角色排前
+			/*LocalPlayer* locPlayer = RoleManager::getInstance()->getLocalPlayer();
+			//判断性别:男
+			if (1 == locPlayer->getAttribute(RA_SEX))
+			{
+				sort(output_vector.begin(),output_vector.end(),Smaller);
+			}
+			else
+			{
+				sort(output_vector.begin(),output_vector.end(),Bigger);
+			}*/
+
+		}
+		break;
+	default:
+		break;
+	}
+	return;
+}
+void SocialMgr::UpdateFriendsState()
+{
+	NET_SIC_update_friend_state cmd;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_NORMAL, false);
+	return;
+}
+/****************************类辅助函数实现***************************/
+bool SocialMgr::has_friend(unsigned int role_id_ ) const
+{
+	friend_vector::const_iterator iter;
+	for( iter=m_friend_vector.begin(); iter!=m_friend_vector.end(); ++iter )
+	{
+		const tagFriendInfo_& info = *iter;
+		if( info.uFriendID == role_id_ )
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool SocialMgr::has_friend( const char* name ) const
+{
+	wchar_t wName[256] = {0};
+	convertWName(name, wName);
+	friend_vector::const_iterator iter;
+	for( iter=m_friend_vector.begin(); iter!=m_friend_vector.end(); ++iter )
+	{
+		const tagFriendInfo_& info = *iter;
+		if( wcscmp(info.friendName, wName) == 0 )
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool SocialMgr::has_black(unsigned int role_id_ ) const
+{
+	black_vector::const_iterator iter;
+	for( iter=m_black_vector.begin(); iter!=m_black_vector.end(); ++iter )
+	{
+		const tagBlackInfo_& info = *iter;
+		if( info.uBlackID == role_id_ )
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool SocialMgr::has_black( const char* name ) const
+{
+	wchar_t wName[256] = {0};
+	convertWName(name, wName);
+	black_vector::const_iterator iter;
+	for( iter=m_black_vector.begin(); iter!=m_black_vector.end(); ++iter )
+	{
+		const tagBlackInfo_& info = *iter;
+		if( wcscmp(info.blackName, wName) == 0 )
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void SocialMgr::delFriend(unsigned int role_id_)
+{
+	//该函数未考虑为找到id的情况，因为上层函数已做防护
+	//删除该好友
+	friend_vector::iterator iter;
+	for( iter=m_friend_vector.begin(); iter!=m_friend_vector.end(); ++iter )
+	{
+		tagFriendInfo_& friendInfo = *iter;
+		if(friendInfo.uFriendID == role_id_)
+		{
+			m_friend_vector.erase(iter);
+			return;
+		}
+	}
+	return;
+}
+void SocialMgr::delBlack(unsigned int role_id_)
+{
+	black_vector::iterator iter;
+	for( iter=m_black_vector.begin(); iter!=m_black_vector.end(); ++iter )
+	{
+		tagBlackInfo_& blackInfo = *iter;
+		if(blackInfo.uBlackID == role_id_)
+		{
+			m_black_vector.erase(iter);
+			return;
+		}
+	}
+	return;
+}
+bool SocialMgr::friend_is_online(unsigned int role_id)
+{
+	if (!IS_VALID(role_id))
+	{
+		return false;
+	}
+	for (size_t i = 0;i < m_friend_vector.size();i++)
+	{
+		if (role_id == m_friend_vector[i].uFriendID)
+		{
+			if (m_friend_vector[i].bOnline)
+				return true;
+			else
+				return false;
+		}
+	}
+	return false;
+}
+void SocialMgr::SendFlowers(unsigned int uDestRoleID,std::string strName,unsigned char byLevel /* = 1 */)
+{
+	if (!IS_VALID(uDestRoleID))
+		return;
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(ploc))
+		return;
+	if (ploc->getId() == uDestRoleID)
+		return;
+	//首先应判断性别，异性之间才可以送花 ,这些判断都他妈交给服务器啦
+	/*Role* pRole = RoleManager::getInstance()->findRole(uDestRoleID);
+	if (!IS_VALID_PTR(pRole))
+		return;
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(ploc))
+		return;
+	if (pRole->getAttribute(RA_SEX) == ploc->getAttribute(RA_SEX))
+	{
+		ToolTip::getInstance()->push(GET_STR(109));
+		return;
+	}*/
+	short n_sendFlowers(0);
+	if (1 == byLevel)
+	{
+		n_sendFlowers = 1;
+	}
+	else if (2 == byLevel)
+	{
+		n_sendFlowers = 9;
+	}
+	else if (3 == byLevel)
+	{
+		n_sendFlowers = 99;
+	}
+	else
+	{
+		return;
+	}
+	int n_YuanBaoInBag(0);
+	//根据送花数量，检查背包是否具备赠送条件
+	int n_FlowersInBag = PackageManager::getInstance()->getItemNumber(EICT_Bag, (unsigned int)SEND_GIFT_NEED_ITEM);
+	n_YuanBaoInBag = PackageManager::getInstance()->getYuanBao();
+	if ((n_FlowersInBag + n_YuanBaoInBag/10) < n_sendFlowers)
+	{
+		//提示玩家充值
+		/*MessageBoxUi *mallUI = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(164).c_str(), "\xE5\x85\x85\xE5\x80\xBC","\xE5\x8F\x96\xE6\xB6\x88");
+		World::getInstance()->getScene()->addChild(mallUI, WZ_MESSAGEBOX);
+		mallUI->signalOkBtnPressed.connect(this, &SocialMgr::ToCharge);*/
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+		return;
+	}
+	//若玩家背包中的玫瑰花不足，需要用元宝来代替，这要给玩家已提示
+	if (n_FlowersInBag < n_sendFlowers)
+	{
+		std::ostringstream ostr;
+		ostr.str("");
+		ostr << n_FlowersInBag;
+		std::string str = replaceStr(GET_STR(143), "*", ostr.str());
+		ostr.str("");
+		ostr << n_sendFlowers-n_FlowersInBag;
+		std::string str1 = replaceStr(str,"**",ostr.str());
+		ostr.str("");
+		ostr << (n_sendFlowers-n_FlowersInBag)*10;
+		std::string str2 = replaceStr(str1,"***",ostr.str());
+		m_TempRoleID = uDestRoleID;
+		bySendLevel = byLevel;
+		m_TempGiftReceiveName = strName;
+		MessageBoxUi *sendUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, str2.c_str(), "\xE7\xA1\xAE\xE5\xAE\x9A","\xE5\x8F\x96\xE6\xB6\x88");
+		World::getInstance()->getScene()->addChild(sendUi, WZ_MESSAGEBOX);
+		sendUi->signalOkBtnPressed.connect(this, &SocialMgr::ConfirmSendFlowers);
+		return;
+	}
+	m_TempGiftReceiveName = strName;
+	NET_SIC_send_gift cmd;
+	cmd.dwDestRoleID = uDestRoleID;
+	cmd.byLevel = byLevel;
+	cmd.dwRoleNameCrc = name_crc32(convertWName(strName));
+	TCP_CLIENT->send_net_cmd(&cmd, NP_INSIGNIFICANT, false);
+	return;
+}
+void SocialMgr::ConfirmSendFlowers()
+{
+	NET_SIC_send_gift cmd;
+	cmd.dwDestRoleID = m_TempRoleID;
+	cmd.byLevel = bySendLevel;
+	cmd.dwRoleNameCrc = name_crc32(convertWName(m_TempGiftReceiveName));
+	TCP_CLIENT->send_net_cmd(&cmd, NP_INSIGNIFICANT, false);
+	return;
+}
+unsigned int SocialMgr::OnServerSendFlowers(s_net_cmd *cmd)
+{
+	NET_SIS_send_gift_to_friend* msg = (NET_SIS_send_gift_to_friend*)cmd;
+	//进入该判断，则一定是送礼者
+	if (0 != msg->dw_error_code)
+	{
+		if (E_Gift_Not_Exit == msg->dw_error_code)
+		{
+			//送礼者道具不足，无法赠送相应级别的玫瑰
+			ToolTip::getInstance()->push(GET_STR(110));
+			return 0;
+		}
+		else if (E_Gift_Friend_Not_Online == msg->dw_error_code)//送花儿人不在线
+		{
+			std::ostringstream oss;
+			oss <<m_TempGiftReceiveName<< GET_STR(2219);
+			ToolTip::getInstance()->push(oss.str());
+			return 0;
+		}
+		//修改为同性也可以送花(by zhang 2015.7.9)
+		/*else if (E_Gift_Not_Gift == msg->dw_error_code)//只能同性之间送花
+		{
+			ToolTip::getInstance()->push(GET_STR(2220));
+			return 0;
+		}*/
+		else if (E_Gift_Not_Level == msg->dw_error_code)//角色达到15级才可送花
+		{
+			ToolTip::getInstance()->push(GET_STR(2376));
+			return 0;
+		}
+		else
+		{
+			return 0;
+		}
+	}
+	short n_sendFlowers(0);
+	if (1 == msg->byLevel)
+	{
+		n_sendFlowers = 1;
+	}
+	else if (2 == msg->byLevel)
+	{
+		n_sendFlowers = 9;
+	}
+	else if (3 == msg->byLevel)
+	{
+		n_sendFlowers = 99;
+	}
+	else
+	{
+		return 0;
+	}
+	unsigned int localPlayerID = RoleManager::getInstance()->getLocalPlayer()->getId();
+	//若本地玩家是送礼者
+	if (localPlayerID == msg->dwSrcRoleID)
+	{
+		//提示玩家成功给某玩家送礼,待后续统一处理
+		std::stringstream ss;
+		ss<<GET_STR(140)<<n_sendFlowers<<GET_STR(142);
+		ToolTip::getInstance()->push(ss.str());
+	}
+	//若本地玩家是收礼者
+	else
+	{
+		if (msg->dwSrcRoleID != (DWORD)(-1) && msg->dwSrcRoleID != 0)
+		{
+			if (has_friend(msg->dwSrcRoleID) == false)
+			{
+				char temp[512];
+				memset(temp, 0, sizeof(char) * 512);
+				Utf16ToUtf8(msg->name, temp, 512, 0);
+				ConcernMgr::getInstance()->addData(msg->dwSrcRoleID,ECT_flower,msg->sex,msg->vipLevel,temp,n_sendFlowers);
+				RoleHeadUi* ui = World::getInstance()->getRoleHeadUi();
+				if(ui)
+					ui->showConcern(ECT_flower);
+			}
+		}
+		//收礼者增加魅力
+		LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+		if(!ploc)
+			return 0;
+		ploc->setAttribute(RA_MEILI_POINT,ploc->getAttribute(RA_MEILI_POINT)+msg->byAddValue);
+		std::string sendRoleName("");
+		if (NameMgr2::getInstance()->queryName(msg->dwSrcRoleID,sendRoleName))
+		{
+			std::stringstream ss;
+			ss<<sendRoleName<<GET_STR(141)<<n_sendFlowers<<GET_STR(142);
+			ToolTip::getInstance()->push(ss.str());
+
+			//给魅力增加提示
+		/*	s_receive_chat_info info;
+			info.send_channel = ESCC_World;
+			std::stringstream ss1;
+			ss1<<msg->byAddValue;
+			std::string str = replaceStr(GET_STR(2126),"**",ss1.str());
+			ss<<","<<str;
+			info.chat_text = ss.str();
+			ChatMgr::getInstance()->ShowInfoByChatChannel(info);*/
+		
+		}
+	}
+	return 0;
+}
+
+void SocialMgr::InvitePlayerCompractice(unsigned int uDestRoleID)
+{
+	if (!IS_VALID(uDestRoleID))
+		return;
+	//若邀请方正在挂机中，则应该打断
+	if (AutoActionMgr::getInstance()->Get_Auto_Action())//gx add
+	{
+		AutoActionMgr::getInstance()->Set_Auto_Action(false);
+	}
+	//首先应判断性别，异性之间才可以双修
+	Role* pRole = RoleManager::getInstance()->findRole(uDestRoleID);
+	if (!IS_VALID_PTR(pRole))
+		return;
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(ploc))
+		return;
+	//若本地玩家正在摆摊，双修状态下，无法邀请别人双修
+	if (ploc->isInRoleStateAny(RA_ShuangXiu) || ploc->isInRoleStateAny(RA_Stall))
+	{
+		ToolTip::getInstance()->push(GET_STR(186));
+		return;
+	}
+	if (pRole->getAttribute(RA_SEX) == ploc->getAttribute(RA_SEX))
+	{
+		ToolTip::getInstance()->push(GET_STR(111));
+		return;
+	}
+	int nOpenLevel = GetFunOpenLevel(EFOL_DoublePractice);
+	//双方级别必须在15级以上
+	if (pRole->getLevel() < nOpenLevel || ploc->getLevel() < nOpenLevel)
+	{
+		ToolTip::getInstance()->push(GET_STR(112));
+		return;
+	}
+	//距离检查
+	float dis = ccpDistance(ploc->getPosition(),pRole->getPosition());
+	if (dis > COMPRACTICE_AVALIB_DIS)
+	{
+		ToolTip::getInstance()->push(GET_STR(113));
+		return;//提示玩家距离远，无法进行双修
+	}
+	//若玩家处于骑乘状态，应该下马 gx add 2013.11.28
+	/*if (ploc->getAttribute(RA_RideState))
+	{
+		RoleManager::getInstance()->sendUnRideMsg();
+	}*/
+	NET_SIC_invite_practice cmd;
+	cmd.dwDestRoleID = uDestRoleID;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_NORMAL, false);
+	return;
+}
+unsigned int SocialMgr::OnServerInvitePlayerToBoth(s_net_cmd *cmd)
+{
+	NET_SIS_invite_practice_to_both* msg = (NET_SIS_invite_practice_to_both*)cmd;
+	unsigned int localRoleID = RoleManager::getInstance()->getLocalPlayer()->getId();
+	//若是邀请方
+	if (msg->dwSrcRoleID == localRoleID)//处理错误信息
+	{
+		if (0 == msg->dw_error_code)//若成功
+		{
+			//邀请已发出，请耐心等待
+			ToolTip::getInstance()->push(STRING_TABLE["invite_send_wait_patience"]);
+		}
+		else
+		{
+			switch (msg->dw_error_code)
+			{
+			case E_Compractice_No_OnLine://非法消息
+				break;
+			case E_Compractice_Local_InPractice:
+				ToolTip::getInstance()->push(GET_STR(180));
+				break;
+			case E_Compractice_Remote_InPractice:
+				ToolTip::getInstance()->push(GET_STR(181));
+				break;
+			case E_Compractice_InStall:
+				ToolTip::getInstance()->push(GET_STR(182));
+				break;
+			case E_Compractice_Local_Practice_Full:
+				ToolTip::getInstance()->push(GET_STR(183));
+				break;
+			case E_Compractice_Remote_Practice_Full:
+				ToolTip::getInstance()->push(GET_STR(184));
+				break;
+			case E_Compractice_Long:
+				ToolTip::getInstance()->push(GET_STR(113));
+				break;
+			case E_Compractice_Level:
+				{
+					ToolTip::getInstance()->push(GET_STR(112));
+					break;
+				}
+			case E_Compractice_Sex:
+				{
+					ToolTip::getInstance()->push(GET_STR(111));
+					break;
+				}
+			case E_Compractice_NotSafearea:
+				{
+					ToolTip::getInstance()->push(GET_STR(2039));
+					break;
+				}
+			case E_Comparctice_Role_Invited:
+				{
+					ToolTip::getInstance()->push(GET_STR(2144));
+					break;
+				}
+			case E_Compractice_Map_Not:
+				{
+					ToolTip::getInstance()->push(GET_STR(9211));
+					break;
+				}
+			case E_Compractice_Exchange:
+				{
+					ToolTip::getInstance()->push(STRING_TABLE["on_trade_not_marrige"]);  //正在交易无法双修
+					break;
+				}
+			default:
+				break;
+			}
+		}
+	}
+	//若是被邀请方
+	else
+	{
+
+		//如果当前被邀请方处在强类型引导中,则关闭引导（也就是跳过引导）  2016-3-17 金山
+		if (NewPlayerGuider::getInstance()->_IsGuide && NewPlayerGuider::getInstance()->getIsStrongGuide())
+		{
+			NewPlayerGuider::getInstance()->SkipNewGuide();
+		}
+
+		//被邀请方弹出确认提示框
+		//先获取邀请方姓名
+		std::string srcName("");
+		if (NameMgr2::getInstance()->queryName(msg->dwSrcRoleID,srcName))
+		{
+			m_ComPracticePartner = msg->dwSrcRoleID;
+			std::stringstream ss;
+			ss<<srcName<<GET_STR(114);
+			MessageBoxUi *practiceUI = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, ss.str().c_str(), "\xE7\xA1\xAE\xE5\xAE\x9A","\xE5\x8F\x96\xE6\xB6\x88");
+			CCPoint pt = practiceUI->getMsgLabelPt();
+			practiceUI->setMsgLabelPt(ccpAdd(pt,ccp(50,-15)));
+			World::getInstance()->getScene()->addChild(practiceUI, WZ_MESSAGEBOX);
+			practiceUI->signalOkBtnPressed.connect(this, &SocialMgr::AgreeCompractice);
+			practiceUI->signalCancelBtnPressed.connect(this,&SocialMgr::DisagreeCompractice);
+		}
+	}
+	return 0;
+}
+void SocialMgr::AgreeCompractice()
+{
+	if (AutoActionMgr::getInstance()->Get_Auto_Action())//gx add
+	{
+		AutoActionMgr::getInstance()->Set_Auto_Action(false);
+	}
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	//若玩家处于骑乘状态，应该下马 gx add 2013.11.28
+	if (ploc->getAttribute(RA_RideState))
+	{
+		RoleManager::getInstance()->sendUnRideMsg();
+	}
+	ploc->setExitAttackState();//退出战斗状态
+
+	CLOSE_ALL_UI();
+
+	NET_SIC_invite_practice_reply cmd;
+	cmd.dwSrcRoleID = m_ComPracticePartner;
+	cmd.bAgree = 1;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_NORMAL, false);
+	return;
+}
+void SocialMgr::DisagreeCompractice()
+{
+	NET_SIC_invite_practice_reply cmd;
+	cmd.dwSrcRoleID = m_ComPracticePartner;
+	cmd.bAgree = 0;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_NORMAL, false);
+	return;
+}
+
+void SocialMgr::setCompracticeTime(INT tims)
+{
+	m_ComPracticeTimeLeft = tims;
+}
+
+void SocialMgr::compracticeTimer( float dt )
+{
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if (!lp->isInRoleStateAny(RA_ShuangXiu))
+	{
+		setCompracticeTime(0);
+	}
+
+	--m_ComPracticeTimeLeft;
+	World::getInstance()->countDownEffect_UI(m_ComPracticeTimeLeft);
+
+	if (m_ComPracticeTimeLeft <= 0 )
+	{
+		addOrRemoveCompracticeTimer(false);
+	}
+}
+
+void SocialMgr::addOrRemoveCompracticeTimer(bool f)
+{
+	if (f)
+	{
+		CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&SocialMgr::compracticeTimer), this,1.0f, false);
+	}
+	else
+	{
+		CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&SocialMgr::compracticeTimer), this);
+	}
+}
+
+
+unsigned int SocialMgr::OnServerInvitePlayerReply(s_net_cmd *cmd)
+{
+	NET_SIS_invite_practice_to_src* msg = (NET_SIS_invite_practice_to_src*)cmd;
+	unsigned int localRoleID = RoleManager::getInstance()->getLocalPlayer()->getId();
+	//若本地玩家是邀请方
+	UINT id = 0;
+	b_IsInStatePractice = false;
+	if (msg->dwSrcRoleID ==localRoleID)
+	{
+		if (msg->dw_error_code != 0)
+		{
+			switch (msg->dw_error_code)
+			{
+			case E_Compractice_Disagree:
+				ToolTip::getInstance()->push(GET_STR(185));
+				break;
+			default:
+				break;
+			}
+		}
+		else
+		{
+			id = msg->dwDesRoleID;
+		}
+		
+	}
+	//若是被邀请方
+	else
+	{
+		if (0 != msg->dw_error_code)
+		{
+			s_receive_chat_info info;
+			info.send_channel = ESCC_System;
+			switch (msg->dw_error_code)
+			{
+			case E_Compractice_No_OnLine://非法消息
+				break;
+			case E_Compractice_Local_InPractice:
+				ToolTip::getInstance()->push(GET_STR(180));
+				break;
+			case E_Compractice_Remote_InPractice:
+				ToolTip::getInstance()->push(GET_STR(181));
+				break;
+			case E_Compractice_InStall:
+				ToolTip::getInstance()->push(GET_STR(182));
+				break;
+			case E_Compractice_Local_Practice_Full:
+				ToolTip::getInstance()->push(GET_STR(183));
+				break;
+			case E_Compractice_Remote_Practice_Full:
+				ToolTip::getInstance()->push(GET_STR(184));
+				break;
+			case E_Compractice_Long:
+				ToolTip::getInstance()->push(GET_STR(113));
+				break;
+			case E_Compractice_Level:
+				{
+					ToolTip::getInstance()->push(GET_STR(112));
+					break;
+				}
+			case E_Compractice_Sex:
+				{
+					ToolTip::getInstance()->push(GET_STR(111));
+					break;
+				}
+			case E_Compractice_NotSafearea:
+				{
+					ToolTip::getInstance()->push(GET_STR(2039));
+					break;
+				}
+			case E_Compractice_Map_Not:
+				{
+					ToolTip::getInstance()->push(GET_STR(9211));
+					break;
+				}
+			default:
+				break;
+			}
+		}
+		else
+		{
+			id = msg->dwSrcRoleID;
+			LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+			if (player)
+			{
+				player->setAcceptShuangXiu(true);
+			}
+		}
+		
+	}
+
+	if (0 == msg->dw_error_code)
+	{
+		b_IsInStatePractice = true;
+		m_ComPracticePartner = id;
+		setCompracticeTime(msg->timeLeft);
+		addOrRemoveCompracticeTimer(true);
+
+	}
+
+	return 0;
+}
+unsigned int SocialMgr::OnServerCancleComPractice(s_net_cmd *cmd)
+{
+	NET_SIS_unset_role_state* msg = (NET_SIS_unset_role_state*)cmd;
+	unsigned int localRoleID = RoleManager::getInstance()->getLocalPlayer()->getId();
+	if (msg->dw_role_id == localRoleID)
+	{
+		if (msg->eState == ERS_ComPractice)
+		{
+			if (b_IsInStatePractice)
+			{
+				b_IsInStatePractice = false;
+				m_ComPracticePartner = (unsigned int)INVALID;
+				//UI停止
+			}
+		}
+	}
+	return 0;
+}
+//本地玩家取消双修
+void SocialMgr::CancelCompractice()
+{
+	//防止摇杆多次发消息
+	if (b_CancelComfirming)
+		return;
+	if (!b_CancelComfirming)
+	{
+		b_CancelComfirming = true;
+	}
+	LocalPlayer* pLoc = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(pLoc))
+		return;
+	if (!pLoc->isInRoleStateAny(RA_ShuangXiu))
+		return;
+
+	//判断成功后，需要给用户提示
+	MessageBoxUi *cancelUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, GET_STR(117).c_str(), "\xE7\xA1\xAE\xE5\xAE\x9A","\xE5\x8F\x96\xE6\xB6\x88");
+	World::getInstance()->getScene()->addChild(cancelUi, WZ_MESSAGEBOX);
+	cancelUi->signalOkBtnPressed.connect(this, &SocialMgr::ComfirmCancelCompractice);
+	cancelUi->signalCancelBtnPressed.connect(this,&SocialMgr::UnComfirmCancelCompractice);
+	return;
+}
+void SocialMgr::ComfirmCancelCompractice()
+{
+	b_CancelComfirming = false;
+	/*LocalPlayer* pLoc = RoleManager::getInstance()->getLocalPlayer();
+	if (pLoc && pLoc->isAcceptShuangXiu())
+	{
+		ToolTip::getInstance()->push("\xE8\xA2\xAB\xE5\x8A\xA8\xE6\x8E\xA5\xE5\x8F\x97\xE5\x8F\x8C\xE4\xBF\xAE\xE8\x80\x85\xE6\x97\xA0\xE6\xB3\x95\xE4\xB8\xBB\xE5\x8A\xA8\xE7\xBB\x93\xE6\x9D\x9F\xE5\x8F\x8C\xE4\xBF\xAE");
+		return;
+	}*/
+	NET_SIC_cancel_practice cmd;
+	cmd.dwPartnerID = m_ComPracticePartner;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_NORMAL, false);
+	
+}
+void SocialMgr::UnComfirmCancelCompractice()
+{
+	b_CancelComfirming = false;
+}
+void SocialMgr::MalePropose()
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(ploc))
+		return;
+	
+	//首先需检查组队信息
+	unsigned int teampID = TeamMgr::getInstance()->get_team_id();
+	if (!IS_VALID(teampID))
+	{
+		//给提示：需男女二人组队
+		ToolTip::getInstance()->push(GET_STR(120));
+		return;
+	}
+	TeamMgr::teammates_vector members = TeamMgr::getInstance()->get_teammate_list();
+	if (members.size() != 1)
+	{
+		//给提示：需男女二人组队
+		ToolTip::getInstance()->push(GET_STR(120));
+		return;
+	}
+	unsigned int uFemaleRoleID = members[0].uRoleID;
+	if (!IS_VALID(uFemaleRoleID))
+		return;
+	//首先应判断性别，
+	Role* pRole = RoleManager::getInstance()->findRole(uFemaleRoleID);
+	if (!IS_VALID_PTR(pRole))
+	{
+		//提示被求婚对象也应在证婚人面前
+		ToolTip::getInstance()->push("\xE6\x82\xA8\xE7\x9A\x84\xE6\xB1\x82\xE5\xA9\x9A\xE5\xAF\xB9\xE8\xB1\xA1\xE4\xB9\x9F\xE9\x9C\x80\xE8\xA6\x81\xE5\x88\xB0\xE8\xAF\x81\xE5\xA9\x9A\xE4\xBA\xBA\xE9\x9D\xA2\xE5\x89\x8D");
+		return;
+	}
+	//首先判断本地玩家是否已有配偶
+	unsigned int tmpSpousID = GetSpouseID();
+	if (IS_VALID(tmpSpousID))
+	{
+		//给提示：您已拥有配偶
+		ToolTip::getInstance()->push(GET_STR(121));
+		return;
+	}
+	//求婚的人必须是男性
+	if (ploc->getAttribute(RA_SEX) != 1)
+	{
+		//给提示：只有男性可以求婚
+		ToolTip::getInstance()->push(GET_STR(122));
+		return;
+	}
+	//被求婚的人必须是女性
+	if (pRole->getAttribute(RA_SEX) != 0)
+	{
+		//给提示：只可以向女性求婚
+		ToolTip::getInstance()->push(GET_STR(123));
+		return;
+	}
+	//双方级别必须在35级以上
+	if (pRole->getLevel() < MARRY_MIN_LEVEL || ploc->getLevel() < MARRY_MIN_LEVEL)
+	{
+		//给提示：结婚双方至少是35级
+		ToolTip::getInstance()->push(GET_STR(124));
+		return;
+	}
+	//本地玩家是否有婚戒
+	f_item* pItem = PackageManager::getInstance()->getItem(EICT_Bag,(unsigned int)MARRY_NEED_ITEM);
+	if (!IS_VALID_PTR(pItem))
+	{
+		//给提示：您缺少婚戒
+		ToolTip::getInstance()->push(GET_STR(125));
+		return;
+	}
+	NET_SIC_male_propose cmd;
+	cmd.dwDestRoleID = uFemaleRoleID;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_NORMAL, false);
+	return;
+}
+unsigned int SocialMgr::OnServerMaleProposeToBoth(s_net_cmd *cmd)
+{
+	NET_SIS_propose_to_both* msg = (NET_SIS_propose_to_both*)cmd;
+	unsigned int uLocID = RoleManager::getInstance()->getLocalPlayer()->getId();
+
+	//此处仅男方收到
+	if (0 != msg->dw_error_code)
+	{
+		switch (msg->dw_error_code)
+		{
+		case E_Propose_Male_Married://男方有配偶
+			ToolTip::getInstance()->push(GET_STR(126));
+			break;
+		case E_Propose_Female_Married://女方有配偶
+			ToolTip::getInstance()->push(GET_STR(127));
+			break;
+		case E_Propose_Marray_Level://等级不足，无法结婚
+			ToolTip::getInstance()->push(GET_STR(124));
+			break;
+		case E_Propose_Marry_Lack_Item://缺少婚戒
+			ToolTip::getInstance()->push(GET_STR(125));
+			break;
+		case E_Propose_No_Team://男女二人组队才可结婚
+			ToolTip::getInstance()->push(GET_STR(120));
+			break;
+		case E_Propose_No_Map://当前地图不能登记结婚
+			ToolTip::getInstance()->push(GET_STR(128));
+			break;
+		default:
+			break;
+		}
+	}
+	else
+	{
+		//若是男方
+		if (msg->dwSrcRoleID == uLocID)
+		{
+			ToolTip::getInstance()->push(GET_STR(2209),1);
+		}
+		//若是女方
+		else
+		{
+			//先检查是否已被求婚
+			MessageBoxUi* pMsgBoxUI = (MessageBoxUi*)World::getInstance()->getScene()->getChildByTag(WCT_MarryMessageBox);
+			//如果没有被求婚才弹窗提示被求婚
+			if( pMsgBoxUI == NULL )
+			{
+				//先获取邀请方姓名
+				std::string srcName("");
+				if (NameMgr2::getInstance()->queryName(msg->dwSrcRoleID,srcName))
+				{
+					m_TempRoleID = msg->dwSrcRoleID;
+					//m_SpouseNameStr = srcName;
+					std::stringstream ss;
+					ss<<srcName<<GET_STR(135);
+					MessageBoxUi *practiceUI = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, ss.str().c_str(), "\xE7\xA1\xAE\xE5\xAE\x9A","\xE5\x8F\x96\xE6\xB6\x88");
+					World::getInstance()->getScene()->addChild(practiceUI, WZ_MESSAGEBOX, WCT_MarryMessageBox);
+					practiceUI->signalOkBtnPressed.connect(this, &SocialMgr::AgreePropose);
+					practiceUI->signalCancelBtnPressed.connect(this,&SocialMgr::DisagreePropose);
+				}
+			}
+		}
+	}
+	return 0;
+}
+void SocialMgr::AgreePropose()
+{
+	NET_SIC_propose_reply cmd;
+	cmd.dwSrcRoleID = m_TempRoleID;
+	cmd.bAgree = 1;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_NORMAL, false);
+	return;
+}
+void SocialMgr::DisagreePropose()
+{
+	NET_SIC_propose_reply cmd;
+	cmd.dwSrcRoleID = m_TempRoleID;
+	cmd.bAgree = 0;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_NORMAL, false);
+	return;
+}
+unsigned int SocialMgr::OnServerFemaleReplyToBoth(s_net_cmd *cmd)
+{
+	NET_SIS_propose_reply_to_both* msg = (NET_SIS_propose_reply_to_both*)cmd;
+	unsigned int uLocID = RoleManager::getInstance()->getLocalPlayer()->getId();
+	
+	//若是发给男方的
+	if (uLocID == msg->dwSrcRoleID)
+	{
+		if (0 == msg->dw_error_code)
+		{
+			if (NameMgr2::getInstance()->queryName(msg->dwDesRoleID,m_SpouseNameStr))
+			{
+				//提示用户：您与***结婚
+				m_SpouseID = msg->dwDesRoleID;
+				//std::stringstream ss;
+				//ss<<GET_STR(132)<<m_SpouseNameStr<<GET_STR(133);
+				//ToolTip::getInstance()->push(ss.str());
+				LocalPlayer* pl = RoleManager::getInstance()->getLocalPlayer();
+				std::string name = convertName(pl->getName());
+				JieHunUiMgr::GetInstance()->name1 = name;
+				JieHunUiMgr::GetInstance()->name2 = m_SpouseNameStr;
+				JieHunUiMgr::GetInstance()->openFenUi();
+			}
+		}
+		else if (E_Propose_Female_Disagree == msg->dw_error_code)
+		{
+			//给提示：被求婚对象不同意
+			ToolTip::getInstance()->push(GET_STR(129));
+			return 0;
+		}
+		else
+		{
+			//do nothing;
+		}
+	}
+	//发给女方的消息
+	else
+	{
+		if (0 == msg->dw_error_code)
+		{
+			if (NameMgr2::getInstance()->queryName(msg->dwSrcRoleID,m_SpouseNameStr))
+			{
+				//提示用户：您与***结婚
+				m_SpouseID = msg->dwDesRoleID;
+				//std::stringstream ss;
+				//ss<<GET_STR(132)<<m_SpouseNameStr<<GET_STR(133);
+				//ToolTip::getInstance()->push(ss.str());
+				LocalPlayer* pl = RoleManager::getInstance()->getLocalPlayer();
+				std::string name = convertName(pl->getName());
+				JieHunUiMgr::GetInstance()->name1 = name;
+				JieHunUiMgr::GetInstance()->name2 = m_SpouseNameStr;
+				JieHunUiMgr::GetInstance()->openFenUi();
+			}
+		}
+		else
+		{
+			switch (msg->dw_error_code)
+			{
+			case E_Propose_Male_Married://男方有配偶
+				ToolTip::getInstance()->push(GET_STR(126));
+				break;
+			case E_Propose_Female_Married://女方有配偶
+				ToolTip::getInstance()->push(GET_STR(127));
+				break;
+			case E_Propose_Marray_Level://等级不足，无法结婚
+				ToolTip::getInstance()->push(GET_STR(124));
+				break;
+			case E_Propose_Marry_Lack_Item://缺少婚戒
+				ToolTip::getInstance()->push(GET_STR(125));
+				break;
+			case E_Propose_No_Map://双方必须在婚姻殿堂成婚
+				ToolTip::getInstance()->push(GET_STR(130));
+				break;
+			case E_Propose_Marray_Bag_Not_Enough: //自己或配偶背包空间不足
+				ToolTip::getInstance()->push(GET_STR(7137));
+				break;
+			case E_Propose_Marray_Man_Offline: //邀请方不在线
+				ToolTip::getInstance()->push(GET_STR(7142));
+				break;
+			default:
+				break;
+			}
+		}
+	}
+	return 0;
+}
+void SocialMgr::PlayerDivorce()
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(ploc))
+		return;
+	int spouseID=GetSpouseID();
+	if (!IS_VALID(spouseID))
+	{
+		ToolTip::getInstance()->push("\xE6\x82\xA8\xE5\xBD\x93\xE5\x89\x8D\xE8\xBF\x98\xE6\xB2\xA1\xE6\x9C\x89\xE7\xBB\x93\xE5\xA9\x9A");
+		return;
+	}
+	//检查玩家背包
+	if (PackageManager::getInstance()->getJinBi() < DIVORCE_NEED_GOLD)
+	{
+		//提示：金币不足，无法离婚
+		ToolTip::getInstance()->push(GET_STR(2031));
+		return;
+	}
+	//离婚给二次确认
+	std::stringstream ss;
+	ss<<"\xE6\x82\xA8\xE7\xA1\xAE\xE5\xAE\x9A\xE6\xB6\x88\xE8\x80\x97\x35\x30\x30\xE4\xB8\x87\xE9\x87\x91\xE5\xB8\x81\xE4\xB8\x8E\xE6\x82\xA8\xE7\x9A\x84\xE4\xBC\xB4\xE4\xBE\xA3"<<GetSpouseName()
+		<<"\xE8\xA7\xA3\xE9\x99\xA4\xE5\xA9\x9A\xE5\xA7\xBB\xE5\x85\xB3\xE7\xB3\xBB";
+	MessageBoxUi *practiceUI = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, ss.str().c_str(), TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+	World::getInstance()->getScene()->addChild(practiceUI, WZ_MESSAGEBOX);
+	practiceUI->signalOkBtnPressed.connect(this, &SocialMgr::ConfirmDivorce);
+}
+void SocialMgr::ConfirmDivorce()
+{
+	NET_SIC_role_divorce cmd;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_NORMAL, false);
+	return;
+}
+unsigned int SocialMgr::OnServerRemotePlayerDivorce(s_net_cmd *cmd)
+{
+	NET_SIS_remote_role_divorce* msg = (NET_SIS_remote_role_divorce*)cmd;
+	Role* srcRole = RoleManager::getInstance()->findRole(msg->src_dw_role_id);
+	if(srcRole)
+	{
+		srcRole->setSpouseName("",-1);
+	}
+	Role* descRole = RoleManager::getInstance()->findRole(msg->desc_dw_role_id);
+	if(descRole)
+	{
+		descRole->setSpouseName("",-1);
+	}
+	return 0;
+}
+unsigned int SocialMgr::OnServerPlayerDivorce(s_net_cmd *cmd)
+{
+	NET_SIS_role_divorce_to_both* msg = (NET_SIS_role_divorce_to_both*)cmd;
+	if (msg->dw_error_code == 0)
+	{
+		LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+		if (!IS_VALID_PTR(ploc))
+			return 0;
+		unsigned int locID = ploc->getId();
+		//若是本地玩家主动提出离婚
+		if (locID == msg->dw_SrcRole_ID)
+		{
+			std::string str = replaceStr(GET_STR(2048),"**",m_SpouseNameStr);
+			m_SpouseID = (unsigned int)INVALID;
+			m_SpouseNameStr = ("");
+			ToolTip::getInstance()->push(str);
+		}
+		//若本地玩家是被离婚的一方
+		else
+		{
+			std::string str = replaceStr(GET_STR(2049),"**",m_SpouseNameStr);
+			m_SpouseID = (unsigned int)INVALID;
+			m_SpouseNameStr = ("");
+			ToolTip::getInstance()->push(str);
+		}
+		RoleManager::getInstance()->SetShowSelfRoleName(GET_UI(HookSetUi,WCT_HookSetUi)->getGameSetData().isShowRoleName == 1);
+	}
+	else
+	{
+		if (E_Divorce_Lack_Yuanbao == msg->dw_error_code)
+		{
+			//提示：金币不足，无法离婚
+			ToolTip::getInstance()->push(GET_STR(2031));
+		}
+	}
+	return 0;
+}
+
+void SocialMgr::SetRoleSocialData(const tagRoleSocialInfo &Info)
+{
+	//合法性检查
+	if (Info.byStar < EVC_Aries || Info.byStar > EVC_Default)
+		return;
+	std::string strTmp;
+	char vStr[500];
+	memset(vStr, 0, sizeof(vStr));
+	Utf16ToUtf8(Info.chCity, vStr, 500, 0);
+	strTmp.assign(vStr);
+	//过滤检查
+	if (FilterMgr::getInstance()->IsNameInNameFilterFile(strTmp) != 0)
+	{
+		GET_UI(RoleInfoUi, WCT_RoleInfoUi)->updateData(RoleManager::getInstance()->getLocalPlayer()->getId());
+		//含有非法字符
+		ToolTip::getInstance()->push(GET_STR(189));
+		return;
+	}
+	
+	memset(vStr, 0, sizeof(vStr));
+	Utf16ToUtf8(Info.bySignature, vStr, 500, 0);
+	strTmp.assign(vStr);
+	if (FilterMgr::getInstance()->IsNameInNameFilterFile(strTmp) != 0)
+	{
+		GET_UI(RoleInfoUi, WCT_RoleInfoUi)->updateData(RoleManager::getInstance()->getLocalPlayer()->getId());
+		//含有非法字符
+		ToolTip::getInstance()->push(GET_STR(189));
+		return;
+	}
+	
+	int nMax = sizeof(NET_SIC_set_role_card)+sizeof(Info.bySignature);
+	unsigned char* pMsg = new unsigned char[nMax];
+	NET_SIC_set_role_card* pcmd = (NET_SIC_set_role_card*)pMsg;
+	pcmd->id = message_id_crc("NET_SIC_set_role_card");
+	pcmd->dw_role_id = RoleManager::getInstance()->getLocalPlayer()->getId();
+	pcmd->customVCardData.byConstellation = Info.byStar;
+	memcpy(pcmd->customVCardData.chCity,Info.chCity,sizeof(Info.chCity));
+	memcpy(pcmd->customVCardData.byData,Info.bySignature,sizeof(Info.bySignature));
+	pcmd->customVCardData.bySignatureSize = sizeof(Info.bySignature);
+	pcmd->size = nMax - sizeof(unsigned char);
+	TCP_CLIENT->send_net_cmd(pcmd, NP_NORMAL, false);
+	m_RoleSocialData = Info;
+	delete []pMsg;
+	return;
+}
+unsigned int SocialMgr::OnServerSetRoleSocialData(s_net_cmd *cmd)
+{
+	NET_SIS_set_role_card* msg = (NET_SIS_set_role_card*)cmd;
+	if (msg->dw_role_id != RoleManager::getInstance()->getLocalPlayer()->getId())//防止异常
+		return 0;
+	if (E_VCard_Success == msg->dw_error_code)
+	{
+		//是否需要给用户提示？
+	}
+	else
+	{
+		//提示用户无权限修改，若进入这里，是非法消息
+		memset(&m_RoleSocialData,0,sizeof(tagRoleSocialInfo));
+	}
+	GET_UI(RoleInfoUi, WCT_RoleInfoUi)->updateData(RoleManager::getInstance()->getLocalPlayer()->getId());
+	return 0;
+}
+void SocialMgr::InitRoleSocialData()
+{
+	NET_SIC_get_role_card cmd;
+	cmd.dw_role_id = RoleManager::getInstance()->getLocalPlayer()->getId();
+	TCP_CLIENT->send_net_cmd(&cmd, NP_INSIGNIFICANT, false);
+	return;
+}
+unsigned int SocialMgr::OnServerInitRoleSocialData(s_net_cmd *cmd)
+{
+	NET_SIS_get_role_card* msg = (NET_SIS_get_role_card*)cmd;
+	//此处仅处理本地玩家的信息
+	if (msg->dw_role_id != RoleManager::getInstance()->getLocalPlayer()->getId())
+		return 0;
+	tagVCardData* pData = reinterpret_cast<tagVCardData*>(msg->pData);
+	m_RoleSocialData.byStar = pData->customVCardData.byConstellation;
+	memcpy(m_RoleSocialData.chCity,pData->customVCardData.chCity,sizeof(pData->customVCardData.chCity));
+	memcpy(m_RoleSocialData.bySignature,pData->customVCardData.byData,MIN(pData->customVCardData.bySignatureSize,2*LEN_MAX_SIGNATURE));
+	//TODO:roleinfoUI
+	GET_UI(RoleInfoUi, WCT_RoleInfoUi)->updateData(RoleManager::getInstance()->getLocalPlayer()->getId());
+	return 0;
+}
+
+void SocialMgr::ToCharge()
+{
+	//充值预留
+//#ifndef WIN32
+//	WzolJni::getInstance()->payJni();
+//#endif
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+}
+
+void SocialMgr::GetQbjjReward()
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	//检查玩家是否已结婚
+	if ((unsigned int)INVALID == GetSpouseID())
+	{
+		//若是男方来领取
+		if (1 == ploc->getAttribute(RA_SEX))
+		{
+			//先去找一个红唇女神结婚吧
+			ToolTip::getInstance()->push(GET_STR(2172));
+			return;
+		}
+		else//若是女方
+		{
+			//若女方是红唇女神
+			if (ploc->getRedZuiFlag())
+			{
+				ToolTip::getInstance()->push(GET_STR(2178));
+			}
+			//若女方不是红唇女神
+			else
+			{
+				ToolTip::getInstance()->push(GET_STR(2174));
+			}
+			return;
+		}
+	}
+	Role* pRole = RoleManager::getInstance()->findRole(GetSpouseID());
+	if (!IS_VALID_PTR(pRole))
+	{
+		ToolTip::getInstance()->push(GET_STR(2173));
+		return;
+	}
+	Player* pPlayer = (Player*)pRole;
+	if (!IS_VALID_PTR(pPlayer))
+		return;
+	if (1 == ploc->getAttribute(RA_SEX))//若是男生来领奖
+	{
+		if (!pPlayer->getRedZuiFlag())
+		{
+			ToolTip::getInstance()->push(GET_STR(2174));
+			return;
+		}
+	}
+	else
+	{
+		if (!ploc->getRedZuiFlag())
+		{
+			ToolTip::getInstance()->push(GET_STR(2174));
+			return;
+		}
+	}
+	NET_SIC_get_qbjj_reward cmd;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_NORMAL, false);
+}
+unsigned int SocialMgr::OnServerGetQbjjReward(s_net_cmd* cmd)
+{
+	NET_SIS_get_qbjj_reward *msg = (NET_SIS_get_qbjj_reward*)cmd;
+	if (0 == msg->dw_error_code)//奖励已发放到奖励通道
+	{
+		ToolTip::getInstance()->push(GET_STR(2175));
+	}
+	else
+	{
+		switch (msg->dw_error_code)
+		{
+		case E_QBJJ_LEVEL_Min_Woman:
+			{
+				LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+				if (!ploc)
+					return 0;
+				if (0 == ploc->getAttribute(RA_SEX))//若本地玩家是女方
+				{
+					ToolTip::getInstance()->push(GET_STR(2176));
+				}
+				else//若本地玩家是男方
+				{
+					ToolTip::getInstance()->push(GET_STR(2177));
+				}
+			}
+			break;
+		case E_QBJJ_LEVEL_MIN_Man:
+			ToolTip::getInstance()->push(GET_STR(2176));
+			break;
+		case E_QBJJ_RED_NO:
+			ToolTip::getInstance()->push(GET_STR(2174));
+			break;
+		case E_QBJJ_RED_NO_REWARD:
+			ToolTip::getInstance()->push(GET_STR(2073));
+			break;
+		}
+	}
+	return 0;
+}
+
+unsigned int SocialMgr::OnServerSetRedZuiFlag( s_net_cmd* cmd )
+{
+	NET_SIS_update_role_script_data* msg = (NET_SIS_update_role_script_data*)cmd;
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return 0;
+	if (ploc->getId() != msg->dw_role_id)//只考虑自己
+		return 0;
+	if (REDZUI_FLAG_INDEX == msg->nindex)
+	{
+		ploc->setRedZuiFlag(msg->dwvalue);
+		if (1 == msg->dwvalue)
+		{
+			//UI 刷新
+			ploc->setRedLip(true);
+		}
+	}
+	else 
+	{
+		//do nothing
+	}
+	return 0;
+}
+
+unsigned int SocialMgr::OnServerSpouseLogin( s_net_cmd* cmd )
+{
+	//您的伴侣上线啦
+	ToolTip::getInstance()->push("\xE6\x82\xA8\xE7\x9A\x84\xE4\xBC\xB4\xE4\xBE\xA3\xE4\xB8\x8A\xE7\xBA\xBF\xE5\x95\xA6");
+	return 0;
+}
+
+unsigned int SocialMgr::OnServerSpouseLogout( s_net_cmd* cmd )
+{
+	//您的伴侣下线啦
+	ToolTip::getInstance()->push("\xE6\x82\xA8\xE7\x9A\x84\xE4\xBC\xB4\xE4\xBE\xA3\xE4\xB8\x8B\xE7\xBA\xBF\xE5\x95\xA6");
+	return 0;
+}
+
+unsigned int SocialMgr::OnServerEnemy_List( s_net_cmd* cmd )
+{
+	NET_SIS_send_enemy_list* msg = (NET_SIS_send_enemy_list*)cmd;
+	tagEnemyInfo tmpStruct;
+	memset(&tmpStruct,0,sizeof(tagEnemyInfo));
+	m_enemy_vector.clear();//在向服务器要信息前，需要清空数组
+	for (int i = 0;i < msg->n_num;i++)
+	{
+		tmpStruct.dwEnemyID = msg->EnemyInfo[i].dwEnemyID;
+		tmpStruct.nLevel = msg->EnemyInfo[i].nLevel;
+		tmpStruct.eClassType = (EClassType)(msg->EnemyInfo[i].eClassType);
+		tmpStruct.bySex = msg->EnemyInfo[i].bySex;
+		tmpStruct.isWatch = msg->EnemyInfo[i].isWatch;
+		tmpStruct.beKillNum = msg->EnemyInfo[i].beKillNum;
+		tmpStruct.killNum = msg->EnemyInfo[i].killNum;
+		tmpStruct.bOnline = msg->EnemyInfo[i].bOnline;
+		memset(tmpStruct.enemyName,0,sizeof(tmpStruct.enemyName));
+		//获取远程玩家的名字
+		std::string rolename;
+		if(NameMgr2::getInstance()->queryName(msg->EnemyInfo[i].dwEnemyID , rolename))
+		{
+			wchar_t tmp[X_SHORT_NAME];
+			memset(tmp, 0, sizeof(tmp));
+			Utf8ToUtf16(rolename.c_str(), tmp, X_SHORT_NAME, 0);
+
+			memcpy(tmpStruct.enemyName,tmp,sizeof(wchar_t)*X_SHORT_NAME);
+		}
+		m_enemy_vector.push_back(tmpStruct);
+	}
+	return 0;
+}
+
+unsigned int SocialMgr::OnServerAddEnemy( s_net_cmd* cmd )
+{
+	NET_SIS_add_enemy* msg = (NET_SIS_add_enemy*)cmd;
+	bool isFind = false;
+	for (size_t i = 0; i < m_enemy_vector.size(); i++)
+	{
+		if (m_enemy_vector[i].dwEnemyID == msg->info.dwEnemyID)
+		{
+			isFind = true;
+			m_enemy_vector[i].nLevel = msg->info.nLevel;
+			m_enemy_vector[i].eClassType = (EClassType)(msg->info.eClassType);
+			m_enemy_vector[i].bySex = msg->info.bySex;
+			m_enemy_vector[i].isWatch = msg->info.isWatch;
+			m_enemy_vector[i].beKillNum = msg->info.beKillNum;
+			m_enemy_vector[i].killNum = msg->info.killNum;
+			m_enemy_vector[i].bOnline = msg->info.bOnline;
+			break;
+		}
+	}
+	if (!isFind)
+	{
+		tagEnemyInfo enmeyInfo;
+		memset(&enmeyInfo,0,sizeof(tagBlackInfo));
+		enmeyInfo.dwEnemyID = msg->info.dwEnemyID;
+		enmeyInfo.nLevel = msg->info.nLevel;
+		enmeyInfo.eClassType = (EClassType)(msg->info.eClassType);
+		enmeyInfo.bySex = msg->info.bySex;
+		enmeyInfo.isWatch = msg->info.isWatch;
+		enmeyInfo.beKillNum = msg->info.beKillNum;
+		enmeyInfo.killNum = msg->info.killNum;
+		enmeyInfo.bOnline = msg->info.bOnline;
+		std::string rolename;
+		if(NameMgr2::getInstance()->queryName(msg->info.dwEnemyID , rolename))
+		{
+			wchar_t tmp[X_SHORT_NAME];
+			memset(tmp, 0, sizeof(tmp));
+			Utf8ToUtf16(rolename.c_str(), tmp, X_SHORT_NAME, 0);
+
+			memcpy(enmeyInfo.enemyName,tmp,sizeof(wchar_t)*X_SHORT_NAME);
+		}
+		m_enemy_vector.push_back(enmeyInfo);
+	}
+	Role *role = RoleManager::getInstance()->findRole(msg->info.dwEnemyID);
+	if(role != NULL && role->getCreatureType() == CT_PLAYER)
+	{
+		Player* pPlayer = dynamic_cast<Player*>(role);
+		if (pPlayer)
+		{
+			pPlayer->setEnemy();
+		}
+	}
+	
+	//UI接口函数需求 RefreshFriendList()
+	//ui更新
+	GET_UI(FriendUi, WCT_FRIENDUI)->updateUiData();
+	return 0;
+}
+
+unsigned int SocialMgr::OnServerDelEnemy( s_net_cmd* cmd )
+{
+	NET_SIS_delete_enemy_list* msg = (NET_SIS_delete_enemy_list*)cmd;
+	if (msg->dw_error_code == 0)
+	{
+		for (size_t i = 0; i < m_enemy_vector.size(); i++)
+		{
+			if (m_enemy_vector[i].dwEnemyID == msg->dwDestRoleID)
+			{
+				m_enemy_vector.erase(m_enemy_vector.begin() + i);
+				break;
+			}
+		}
+		Role *role = RoleManager::getInstance()->findRole(msg->dwDestRoleID);
+		if(role != NULL && role->getCreatureType() == CT_PLAYER)
+		{
+			Player* pPlayer = dynamic_cast<Player*>(role);
+			if (pPlayer)
+			{
+				pPlayer->setEnemy();
+			}
+		}
+		GET_UI(FriendUi, WCT_FRIENDUI)->updateUiData();
+	}
+	return 0;
+}
+
+void SocialMgr::onDelEnemy( unsigned int destRoleID, bool isdel )
+{
+	if (!IS_VALID(destRoleID))
+	{
+		return;
+	}
+	NET_SIC_delete_enemy_list cmd;
+	cmd.dwDestRoleID = destRoleID;
+	if (!isdel)
+		cmd.type = 1;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_INSIGNIFICANT,false);
+}
+
+tagEnemyInfo* SocialMgr::getEnemyInfo( unsigned int destRoleID )
+{
+	for (size_t i = 0; i < m_enemy_vector.size(); i++)
+	{
+		if (m_enemy_vector[i].dwEnemyID == destRoleID)
+		{
+			return &m_enemy_vector[i];
+		}
+	}
+	return NULL;
+}
+
+bool SocialMgr::getEnemyWatch( unsigned int destRoleID )
+{
+	tagEnemyInfo* info = getEnemyInfo(destRoleID);
+	if (info)
+	{
+		return info->isWatch != 0;
+	}
+	return false;
+}
+
+bool SocialMgr::getIsEnemy( unsigned int destRoleID )
+{
+	tagEnemyInfo* info = getEnemyInfo(destRoleID);
+	if (info)
+	{
+		return info->killNum > info->beKillNum;
+	}
+	return false;
+}
+
+unsigned int SocialMgr::onServerBlackLogout( s_net_cmd *cmd )
+{
+	NET_SIS_logout_to_black* msg = (NET_SIS_logout_to_black*)cmd;
+	for (black_vector::iterator iter = m_black_vector.begin();iter!=m_black_vector.end();++iter)
+	{
+		if ((*iter).uBlackID == msg->dw_role_id)
+		{
+			(*iter).bOnline = 0;
+			(*iter).nLevel = msg->level;
+			FriendUiLayer *uilayer = getUiNodeByTag<FriendUiLayer>(WCT_FRIENDUI);
+			if (uilayer)
+			{
+				uilayer->updateUiData();
+			}
+		}
+	}
+	return 0;
+}
+
+unsigned int SocialMgr::onServerBlackLogin( s_net_cmd *cmd )
+{
+	NET_SIS_login_to_black* msg = (NET_SIS_login_to_black*)cmd;
+	for (black_vector::iterator iter = m_black_vector.begin();iter!=m_black_vector.end();++iter)
+	{
+		if ((*iter).uBlackID == msg->dw_role_id)
+		{
+			(*iter).bOnline = 1;
+			FriendUiLayer *uilayer = getUiNodeByTag<FriendUiLayer>(WCT_FRIENDUI);
+			if (uilayer)
+			{
+				uilayer->updateUiData();
+			}
+		}
+	}
+	return 0;
+}
+
+unsigned int SocialMgr::onServerEnemyLogout( s_net_cmd *cmd )
+{
+	NET_SIS_logout_to_enemy* msg = (NET_SIS_logout_to_enemy*)cmd;
+	for (enemy_vector::iterator iter = m_enemy_vector.begin();iter!=m_enemy_vector.end();++iter)
+	{
+		if ((*iter).dwEnemyID == msg->dw_role_id)
+		{
+			(*iter).bOnline = 0;
+			(*iter).nLevel = msg->level;
+			FriendUiLayer *uilayer = getUiNodeByTag<FriendUiLayer>(WCT_FRIENDUI);
+			if (uilayer)
+			{
+				uilayer->updateUiData();
+			}
+		}
+	}
+	return 0;
+}
+
+unsigned int SocialMgr::onServerEnemyLogin( s_net_cmd *cmd )
+{
+	NET_SIS_login_to_enemy* msg = (NET_SIS_login_to_enemy*)cmd;
+	for (enemy_vector::iterator iter = m_enemy_vector.begin();iter!=m_enemy_vector.end();++iter)
+	{
+		if ((*iter).dwEnemyID == msg->dw_role_id)
+		{
+			(*iter).bOnline = 1;
+			FriendUiLayer *uilayer = getUiNodeByTag<FriendUiLayer>(WCT_FRIENDUI);
+			if (uilayer)
+			{
+				uilayer->updateUiData();
+			}
+		}
+	}
+	return 0;
+}
+
+bool SocialMgr::tryToAddFriend( unsigned int targetID )
+{
+	RoleManager* mgr = RoleManager::getInstance();
+	unsigned int roleId = targetID;
+	Role *role = mgr->findRole(roleId);
+	if(role != NULL)
+	{
+		LocalPlayer* ploc = mgr->getLocalPlayer();
+		if(!ploc)
+			return false;
+		if (ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))//摆摊交易中禁止操作
+		{
+			ToolTip::getInstance()->push(GET_STR(7209));
+			return false;
+		}
+		onAddFriend(roleId);
+		return true;
+	}
+
+	return false;
+}
+
+void SocialMgr::updateRoleLevel( unsigned int roleId,int level )
+{
+	BOOST_FOREACH(tagFriendInfo_ & one,m_friend_vector)
+	{
+		if(one.uFriendID == roleId)
+		{
+			one.nLevel = level;
+			break;
+		}
+	}
+	BOOST_FOREACH(tagBlackInfo_ & one,m_black_vector)
+	{
+		if(one.uBlackID == roleId)
+		{
+			one.nLevel = level;
+			break;
+		}
+	}
+	BOOST_FOREACH(tagEnemyInfo & one,m_enemy_vector)
+	{
+		if(one.dwEnemyID == roleId)
+		{
+			one.nLevel = level;
+			 break;
+		}
+	}
+}
+
+void SocialMgr::updateRoleLevel( unsigned int roleId,bool online,int level,int rating )
+{
+	BOOST_FOREACH(tagFriendInfo_ & one,m_friend_vector)
+	{
+		if(one.uFriendID == roleId)
+		{
+			one.bOnline= online;
+			one.nLevel = level;
+			one.n32Rating = rating;
+		}
+	}
+	BOOST_FOREACH(tagBlackInfo_ & one,m_black_vector)
+	{
+		if(one.uBlackID == roleId)
+		{
+			one.bOnline= online;
+			one.nLevel = level;
+		}
+	}
+	BOOST_FOREACH(tagEnemyInfo & one,m_enemy_vector)
+	{
+		if(one.dwEnemyID == roleId)
+		{
+			one.bOnline= online;
+			one.nLevel = level;
+		}
+	}
+}
+
+void SocialMgr::updateRoleOnline( unsigned int roleId,bool online )
+{
+	BOOST_FOREACH(tagFriendInfo_ & one,m_friend_vector)
+	{
+		if(one.uFriendID == roleId)
+		{
+			one.bOnline= online;
+		}
+	}
+	BOOST_FOREACH(tagBlackInfo_ & one,m_black_vector)
+	{
+		if(one.uBlackID == roleId)
+		{
+			one.bOnline= online;
+		}
+	}
+	BOOST_FOREACH(tagEnemyInfo & one,m_enemy_vector)
+	{
+		if(one.dwEnemyID == roleId)
+		{
+			one.bOnline= online;
+		}
+	}
+}
+
+void SocialMgr::delayDestroy()
+{
+	m_friend_vector.clear();
+	m_black_vector.clear();
+	m_enemy_vector.clear();
+}

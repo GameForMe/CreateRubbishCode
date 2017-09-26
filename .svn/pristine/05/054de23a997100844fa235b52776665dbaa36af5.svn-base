@@ -1,0 +1,309 @@
+#ifndef SERVERLISTUI_H
+#define SERVERLISTUI_H
+
+#include "cocos2d.h"
+#include "cocos-ext.h"
+#include "ListItem.h"
+#include "VerticalList.h" 
+#include "GameActionNode.h"
+using namespace cocos2d;
+using namespace cocos2d::extension;
+
+#define SERVERLIST_SPACE_H 185
+#define SERVERLIST_SPACE_V 70
+
+extern const char* serverlistDownFileName;
+
+struct ServerZone
+{
+	struct Zone
+	{
+		std::string name;
+		std::string version;
+		std::string ip;
+		int zoneIdx;		// zoneIdx为0代表“曾经登陆”，其余从1顺序向下排
+		int port;
+		int serial;
+		int IsShow;
+		std::string areaname; //公测区和内测区的string
+		int areatag;          //公测区和内测区的tag
+		Zone():IsShow(1) , zoneIdx(-1)
+		{
+
+		}
+	};
+
+	struct Server
+	{
+		std::string name;
+		std::string nameDest;//记录该服合并到了哪个服
+		std::string zonenameDest;//记录该服合并到了哪个区
+		std::string num;
+		std::string version;
+		std::string zoneName;		// 所属的大区名，用于“曾经登陆”
+		std::string areaName;     //曾经登录的区名，区分“公测区”和“内测区”
+		int status;
+		int serial;
+		int meregeFlag;//是否需要考虑合服标记
+		int IsShow;
+		int zoneIdx;		// 所属的大区idx，用于“曾经登陆”
+		int areaTag;        // 曾经登录的区名tag值，区分“公测区”和“内测区”
+		Server():meregeFlag(0),nameDest(("")),IsShow(1),zoneIdx(-1),zonenameDest(("")),areaTag(-1),areaName((""))
+		{
+			version = "";
+		}
+	};
+
+	Zone zone;
+	std::list<Server> serverList;
+};
+
+
+class AreaListItem : public ListItem
+{
+	enum eNodeTag
+	{
+		NT_Back = 0,
+		NT_Label
+	};
+
+public:
+	AreaListItem();
+	~AreaListItem();
+	void setData(const ServerZone::Zone &zone);
+	ServerZone::Zone getData() { return _zone; }
+	virtual CCSize getContentSize();
+	virtual void onTouch(CCTouch *touck);
+	virtual void onSelectChanged(bool select);
+	virtual float getItemHeight();
+
+private:
+	LabelFT *getLabel();
+
+private:
+	ServerZone::Zone _zone;
+};
+
+class ServerListItem;
+
+class ServerListItemFrame : public CCSprite
+{
+	friend class ServerListItem;
+
+	enum eNodeTag
+	{
+		NT_Icon = 0,
+		NT_State = 1,
+		NT_ServerName = 2,
+		NT_ServerNum = 3,
+		NT_LastLogin = 4
+	};
+
+public:
+	ServerListItemFrame();
+	~ServerListItemFrame();
+	CREATE_FUNC(ServerListItemFrame);
+	bool init();
+	void setLastLogin(bool bLast);
+	void setState(int state);
+	void setServerName(const std::string &name);
+	void setServerNum(const std::string &num);
+
+protected:
+	ServerListItem *_item;
+};
+
+class ServerListItem
+{
+public:
+	enum eServerState
+	{
+		SS_Recommend = 0,
+		SS_New,
+		SS_Fire,
+		SS_Preserve,
+	};
+
+	ServerListItem();
+	~ServerListItem();
+	void addToParent(CCNode *node);
+	void setData(const ServerZone::Server &server, bool bLastLogin);
+	const ServerZone::Server &getData() const {return _data;}
+	void setPosition(const CCPoint &pos);
+	bool isTouchOn(CCTouch *pTouch);
+	void setSelect(bool select);
+
+private:
+	ServerListItemFrame *_uiFrame;
+	std::set<std::string> _usedPlistFile;
+	ServerZone::Server _data;
+};
+
+class ServerListUiLayer;
+
+class ServerListUi
+{
+	friend class ServerListUiLayer;
+public:
+	ServerListUi();
+	static ServerListUi *getInstance();
+	void open();
+	void close();
+	void praseServerList();
+	void updateDisplay();
+	ServerListUiLayer *getUiLayer();
+
+	ServerZone::Zone* getZone( const std::string &zoneName );
+	const std::list<ServerZone> &getZoneList() const { return _zoneList; }
+	std::list<ServerZone::Server> getServerList(const std::string &zoneName);
+	bool getCurDataForGame(ServerZone::Zone &zone, ServerZone::Server &server);
+	bool getCurDataForLogin(ServerZone::Zone &zone, ServerZone::Server &server);
+
+	const std::string &curAreaName() const { return _curAreaName; }
+	const std::string &curServerName() const { return _curServerName; }
+	const std::string &curServerNum() const { return _curServerNum; }
+	
+	void setCurAreaName(const std::string &name) { _curAreaName = name; }
+	void setCurServerName(const std::string &name) { _curServerName = name; }
+	void setCurServerNum(const std::string &num) { _curServerNum = num; }
+
+	void setCurServerStatus(const int &nStatus) { m_CurServerStatus = nStatus; }
+	int GetCurServerStatus() { return m_CurServerStatus; }
+
+	const std::string &recommandAreaName() const { return _recommandAreaName; }
+	const std::string &recommandServerName() const { return _recommandServerName; }
+	const std::string &recommandServerNum() const { return _recommandServerNum; }
+	const int recommandServerState() const { return _recommandServerState; }
+	const int recommandServerAreaTag() const { return _recommandSetverAreaTag; }
+	void setIsFirstLogin(bool flag){isFirstLogin = flag;};
+
+	const std::string& getAreaBtnName1() const { return m_areaBtnName1; }
+	const std::string& getAreaBtnName2() const { return m_areaBtnName2; }
+	const std::string& getUsedLoginName1() const { return m_usedLoginName1; }
+	const std::string& getUsedLoginName2() const { return m_usedLoginName2; }
+
+protected:
+	bool getCurServerData(ServerZone::Zone &zone, ServerZone::Server &server, const std::string& arenaName, const std::string& serverName);
+
+	bool hasUsedLoginServer()  {return _hasUsedLoginServer;}
+
+#ifndef WIN32
+	void update(float dt);
+	void onRetryMessageBoxOk();
+
+private:
+	bool _update;
+	bool _bDownServerList;
+
+#endif
+
+private:
+	void updateUsedLoginSeversData();
+
+	bool getServerZone(const std::string & serverInfo, ServerZone::Zone & zone_out, ServerZone::Server & server_out);
+	bool getServerZoneByName(const std::string & zoneName, const std::string & serverName, ServerZone::Zone & zone_out, ServerZone::Server & server_out);
+
+	bool get_appropriate_recommond_server(ServerZone::Zone & zone_out, ServerZone::Server & server_out);
+protected:
+	std::set<std::string> _usedPlistFile;
+	std::list<ServerZone> _zoneList;
+
+	std::string _curAreaName;
+	std::string _curServerName;
+	std::string _curServerNum; //add by XSea 2014.10.22
+
+	std::string _recommandAreaName;
+	std::string _recommandServerName;
+	std::string _recommandServerNum;
+	int	_recommandServerState;
+	int _recommandSetverAreaTag;
+	bool isFirstLogin;
+	bool _isLoad;
+	int m_CurServerStatus;
+	bool _hasUsedLoginServer;
+
+	std::string m_areaBtnName1;
+	std::string m_areaBtnName2;
+	std::string m_usedLoginName1;
+	std::string m_usedLoginName2;
+
+};
+
+class ServerListUiLayer
+	: public CCLayer
+	, public cocos2d::extension::CCBSelectorResolver
+	, public cocos2d::extension::CCNodeLoaderListener
+{
+	enum eNodeTag
+	{
+		NT_Frame = 0,
+		NT_AreaContent = 1,
+		NT_ServerListContent = 2,
+		NT_RecommendServer = 3,
+/*		NT_LastLoginServer = 4,*/
+		NT_SpecialSprite = 7,
+		NT_GongCeQuLab = 8,
+		NT_NeiCeQuLab = 9,
+		NT_BaoManLab = 10,
+		NT_KongXianLab = 11,
+		NT_WeiHuLab = 12,
+		NT_GongCeQuBtn = 13,
+		NT_NeiCeQuBtn = 14,
+	};
+public:
+	ServerListUiLayer();
+	~ServerListUiLayer();
+	CCB_STATIC_NEW_AUTORELEASE_OBJECT_WITH_INIT_METHOD(ServerListUiLayer, create);
+	virtual SEL_MenuHandler onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName);
+	virtual SEL_CCControlHandler onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName);
+	virtual void onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader);
+
+	void updateDisplay();
+
+	virtual void onEnter();
+	virtual void onExit();
+
+//	void runAnimation();
+//	void stopAnimation();
+	void onGongCeQuBtn(cocos2d::CCObject* pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onNeiCeQuBtn(cocos2d::CCObject* pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+
+	virtual bool ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent);
+	virtual void ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent);
+
+private:
+	void clearZoneList();
+	void clearServerList();
+	void resetScrollPosition();
+	void setState(int state); //设置豆状态
+private:
+	CCSprite *_frame;
+	CCSprite *_specialSprite;
+	CCSprite *_specialNode;
+	CCSprite *_specialIcon;
+
+//	CCSprite* _forwardUpEffect;
+//	CCSprite* _forwardDownEffect;
+	CCNode* _forwardUpSprite;
+	CCNode* _forwardDownSprite;
+
+	VerticalList<AreaListItem> *_areaList;
+	CCScrollView *_areaScrollView;
+	CCNode *_areaContent;
+
+	CCScrollView *_serverScrollView;
+	CCNode *_serverContent;
+	CCNode *_serverContent2;
+	std::list<ServerListItem*> _serverList;
+
+	CCPoint _stPt;
+
+	CCControlButton *_gongCeQuBtn;
+	CCControlButton *_neiCeQuBtn;
+	LabelFT* m_gongCeQuLabel;
+	LabelFT* m_neiCeQuLabel;
+	bool _isSelectGongCe;
+	bool _isSelectNeiCe;
+};
+
+#endif //SERVERLISTUI_H

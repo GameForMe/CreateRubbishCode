@@ -1,0 +1,318 @@
+#include "NewFuncGuider.h"
+#include "GameEventDefine.h"
+#include "CommonClient.h"
+#include "DBMgr.h"
+#include "LevelUpGuideShow.h"
+#include "UiManager.h"
+#include "SystemUi.h"
+#include "RoleManager.h"
+#include "QuestMgr.h"
+#include "LocalPlayer.h"
+#include "MiniMapUi.h"
+#include "SkillManager.h"
+#include "NewPlayerGuide.h"
+
+NewFuncGuider::NewFuncGuider()
+	:mnCacheSkillID(-1)
+{
+
+}
+
+NewFuncGuider::~NewFuncGuider()
+{
+
+}
+
+bool NewFuncGuider::init()
+{
+	REGISTER_EVENT(LpLevelUpEvent,NewFuncGuider,onEventLvUp);
+	REGISTER_EVENT(QuestComplete,NewFuncGuider,onEventQuestComplete);
+
+	loadData();
+
+	return true;
+}
+
+void NewFuncGuider::destroy()
+{
+	UNREGISTER_EVENT(LpLevelUpEvent,NewFuncGuider,onEventLvUp);
+	UNREGISTER_EVENT(QuestComplete,NewFuncGuider,onEventQuestComplete);
+
+
+	cleanData();
+}
+
+stGuideModelData const* NewFuncGuider::getModelData( int nID ) const
+{
+	BOOST_AUTO(finder,mModel.find(nID));
+	if (finder != mModel.end())
+	{
+		return &finder->second;
+	}
+
+	return NULL;
+}
+
+
+void NewFuncGuider::loadData()
+{
+	cleanData();
+
+	SQL_START_WITH_DATA(gongnengkaiqi,stGuideModelData,data);
+	SQL_EXTRA_INT(data.nIndex ,id);
+	SQL_EXTRA_INT(data.nType ,type);
+	SQL_EXTRA_INT(data.nParam ,param);
+	SQL_EXTRA_INT(data.nForceOpenLv ,forceopen);
+	SQL_EXTRA_STRING(data.strPic ,icon);
+
+	mModel.insert(std::make_pair(data.nIndex,data));
+
+	if (data.nType== 2)
+	{
+		mQuestList.push_back((unsigned short)(data.nParam));
+	}
+	
+	SQL_END;
+}
+
+void NewFuncGuider::onEventLvUp( LpLevelUpEvent* pEvent )
+{
+	BOOST_FOREACH(stGuideModelData const& data,mModel|boost::adaptors::map_values)
+	{
+		if (data.nType == 1 && pEvent->nTo == data.nParam)
+		{
+			//invoke
+			invoke(data.nIndex);
+		}
+
+	}
+}
+
+void NewFuncGuider::onEventQuestComplete( QuestComplete* pEvent )
+{
+	BOOST_FOREACH(stGuideModelData const& data,mModel|boost::adaptors::map_values)
+	{
+		if (data.nType == 2&& pEvent->nQuestID == data.nParam)
+		{
+			//invoke
+			invoke(data.nIndex);
+		}
+
+	}
+}
+
+int NewFuncGuider::getDir( int index )
+{
+	switch(index)
+	{
+	case eSkill:
+	case eGuild:
+	case eRide:
+	case eForge:
+		return eDirLower;
+	case eBattle:
+	case eSign:
+	case eInstance:
+	case eOfferReward:
+	case eArena:
+		return eDirTarget;
+	case eMinitaryQuest:
+		return eDirUpper;
+	}
+
+	return eDirNull;
+}
+
+int NewFuncGuider::getFuncPos( int nIndex )
+{
+	switch(nIndex)
+	{
+	case eSkill:
+		return SystemUi::BT_Skill;
+	case eGuild:
+		return SystemUi::BT_Guild;
+	case eRide:
+		return SystemUi::BT_Ride;
+	case eForge:
+		return SystemUi::BT_Forge;
+	case eSign:
+		return 0;
+	case eMinitaryQuest:
+		return 2;
+	case eBattle:
+		return ActivityBtnGroup::EBP_Battle;
+	case eArena:
+		return ActivityBtnGroup::EBP_Arena;
+	case eOfferReward:
+		return ActivityBtnGroup::EBP_OR;
+	}
+	return 0;
+}
+
+int NewFuncGuider::getTargetType( int nIndex )
+{
+	switch (nIndex)
+	{
+	case eBattle:
+	case eArena:
+	case eOfferReward:
+		return eTargetAct;
+	case eSign:
+		return eTargetSignNode;
+	case eInstance:
+		return eTargetNPC;
+	}
+
+	return eTargetNull;
+}
+
+void NewFuncGuider::invoke( int nIndex )
+{
+	LevelUpGuideShowLayer*layer  = LevelUpGuideShowLayer::createFromCCB("gongnengkaiqi",NULL);
+	CC_ASSERT(layer);
+	UiMgr::getInstance()->getCurScene()->addChild(layer,WZ_POPUI);
+	layer->show(nIndex);
+
+}
+
+void NewFuncGuider::getInvisibleLowerBtns( std::vector<size_t>& indexList )
+{
+	int nLpLv = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	QuestMgr* questMgr = QuestMgr::getInstance();
+	for (int i = eSkill; i <= eDragon ; i++)
+	{
+		if (getDir(i) == eDirLower)
+		{
+			if (isForceOpen(i))
+			{
+				continue;
+			}
+			else
+			{
+				stGuideModelData const* data = getModelData(i);
+				if (data)
+				{
+					if (data->nType == 1 && data->nParam > nLpLv)
+					{
+						size_t pos = getFuncPos(i);
+						indexList.push_back(pos);
+					}
+					else if (data->nType == 2 && !questMgr->queryQuestIsAccomlished(data->nParam))
+					{
+						size_t pos = getFuncPos(i);
+						indexList.push_back(pos);
+					}
+				}
+			}
+		}
+	}
+}
+
+bool NewFuncGuider::questIsInNewFuncGuide( unsigned short questID ) const
+{
+	BOOST_AUTO(finder,boost::find(mQuestList,questID));
+	return finder != mQuestList.end();
+}
+
+void NewFuncGuider::getInvisibleActGroupBtns( std::vector<size_t>& indexList )
+{
+	/*int nLpLv = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	QuestMgr* questMgr = QuestMgr::getInstance();
+	for (int i = eSkill; i <=eTreasureRoom ; i++)
+	{
+		if (getTargetType(i) == eTargetAct)
+		{
+			if (isForceOpen(i))
+			{
+				continue;
+			}
+			else
+			{
+				stGuideModelData const* data = getModelData(i);
+				if (data->nType == 1 && data->nParam >nLpLv)
+				{
+					size_t pos = getFuncPos(i);
+					indexList.push_back(pos);
+				}
+				else if (data->nType == 2 && !questMgr->queryQuestIsAccomlished(data->nParam))
+				{
+					size_t pos = getFuncPos(i);
+					indexList.push_back(pos);
+				}
+			}
+		}
+	}*/
+}
+
+bool NewFuncGuider::enableSign() const
+{
+	stGuideModelData const* data = getModelData(3);
+	if (data)
+	{
+	
+		QuestMgr* questMgr = QuestMgr::getInstance();
+		int nLpLv = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+		return data->nType==1?(nLpLv>= data->nParam):(questMgr->queryQuestIsAccomlished(data->nParam));
+	}
+
+	return false;
+}
+
+bool NewFuncGuider::cacheSkillFuncGuideByLocalPlayerLv(int nSkillID) 
+{
+	int nLpLv = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	stGuideModelData const& data = mModel.begin()->second;
+	bool ret = data.nParam == nLpLv;//潜规则，第一个引导是技能的
+
+	if (ret)
+	{
+		mnCacheSkillID = nSkillID;
+	}
+	return ret;
+}
+
+void NewFuncGuider::continueSkillGuide()
+{
+	if (mnCacheSkillID !=-1)
+	{
+		SkillData *skillData = SkillManager::getInstance()->getSkillData(mnCacheSkillID, false);
+		CC_ASSERT(skillData);
+		NewSkillTipUI::Init(skillData);
+		mnCacheSkillID = -1;
+	}
+}
+
+bool NewFuncGuider::isForceOpen( int nFuncType ) const
+{
+	stGuideModelData const* data = getModelData(nFuncType);
+	if (data)
+	{
+		int nLpLv = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+		bool ret = data->nForceOpenLv <= nLpLv;
+		return ret;
+	}
+
+	return false;
+}
+
+int NewFuncGuider::convertActFuncPosToGuideID( int funcPos )const
+{
+	switch (funcPos)
+	{
+	case ActivityBtnGroup::EBP_Battle:
+		return eBattle;
+	case ActivityBtnGroup::EBP_Arena:
+		return eArena;
+	case ActivityBtnGroup::EBP_OR:
+		return eOfferReward;
+	case ActivityBtnGroup::EBP_Dragon:
+		return eDragon;
+	}
+
+	return 0;
+}
+
+bool NewFuncGuider::isForceOpenByActPos( int nActFuncPos ) const
+{
+	return isForceOpen(convertActFuncPosToGuideID(nActFuncPos));
+}

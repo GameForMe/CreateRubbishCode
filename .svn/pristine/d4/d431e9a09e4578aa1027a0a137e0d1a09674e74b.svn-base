@@ -1,0 +1,209 @@
+#include "NPCChatMgr.h"
+#include "cocos2d.h"
+#include "UiManager.h"
+#include "NPCChatUi.h"
+#include "NewPlayerGuide.h"
+#include "NPCChatUi.h"
+#include "World.h"
+#include "QuestMgr.h"
+#include "ShopMgr.h"
+#include "TransmitMgr.h"
+#include "ExchangeMgr.h"
+#include "UpMgr.h"
+#include "MarryMgr.h"
+#include "StoreMgr.h"
+#include "GuildMgr.h"
+#include "DaRongLu.h"
+#include "NPCTalkUi.h"
+#include "FuncGuideMgr.h"
+#include "LocalPlayer.h"
+#include "InstanceMgr.h"
+#include "GuildNaturalGiftMgr.h"
+
+using namespace cocos2d;
+NPCChatMgr::NPCChatMgr()
+{	
+	npcChatData = NULL;
+	_npcId = INVALID;
+	_id = INVALID;
+	_needShowUi = false;
+	_selectIndex = false;
+}
+//////////////////////////////////////////////////////////////////////////
+NPCChatMgr::~NPCChatMgr()
+{
+	CC_SAFE_DELETE(npcChatData);
+}
+//////////////////////////////////////////////////////////////////////////
+NPCChatMgr * NPCChatMgr::getInstance()
+{
+	static NPCChatMgr instance;
+	return &instance;
+}
+
+void NPCChatMgr::setNpcAllChatData(NPCChatData *npcChat)
+{
+	//npcAllChatData[npcAllChatData.size()] = npcChat;
+	npcAllChatData.push_back(npcChat);
+};
+
+void NPCChatMgr::setNpcChatData()
+{
+	if (npcAllChatData.size() == 0)
+	{
+		CLOSE_UI(WCT_NPCCHATUI);
+		NewPlayerGuider::getInstance()->onNpcChatOver();
+
+		if (_needShowUi)
+		{
+			openNPCChatUi();
+			_needShowUi = false;
+			_selectIndex = -1;
+		}
+		return;
+	}
+	else
+	{
+		//OPEN_UI(WCT_NPCCHATUI);
+		CC_SAFE_DELETE(npcChatData);
+		npcChatData = npcAllChatData.front();
+		GET_UI(NPCChatUi,WCT_NPCCHATUI)->updateNpcData();
+		npcAllChatData.pop_front();
+	}
+};
+
+void NPCChatMgr::chearNpcAllChatData()
+{
+	int count = npcAllChatData.size();
+	for (int i = 0;i < count;i++)
+	{
+		CC_SAFE_DELETE(npcAllChatData.front());
+		npcAllChatData.pop_front();
+	}
+}
+
+void NPCChatMgr::openNPCChatUi(unsigned int typeId,unsigned int id)
+{
+	_npcId = typeId;
+	_id = id;
+	// 膜拜雕像走新流程
+	if (ExchangeMgr::getInstance()->isMoBaiNpc(_npcId))
+	{
+		LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+		if(!ploc){
+			return;
+		}
+
+		// 自动定位到特定的雕像
+		_npcId = RoleManager::getInstance()->getNpcIdByRoleType(ploc->getRoleType());
+		ExchangeMgr::getInstance()->doMoBaiScript(_npcId, _id);
+	}
+	else if (openUiWithoutChatUi(_npcId))
+	{
+		CCLOG("this npc only open ui");
+	}
+	else
+	{
+		QuestMgr::getInstance()->doNPCScript(_npcId , _id);
+		ShopMgr::getInstance()->onNpcTalk(_npcId, _id );
+		TransmitMgr::getInstance()->doTransScript(_npcId , _id);
+		ExchangeMgr::getInstance()->doTransScript(_npcId , _id);
+		UpMgr::getInstance()->doTransScript(_npcId , _id);
+		MarryMgr::getInstance()->doTransScript(_npcId , _id);
+		StoreMgr::getInstance()->doTransScript(_npcId , _id);
+		GuildMgr::getInstance()->doTransScript(_npcId , _id);
+		DaRongLuUiMgr::GetInstance()->onNpcTalk(_npcId, _id);
+		InstanceMgr::getInstance()->onNPCTalk(_npcId , _id);
+		//FuncGuideMgr::getInstance()->doNPCScript(_npcId, _id);
+		NPCTalkUi* npcUi = World::getInstance()->getNPCDialog();
+		if (npcUi)
+		{
+			npcUi->setSelectIndex(-1);
+			npcUi->setJingYanBeishushow(false);
+		}
+	}
+}
+
+void NPCChatMgr::openNPCChatUi()
+{
+	QuestMgr::getInstance()->doNPCScript(_npcId , _id);
+	ShopMgr::getInstance()->onNpcTalk(_npcId, _id );
+	TransmitMgr::getInstance()->doTransScript(_npcId , _id);
+	ExchangeMgr::getInstance()->doTransScript(_npcId , _id);
+	UpMgr::getInstance()->doTransScript(_npcId , _id);
+	MarryMgr::getInstance()->doTransScript(_npcId , _id);
+	StoreMgr::getInstance()->doTransScript(_npcId , _id);
+	GuildMgr::getInstance()->doTransScript(_npcId , _id);
+	DaRongLuUiMgr::GetInstance()->onNpcTalk(_npcId, _id);
+	InstanceMgr::getInstance()->onNPCTalk(_npcId , _id);
+	//FuncGuideMgr::getInstance()->doNPCScript(_npcId, _id);//屏蔽
+	NPCTalkUi* npcUi = World::getInstance()->getNPCDialog();
+	if (npcUi)
+	{
+		npcUi->setSelectIndex(-1);
+// 		npcUi->setSelectIndex(_selectIndex);
+// 		npcUi->showSelectSprite();
+	}
+}
+
+void NPCChatMgr::setNeedShowUi( bool show )
+{
+	_needShowUi = show;
+}
+
+bool NPCChatMgr::getNeedShowUi()
+{
+	return _needShowUi;
+}
+
+void NPCChatMgr::setSelectIndex( short index )
+{
+	_selectIndex = index;
+}
+
+short NPCChatMgr::getSelectIndex()
+{
+	return _selectIndex;
+}
+
+bool NPCChatMgr::openUiWithoutChatUi(unsigned int typeId)
+{
+	bool t_result = false;
+	switch (typeId)
+	{
+	case GUILD_NG_NPC_ID:
+		{
+			OPEN_UI(WCT_Guild_NaturalGift_Ui);
+			t_result = true;
+		}
+		break;
+	case GUILD_MAP_JINGBIAO:
+		{
+			OPEN_UI(WCT_GuildCommon_UI);
+			guild_map_ui_type trans;
+			trans.type = 2;
+			SEND_EVENT(&trans);
+			t_result = true;
+		}
+		break;
+	case GUILD_MAP_SHANGXIANG:
+		{
+			OPEN_UI(WCT_GuildCommon_UI);
+			guild_map_ui_type trans;
+			trans.type = 1;
+			SEND_EVENT(&trans);
+			t_result = true;
+		}
+		break;
+	case GUILD_MAP_STORE:
+		{
+			OPEN_UI(WCT_GuildMapStore_UI);
+			t_result = true;
+		}
+		break;
+	default:
+		break;
+	}
+	return t_result;
+	//World::getInstance()->getNPCDialog()->show(false);
+}

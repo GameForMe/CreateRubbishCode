@@ -1,0 +1,617 @@
+#ifndef ROLEMANAGER_H
+#define ROLEMANAGER_H
+
+#include "BaseDefine.h"
+#include "cocos2d.h"
+#include "UiTools.h"
+#include "CreatureCacheData.h"
+#include <memory>
+using namespace cocos2d;
+
+class LocalPlayer;
+class Role;
+struct s_net_cmd;
+
+
+//坐骑等级<-->阶转化
+
+// 阶
+const int MIN_RAID_STEP	= 0;								// 坐骑最小阶
+const int MAX_RAID_STEP	= 12;								// 坐骑最大阶
+const int NUM_RAID_STEP	= MAX_RAID_STEP - MIN_RAID_STEP + 1;	// 坐骑阶数
+#define IS_RAID_STEP(nlvl)	((nlvl) >= MIN_RAID_STEP && (nLvl) <= MAX_RAID_STEP)
+
+// 等
+const int MIN_RAID_GRADE	= 1;								// 坐骑最小等
+const int MAX_RAID_GRADE	= 10;								// 坐骑最大等
+const int NUM_RAID_GRADE	= MAX_RAID_GRADE - MIN_RAID_GRADE + 1;// 坐骑等数
+#define IS_RAID_GRADE(nlvl)	((nlvl) >= MIN_RAID_GRADE && (nLvl) <= MAX_RAID_GRADE)
+
+// 虚拟等级
+const int MIN_RAID_VLEVEL	= 1;
+const int MAX_RAID_VLEVEL	= 120;
+const int NUM_RAID_VLEVEL	= MAX_RAID_VLEVEL - MIN_RAID_VLEVEL + 1;// 虚拟等级
+#define IS_RAID_VLEVEL(nlvl)	((nlvl) >= MIN_RAID_VLEVEL && (nLvl) <= MAX_RAID_VLEVEL)
+
+
+#define MMID(val, min, max)		((val) = ((val) > (max)) ? (max) : (((val) < (min)) ? (min) : val))
+// 虚拟等级到阶等的转换
+inline void VLevel2StepGrade( int nVLevel, int &nStep, int &nGrade )
+{
+	MMID(nVLevel, MIN_RAID_VLEVEL, MAX_RAID_VLEVEL);
+	nVLevel -= 1;
+	nStep	= nVLevel / NUM_RAID_GRADE;
+	nGrade	= nVLevel % NUM_RAID_GRADE + 1;
+}
+// 阶等到虚拟等级的转换
+inline void StepGrade2VLevel( int nStep, int nGrade, int &nVLevel )
+{
+	MMID(nStep, MIN_RAID_STEP, MAX_RAID_STEP);
+	MMID(nGrade, MIN_RAID_GRADE, MAX_RAID_GRADE);
+	nGrade	-= 1;
+	nVLevel = nStep * NUM_RAID_GRADE + nGrade;
+	nVLevel += 1;
+}
+
+#undef MMID
+
+
+enum ePickRoleType
+{
+	PRT_Default = -1,
+	PRT_Npc,
+	PRT_Stall,
+	PRT_Player,
+	PRT_Monster,
+	PRT_Proxy,
+	PRT_End
+};
+
+enum enumUpdateGuildColorType
+{
+	EUGCT_all,
+	EUGCT_sbk,
+	EUGCT_league,
+	EUGCT_war,
+};
+
+class RoleManager
+{
+public:
+	//Npc职能类型
+	enum eFunctionNpcType
+	{
+		EFNPCT_Null				=	-1,		// 无
+		EFNPCT_Shop				=	0,		// 商店
+		EFNPCT_Dak				=	1,		// 驿站
+		EFNPCT_Ware				=	2,		// 仓库
+		EFNPCT_Compose			=	3,		// 合成
+		EFNPCT_Guild			=	4,		// 门派
+		EFNPCT_Guard			=	5,		// 卫兵
+		EFNPCT_Yamun			=	6,		// 衙门
+		EFNPCT_Quench			=	7,		// 淬火
+		EFNPCT_Engrave			=	8,		// 镌刻
+		EFNPCT_Posy				=	9,		// 铭文
+		EFNPCT_Teacher			=	10,		// 技能授予者
+		EFNPCT_Revive			=	11,		// 复活点
+		EFNPCT_GuildMgr			=	12,		// 帮派管事
+		EFNPCT_GuildWare		=	13,		// 帮派仓库
+		EFNPCT_CofC				=	14,		// 商会
+		EFNPCT_Fusion			=	15,		// 武器融合
+		EFNPCT_Purification		=	16,		// 武器净化
+		EFNPCT_LoopQuest		=	17,	    // 发放循环任务
+		EFNPCT_Ride				=	18,		// 坐骑强化/镶装备/打磨装备
+		EFNPCT_Master			=	19,		// 解除师徒关系
+		EFNPCT_MailMan			=	20,		// 邮箱
+		EFNPCT_CircleQuest		=	21,		// 换随机任务
+		EFNPCT_BANNER			=	22,		// 切磋战旗
+		EFNPCT_FISH				=	23,		// 钓鱼 
+		EFNPCT_TeamCircleQst	=	24,		// 组队刷随机任务
+		EFNPCT_Earthy			=	25,		// 帮会种植土地
+		EFNPCT_ReaAtt			=	26,		// 重置属性
+		EFNPCT_Pet_Xiulian		=	27,		// 宠物寄养
+		EFNPCT_DAMO				=	28,		// 原石打磨
+		EFNPCT_LiHua			=	29,		// 礼花&蛋糕
+		EFNPCT_Pet_Level		=	30,		// 宝宝等级
+	};
+
+	struct CreatureInfo
+	{
+		int monsterId;
+		std::string animFile;
+		std::string creatureName;
+		std::string Context;
+		int posx;
+		int posy;
+		std::string mapid;
+		int funtype;
+		int funid;
+		int level;
+		int boss;
+		std::string portrait;
+		std::string sound1;
+		std::string sound2;
+		std::string sound3;
+		float hpRatio;
+		int msgID;
+		std::string effectName;
+		int bodyRatio;
+		std::string attSound;
+		std::string dieSound;
+		int _type;		//1为怪物 3 为npc
+
+		CreatureInfo()
+			:monsterId(0)
+			,animFile("")
+			,creatureName("")
+			,Context("")
+			,posx(0)
+			,posy(0)
+			,mapid("")
+			,funtype(0)
+			, funid(0)
+			, level(0)
+			, boss(0)
+			,portrait("")
+			,sound1("")
+			,sound2("")
+			,sound3("")
+			, hpRatio(0)
+			, msgID(0)
+			, effectName("")
+			,bodyRatio(0)
+			,attSound("")
+			,dieSound("")
+			, _type(0)		//1为怪物 3 为npc
+		{
+
+		}
+
+		bool isNpc() { return _type == 3;}
+	};
+
+	struct DisplayData
+	{
+		std::string _animFile;
+		unsigned char _r;
+		unsigned char _g;
+		unsigned char _b;
+		unsigned int effectId;
+
+		unsigned int _zhiye;
+		unsigned int _suitnum;
+
+		DisplayData()
+			: _animFile("")
+			, _r(255)
+			, _g(255)
+			, _b(255)
+			, effectId((unsigned int) -1)
+			,_zhiye(1)
+			,_suitnum(1)
+		{
+
+		}
+	};
+
+	struct RideData
+	{
+		std::string rideName;
+		int life;
+		int mana;
+		int hit;
+		int miss;
+		int baoji;
+		int mianbao;
+		int battlePt;
+		int speed;
+		int lvExp;
+		int effect;
+		int suit;
+		int titleID;
+		std::string animFile_M;
+		std::string animFile_F;
+		std::string animFile_Z;
+		std::string animFile_T1;
+		std::string animFile_T2;
+		std::string animFile_T3;
+		std::string shadowFile;
+		std::string introduce;
+		std::string imageFile;
+
+		RideData()
+			: life(0)
+			, mana(0)
+			, hit(0)
+			, miss(0)
+			, baoji(0)
+			, mianbao(0)
+			, battlePt(0)
+			, speed(0)
+			, lvExp(0)
+			, suit(0)
+			, effect(-1)
+			, titleID(0)
+		{
+
+		}
+	};
+
+	struct RideModeData
+	{
+		std::string animFile;
+		std::string rideName;
+		std::string photo;
+		
+		int life;
+		int mana;
+		int hit;
+		int miss;
+		int baoji;
+		int mianbao;
+		int battlePt;
+		int speed;
+		int lvl;
+		int showEffect; //0 不显示特效 1 显示
+		int changeName; //0 不修改名字 1 修改名字
+		bool canRideInSafe;//在安全区是否可以骑
+
+		unsigned int _zhiye;
+		unsigned int _suitnum;
+
+		RideModeData()
+			: life(0)
+			, mana(0)
+			, hit(0)
+			, miss(0)
+			, baoji(0)
+			, mianbao(0)
+			, battlePt(0)
+			, speed(0)
+			, lvl(0)
+			, showEffect(0)
+			, changeName(0)
+		{
+			_zhiye = 0;
+			_suitnum = 0;
+		}
+	};
+
+	struct SpecialEffectData
+	{
+		std::string animFile;
+		int count;
+		int index;
+		int offsetX;
+		int offsetY;
+		int red;
+		int green;
+		int blue;
+
+		SpecialEffectData()
+			: count(0)
+			, index(0)
+			, offsetX(0)
+			, offsetY(0)
+			, red(255)
+			, green(255)
+			, blue(255)
+		{
+
+		}
+	};
+
+	struct Npctalk
+	{
+		int id;
+		int displaytime;
+		int standtime;
+		int standodds;
+		std::string standchats1;
+		std::string standchats2;
+		std::string standchats3;
+		int fighttime;
+		int fightodds;
+		std::string fightchats1;
+		std::string fightchats2;
+		std::string fightchats3;
+		Npctalk()
+			:id(-1)
+			,displaytime(0)
+			,standtime(0)
+			,standodds(0)
+			,standchats1("")
+			,standchats2("")
+			,standchats3("")
+			,fighttime(0)
+			,fightodds(0)
+			,fightchats1("")
+			,fightchats2("")
+			,fightchats3("")
+		{
+
+		}
+
+		bool emptyTalk()const
+		{
+			std::string const str  = "0";
+			return standchats1== str &&fightchats1==str;
+		}
+
+		void GetStandString(int index,std::string &desstr,int &count) const
+		{
+			std::string str  = "0";
+			switch(index)
+			{
+			case 0:
+				str = standchats1;
+				break;
+			case 1:
+				str = standchats2;
+				break;
+			case 2:
+				str = standchats3;
+				break;
+			default:
+				str = "0";
+			}
+			
+			#ifdef _WIN32
+				desstr = converstring(str,8,count);
+			#else
+				desstr = converstring(str,4,count);
+			#endif
+		}
+
+		void GetFightString(int index,std::string &desstr,int &count) const
+		{
+			std::string str  = "0";
+			switch(index)
+			{
+			case 0:
+				str = fightchats1;
+				break;
+			case 1:
+				str = fightchats2;
+				break;
+			case 2:
+				str = fightchats3;
+				break;
+			default:
+				str = "0";
+			}
+
+
+			#ifdef _WIN32
+				desstr = converstring(str,8,count);
+			#else
+				desstr = converstring(str,4,count);
+			#endif
+		}
+	};	
+
+	typedef std::map<unsigned int, DisplayData> DisplayMap;
+	typedef std::map<unsigned int, RideData> RideDataMap;
+	typedef std::map<unsigned int, RideModeData> RideModeDataMap;
+	typedef std::map<unsigned int, SpecialEffectData> SpecialEffectDataMap;
+	//typedef std::map<unsigned int, CreatureInfo> CreatureInfoMap;
+	typedef std::map<unsigned int, Npctalk> NpctalkMap;
+	typedef std::map<unsigned int, Role*> RoleMap;
+
+	RoleManager();
+	~RoleManager(){}
+
+	static RoleManager *getInstance();
+	inline bool isLoading() const {return _loading;}
+	inline void setLoading(bool lo){_loading = lo;}
+	void init();
+	void destory();
+	void initNpcTalkDataFromXML();
+	//addReqIfNotFind --如果没有找到，是否发送消息
+	//noReqProxy --是否为代理发送获取信息消息 true-发送 false-不发送
+	Role *findRole(unsigned int roleId, bool addReqIfNotFind = false, bool reqProxy = true);
+	Role *findRoleByProtoTypeID(unsigned int roleTypeID);
+	RoleMap getAllRemotePlayer();
+	RoleMap getAllRemoteRole();
+	Role *getMonstFromCache(unsigned int id);
+	void AddRole(Role* role);
+	void showRoleHeadHpUiByCondition(Role *role);
+	bool isForceShowRoleHpBar();//根据条件强制显示hp
+	void showRoleNameTypeByCondition(Role *role);
+	//void addRoleRequest(unsigned int roleId);
+	//void cancelRoleRequest(unsigned int roleID);
+	//void sendRoleRequestOne(unsigned int id);
+	//void sendRoleRequest();
+	LocalPlayer *getLocalPlayer() const  { return _localPlayer;}
+	const RoleMap &getRoleMap() const { return _remoteRole; } //获取所有显示的玩家、怪物、NPC
+	void update(float dt);
+	long long pickRole(const CCPoint &pickPoint, Role** pRole, ePickRoleType prt = PRT_Default, bool useBound = true);
+	void freeRole(unsigned int roleId);
+	void set_select_role_id(unsigned int roleId);
+	unsigned int get_select_role_id()const { return _currentSelected; }
+	void SetTargetRole( Role *role){_TargetRole = role;}
+	Role * GetTargetRole(){return _TargetRole;}
+	void showAllRole(bool show = true);
+	void showAllPlayer( bool show /*= true*/ );
+	void showAllOtherRole(bool show = true);
+	void freeAll();
+	void clearAllRemote(bool deleteNewMapRole = true);
+	void clearAllRemotePlayer();
+	void addProxy(Role *role);
+	void releaseProxy(unsigned int id);
+	Role* findProxy(unsigned int id);
+	//雕像名字
+	std::string getDiaoXiangNpcName(unsigned int id);
+	std::string getDiaoXiangNpcNameByRoleType(unsigned int type);
+	unsigned int getDiaoXiangNpcPower(unsigned int id);
+	unsigned int getDiaoXiangNpcPowerByRoleType(unsigned int type);
+	unsigned int getDiaoXiangRoleId(unsigned int id);
+	unsigned int getDiaoXiangRoleIdByRoleType(unsigned int type);
+	unsigned int getDiaoXiangLevel(unsigned int id);
+	unsigned int getDiaoXiangLevelByRoleType(unsigned int type);
+	unsigned int getDiaoXiangMoBaiExp(int roleLevel, unsigned int type, bool normalMobai);
+	unsigned int getNpcIdByRoleType(unsigned int type);
+	void setDiaoXiangNpcName(std::string name,unsigned int id);
+	//获取人物的帮会名字
+	std::string getGuildName(unsigned int roleId, unsigned int guildId);
+	//更新当前视野内的所有人的行会名字
+	void updateRoleGuildName();
+	//得到离自己最近的角色
+	Role *findNearestRole();
+	//获取角色是否可以攻击
+	bool canAttack(unsigned int roleId, bool selectPet = true, bool IsGiveTip = false);
+	bool canAttack(const Role *role, bool selectPet = true,bool IsGiveTip = false);
+	//切换时装
+	void showFashion(bool show);
+	bool JusticeCan( Role *role);
+	//将在切换地图的时候的角色添加到新地图中
+	void addNewMapRole();
+	//自动选择可以攻击的角色
+	//void autoSelectCanAttackRole();
+	//屏蔽其他玩家
+	void hideOtherRole(bool hide);
+	bool isHideOtherRole() const { return (_hideRemoteRole && (!_forceShowOther)); } 
+	void setForceShowOther(bool forceShowOther) { _forceShowOther = forceShowOther; }
+	//屏蔽其他特效
+	void hideOtherEffect(bool hide);
+	bool isHideOtherEffect() const { return _hideRemoteEffect; }
+	bool isPet(unsigned int typeId);
+	//屏蔽自己名字
+	void SetShowSelfRoleName(bool isShow);
+	bool getIsShowSelfRoleName() const { return _showSelfRoleName; }
+	
+	//获取显示数据
+	DisplayData const* getDisplayData(unsigned int id);
+	DisplayData const*  getAvatarDisplayData(unsigned int id);
+
+	//坐骑相关接口
+	void sendRideMsg(int index);
+	void sendUnRideMsg();
+
+	RideData const* getRideData(unsigned int lv)const;
+
+	RideModeData getRideModeData(unsigned int id, int gender);
+	//获取特殊特效数据
+	SpecialEffectData getSpecialEffectData(unsigned int id);
+	//培养坐骑,0:金币1:礼券2:元宝
+	void togRide(int mode);
+	void syncRideData();
+	//获取creatureInfo
+	//CreatureInfo getCreatureInfo(unsigned int id);
+	stCreateProto const* getCreatureProto(unsigned int id);
+	//获取NpcTalk
+	Npctalk getNpctalk( unsigned int id );
+	//交易对象的Id
+	void setTradeRoleId(unsigned int id){tradeRoleId = id;};
+	unsigned int getTradeRoleId(){return tradeRoleId;};
+	Role *findNpc(unsigned int roleId);
+	void AddNpc(Role* role);
+	void ClearNpc();
+	bool isCanShowOtherPlayer(Role* role);
+	bool isCanShowThisRole(Role* role);
+	void tryToUseSkill(unsigned int playerID);
+	bool isInFadeList(unsigned int id)const;
+
+	void changeGuildNameByOldGuidID(DWORD oldId,DWORD newId,string name);
+
+	INT64 get_max_exp_by_role_lv_index(int lv_idex)const{return m_role_max_exp.at(lv_idex);}
+	//Role const* get_npc_by_model_id(unsigned int model_id)const;
+public:
+	unsigned int onRemoveRemote(s_net_cmd *cmd);
+	unsigned int onInitLocalPlayer(s_net_cmd *cmd);
+	unsigned int onGetRemoteRole(s_net_cmd *cmd);
+	unsigned int onRoleEquipChange(s_net_cmd *cmd);
+	unsigned int onSetPractice(s_net_cmd *cmd);
+	unsigned int onSetRoleState(s_net_cmd *cmd);
+	unsigned int onUnsetRoleState(s_net_cmd *cmd);
+	unsigned int onDiaoXiangName(s_net_cmd *cmd);
+	unsigned int onPkValueChanged(s_net_cmd *cmd);
+	unsigned int onTeamEquipInfo(s_net_cmd *cmd);
+	unsigned int onRoleFashionChanged(s_net_cmd *cmd);
+	unsigned int onAddRoleBuff(s_net_cmd *cmd);
+	unsigned int onRemoveRoleBuff(s_net_cmd *cmd);
+	unsigned int onRoleSetState(s_net_cmd *cmd);
+	unsigned int onRoleUnSetState(s_net_cmd *cmd);
+	unsigned int onRoleRide(s_net_cmd *cmd);
+	unsigned int onRoleUnRide(s_net_cmd *cmd);
+	unsigned int onTogRide(s_net_cmd *cmd);
+	unsigned int onSyncRideData(s_net_cmd *cmd);
+
+	unsigned int onPlaySceneEffect(s_net_cmd *cmd);
+
+	unsigned int on_buff_update(s_net_cmd* cmd);
+
+	void onGetGuildName( unsigned int guildId, const std::string& guildName);
+	bool getPetOwnerNameByCondition(string& str,Role *role);
+	void onSetRoleIsCanLive(int flag){currentRoleIsCanLive = flag;} //当前角色是否可以原地复活
+	int onGetRoleIsCanLive(){return currentRoleIsCanLive;}
+	unsigned int getNpcId();
+	//RoleManager::CreatureInfoMap GetCreatureMap();
+	void updateAllGuildColor(enumUpdateGuildColorType index = EUGCT_all);
+protected:
+	bool isRoleInFadeOut(unsigned int roleId);
+
+private:
+	ePickRoleType getPickType(Role *role);
+	int currentRoleIsCanLive;
+
+	std::map<int,INT64> m_role_max_exp;
+	void init_max_lv_table();
+
+	//坐骑数据
+	typedef std::shared_ptr<RideData>		ride_data_ptr;
+	std::map<unsigned int,ride_data_ptr>	_rideData;
+	//RideDataMap _rideData;
+	void init_ride_data();
+protected:
+	LocalPlayer *_localPlayer;
+	//包含所有显示的远程玩家、怪物、npc
+	RoleMap _remoteRole;
+	RoleMap _roleProxyMap;	//角色代理
+
+	//std::set<unsigned int> _roleRequestPair;
+	//std::map<unsigned int, float> _roleRequestBlock; //!请求列表发送了，
+
+	std::set<unsigned int> _fadeOutList;
+	//怪物缓存列表、怪在删除的时候存入列表中
+	RoleMap _monstCache;
+	bool addRequestLock;
+
+	void changeSelect(int newId);
+	unsigned int _currentSelected;
+	std::map<unsigned int, std::string> _diaoxiangName;	//雕像名字
+	std::map<unsigned int, unsigned int> _diaoxiangPower; // 雕像战斗力
+	std::map<unsigned int, unsigned int> _diaoxiangId; // 雕像战斗力
+	std::map<unsigned int, unsigned int> _diaoxiangLevel; // 雕像等级
+	bool _loading;
+	typedef std::map<unsigned int, std::set<unsigned int> > RoleGuildNameTmp;
+	RoleGuildNameTmp _guildNameTmp;
+	float _lastSendTime;
+	bool _showSelfRoleName;//隐藏自己角色名字
+	bool _hideRemoteRole;//隐藏其他玩家
+	bool _hideRemoteEffect;//隐藏其他特效
+	bool _forceShowOther;//是否强制显示其他玩家
+	//显示数据
+	DisplayMap _displayMap;
+
+
+	void init_avator_display_data();
+	DisplayMap _AvatarDisplayMap;
+
+	RideModeDataMap _rideModeData;
+	//特殊特效，每个人物限制添加一个
+	SpecialEffectDataMap _specialEffectData;
+	//creatureInfo
+	//CreatureInfoMap _creatureInfo;
+	//npctalk
+	NpctalkMap _Npctalk;
+	//交易目标的Id
+	unsigned int tradeRoleId;
+	std::map<unsigned int,bool> _roleOnline;
+	RoleMap _selectRoleMaps;
+	RoleMap _npcRole;
+	//RoleMap _model_id_to_role_map;
+	Role *_TargetRole;
+};
+
+#endif //ROLEMANAGER_H

@@ -1,0 +1,483 @@
+#include "TianmingUi.h"
+#include "World.h"
+#include "CfgReader.h"
+#include "TouchSprite.h"
+#include "BaseDefine.h"
+#include "ItemNode.h"
+#include "GambleMgr.h"
+#include "MessageBoxUi.h"
+#include "ClientUpdate.h"
+#include "PackageManager.h"
+#include "GambleProto.h"
+#include "UiTools.h"
+#include "UiResourceMgr.h"
+#include "UiLoader.h"
+#include "UiManager.h"
+#include "NewPlayerGuide.h"
+#include "StringMgr.h"
+#include "ChatMgr.h"
+#include "ToolTip.h"
+#include "BSAnimate.h"
+#include "AnimationCache.h"
+
+TianmingUi::TianmingUi():
+	_autobuystate(false)
+{
+
+}
+
+TianmingUi::~TianmingUi()
+{
+
+}
+
+CCNode * TianmingUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["TianmingUiLayer"] = UiLayerLoader<TianmingUiLayer>::loader();
+	nodeLoaders["TouchSprite"] = TouchSpriteLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("tianmingui", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+TianmingUiLayer * TianmingUi::getUiLayer()
+{
+	return getUiNodeByTag<TianmingUiLayer>(WCT_TIANMING);
+}
+
+//处理服务器返回
+void TianmingUi::onServerResult( bool success )
+{
+	TianmingUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->onServerResult(success);
+	}
+}
+
+cocos2d::CCRect TianmingUi::getWenyunBtnPos()
+{
+	TianmingUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		return uiLayer->getWenyunBtnPos();
+	}
+
+	return CCRect();
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler TianmingUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler TianmingUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", TianmingUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLogCloseBtnPressed", TianmingUiLayer::onLogCloseBtnPressed);
+//	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onMingyunjiluBtnPressed", TianmingUiLayer::onMingyunjiluBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onWenyunBtnPressed", TianmingUiLayer::onWenyunBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onYijianwenyunBtnPressed", TianmingUiLayer::onYijianwenyunBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onTianmingguizeBtnPressed",TianmingUiLayer::onTianmingguizeBtnPressed);
+	return NULL;
+}
+
+void TianmingUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_autoTimes = 0;
+	_autoTimesTemp = 0;
+
+	//frame
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(TUT_Frame));
+	CC_ASSERT(_frame != NULL);
+
+	CCNode *sign = _frame->getChildByTag(TUT_Sign);
+	sign->setVisible(GET_UI(TianmingUi,WCT_TIANMING)->_autobuystate);
+
+	for(int i = TUT_ItemBegin; i < TUT_ItemEnd; i ++)
+	{
+		CCNode *node = _frame->getChildByTag(i);
+		CC_ASSERT(node != NULL);
+		_itemPos[i - TUT_ItemBegin] = node->getPosition();
+		ItemNode *itemNode = ItemNode::create();
+		itemNode->setBlank();
+		itemNode->setPosition(node->getPosition());
+		itemNode->setTag(TUT_ItemNodeBegin + i);
+		_frame->addChild(itemNode, 1);
+	}
+
+	CCNode *tmpNode = _frame->getChildByTag(TUT_ItemStuff);
+	_itemStuffPos = tmpNode->getPosition();
+	ItemNode *itemNode = ItemNode::create();
+	itemNode->setBlank();
+	itemNode->setPosition(tmpNode->getPosition());
+	itemNode->setTag(TUT_ItemNodeBegin + TUT_ItemStuff);
+	_frame->addChild(itemNode, 1);
+
+	TouchSprite *autoBuySprite = dynamic_cast<TouchSprite*>(_frame->getChildByTag(TUT_SignRect));
+	CC_ASSERT(autoBuySprite != NULL);
+	autoBuySprite->signalTouched.connect(this, &TianmingUiLayer::onAutoBuyBtnPressed);
+
+	//logframe
+	_logFrame = dynamic_cast<CCSprite*>(getChildByTag(TUT_LogFrame));
+	CC_ASSERT(_logFrame != NULL);
+	_logFrame->setVisible(true);
+	_logContentLayer = dynamic_cast<CCLayer*>(_logFrame->getChildByTag(TUT_LogContentLayer));
+	_logFrameVisible = true;
+	setLogFrameVisible(false);
+
+	_logScrollView = CCScrollView::create(_logContentLayer->getContentSize());
+	_logContentLayer->addChild(_logScrollView);
+
+	_logContainer = CCNode::create();
+	_logContainer->setContentSize(_logContentLayer->getContentSize());
+	_logScrollView->setContainer(_logContainer);
+	_logScrollView->setTouchEnabled(true);
+	_logScrollView->setBounceable(true);
+	_logScrollView->setContentSize(_logContainer->getContentSize());
+	_logScrollView->setDirection(kCCScrollViewDirectionVertical);
+	_logScrollView->setContentOffset(_logScrollView->minContainerOffset());
+	CC_ASSERT(_logContainer != NULL && _logScrollView != NULL);
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+
+	updateMessage();
+	updateLog();
+}
+
+void TianmingUiLayer::onExit()
+{
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool TianmingUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		return true;
+	}
+
+	return false;
+}
+
+void TianmingUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_TIANMING);
+}
+
+void TianmingUiLayer::onLogCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CC_ASSERT(_logFrame != NULL);
+	CC_ASSERT(_logFrameVisible);
+	setLogFrameVisible(false);
+}
+
+void TianmingUiLayer::onTianmingguizeBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setLogFrameVisible(true);
+}
+
+void TianmingUiLayer::onWenyunBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//正在查询的过程中，禁止再次点击;
+	if(_autoTimes > 0)
+		return;
+
+	short times;
+	GambleMgr::getInstance()->GetGambleContinuous_LeftCounts(times);
+	if(times > 0)
+	{
+		bool bCurGambleFree = GambleMgr::getInstance()->CanFreeGamble();//判断本次抽奖是否是免费
+		if (!bCurGambleFree)//付费
+		{
+			//该判断仅对付费抽奖提示，免费抽奖不给提示
+			//若玩家未设置自动购买选项
+			if (!GET_UI(TianmingUi,WCT_TIANMING)->_autobuystate)
+			{
+				MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,
+					GET_STR(2098).c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+				World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+				msgUi->signalOkBtnPressed.connect(this, &TianmingUiLayer::onMessageBoxWenyunOk);
+			}
+			//若玩家设置了自动购买选项
+			else
+			{
+				onMessageBoxWenyunOk();
+			}
+		}
+		else//免费
+		{
+			onMessageBoxWenyunOk();
+		}
+	}
+	else
+	{//TODO:messagebox提示;
+
+	}
+
+}
+
+void TianmingUiLayer::onYijianwenyunBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//正在查询的过程中，禁止再次点击;
+	if(_autoTimes > 0)
+		return;
+
+	short times;
+	bool haveFree = GambleMgr::getInstance()->GetGambleContinuous_LeftCounts(times);
+	if(times > 0 && haveFree)
+	{
+		//_autoTimesTemp = MIN(times, 5) + (haveFree ? 1 : 0);
+		_autoTimesTemp = times;
+		GambleMgr::getInstance()->SetAutoGambleTimes(times);
+		GambleMgr::getInstance()->SetGambleState(false);//代表一键问运;
+		//CCString *str = CCString::createWithFormat("\xE6\x9C\xAC\xE6\xAC\xA1\xE5\x8F\xAF\xE8\xBF\x9E\xE7\xBB\xAD\xE9\x97\xAE\xE8\xBF\x90\x25\x64\xE6\xAC\xA1\xE3\x80\x82", 
+		//	_autoTimesTemp);//本次可连续问运%d次。
+		MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,
+			GET_STR(2046).c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+		World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+		msgUi->signalOkBtnPressed.connect(this, &TianmingUiLayer::onMessageBoxAutoWenyunOk);
+	}
+	else
+	{//TODO:messagebox提示;
+
+	}
+}
+
+// void TianmingUiLayer::onMingyunjiluBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+// {
+// 	setLogFrameVisible(true);
+// }
+
+void TianmingUiLayer::setAutoBuy( bool enable )
+{
+	if(GET_UI(TianmingUi,WCT_TIANMING)->_autobuystate != enable)
+	{
+		CCNode *sign = _frame->getChildByTag(TUT_Sign);
+		sign->setVisible(enable);
+		GET_UI(TianmingUi,WCT_TIANMING)->_autobuystate = enable;
+	}
+}
+
+void TianmingUiLayer::onAutoBuyBtnPressed( TouchSprite*, bool )
+{
+	setAutoBuy(!GET_UI(TianmingUi,WCT_TIANMING)->_autobuystate);
+}
+
+void TianmingUiLayer::onServerResult( bool success )
+{
+	if(success)
+	{
+		//设置各项
+		int index = 0;
+		std::vector<Tag_PrizeInfos> const& prizeMap = GambleMgr::getInstance()->GetUIPrizeMap();
+		CC_ASSERT(prizeMap.size() == TUT_ItemEnd - TUT_ItemBegin);
+		for(auto iter = prizeMap.begin(); iter != prizeMap.end(); ++ iter)
+		{
+			const Tag_PrizeInfos &info = *iter;
+			ItemNode *item = dynamic_cast<ItemNode*>(_frame->getChildByTag(index + TUT_ItemNodeBegin));
+			item->setDataId(info.uItemTypeID);
+			item->setNum(info.num);
+			index ++;
+		}
+
+		CCAction *anim = createAnim();
+		CCSprite *sprite = getSelectSprite();
+		
+		if(sprite != NULL)
+		{
+			sprite->runAction(anim);
+		}
+
+		updateMessage();
+		updateLog();
+		
+	}
+}
+
+void TianmingUiLayer::onMessageBoxAutoWenyunOk()
+{
+	CC_ASSERT(_autoTimesTemp > 0 && _autoTimes == 0);
+	_autoTimes = _autoTimesTemp;
+	_autoTimesTemp = 0;
+	GambleMgr::getInstance()->Gamble_ForOnce();
+}
+
+CCAction * TianmingUiLayer::createAnim()
+{
+	CCArray *actionArray = CCArray::create();
+	srand(ClientUpdate::getInstance()->getCurrentTime());
+	int beginIndex = rand() % (TUT_ItemEnd - TUT_ItemBegin);
+	int endIndex = GambleMgr::getInstance()->GetPrizeIndex();
+	while(endIndex < beginIndex + 12)
+	{
+		endIndex += (TUT_ItemEnd - TUT_ItemBegin);
+	}
+
+	int slowCount = rand() % (SELECTANIMSLOWCOUNTMAX - SELECTANIMSLOWCOUNTMIN) + SELECTANIMSLOWCOUNTMIN;
+	for(int i = beginIndex; i < endIndex; i ++)
+	{
+		CCPlace *place = CCPlace::create(_itemPos[i % (TUT_ItemEnd - TUT_ItemBegin)]);
+		if(endIndex - i < slowCount)
+			place->setDuration((float)(SELECTANIMTIME / 500.f));
+		else
+			place->setDuration((float)(SELECTANIMTIME / 1000.f));
+		actionArray->addObject(place);
+	}
+
+	CCPlace *place = CCPlace::create(_itemPos[endIndex % (TUT_ItemEnd - TUT_ItemBegin)]);
+	place->setDuration(0.1f);
+	actionArray->addObject(place);
+
+	CCPlace *place1 = CCPlace::create(ccpAdd(_itemPos[endIndex % (TUT_ItemEnd - TUT_ItemBegin)], ccp(55.2, -55.2)));
+	actionArray->addObject(place1);
+
+	AnimationCache::AnimateList animateList;
+	AnimationCache::createDefList(1, animateList);
+	AnimationCache::getInstance()->getSpecialEffect(0x3000,"choujiang", animateList);
+	BSAnimate *animste = animateList[0];
+	actionArray->addObject(animste);
+
+	CCCallFuncN *callFunc = CCCallFuncN::create(this, SEL_CallFuncN(&TianmingUiLayer::animCallback));
+	actionArray->addObject(callFunc);
+	CCSequence *sequence = CCSequence::create(actionArray);
+	return sequence;
+}
+
+void TianmingUiLayer::animCallback( CCNode *node )
+{
+	CC_ASSERT(_autoTimes > 0);
+	_autoTimes--;
+
+	//TODO:弹框提示得奖物品信息;
+	std::vector<Tag_PrizeInfos> const& prizeMap = GambleMgr::getInstance()->GetUIPrizeMap();
+	int endIndex = GambleMgr::getInstance()->GetPrizeIndex();
+	if (endIndex<0 || endIndex >= 8)
+		return;
+	ItemTypeData data = PackageManager::getInstance()->getItemTypeData(prizeMap[endIndex].uItemTypeID);
+	std::stringstream ss;
+	ss<<GET_STR(9264).c_str()<<data.name<<"*"<<prizeMap[endIndex].num;
+	ToolTip::getInstance()->push(ss.str());
+
+	//聊天框也要显示
+	s_receive_chat_info info;
+	info.send_channel = ESCC_System;
+	std::stringstream sstream;
+	sstream<<GET_STR(9264).c_str()<<data.name<<"*"<<prizeMap[endIndex].num;
+	info.chat_text = sstream.str();
+	ChatMgr::getInstance()->ShowInfoByChatChannel(info);
+
+	if(_autoTimes > 0)
+	{
+		GambleMgr::getInstance()->Gamble_ForOnce();
+	}
+	else
+	{
+		GambleMgr::getInstance()->ShowGambleInfo(GambleMgr::getInstance()->GetAutoGambleTimes());
+	}
+}
+
+CCSprite * TianmingUiLayer::getSelectSprite()
+{
+	CC_ASSERT(_frame != NULL);
+	CCSprite *selectSprite = dynamic_cast<CCSprite*>(_frame->getChildByTag(TUT_SelectSprite));
+	if(selectSprite == NULL)
+	{
+		selectSprite = CCSprite::create();
+		selectSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(
+			PackageManager::getInstance()->getSelectFrameName().c_str()));
+		selectSprite->setTag(TUT_SelectSprite);
+		_frame->addChild(selectSprite, 1);
+	}
+	selectSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("tianmingui_kuang"));
+	return selectSprite;
+}
+
+void TianmingUiLayer::updateMessage()
+{
+	if(_frame != NULL)
+	{
+		CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(TUT_Message));
+		CC_ASSERT(label != NULL);
+		int timeSection = 0;
+		int yuanbaoGambles = 0;
+		bool freeGet = GambleMgr::getInstance()->GetPlayerGambleInfo(timeSection, yuanbaoGambles);
+	//	const char *str = "\x25\x73\xE5\x85\x8D\xE8\xB4\xB9\xE9\x97\xAE\xE8\xBF\x90\x25\x64\xE6\xAC\xA1\xEF\xBC\x8C\xE4\xBB\x8A\xE6\x97\xA5\xE5\x8F\xAF\xE9\x97\xAE\xE8\xBF\x90\x25\x64\xE6\xAC\xA1\xE3\x80\x82"; // %s免费问运%d次，今日可问运%d次。
+		const char *str = "\x25\x73\xE5\x8F\xAF\xE5\x85\x8D\xE8\xB4\xB9\xE9\x97\xAE\xE8\xBF\x90\x25\x64\xE6\xAC\xA1\n\xE4\xBB\x8A\xE6\x97\xA5\xE5\x8F\xAF\xE4\xBD\xBF\xE7\x94\xA8\xE5\x91\xBD\xE8\xBF\x90\xE4\xB9\x8B\xE6\x98\x9F\xE9\x97\xAE\xE8\xBF\x90\x25\x64\xE6\xAC\xA1\xE3\x80\x82\x20";//%s免费问运%d次 \n 今日可使用命运之星问运%d次。
+		const char *timeStr[] = {
+			"6:00 - 12:00 ", "6:00 - 12:00 ", "12:00 - 18:00 ", "18:00 - 23:00 "
+		};
+		CC_ASSERT(timeSection >= 0 && timeSection < 4);
+		CCString *messageStr = CCString::createWithFormat(str, timeStr[timeSection], freeGet ? 1 : 0, yuanbaoGambles);
+		label->setString(messageStr->getCString());
+	}
+}
+
+void TianmingUiLayer::setLogFrameVisible( bool visible )
+{
+	CC_ASSERT(_logFrame != NULL);
+	if(_logFrameVisible != visible)
+	{
+		_logFrameVisible = visible;
+		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+		if(visible)
+			_logFrame->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+		else
+			_logFrame->setPosition(ccp(winSize.width * 1.5f, winSize.height / 2.0f));
+	}
+}
+
+void TianmingUiLayer::updateLog()
+{
+	CC_ASSERT(_logContainer != NULL);
+	_logContainer->removeAllChildren();
+	const char *logStr[] = {
+		"\xE6\x82\xA8\xE8\x8E\xB7\xE5\xBE\x97\xE4\xBA\x86",		//您获得了
+		"\xE5\xA4\xA9\xE5\x91\xBD\xE5\xA4\xA7\xE5\xA5\x96"		//天命大奖
+	};
+
+	std::vector<Tag_WinPrizeInfo> const& prizeInfos = GambleMgr::getInstance()->GetPlayerWinPrizeInfo();
+	float height = prizeInfos.size() * TIANMINGLOGLINESPACE;
+	if(height < _logContentLayer->getContentSize().height)
+		height = _logContentLayer->getContentSize().height;
+	_logContainer->setContentSize(CCSize(_logContentLayer->getContentSize().width, height));
+
+	for(auto iter = prizeInfos.begin(); iter != prizeInfos.end(); ++ iter)
+	{
+		const Tag_WinPrizeInfo &info = *iter;
+		CCLabelTTF *label = CCLabelTTF::create();
+		label->setFontSize(14);
+		label->setAnchorPoint(ccp(0.0f, 1.0f));
+		CCString *str = NULL;
+		if(info.bFirstPrize == 1)	//大奖
+			str = CCString::createWithFormat("%s  %s%s  %s", info.cPrizeGetTime, logStr[0], logStr[1], info.cItemName);
+		else
+			str = CCString::createWithFormat("%s  %s  %s", info.cPrizeGetTime, logStr[0], info.cItemName);
+		label->setString(str->getCString());
+		_logContainer->addChild(label);
+		label->setPosition(ccp(0.f, height));
+		height -= TIANMINGLOGLINESPACE;
+	}
+}
+
+void TianmingUiLayer::onMessageBoxWenyunOk()
+{
+	_autoTimes = 1;
+	GambleMgr::getInstance()->Gamble_ForOnce();
+	GambleMgr::getInstance()->SetAutoGambleTimes(1);
+	GambleMgr::getInstance()->SetGambleState(false);//代表单击问运;
+}
+
+cocos2d::CCRect TianmingUiLayer::getWenyunBtnPos()
+{
+	CCNode *node = _frame->getChildByTag(15);
+	CCPoint pt = node->convertToWorldSpace(ccp(0, 0));
+	CCSize size = node->getContentSize();
+	return CCRect(pt.x, pt.y, size.width, size.height);
+}

@@ -1,0 +1,586 @@
+#include "MartialObtainUi.h"
+#include "UiManager.h"
+#include "UiLoader.h"
+#include "CfgReader.h"
+#include "LocalPlayer.h"
+#include "TouchSprite.h"
+#include "UiTools.h"
+#include "ClientCfg.h"
+#include "GambleMgr.h"
+#include "PackageUi.h"
+#include "GambleProto.h"
+#include "MartialEquipUi.h"
+#include "RoleManager.h"
+#include "ActivityMgr.h"
+#include "PackageManager.h"
+#include "item.h"
+#include "StringMgr.h"
+#include "UiTools.h"
+#include "World.h"
+#include "SystemUi.h"
+#include "NewPlayerGuide.h"
+#include <algorithm>
+
+InstructList::InstructList()
+{
+	CCLabelTTF *label = createLabel("");
+	label->setTag(NTT_Text);
+	_node->addChild(label);
+	getLabel(NTT_Text)->setPosition(ccp(PACKAGEUI_INSTRUCT_POX, 0.f));
+}
+
+InstructList::~InstructList()
+{
+
+}
+
+cocos2d::CCSize InstructList::getContentSize()
+{
+	return _contentSize;
+}
+
+void InstructList::setData( const std::string &text )
+{
+	getLabel(NTT_Text)->setString(text.c_str());
+	updateContent();
+}
+
+CCLabelTTF * InstructList::getLabel( eNonticTextTag tag )
+{
+	return dynamic_cast<CCLabelTTF*>(_node->getChildByTag(tag));
+}
+
+CCLabelTTF* InstructList::createLabel( const std::string &text )
+{
+	CCLabelTTF *label = CCLabelTTF::create();
+	label->setFontSize(16.0f);
+	label->setAnchorPoint(ccp(0.f, 1.0f));
+	label->setString(text.c_str()); 
+	label->setDimensions(CCSize(490,0.f));
+	label->setColor(ccc3(0xfe, 0xf8, 0xd8));
+	return label;
+}
+
+void InstructList::updateContent()
+{
+	float height = 0.f;
+
+	CCLabelTTF *label = getLabel(NTT_Text);
+	if(label != NULL)
+	{
+		float tmpHeight = label->getContentSize().height;
+		if(height < tmpHeight)
+			height = tmpHeight;
+	}
+
+	_contentSize.height = height;
+
+	CCLabelTTF *last = getLabel(NTT_Text);
+	if(last != NULL)
+	{
+		_contentSize.width = PACKAGEUI_INSTRUCT_POX + last->getContentSize().width;
+	}
+}
+
+////////////////////////////////////////////////////////////
+MartialObtainUi::MartialObtainUi()
+{
+
+}
+
+MartialObtainUi::~MartialObtainUi()
+{
+
+}
+
+CCNode* MartialObtainUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["MartialObtainUiLayer"] = UiLayerLoader<MartialObtainUiLayer>::loader();
+	nodeLoaders["TouchSprite"] = TouchSpriteLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("martialobtainui", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+MartialObtainUiLayer * MartialObtainUi::getUiLayer()
+{
+	return getUiNodeByTag<MartialObtainUiLayer>(WCT_MartialObtainUi);
+}
+
+void MartialObtainUi::onServerResult( bool success )
+{
+	if (success)
+	{
+		MartialObtainUiLayer *uiLayer = getUiLayer();
+		if(uiLayer != NULL)
+		{
+			uiLayer->onServerResult(success);
+		}
+	}
+}
+
+void MartialObtainUi::setInstructFrameShow( bool show )
+{
+	MartialObtainUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setInstructFrameShow(show);
+	}
+}
+
+void MartialObtainUi::updateData()
+{
+	MartialObtainUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateData();
+	}
+}
+
+cocos2d::CCRect MartialObtainUi::getCloseBtnPos()
+{
+	MartialObtainUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->getCloseBtnPos();
+	}
+	return CCRect();
+}
+
+cocos2d::CCRect MartialObtainUi::getCloseBtn2Pos()
+{
+	MartialObtainUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		return uiLayer->getCloseBtn2Pos();
+	}
+	return CCRect();
+}
+
+cocos2d::CCRect MartialObtainUi::getBtnPos( int tag )
+{
+	MartialObtainUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		return uiLayer->getBtnPos(tag);
+	}
+	return CCRect();
+}
+
+
+///////////////////////////////////////////////////
+
+MartialObtainUiLayer::MartialObtainUiLayer()
+	:_magicNode(NULL)
+	,_onlyEffect(NULL)
+	,_onekeyEffect(NULL)
+	,_verticalList(NULL)
+	,_enableObtain(true)
+{
+
+}
+
+MartialObtainUiLayer::~MartialObtainUiLayer()
+{
+	if(_verticalList != NULL)
+	{
+		delete _verticalList;
+		_verticalList = NULL;
+	}
+}
+
+cocos2d::SEL_MenuHandler MartialObtainUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler MartialObtainUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", MartialObtainUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGoldObtainBtnPressed", MartialObtainUiLayer::onGoldObtainBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOneKeyObtainBtnPressed", MartialObtainUiLayer::onOneKeyObtainBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onYuanBaoObtainBtnPressed", MartialObtainUiLayer::onYuanBaoObtianBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtn2Pressed", MartialObtainUiLayer::onCloseBtn2Pressed);
+	return NULL;
+}
+
+void MartialObtainUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(MOT_Frame));
+	CC_ASSERT(_frame != NULL);
+
+	_nodeFrame = dynamic_cast<CCSprite*>(_frame->getChildByTag(MOT_NodeFrame));
+	CC_ASSERT(_nodeFrame != NULL);
+
+	_magicNode = _frame->getChildByTag(MOT_MagicNode);
+	CC_ASSERT(_magicNode != NULL );
+
+	_instructframe = static_cast<CCSprite*>(getChildByTag(1));
+	CC_ASSERT(_instructframe != NULL);
+	CCSize size = CCDirector::sharedDirector()->getWinSize();
+	_instructframe->setPosition(ccp(size.width * 2, size.height));
+
+	_container = _instructframe->getChildByTag(0);
+	CC_ASSERT(_container != NULL);
+	_scrollView = createScrollViewWithContent(_container);
+	CC_ASSERT(_scrollView != NULL);
+	_container->addChild(_scrollView);
+	_verticalList = new VerticalList<InstructList>;
+	_verticalList->addToScrollView(_scrollView);
+	_verticalList->setMinSize(_container->getContentSize());
+
+	//功法装备页签、升级页签点击事件;
+	TouchSprite *martialEquipTab = dynamic_cast<TouchSprite*>(_frame->getChildByTag(MOT_PracticeTab));
+	CC_ASSERT(martialEquipTab != NULL);
+	martialEquipTab->signalTouched.connect(this, &MartialObtainUiLayer::onMartialPracticeTabClicked);
+
+// 	TouchSprite *martialUpgradTab = dynamic_cast<TouchSprite*>(_frame->getChildByTag(MOT_UpgradTab));
+// 	CC_ASSERT(martialUpgradTab != NULL);
+// 	martialUpgradTab->signalTouched.connect(this, &MartialObtainUiLayer::onMartialUpgradTabClicked);
+
+	for(int i = MOT_ItemBegin; i < MOT_ItemEnd; i ++)
+	{
+		CCNode *node = _frame->getChildByTag(i);
+		CC_ASSERT(node != NULL);
+		_itemPos[i] = node->getPosition();
+		ItemNode *itemNode = ItemNode::create();
+		itemNode->setBlank();
+		itemNode->setPosition(node->getPosition());
+		itemNode->setTag(MOT_ItemNodeBegin + i);
+		_frame->addChild(itemNode,2);
+	}
+
+	CCNode *specialNode = _frame->getChildByTag(MOT_ItemSpecial);
+	CC_ASSERT(specialNode != NULL);
+	_itemSpecialPos = specialNode->getPosition();
+
+	_magicNode = _frame->getChildByTag(MOT_MagicNode);
+	CC_ASSERT(_magicNode != NULL);
+
+	//runObtainAnimation(false);
+	updateData();
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this,1, true);
+}
+
+void MartialObtainUiLayer::onExit()
+{
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool MartialObtainUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	const CCSize &instructframeSize = _instructframe->getContentSize();
+ 	CCRect nodeFrameRect(0.0f, 0.0f, instructframeSize.width, instructframeSize.height);
+	if(frameRect.containsPoint(framePoint)||nodeFrameRect.containsPoint(framePoint)|| isTouchOnNodeContent(_container,pTouch))
+	{
+		return true;
+	}
+	return false;
+}
+
+void MartialObtainUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//关闭;
+ 	CLOSE_UI(WCT_MartialObtainUi);
+ 	CLOSE_UI(WCT_PACKAGEUI);
+	stopOnekeyAnimation();
+	stopOnlyAnimation();
+}
+
+void MartialObtainUiLayer::onCloseBtn2Pressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setInstructFrameShow(false);
+}
+
+
+void MartialObtainUiLayer::onGoldObtainBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//功法获取;
+	GambleMgr::getInstance()->Kungfu_Gamble(GAMBLE_KUNGFU_GOLD);
+}
+
+void MartialObtainUiLayer::onYuanBaoObtianBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	GambleMgr::getInstance()->Kungfu_Gamble(GAMBLE_KUNGFU_YBLQ);
+}
+
+
+void MartialObtainUiLayer::onOneKeyObtainBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	//一键获取;
+	GambleMgr::getInstance()->Kungfu_Gamble(GAMBLE_KUNGFU_ONEKEY);
+}
+
+void MartialObtainUiLayer::onMartialPracticeTabClicked( TouchSprite* ,bool )
+{
+	CLOSE_UI(WCT_MartialObtainUi);
+	OPEN_UI(WCT_MartialEquipUi);
+	GET_UI(MartialEquipUi,WCT_MartialEquipUi)->setPlayerId(RoleManager::getInstance()->getLocalPlayer()->getId());
+	GET_UI(Package,WCT_PACKAGEUI)->changePackageBtn(true);
+}
+
+// void MartialObtainUiLayer::onMartialUpgradTabClicked( TouchSprite*, bool )
+// {
+// 	CLOSE_UI(WCT_MartialObtainUi);
+// 	OPEN_UI(WCT_MartialUpgradUi);
+// }
+
+// void MartialObtainUiLayer::runObtainAnimation( bool show /*= true*/ )
+// {
+// 	CCNode *node =_frame->getChildByTag(MOT_MagicSprite);
+// 	_magicNode = _frame->getChildByTag(MOT_MagicNode);
+// 	if(node == NULL)
+// 	{
+// 		node = CCSprite::create();
+// 		node->setAnchorPoint(ccp(0.0, 1.0));
+// 		node->setTag(MOT_MagicSprite);
+// 		node->setPosition(_magicNode->getPosition());
+// 		_frame->addChild(node);
+// 	}
+// 
+// 	node->setVisible(show);
+// 
+// 	if(_animateList.empty())
+// 	{
+// 		AnimationCache::createDefList(1, _animateList, false);
+// 		AnimationCache::getInstance()->getSinEffect(0,"cangbaowai", _animateList);
+// 	}
+// 
+// 	BSAnimate *animate = _animateList[0];
+// 	node->stopAllActions();
+// 	node->runAction(animate);
+// }
+
+void MartialObtainUiLayer::onServerResult( bool success )
+{
+	if(success)
+	{
+		//设置各项;
+		unsigned int* KungfuArrary = GambleMgr::getInstance()->GetKungfuGambleIDArray();
+		CCPoint targetPos;
+		if (IS_UI_OPEN(WCT_PACKAGEUI))
+		{
+			targetPos = GET_UI(Package, WCT_PACKAGEUI)->getPagepos();
+		}
+		else
+		{
+			targetPos = GET_UI(SystemUi,WCT_SystemUi)->getBagBtnPos();
+		}
+
+		int num = 0;
+		for (int i = 0; i < KUNGFU_LOTTERY_MAX_NUM; i++)
+		{
+			if ((unsigned int)INVALID == KungfuArrary[i] || 0 == KungfuArrary[i])
+				break;
+			num++;
+		}
+
+		for (int i = 0; i < KUNGFU_LOTTERY_MAX_NUM; i++)
+		{
+			ItemNode *item = dynamic_cast<ItemNode*>(_frame->getChildByTag(i + MOT_ItemNodeBegin));
+			CC_ASSERT(item != NULL);
+			if ((unsigned int)INVALID == KungfuArrary[i] || 0 == KungfuArrary[i])
+				break;
+			item->setDataId(KungfuArrary[i]);
+			item->setLevel(1);
+			if (num != 1)
+			{
+				item->setPosition(_itemPos[i]);
+				runOneKeyAnimation();;
+				item->runMoveAction(_itemPos[i],targetPos,1,true);
+			}
+			else
+			{
+				item->setPosition(_itemSpecialPos);
+ 				runOnlyAnimation();
+				item->runMoveAction(_itemSpecialPos,targetPos,1,false);
+
+			}
+		}
+	}
+}
+
+void MartialObtainUiLayer::setInstructFrameShow( bool show )
+{
+	CCSize size = CCDirector::sharedDirector()->getWinSize();
+	if (show)
+	{
+		_instructframe->setPosition(ccp(size.width * 0.5,size.height * 0.5));
+	}
+	else
+	{
+		_instructframe->setPosition(ccp(size.width * 1.5,size.height * 0.5));
+	}
+}
+
+void MartialObtainUiLayer::updateData()
+{
+
+	_verticalList->clear();
+	InstructList *notice = new InstructList;
+	std::string noticeText = GET_STR(6013);
+	std::replace(noticeText.begin(), noticeText.end(), '\\', '\n');
+	notice->setData(noticeText);
+	_verticalList->addItem(notice);
+	_verticalList->updateDisplay();
+
+}
+
+void MartialObtainUiLayer::runOneKeyAnimation()
+{
+	/*AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0,"cangbaowai", anims);
+	BSAnimate *animste = anims[0]; //特效动画;
+
+	if (_onekeyEffect == NULL)
+	{
+		_onekeyEffect = CCSprite::create();
+		//_onekeyEffect->setAnchorPoint(ccp(0.0f, 1.0f));
+		_onekeyEffect->setPosition(_magicNode->getPosition());
+		_frame->addChild(_onekeyEffect,1);
+		_onekeyEffect->runAction(animste);
+	}
+	else
+	{
+		_onekeyEffect->runAction(animste);
+	}*/
+}
+
+void MartialObtainUiLayer::runOnlyAnimation()
+{
+	/*AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0,"cangbaonei", anims);
+	BSAnimate *animste = anims[0];
+	if (_onlyEffect == NULL)
+	{
+		_onlyEffect = CCSprite::create();
+		//_onlyEffect->setAnchorPoint(ccp(0.0f, 1.0f));
+		_onlyEffect->setPosition(_magicNode->getPosition());
+		_frame->addChild(_onlyEffect,1);
+		_onlyEffect->runAction(animste);
+	}
+	else
+	{
+		_onlyEffect->runAction(animste);
+	}*/
+}
+
+void MartialObtainUiLayer::stopOnekeyAnimation()
+{
+	if (_onekeyEffect != NULL)
+	{
+		_onekeyEffect->stopAllActions();
+		_onekeyEffect->removeFromParent();
+		_onekeyEffect = NULL;
+	}
+}
+
+void MartialObtainUiLayer::stopOnlyAnimation()
+{
+	if (_onlyEffect != NULL)
+	{
+		_onlyEffect->stopAllActions();
+		_onlyEffect->removeFromParent();
+		_onlyEffect = NULL;
+	}
+}
+
+void MartialObtainUiLayer::setEnableObtain( bool enable )
+{
+	if(_frame != NULL)
+	{
+		_enableObtain = enable;
+		CCControlButton *goldbtn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(MOT_GoldBtn));
+		CC_ASSERT(goldbtn != NULL);
+		goldbtn->setEnabled(enable);
+
+		CCControlButton *yuanbaobtn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(MOT_YuanBaoBtn));
+		CC_ASSERT(yuanbaobtn != NULL);
+		yuanbaobtn->setEnabled(enable);
+
+		CCControlButton *onekeybtn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(MOT_OneKeyBtn));
+		CC_ASSERT(onekeybtn != NULL);
+		onekeybtn->setEnabled(enable);
+	}
+}
+
+void MartialObtainUiLayer::animCallback( CCNode* node )
+{
+	unsigned int* KungfuArrary = GambleMgr::getInstance()->GetKungfuGambleIDArray();
+	CCPoint targetPos;
+	if (IS_UI_OPEN(WCT_PACKAGEUI))
+	{
+		targetPos = GET_UI(Package, WCT_PACKAGEUI)->getPagepos();
+	}
+	else
+	{
+		targetPos = GET_UI(SystemUi,WCT_SystemUi)->getBagBtnPos();
+	}
+	int num = 0;
+	for (int i = 0; i < KUNGFU_LOTTERY_MAX_NUM; i++)
+	{
+		if ((unsigned int)INVALID == KungfuArrary[i] || 0 == KungfuArrary[i])
+			break;
+		num++;
+	}
+	for (int i = 0; i < KUNGFU_LOTTERY_MAX_NUM; i++)
+	{
+		ItemNode *item = dynamic_cast<ItemNode*>(_frame->getChildByTag(i + MOT_ItemNodeBegin));
+		CC_ASSERT(item != NULL);
+		if ((unsigned int)INVALID == KungfuArrary[i] || 0 == KungfuArrary[i])
+			break;
+// 		item->setDataId(KungfuArrary[i]);
+// 		item->setLevel(1);
+		if (num != 1)
+		{
+			item->runMoveAction(_itemPos[i],targetPos,1,true);
+		}
+		else
+		{
+			item->runMoveAction(_itemSpecialPos,targetPos,1,false);
+		}
+	}
+}
+
+cocos2d::CCRect MartialObtainUiLayer::getCloseBtnPos()
+{
+	CCSize size = _frame->getContentSize();
+	CCPoint pos = _frame->convertToWorldSpace(ccp(size.width - 15, size.height - 15));
+	return CCRect(pos.x - 23, pos.y - 23, 46, 46);
+}
+
+cocos2d::CCRect MartialObtainUiLayer::getCloseBtn2Pos()
+{
+	CCSize size = _instructframe->getContentSize();
+	CCPoint pos = _instructframe->convertToWorldSpace(ccp(size.width - 15, size.height - 15));
+	return CCRect(pos.x - 23, pos.y - 23, 46, 46);
+}
+
+cocos2d::CCRect MartialObtainUiLayer::getBtnPos( int tag )
+{
+	CCNode *node = NULL;
+
+	if(tag == MOT_PracticeTab)
+	{
+		node = _frame->getChildByTag(MOT_PracticeTab);
+	}
+	if(node != NULL)
+	{
+		CCPoint pt = node->convertToWorldSpace(ccp(0, 0));
+		CCSize size = node->getContentSize();
+		return CCRect(pt.x, pt.y, size.width, size.height);
+	}
+
+	return CCRect();
+}
+
+
+
+

@@ -1,0 +1,323 @@
+/*******************************************************************************
+
+	Copyright 2010 by Shengshi Interactive Game Co., Ltd.
+	All rights reserved.
+	
+	This software is the confidential and proprietary information of
+	Shengshi Interactive Game Co., Ltd. ('Confidential Information'). You shall
+	not disclose such Confidential Information and shall use it only in
+	accordance with the terms of the license agreement you entered into with
+	Shengshi Interactive  Co., Ltd.
+ 
+   *******************************************************************************/
+#include "UpdateNode.h"
+//#include "UpdatePanel.h"
+//#include "UpdateMsgBox.h"
+#include "GameEventDefine.h"
+#include "Helper.h"
+#include "BaseDefine.h"
+//#include "QuickConfig.h"
+#include "f_string_util.h"
+//#include "AccountPlatform.h"
+#include "CommonClient.h"
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+#include "wzolJni.h"
+#endif
+//#include "TestUI.h"
+//#include "ViewCommon.h"
+//#include "AccountPlatform.h"
+
+UpdateNode::UpdateNode()
+: _assertsMgr(NULL)
+//, m_update_panel(NULL)
+, m_ask_if_need_update(true)
+,_updateView(NULL)
+{
+	//REGISTER_EVENT(StartUpdate, UpdateNode, on_start_update);
+}
+
+UpdateNode::~UpdateNode()
+{
+	CC_SAFE_DELETE(_assertsMgr);
+	//UNREGISTER_EVENT(StartUpdate, UpdateNode, on_start_update);
+}
+
+bool UpdateNode::init()
+{
+	_assertsMgr = new AssetsManager("", "", "");
+	_assertsMgr->setDelegate(this);
+	_assertsMgr->setConnectionTimeout(10);
+	_assertsMgr->setDefaultVersion(CFG(string,"res_ver", ""));
+
+	std::string storage_path;
+	safe_sprintf(storage_path, "%s%s", 
+		CCFileUtils::sharedFileUtils()->getWritablePath().c_str(),
+		g_szDownloadPath); 
+
+	CCLOG("UpdateNode::init():%s", storage_path.c_str());
+	_assertsMgr->createDirectory(storage_path.c_str());
+	_assertsMgr->setStoragePath(storage_path.c_str());
+
+	return true;
+}
+
+void UpdateNode::onEnter()
+{
+	CCNode::onEnter();
+	runAction(CCCallFunc::create(this, callfunc_selector(UpdateNode::after_enter)));
+}
+
+void UpdateNode::after_enter()
+{
+	/*
+	m_update_panel = static_cast<UpdatePanel*>(TestUI::createLayer(
+		"layout/interface/rebirth02.ccbi",
+		"UpdatePanel",
+		UpdatePanelLoader::loader(),
+		this, this, false, false));
+		*/
+	_updateView = AutoUpdateUi::createFromCCBI(this,_assertsMgr);
+	this->addChild(_updateView);
+
+	try_update(m_ask_if_need_update);
+}
+
+void UpdateNode::try_update(bool show_panel)
+{
+	AssetsManager::ErrorCode code = AssetsManager::kNoNewVersion;
+	if(CFG(int,"enable_upgrade", 1))
+	{
+		code = check_update();
+	}
+
+	if(code == AssetsManager::kNeedUpdate)
+	{
+		if(show_panel)
+		{
+			ask_if_update_now();
+		}
+		else
+		{
+			update_resource();
+		}
+	}
+	else if(code == AssetsManager::kNetwork)
+	{
+		// 网络异常, 统一在错误消息处理的地方处理.
+	}
+	else if(code == AssetsManager::kNoNewVersion)
+	{
+// 		if(m_update_panel)
+// 		{
+// 			m_update_panel->setDisplayType(UpdatePanel::EDT_loading);
+// 		}
+		if (_updateView)
+		{
+			_updateView->showProgressState(AutoUpdateUi::EUS_Finish,_assertsMgr->needReboot());
+		}
+
+		this->runAction(CCSequence::create(
+			CCDelayTime::create(0.5f),	
+			CCCallFunc::create(this, callfunc_selector(UpdateNode::call_finished_fn)),
+			NULL));
+	}
+}
+
+void UpdateNode::ask_if_update_now()
+{
+// 	UpdateMsgBox* msg_box = static_cast<UpdateMsgBox*>(TestUI::createLayer(
+// 		"layout/interface/rebirth01.ccbi",
+// 		"UpdateMsgBox",
+// 		UpdateMsgBoxLoader::loader(),
+// 		this, this, true, false));
+// 	msg_box->setDisplayType(UpdateMsgBox::EDT_download);	
+// 	msg_box->setDownloadSize(m_am->getTargetVersionSize());
+	
+	_updateView->showUpConfirm(_assertsMgr->getTargetVersionSize());
+}
+
+bool UpdateNode::fast_check_update()
+{
+#ifndef _WIN32
+    //http://192.168.1.100:30080/resnei/uptest/1.0.5.0.txt
+    std::string res_ver=CCUserDefault::sharedUserDefault()->getStringForKey(KEY_OF_VERSION);
+    if (res_ver.empty())
+    {
+        //std::string default_ver;
+        WzolJni::getInstance()->callPlatformWithReturn(GET_DEFAULT_RES_VER,"",res_ver);
+    }
+    
+    std::string check_up_url;
+    WzolJni::getInstance()->callPlatformWithReturn(GET_UPDATE_CHECK_URL,"",check_up_url);
+    
+    safe_sprintf(check_up_url,"%s/%s.txt",check_up_url.c_str(),res_ver.c_str());
+    
+	CCLog("UpdateNode::fast_check_update():%s", check_up_url.c_str());
+    return _assertsMgr->fastCheckUpdate(check_up_url) == AssetsManager::kNeedUpdate;
+#else 
+    return false;
+#endif
+}
+
+AssetsManager::ErrorCode UpdateNode::check_update()
+{
+#ifndef _WIN32
+	//http://192.168.1.100:30080/resnei/uptest/1.0.5.0.txt
+	std::string res_ver=CCUserDefault::sharedUserDefault()->getStringForKey(KEY_OF_VERSION);
+	if (res_ver.empty())
+	{
+		//std::string default_ver;
+		WzolJni::getInstance()->callPlatformWithReturn(GET_DEFAULT_RES_VER,"",res_ver);
+	}
+
+	std::string check_up_url="";
+	WzolJni::getInstance()->callPlatformWithReturn(GET_UPDATE_CHECK_URL,"",check_up_url);
+
+	safe_sprintf(check_up_url,"%s/%s.txt",check_up_url.c_str(),res_ver.c_str());
+	CCLOG("UpdateNode::check_update():%s", check_up_url.c_str());
+	_assertsMgr->setVersionFileUrl(check_up_url.c_str());
+	return _assertsMgr->checkUpdate();
+#else
+	return AssetsManager::kNoNewVersion;
+#endif
+
+}
+
+void UpdateNode::update_resource()
+{
+	//AccountPlatform& plat = AccountPlatform::Inst();
+
+	//std::string cfg_pkg_url = CFG(string,"package_base_url", "http://192.168.1.100:30080/resnei/uptest");
+#ifndef _WIN32
+	std::string package_url;
+	WzolJni::getInstance()->callPlatformWithReturn(GET_UPDATE_ZIP_URL,"",package_url);
+	safe_sprintf(package_url, "%s/%s.zip",
+		package_url.c_str(),
+		_assertsMgr->getTargetVersion().c_str());
+
+	CCLOG("UpdateNode::update_resource():%s", package_url.c_str());
+	_assertsMgr->setPackageUrl(package_url.c_str());
+	_assertsMgr->update();
+
+	if (_updateView)
+	{
+		_updateView->showProgressState(AutoUpdateUi::EUS_CheckUrl);
+	}
+#endif
+}
+
+void UpdateNode::onError(AssetsManager::ErrorCode errorCode)
+{
+	if (_updateView)
+	{
+		_updateView->showErrorCode(errorCode);
+	}
+	switch(errorCode)
+	{
+	case AssetsManager::kUncompress:
+		_assertsMgr->deleteDownloadVersion();
+		break;
+    default: break;
+	}
+// 	std::string hint_str;
+// 	UpdateMsgBox::EDisplayType type = UpdateMsgBox::EDT_hint;
+// 	switch(errorCode)
+// 	{
+// 	case AssetsManager::kCreateFile:
+// 		hint_str = g_StrTable["update_err_create_file"];
+// 		break;
+// 	case AssetsManager::kNetwork:
+// 		hint_str = g_StrTable["update_err_network"];
+// 		type = UpdateMsgBox::EDT_Network;
+// 		break;
+// 	case AssetsManager::kUncompress:
+// 		m_am->deleteDownloadVersion();
+// 		hint_str = g_StrTable["update_err_other"];
+// 		break;
+// 	}
+// 
+// 	if(!hint_str.empty())
+// 	{
+// 		UpdateMsgBox* msg_box = static_cast<UpdateMsgBox*>(TestUI::createLayer(
+// 			"layout/interface/rebirth01.ccbi",
+// 			"UpdateMsgBox",
+// 			UpdateMsgBoxLoader::loader(),
+// 			this, this, true, false));
+// 		msg_box->setDisplayType(type);	
+// 		msg_box->setHintString(hint_str);
+// 	}	
+}
+
+void UpdateNode::onProgress(int percent)
+{
+// 	if(m_update_panel)
+// 	{
+// 		m_update_panel->setPercent(percent);
+// 	}
+	if (_updateView)
+	{
+		_updateView->showProgressState(AutoUpdateUi::EUS_DownloadingZip);
+		_updateView->updateProgress(percent);
+	}
+
+}
+
+void UpdateNode::onSuccess()
+{
+	if (_updateView)
+	{
+		_updateView->showProgressState(AutoUpdateUi::EUS_Success);
+	}
+
+	try_update_without_ask();
+}
+
+void UpdateNode::on_start_update(StartUpdate* evt)
+{
+	this->runAction(CCSequence::create(
+		CCDelayTime::create(0.1f),
+		CCCallFunc::create(this, callfunc_selector(UpdateNode::try_update_without_ask)),
+		NULL));
+}
+
+void UpdateNode::try_update_without_ask()
+{
+	try_update(false);
+}
+
+
+void UpdateNode::call_finished_fn()
+{
+	CCFileUtils::sharedFileUtils()->purgeCachedEntries();
+	
+	if(m_finished_fn)
+	{
+		m_finished_fn(_assertsMgr->needReboot());
+	}
+	setVisible(false);
+}
+
+cocos2d::extension::SEL_CCControlHandler UpdateNode::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(UpdateNode,onOK);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(UpdateNode,onCancel);
+	return NULL;
+}
+
+void UpdateNode::onOK( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	this->runAction(CCSequence::create(
+		CCDelayTime::create(0.1f),
+		CCCallFunc::create(this, callfunc_selector(UpdateNode::try_update_without_ask)),
+		NULL));
+}
+
+void UpdateNode::onCancel( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if (m_end_game_fn)
+	{
+		m_end_game_fn();
+	}
+	//call_finished_fn();
+}

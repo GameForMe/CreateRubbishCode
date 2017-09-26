@@ -1,0 +1,284 @@
+#include "AttackAction.h"
+#include "SQLCommand.h"
+#include "SQLTable.h"
+#include "DBMgr.h"
+#include "UiTools.h"
+#include "InheritAction.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+const float WallRange = 50.0f;					//火墙范围
+const unsigned int WallTime = 10 * 1000;		//火墙持续时间
+
+RoleActionMgr::RoleActionMgr(): isUsed(false), oldTime(0), totalTime(0.0f)
+{
+
+}
+
+RoleActionMgr::~RoleActionMgr()
+{
+	Destory();
+}
+
+RoleActionMgr* RoleActionMgr::GetInstance()
+{
+	static RoleActionMgr mgr;
+	return &mgr;
+}
+
+void RoleActionMgr::LoadRoleAction()
+{
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Skillpriority");
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	//int index = 0;
+	while(table->retrieve_row())
+	{
+		E_Role_Action_Type type = ERAT_Action_None;
+		unsigned int idx = table->get_index("ActionType");
+		type = (E_Role_Action_Type)table->get_integer32(idx);
+		RoleAction* dad = NULL;
+		switch (type)
+		{
+		case ERAT_Action_Skill:
+			dad = new SkillAction;
+			break;
+		case ERAT_Action_RandMove:
+			dad = new RandMoveAction;
+			break;
+		case ERAT_Action_RoundWall:
+			dad = new RoundWallAction;
+			break;
+		case ERAT_Action_RoundPet:
+			dad = new RoundPetAction;
+			break;
+		}
+		if (!dad)
+			continue;
+		dad->m_eType = type;
+		idx = table->get_index("ActionID");
+		dad->m_iId = table->get_integer32(idx);
+		idx = table->get_index("Profession");
+		dad->m_eProfession = (RoleType)table->get_integer32(idx);
+		idx = table->get_index("ActionNumber");
+		dad->m_iValue = table->get_integer32(idx);
+		idx = table->get_index("Condition");
+		std::string txtCondition = table->get_text(idx);
+		idx = table->get_index("ConditionNumber");
+		std::string txtValue = table->get_text(idx);
+		std::vector<int> vecCondition;
+		std::vector<int> vecValue;
+		part_string(txtCondition.c_str(), vecCondition);
+		part_string(txtValue.c_str(), vecValue);
+		for (size_t i = 0; i < vecCondition.size() && i < vecValue.size(); i++)
+		{
+			ActionCondition* condition = NULL;
+			E_Action_Contion_Type conType = EACT_Condition_None;
+			conType = (E_Action_Contion_Type)vecCondition[i];
+			switch (conType)
+			{
+			case EACT_Condition_InWall:
+				condition = new InWallCondition;
+				break;
+			case EACT_Condition_Level:
+				condition = new LevelCondition;
+				break;
+			case EACT_Condition_EnemyHp:
+				condition = new EnemyHpCondition;
+				break;
+			case EACT_Condition_SelfHp:
+				condition = new SelfHpCondition;
+				break;
+			case EACT_Condition_EnemyHavePet:
+				condition = new EnemyHavePetCondition;
+				break;
+			case EACT_Condition_SelfHavePet:
+				condition = new SelfHavePetCondition;
+				break;
+			case EACT_Condition_Distance:
+				condition = new DistanceCondition;
+				break;
+			}
+			if (!condition)
+				continue;
+			condition->m_eType = conType;
+			condition->m_iValue = vecValue[i];
+			dad->m_vConditions.push_back(condition);
+		}
+		roleActionList.push_back(dad);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+}
+
+void RoleActionMgr::Destory()
+{
+	isUsed = false;
+	professionAction.clear();
+	skillAction.clear();
+	for (size_t i = 0; i < roleActionList.size(); i++)
+	{
+		delete roleActionList[i];
+	}
+	roleActionList.clear();
+	oldTime = 0;
+}
+
+bool RoleActionMgr::CanUseSkill(int skillId )
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if (player)
+	{
+		if (!isUsed)
+		{
+			isUsed = true;
+			professionAction.clear();
+			skillAction.clear();
+			for (size_t i = 0; i < roleActionList.size(); i++)
+			{
+				if (roleActionList[i]->m_eProfession == player->getAttribute(RA_ROLETYPE))
+				{
+					if (roleActionList[i]->m_eType == ERAT_Action_Skill)
+						skillAction.push_back(roleActionList[i]);
+					else
+						professionAction.push_back(roleActionList[i]);
+					
+				}
+			}
+		}
+		for (size_t i = 0; i < skillAction.size(); i++)
+		{
+			if (skillAction[i]->m_eType == ERAT_Action_Skill && skillAction[i]->m_iValue == skillId)
+			{
+				return skillAction[i]->CanExecute();
+			}
+		}
+	}
+	return true;
+}
+
+bool RoleActionMgr::ExecuteAction(float dt)
+{
+	return false;
+	for (size_t i = 0; i < professionAction.size(); i++)
+	{
+		if (professionAction[i]->CanExecute())
+		{
+			if (professionAction[i]->Execute())
+			{
+				return true;
+			}
+		}		
+	}
+	return false;
+}
+
+void RoleActionMgr::AddSkillWall( unsigned int m_Actor, unsigned int skillId, unsigned int targetId )
+{
+	Role* pRole = RoleManager::getInstance()->findRole(m_Actor);
+	Role* pTarRole = RoleManager::getInstance()->findRole(targetId);
+	if (pRole && pTarRole && (pRole->getCreatureType() == CT_PLAYER || pRole->getCreatureType() == CT_MONSTER))
+	{
+		SkillWallData data;
+		data.m_Actor = m_Actor;
+		data.m_SkillId = skillId;
+		data.m_Pos = ccp(0,0);
+		data.m_ActTime = WallTime;
+		skillWallList.push_back(data);
+	}
+}
+
+void RoleActionMgr::Update( unsigned int dt )
+{
+	if (oldTime == 0)
+		oldTime = dt;
+	unsigned int space = dt - oldTime;
+	for (size_t i = 0; i < skillWallList.size();)
+	{
+		skillWallList[i].m_ActTime -= space;
+		if (skillWallList[i].m_ActTime <= 0)
+			skillWallList.erase(skillWallList.begin() + i);
+		else
+			i++;
+	}
+	oldTime = dt;
+}
+
+bool RoleActionMgr::IsInWall(unsigned int roleId, bool own)
+{
+	if (skillWallList.size() <= 0)
+		return false;
+	Role* pSelf = RoleManager::getInstance()->findRole(roleId);
+	if (!pSelf)
+		return false;
+	for (size_t i = 0; i < skillWallList.size(); i++)
+	{
+		if (( own && skillWallList[i].m_Actor == roleId) || (!own && skillWallList[i].m_Actor != roleId))
+		{
+			float dis = ccpDistance(pSelf->getPosition(), skillWallList[i].m_Pos);
+			if (dis <= WallRange)
+				return true;
+		}
+	}
+	return false;
+}
+
+CCPoint& RoleActionMgr::GetSkillWallPos( unsigned int roleId, CCPoint& pos)
+{
+	if (skillWallList.size() <= 0)
+		return pos;
+	Role* pSelf = RoleManager::getInstance()->findRole(roleId);
+	if (!pSelf)
+		return pos;
+	for (size_t i = 0; i < skillWallList.size(); i++)
+	{
+		if (skillWallList[i].m_Actor == roleId)
+		{
+			float dis = ccpDistance(pSelf->getPosition(), skillWallList[i].m_Pos);
+			if (dis <= WallRange)
+			{
+				pos = skillWallList[i].m_Pos;
+				break;
+			}
+		}
+	}
+	return pos;
+}
+
+RoleAction::RoleAction() : m_eType(ERAT_Action_None), m_eProfession(RT_Null), m_iValue(0), m_iId(0), m_bIsRunning(false)
+{
+
+}
+
+RoleAction::~RoleAction()
+{
+	for (size_t i = 0; i < m_vConditions.size(); i++)
+	{
+		delete m_vConditions[i];
+	}
+	m_vConditions.clear();
+}
+
+
+bool RoleAction::CanExecute()
+{
+	for (size_t i = 0; i < m_vConditions.size(); i++)
+	{
+		if (!m_vConditions[i]->CanExecute())
+			return false;
+	}
+	return true;
+}
+
+ActionCondition::ActionCondition() : m_eType(EACT_Condition_None), m_iValue(0)
+{
+
+}
+
+ActionCondition::~ActionCondition()
+{
+
+}
+
+bool ActionCondition::CanExecute()
+{
+	return false;
+}

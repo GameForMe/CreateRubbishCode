@@ -1,0 +1,1510 @@
+#include "SkillUi.h"
+#include "CfgReader.h"
+#include "SkillListItemUi.h"
+#include "SkillManager.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "UiTools.h"
+#include "UiLoader.h"
+#include "UiManager.h"
+#include "CheckButton.h"
+#include "NewPlayerGuide.h"
+#include "BSAnimate.h"
+#include "AnimationCache.h"
+#include "DropDragDelegate.h"
+#include "ToolTip.h"
+#include "PackageManager.h"
+#include "InputMessageBox.h"
+#include "MessageBoxUi.h"
+#include "World.h"
+#include "ToolTip.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "VIPMgr.h"
+#include "StringMgr.h"
+#include "HookSetUi.h"
+#include "UiResourceMgr.h"
+#include "ShortCutUi.h"
+#include "UIUtil.h"
+#include "Helper.h"
+#include "PlacardManager.h"
+//////////////////////////////////////////////////////////////////////////
+
+QuickUi * QuickUi::getInstace()
+{
+	static QuickUi instance;
+	return &instance;
+}
+
+bool QuickUi::isOpen()
+{
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		QuickUi *uiNode = (QuickUi*)(scene->getChildByTag(WCT_QuickUiLayer));
+		if(uiNode != NULL)
+			return true;
+	}
+
+	return false;
+}
+
+CCNode* QuickUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["QuickUiLayer"] = UiLayerLoader<QuickUiLayer>::loader();
+	CCNode* pNode = readUiFromCCBI("quick", nodeLoaders, _loadSpriteSheet);
+	return pNode;
+}
+
+void QuickUi::open()
+{
+	if(isOpen())
+		return;
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+		ccNodeLoaderLibrary->registerCCNodeLoader("QuickUiLayer", UiLayerLoader<QuickUiLayer>::loader());
+		cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+		CCNode *node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "quick.ccbi").c_str());
+		_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+		UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+		ccbReader->release();
+		if(node != NULL) {
+			scene->addChild(node, WZ_POPUI, WCT_QuickUiLayer);
+		}
+	}
+}
+void QuickUi::closeUI()
+{
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+}
+
+void QuickUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+}
+void QuickUiLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+void QuickUiLayer::updateLabel()
+{
+	//CCLabelTTF* studyNumLabel = (CCLabelTTF*)this->getChildByTag(0)->getChildByTag(1);
+	LabelFT* studyNumLabel = Helper::getLabelFTByParentAndTag(this->getChildByTag(0),1);
+	if (studyNumLabel)
+	{
+		char studyNum[10] = {0};
+		sprintf(studyNum,"%d/%d",_dayCount,_temp);
+		studyNumLabel->setString(studyNum);
+	}
+
+	//CCLabelTTF* baoJiNumLabel = (CCLabelTTF*)this->getChildByTag(0)->getChildByTag(2);
+	LabelFT* baoJiNumLabel = Helper::getLabelFTByParentAndTag(this->getChildByTag(0),2);
+	if (baoJiNumLabel)
+	{
+		char baoJiNum[10] = {0};
+		sprintf(baoJiNum,"%d",_moneyExp);
+		baoJiNumLabel->setString(baoJiNum);
+	}
+
+	//CCLabelTTF* yuanbaoNumLabel = (CCLabelTTF*)this->getChildByTag(0)->getChildByTag(3);
+	LabelFT* yuanbaoNumLabel = Helper::getLabelFTByParentAndTag(this->getChildByTag(0),3);
+	if (yuanbaoNumLabel)
+	{
+		char yuanbaoNum[10] = {0};
+		sprintf(yuanbaoNum,"%d",_yuanbao);
+		yuanbaoNumLabel->setString(yuanbaoNum);
+	}
+
+	//CCLabelTTF* NumLabel = (CCLabelTTF*)this->getChildByTag(0)->getChildByTag(4);
+	LabelFT* NumLabel = Helper::getLabelFTByParentAndTag(this->getChildByTag(0),4);
+	if (NumLabel)
+	{
+		char Num[10] = {0};
+		sprintf(Num,"%d",_studyNum);
+		NumLabel->setString(Num);
+	}
+}
+void QuickUiLayer::updateYuanbao()
+{
+	_yuanbao = 0;
+	for (int addNum = 1; addNum <= _studyNum; ++addNum)
+	{
+		const skillExpCost* const pSkillPro =  SkillManager::getInstance()->getSkillExpCost(_dayCount + addNum);
+		if (pSkillPro == NULL)
+		{
+			_studyNum = addNum - 1;
+			return;
+		}
+		_yuanbao += pSkillPro->n16Cost;
+	}
+}
+cocos2d::SEL_MenuHandler QuickUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+bool QuickUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+cocos2d::extension::SEL_CCControlHandler QuickUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", QuickUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onMinBtnPressed", QuickUiLayer::onMinBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onMaxBtnPressed", QuickUiLayer::onMaxBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSubBtnPressed", QuickUiLayer::onSubBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onAddBtnPressed", QuickUiLayer::onAddBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onQuickBtnPressed", QuickUiLayer::onQuickBtnPressed);
+	return NULL;
+}
+void QuickUiLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -1, true);
+	setAllChildernButtonPriority(this, -1);
+	CCNode* baoJiNode = (CCNode*)this->getChildByTag(0)->getChildByTag(10);
+	baoJiNode->setVisible(false);
+
+	CCLayerColor* hazyLayer = CCLayerColor::create(ccc4(0,0,0,100)); 
+	hazyLayer->setContentSize(CCSizeMake(CCDirector::sharedDirector()->getVisibleSize().width,CCDirector::sharedDirector()->getVisibleSize().height));
+	hazyLayer->setAnchorPoint(ccp(0.5,0.5));
+	hazyLayer->setTouchEnabled(false);
+	this->addChild(hazyLayer,-1); 
+
+	int playerCurLevel = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	//SkillManager::getInstance()->querySkillExpByLv(playerCurLevel);
+// 	SkillExpByLv otempSkillExpByLv = SkillManager::getInstance()->getSkillExpByLv(playerCurLevel);
+// 	SkillExpByLv* tempSkillExpByLv = &otempSkillExpByLv;
+	SkillExpByLv* tempSkillExpByLv = SkillManager::getInstance()->getSkillExpByLv(playerCurLevel);
+	CC_ASSERT(tempSkillExpByLv);
+	LocalPlayer* lPlayer = RoleManager::getInstance()->getLocalPlayer();
+	_temp = VIPMgr::getInstance()->getLocalVipData().quickSkillPoint;
+	_dayCount = lPlayer->getRoleDayClearInfoTwo(ERDCTT_FAST_ADD_SKILL_POINT_COUNT);
+	//_yuanbao = 10 + lPlayer->getRoleDayClearInfoTwo(ERDCTT_FAST_ADD_SKILL_POINT_COUNT) * 0.5;
+	_moneyExp = tempSkillExpByLv->MoneyExp;
+	_studyNum = 1;
+	updateYuanbao();
+	updateLabel();
+}
+bool QuickUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	return true;
+}
+void QuickUiLayer::onCloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCNode* baoJiNode = (CCNode*)this->getChildByTag(0)->getChildByTag(10);
+	baoJiNode->setVisible(false);
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		scene->removeChildByTag(WCT_QuickUiLayer);
+	}
+	//zhjl:临时先这么改吧，
+	QuickUi::getInstace()->closeUI();
+}
+void QuickUiLayer::onMinBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	
+	CCNode* baoJiNode = (CCNode*)this->getChildByTag(0)->getChildByTag(10);
+	baoJiNode->setVisible(false);
+
+	int playerCurLevel = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	//SkillManager::getInstance()->querySkillExpByLv(playerCurLevel);
+// 	SkillExpByLv otempSkillExpByLv = SkillManager::getInstance()->getSkillExpByLv(playerCurLevel);
+// 	SkillExpByLv* tempSkillExpByLv = &otempSkillExpByLv;
+	SkillExpByLv* tempSkillExpByLv = SkillManager::getInstance()->getSkillExpByLv(playerCurLevel);
+	CC_ASSERT(tempSkillExpByLv);
+	LocalPlayer* lPlayer = RoleManager::getInstance()->getLocalPlayer();
+	_temp = VIPMgr::getInstance()->getLocalVipData().quickSkillPoint;
+	_dayCount = lPlayer->getRoleDayClearInfoTwo(ERDCTT_FAST_ADD_SKILL_POINT_COUNT);
+	//_yuanbao = 10 + lPlayer->getRoleDayClearInfoTwo(ERDCTT_FAST_ADD_SKILL_POINT_COUNT) * 0.5;
+	_moneyExp = tempSkillExpByLv->MoneyExp;
+	_studyNum = 1;
+	updateYuanbao();
+	if (_dayCount == _temp)
+	{
+		_studyNum = 0;
+		_yuanbao = 0;
+		_moneyExp =0;
+	}
+	updateLabel();
+}
+void QuickUiLayer::onMaxBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CCNode* baoJiNode = (CCNode*)this->getChildByTag(0)->getChildByTag(10);
+	baoJiNode->setVisible(false);
+
+	int playerCurLevel = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	//SkillManager::getInstance()->querySkillExpByLv(playerCurLevel);
+// 	SkillExpByLv otempSkillExpByLv = SkillManager::getInstance()->getSkillExpByLv(playerCurLevel);
+// 	SkillExpByLv* tempSkillExpByLv = &otempSkillExpByLv;
+	SkillExpByLv* tempSkillExpByLv = SkillManager::getInstance()->getSkillExpByLv(playerCurLevel);
+	CC_ASSERT(tempSkillExpByLv);
+
+	LocalPlayer* lPlayer = RoleManager::getInstance()->getLocalPlayer();
+	_temp = VIPMgr::getInstance()->getLocalVipData().quickSkillPoint;
+	_dayCount = lPlayer->getRoleDayClearInfoTwo(ERDCTT_FAST_ADD_SKILL_POINT_COUNT);
+	_studyNum = _temp - _dayCount;
+	_moneyExp = (tempSkillExpByLv->MoneyExp) * _studyNum;
+	updateYuanbao();
+	updateLabel();
+}
+void QuickUiLayer::onSubBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	int playerCurLevel = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	//SkillManager::getInstance()->querySkillExpByLv(playerCurLevel);
+// 	SkillExpByLv otempSkillExpByLv = SkillManager::getInstance()->getSkillExpByLv(playerCurLevel);
+// 	SkillExpByLv* tempSkillExpByLv = &otempSkillExpByLv;
+	SkillExpByLv* tempSkillExpByLv = SkillManager::getInstance()->getSkillExpByLv(playerCurLevel);
+	CC_ASSERT(tempSkillExpByLv);
+
+	LocalPlayer* lPlayer = RoleManager::getInstance()->getLocalPlayer();
+	_temp = VIPMgr::getInstance()->getLocalVipData().quickSkillPoint;
+	_dayCount = lPlayer->getRoleDayClearInfoTwo(ERDCTT_FAST_ADD_SKILL_POINT_COUNT);
+	if (_studyNum > 1)
+	{
+		--_studyNum;
+		_moneyExp = (tempSkillExpByLv->MoneyExp) * _studyNum;
+		updateYuanbao();
+		updateLabel();
+		CCNode* baoJiNode = (CCNode*)this->getChildByTag(0)->getChildByTag(10);
+		baoJiNode->setVisible(false);
+	}
+}
+void QuickUiLayer::onAddBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	int playerCurLevel = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	//SkillManager::getInstance()->querySkillExpByLv(playerCurLevel);
+// 	SkillExpByLv otempSkillExpByLv = SkillManager::getInstance()->getSkillExpByLv(playerCurLevel);
+// 	SkillExpByLv* tempSkillExpByLv = &otempSkillExpByLv;
+	SkillExpByLv* tempSkillExpByLv = SkillManager::getInstance()->getSkillExpByLv(playerCurLevel);
+	CC_ASSERT(tempSkillExpByLv);
+
+	LocalPlayer* lPlayer = RoleManager::getInstance()->getLocalPlayer();
+	_temp = VIPMgr::getInstance()->getLocalVipData().quickSkillPoint;
+	_dayCount = lPlayer->getRoleDayClearInfoTwo(ERDCTT_FAST_ADD_SKILL_POINT_COUNT);
+	if (_studyNum < _temp - _dayCount)
+	{
+		++_studyNum;
+		_moneyExp = (tempSkillExpByLv->MoneyExp) * _studyNum;
+		updateYuanbao();
+		updateLabel();
+		CCNode* baoJiNode = (CCNode*)this->getChildByTag(0)->getChildByTag(10);
+		baoJiNode->setVisible(false);
+	}
+}
+void QuickUiLayer::onQuickBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CCNode* baoJiNode = (CCNode*)this->getChildByTag(0)->getChildByTag(10);
+	baoJiNode->setVisible(false);
+	//int playerCurLevel = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	//SkillManager::getInstance()->querySkillExpByLv(playerCurLevel);
+	//SkillExpByLv otempSkillExpByLv = SkillManager::getInstance()->getSkillExpByLv(playerCurLevel);
+	//SkillExpByLv* tempSkillExpByLv = &otempSkillExpByLv;
+
+	//SkillExpByLv* tempSkillExpByLv = SkillManager::getInstance()->getSkillExpByLv();
+	LocalPlayer* lPlayer = RoleManager::getInstance()->getLocalPlayer();
+	_temp = VIPMgr::getInstance()->getLocalVipData().quickSkillPoint;
+	_dayCount = lPlayer->getRoleDayClearInfoTwo(ERDCTT_FAST_ADD_SKILL_POINT_COUNT);
+	updateLabel();
+	if (_studyNum > 0)
+	{
+		SkillManager::getInstance()->sendFastAddSkillExp(_studyNum);//发送快速领悟信息
+	}
+	else if (_studyNum == 0)
+	{
+		//本日领悟次数已达上线
+		ToolTip::getInstance()->push(GET_STR(9630).c_str());
+	}
+}
+
+CCNode * SkillUi::openUi()
+{
+#ifdef _DEBUG
+	clock_t t[10];
+	memset(t,0,10*sizeof(t[0]));
+	clock_t t_begin = clock();
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	t[0] = clock();
+	nodeLoaders["SkillUiLayer"] = UiLayerLoader<SkillUiLayer>::loader();
+	t[1] = clock();
+	nodeLoaders["TouchSprite"] = TouchSpriteLoader::loader();
+	t[2] = clock();
+	nodeLoaders["CheckButton"] = CheckButtonLoader::loader();
+	t[3] = clock();
+	nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+	t[4] = clock();
+	CCNode *uiNode = readUiFromCCBIData( _ccbiData, _size, "skillui", nodeLoaders, _loadSpriteSheet);
+	//CCNode *uiNode = readUiFromCCBI("skillui", nodeLoaders, _loadSpriteSheet);
+	t[5] = clock();
+	clock_t t_end = clock();
+	//if (t_end>t_begin && t_end-t_begin>=50)
+	{
+		CCLOG("SkillUi::openUi:-------totoal:%d, ",t_end-t_begin);
+		for (int i=0; i<5; i++)
+		{
+			CCLOG("t%d:%d",i+1,t[i+1]-t[i]);
+		}
+		CCLOG("SkillUi::openUi:-------totoal:%d, -------------------------------",t_end-t_begin);
+	}
+#else
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["SkillUiLayer"] = UiLayerLoader<SkillUiLayer>::loader();
+	nodeLoaders["TouchSprite"] = TouchSpriteLoader::loader();
+	nodeLoaders["CheckButton"] = CheckButtonLoader::loader();
+	nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+	CCNode *uiNode = readUiFromCCBIData( _ccbiData, _size, "skillui", nodeLoaders, _loadSpriteSheet);
+#endif
+	if(0 > SkillManager::getInstance()->GetCurIndex())
+		SkillManager::getInstance()->SetCurIndex(0);
+
+	return uiNode;
+}
+
+void SkillUi::closeUI()
+{
+	UiInterface::closeUI();
+	if(World::getInstance()->getScene()->getChildByTag(WCT_ShowTips))
+	{
+		FrameSprite* skillTips = (FrameSprite*)World::getInstance()->getScene()->getChildByTag(WCT_ShowTips);
+		skillTips->setTouchEnable(false);
+		skillTips->setVisible(false);
+		skillTips->removeFromParentAndCleanup(true);
+	}
+}
+
+void SkillUi::updateData()
+{
+	SkillUiLayer *uiLayer = getUiNodeByTag<SkillUiLayer>(WCT_SKILLUI);
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateData();
+	}
+}
+
+void SkillUi::setStudyBtnShowState(bool isShow)
+{
+	SkillUiLayer *uiLayer = getUiNodeByTag<SkillUiLayer>(WCT_SKILLUI);
+	if(uiLayer != NULL)
+	{
+		uiLayer->setStudyBtnShowState(isShow);
+	}
+}
+
+void SkillUi::updateJinengdian()
+{
+	SkillUiLayer *uiLayer = getUiNodeByTag<SkillUiLayer>(WCT_SKILLUI);
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateJinengdian();
+	}
+}
+
+void SkillUi::setSkill( const SkillData *data )
+{
+	SkillUiLayer *uiLayer = getUiNodeByTag<SkillUiLayer>(WCT_SKILLUI);
+	if(uiLayer != NULL)
+	{
+		uiLayer->setSkill(data);
+	}
+}
+
+void SkillUi::showFastAddSkillExpResult(int type){
+	CCScene *scene = World::getInstance()->getScene();	
+	//结果0=成功,1=本日快速领悟已达上限,2=元宝不足
+	switch(type){
+	case SUCCESS:
+		ToolTip::getInstance()->push("\xE9\xA2\x86\xE6\x82\x9F\xE6\x88\x90\xE5\x8A\x9F");//兑换成功
+		break;
+	case UPPER:
+		//ToolTip::getInstance()->push(GET_STR( 7153 ));
+		ToolTip::getInstance()->push("\xE6\x9C\xAC\xE6\x97\xA5\xE5\xBF\xAB\xE9\x80\x9F\xE9\xA2\x86\xE6\x82\x9F\xE5\xB7\xB2\xE8\xBE\xBE\xE4\xB8\x8A\xE9\x99\x90");
+		break;
+	case YUANBAONOTENOUGH:
+		//ToolTip::getInstance()->push("\xE5\x85\x83\xE5\xAE\x9D\xE4\xB8\x8D\xE8\xB6\xB3");//元宝不足
+		//add by vvv 2014.11.05
+		//MessageBoxUi *messageBox = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(7024).c_str(), TEXT_UTF8_RECHARGE, TEXT_UTF8_QUXIAO);//充值，取消
+		//messageBox->signalOkBtnPressed.connect(this, &SkillUi::noticeRecharge);
+		//messageBox->signalCancelBtnPressed.connect(QuickUi::getInstace(), &QuickUi::open);
+		//World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();		
+		RechargeNewUiLayer *layer = GET_UI(RechargeNewUi,WCT_RECHARGENEWUI)->getLayer();
+		if (!layer)
+			return;
+		layer->signalCancelBtnPressed.connect(QuickUi::getInstace(), &QuickUi::open);
+		if(scene != NULL)
+		{
+			scene->removeChildByTag(WCT_QuickUiLayer);
+		}
+		break;
+	}
+}
+void SkillUi::noticeRecharge()
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+}
+cocos2d::CCRect SkillUi::getGuildBtnPos(int tag)
+{
+	SkillUiLayer *uiLayer = getUiNodeByTag<SkillUiLayer>(WCT_SKILLUI);
+	if(uiLayer != NULL)
+	{
+		return uiLayer->getGuildBtnPos(tag)	;
+	}
+
+	return CCRect();
+}
+
+//
+//std::string SkillUi::getSkillIcon( int index )
+//{
+//	SkillUiLayer *uiLayer = getUiNodeByTag<SkillUiLayer>(WCT_SKILLUI);
+//	if(uiLayer != NULL)
+//	{
+//		return uiLayer->getSkillIconName(index);
+//	}
+//	return "";
+//}
+//
+//int SkillUi::getSkillId( int index )
+//{
+//	SkillUiLayer *uiLayer = getUiNodeByTag<SkillUiLayer>(WCT_SKILLUI);
+//	if(uiLayer != NULL)
+//	{
+//		return uiLayer->getSkillId(index);
+//	}
+//	return -1;
+//}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler SkillUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler SkillUiLayer::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "closeBtnPressed", SkillUiLayer::closeBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "activityBtnPressed", SkillUiLayer::activityBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "studyBtnPressed", SkillUiLayer::studyBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onQuickStudyBtnPressed", SkillUiLayer::onQuickStudyBtnPressed);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHelpBtn", SkillUiLayer::onHelpBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseDescBtnPressed", SkillUiLayer::onCloseDescBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onKnowBtnPressed", SkillUiLayer::onKnowBtnPressed);
+	return NULL;
+}
+
+bool SkillUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+
+void SkillUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	clock_t t[10];
+	memset(t,0,10*sizeof(t[0]));
+	clock_t t_begin = clock();
+
+	//关闭技能界面与商店同时存在
+	if(IS_UI_OPEN(WCT_SHOPUI))
+	{
+		CLOSE_UI(WCT_SHOPUI);
+	}
+
+	t[0] = clock();
+	//_descframe = NULL;
+	_tipsBgSprite = NULL;
+	_mainFrame = (CCSprite*)getChildByTag(1);
+	CC_ASSERT(_mainFrame != NULL);
+	_detailFrame = (CCSprite*)getChildByTag(2);
+	CC_ASSERT(_detailFrame != NULL);
+	//_skillListBtn = (TouchSprite*)_mainFrame->getChildByTag(1);
+	//_skillListHBtn = (CCSprite*)_mainFrame->getChildByTag(2);
+	//_jingmaiBtn = (TouchSprite*)_mainFrame->getChildByTag(3);
+	//_jingmaiHBtn = (CCSprite*)_mainFrame->getChildByTag(4);
+	_skillListLayer = (CCLayer*)_mainFrame->getChildByTag(5);
+
+	//_jinengdian = (CCLabelTTF*)_mainFrame->getChildByTag(6);
+	//_skillName = (CCLabelTTF*)_detailFrame->getChildByTag(2);
+	//_skillLevel = (CCLabelTTF*)_detailFrame->getChildByTag(3);
+	//_skillNestDes = (CCLabelTTF*)_detailFrame->getChildByTag(23);
+	//_cd = (CCLabelTTF*)_detailFrame->getChildByTag(5);
+	//_mp = (CCLabelTTF*)_detailFrame->getChildByTag(6);
+	//_nextLevel = (CCLabelTTF*)_detailFrame->getChildByTag(7);
+	//_desc = (CCLabelTTF*)_detailFrame->getChildByTag(8);
+	//_autoWenzi = (CCLabelTTF *)_detailFrame->getChildByTag(22);
+	//_needBookState = (CCLabelTTF*)_detailFrame->getChildByTag(11);
+	//_suoxujinengdian = (CCLabelTTF*)_detailFrame->getChildByTag(9);
+
+	_jinengdian = Helper::getLabelFTByParentAndTag(_mainFrame,6);
+	_skillName = Helper::getLabelFTByParentAndTag(_detailFrame, 2);
+	_skillLevel = Helper::getLabelFTByParentAndTag(_detailFrame, 3);
+	_skillNestDes = Helper::getLabelFTByParentAndTag(_detailFrame, 23);
+	_cd = Helper::getLabelFTByParentAndTag(_detailFrame, 5);
+	_mp = Helper::getLabelFTByParentAndTag(_detailFrame, 6);
+	_nextLevel = Helper::getLabelFTByParentAndTag(_detailFrame,7);
+	_desc = Helper::getLabelFTByParentAndTag(_detailFrame, 8);
+	_autoWenzi = Helper::getLabelFTByParentAndTag(_detailFrame, 22);
+	_suoxujinengdian = Helper::getLabelFTByParentAndTag(_detailFrame, 9);
+	Helper::getLabelFTByParentAndTag(_detailFrame,31);
+	Helper::getLabelFTByParentAndTag(_detailFrame,32);
+	Helper::getLabelFTByParentAndTag(_detailFrame,33);
+	Helper::getLabelFTByParentAndTag(_detailFrame,34);
+	_skillIcon = (CCSprite*)_detailFrame->getChildByTag(1);
+	_progressBar = (CCSprite*)_detailFrame->getChildByTag(4);
+	_progressBarBlank = (CCSprite*)_detailFrame->getChildByTag(114);
+	if (_desc)
+	{
+		_desc->setDimensions(200.0f,0.0f);
+		//_desc->setDimensions(CCSize(200.0f,0.0f));
+	}
+	
+	//_activityBtn = (CCControlButton*)_detailFrame->getChildByTag(9);
+	_progressTimer = initHProgressBar(_progressBar);
+
+	_needBookState = (CCNode*)_detailFrame->getChildByTag(11);
+	_suoxujinengdian->removeFromParentAndCleanup(true);
+	UIUtil::childNodeAlign(_progressTimer,_suoxujinengdian,eha_center,eva_center,CCPointZero);
+	_detailFrame->addChild(_progressTimer, _progressBar->getZOrder());
+	_progressBar->setVisible(false);
+
+	//_descframe = dynamic_cast<FrameSprite*>(getChildByTag(20));
+	//_descframe->retain();
+	//_descframe->removeFromParent();
+	t[1] = clock();
+
+	_listItems = SkillListItemUi::create();
+	t[2] = clock();
+	_listItems->retain();
+
+	//CCSize size = _skillListLayer->getContentSize();
+	//_skillListLayer->setContentSize(CCSize(800,size.height - 100));
+	_skillListView = CCScrollView::create(_skillListLayer->getContentSize());
+	//_skillListView->setPositionX(2.0f);
+	_skillListView->setPosition(ccp(2.5,1.5));
+	_skillListLayer->addChild(_skillListView);
+
+	_skillListView->setContainer(_listItems);
+	_skillListView->setTouchEnabled(true);
+	_skillListView->setBounceable(true);
+	_skillListView->setContentSize(_listItems->getContentSize());
+	_skillListView->setDirection(kCCScrollViewDirectionVertical);
+	_skillListView->setContentOffset(_skillListView->minContainerOffset());
+
+	_listItems->signalItemSelected.connect(this, &SkillUiLayer::onItemSelect);
+
+	CheckButton *checkBtn = dynamic_cast<CheckButton*>(_detailFrame->getChildByTag(20));
+	CC_ASSERT(checkBtn != NULL);
+	checkBtn->signalStateChanged.connect(this, &SkillUiLayer::onActivityStateChange);
+	checkBtn->setTouchProprity(0);
+
+	setJinengdian(RoleManager::getInstance()->getLocalPlayer()->getAttribute(RA_Jinengdian));
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+	setAllChildernButtonPriority(this, 0);
+
+	addSkillFromSkillManager();
+
+	_listItems->release();
+
+	CCScheduler *scheduler = CCDirector::sharedDirector()->getScheduler();
+	scheduler->unscheduleAllForTarget(this);
+	t[3] = clock();
+
+	clock_t t_end = clock();
+	//if (t_end>t_begin && t_end-t_begin>=50)
+	{
+		CCLOG("SkillUiLayer::onNodeLoaded:-------totoal:%d, ",t_end-t_begin);
+		for (int i=0; i<3; i++)
+		{
+			CCLOG("t%d:%d",i+1,t[i+1]-t[i]);
+		}
+		CCLOG("SkillUiLayer::onNodeLoaded:-------totoal:%d, -------------------------------",t_end-t_begin);
+	}
+}
+
+void SkillUiLayer::closeBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_SKILLUI);
+}
+
+void SkillUiLayer::onMessageBoxAutoWenyunOk()
+{
+	//SkillManager::getInstance()->sendFastAddSkillExp();//发送快速领悟信息
+	//CLOSE_UI(WCT_SKILLUI);
+}
+
+void SkillUiLayer::onInputMessageBoxBtn()
+{
+	//CLOSE_UI(WCT_SKILLUI);
+}
+
+void SkillUiLayer::activityBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	int smailskillId = (_detailData.id / 100) % 10;
+	if (smailskillId == 8)//三个职业第八个技能都是被动
+	{
+		SkillManager::getInstance()->deactiveSkill(_detailData.id);
+		return;
+	}
+	if(_detailData.activity)
+		SkillManager::getInstance()->activeSkill(_detailData.id);
+	else
+		SkillManager::getInstance()->deactiveSkill(_detailData.id);
+}
+
+void SkillUiLayer::studyBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_12);
+
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	CC_ASSERT(NULL != ploc);
+	if(ploc->getLevel() < _detailData.nextLevel)
+	{
+		ToolTip::getInstance()->push(GET_STR(7274));//等级不足
+		return ;
+	}
+
+	int skillnum = RoleManager::getInstance()->getLocalPlayer()->getAttribute(RA_Jinengdian);
+	if(0 >= skillnum && _detailData.curSkill != _detailData.maxSkill)
+	{
+		LocalPlayer* lPlayer = RoleManager::getInstance()->getLocalPlayer();
+		if(lPlayer == NULL)
+		{
+			return;
+		}
+		//如果领悟次数未达到上限
+		if (lPlayer->getRoleDayClearInfoTwo(ERDCTT_FAST_ADD_SKILL_POINT_COUNT) < VIPMgr::getInstance()->getLocalVipData().quickSkillPoint)
+		{
+			MessageBoxUi* boxUi = MessageBoxUi::createWithTwoBtnAndCloseBtn(TEXT_UTF8_TISHI,GET_STR(9618).c_str(),TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+			CCScene* scene = World::getInstance()->getScene();
+			if(scene != NULL)
+			{
+				scene->addChild(boxUi,WZ_MESSAGEBOX);
+				boxUi->signalOkBtnPressed.connect(this,&SkillUiLayer::openQuickUi);
+			}
+		}
+		else
+		{
+			ToolTip::getInstance()->push(GET_STR(9018));//技能点不足
+		}
+		return ;
+	}
+
+	if (  _detailData.curSkill == _detailData.maxSkill && 4 == _detailData.level + 1)
+	{
+		int num = PackageManager::getInstance()->getItemNumber(EICT_Bag,_detailData.LvItem_3to4);
+		if (1 > num)
+		{
+			//ToolTip::getInstance()->push(GET_STR(9005));//背包内没有书
+			SkillManager::getInstance()->try_to_findpath(_detailData.LvItem_3to4);
+			return ;
+		}
+
+		f_item  *item = PackageManager::getInstance()->getItem(EICT_Bag,static_cast<unsigned int>(_detailData.LvItem_3to4));
+		if(NULL != item)
+			SkillManager::getInstance()->sendSkillLevelUp(_detailData.id,0,item->get_item_id());
+	}
+
+	else if ( _detailData.curSkill == _detailData.maxSkill && 7 == _detailData.level + 1)
+	{
+		int num = PackageManager::getInstance()->getItemNumber(EICT_Bag,_detailData.LvItem_6to7);
+		if (1 > num)
+		{
+			//ToolTip::getInstance()->push(GET_STR(9005));//背包内没有书
+			SkillManager::getInstance()->try_to_findpath(_detailData.LvItem_6to7);
+			return;
+		}
+
+		f_item  *item = PackageManager::getInstance()->getItem(EICT_Bag,static_cast<unsigned int>(_detailData.LvItem_6to7));
+		if(NULL != item)
+			SkillManager::getInstance()->sendSkillLevelUp(_detailData.id,0,item->get_item_id());
+	}
+	else
+	{
+		SkillManager::getInstance()->sendSkillLevelUp(_detailData.id);
+		NewPlayerGuider::getInstance()->onStudySkill(_detailData.id);
+	}
+}
+
+void SkillUiLayer::onQuickStudyBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_10);
+	//int vipLevel = ploc->getVIPLevel();
+	//if (vipLevel < 2)
+	//{
+	//	//ToolTip::getInstance()->push("\xE9\x9C\x80\xE8\xA6\x81\x56\x49\x50\x32\xE6\x89\x8D\xE8\x83\xBD\xE5\xBC\x80\xE5\x90\xAF\xE6\xAD\xA4\xE5\x8A\x9F\xE8\x83\xBD");
+	//	RechargeNewUiMgr::GetInstance()->setCurrentRechargeState(2);
+	//	RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+	//	return ;
+	//}
+	LocalPlayer* lPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if(lPlayer == NULL)
+	{
+		return;
+	}
+	//int playerCurLevel = lPlayer->getLevel();
+	//SkillManager::getInstance()->querySkillExpByLv(playerCurLevel);
+	//SkillExpByLv otempSkillExpByLv = SkillManager::getInstance()->getSkillExpByLv(playerCurLevel);
+	//SkillExpByLv* A = &otempSkillExpByLv;
+
+	//SkillExpByLv* tempSkillExpByLv = SkillManager::getInstance()->getSkillExpByLv(playerCurLevel);
+	
+	//int temp = VIPMgr::getInstance()->getLocalVipData().quickSkillPoint;
+	//int dayCount = 0;
+	if (lPlayer->getRoleDayClearInfoTwo(ERDCTT_FAST_ADD_SKILL_POINT_COUNT) < VIPMgr::getInstance()->getLocalVipData().quickSkillPoint)
+	{
+		QuickUi::getInstace()->open();
+	}
+	else
+	{
+		std::string msg = CCString::createWithFormat("%s%d%s",GET_STR(9619).c_str(),
+			lPlayer->getRoleDayClearInfoTwo(ERDCTT_FAST_ADD_SKILL_POINT_COUNT),GET_STR(9620).c_str())->getCString();
+		ToolTip::getInstance()->push(msg);
+	}
+
+}
+
+
+CCProgressTimer * SkillUiLayer::initHProgressBar( CCSprite * sprite )
+{
+	CCProgressTimer *progress = CCProgressTimer::create(sprite);
+	progress->setType(kCCProgressTimerTypeBar);
+	progress->setMidpoint(ccp(0.0, 0.0));
+	progress->setBarChangeRate(ccp(1.0, 0.0));
+	progress->setPercentage(0.0f);
+	progress->setPosition(sprite->getPosition());
+	return progress;
+}
+
+void SkillUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	DropDragDelegate::getInstance()->addDropLayer(this);
+}
+
+void SkillUiLayer::onExit()
+{
+	ShortCutUiLayer *layer = getUiNodeByTag<ShortCutUiLayer>(WCT_ShorCutUi);
+	if (layer)
+	{
+		layer->stopAllEffectAction();
+	}
+	DropDragDelegate::getInstance()->removeDropLayer(this);
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	//CC_SAFE_RELEASE(_descframe);
+	
+	if (IS_VALID_PTR(_tipsBgSprite))
+	{
+		_tipsBgSprite->removeFromParent();
+		_tipsBgSprite = NULL;
+	}
+
+	CCLayer::onExit();
+}
+
+void SkillUiLayer::update(float dt)
+{
+}
+//
+//bool SkillUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+//{
+//	if(isTouchOnNodeContent(_skillListLayer, pTouch))
+//	{
+//		_listItems->touch(pTouch);
+//		return true;
+//	}
+//
+//	if(_detailFrame->isVisible())
+//	{
+//		CCPoint p = _detailFrame->convertTouchToNodeSpace(pTouch);
+//		CCRect boundBox = _detailFrame->boundingBox();
+//		CCRect rect(0, 0, boundBox.size.width, boundBox.size.height);
+//		if(rect.containsPoint(p))
+//			return true;
+//	}
+//
+//	CCPoint p = _mainFrame->convertTouchToNodeSpace(pTouch);
+//	CCRect boundBox = _mainFrame->boundingBox();
+//	CCRect rect(0, 0, boundBox.size.width, boundBox.size.height);
+//	if(rect.containsPoint(p))
+//		return true;
+//
+//	return false;
+//}
+
+void SkillUiLayer::onHelpBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+// 	CC_ASSERT(_descframe != NULL);
+// 	if(_descframe->getParent() == NULL)
+// 	{
+// 		_descframe->setVisible(true);
+// 		_descframe->setTouchPriority(-1);
+// 		setAllChildernButtonPriority(_descframe,-1);
+// 		_descframe->setTouchEnable(true);
+// 		World::getInstance()->getScene()->addChild(_descframe,WZ_POPUI, WCT_ShowTips);
+// 		DropDragDelegate::getInstance()->removeDropLayer(this);
+// 	}
+
+	PlacardManager::getInstance()->open_placard_node(16);
+}
+void SkillUiLayer::onCloseDescBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+// 	CC_ASSERT(_descframe != NULL);
+// 	_descframe->setTouchEnable(false);
+// 	_descframe->removeFromParent();
+// 	_descframe->setVisible(false);
+// 	DropDragDelegate::getInstance()->addDropLayer(this);
+}
+
+void SkillUiLayer::onKnowBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+// 	CC_ASSERT(_descframe != NULL);
+// 	_descframe->setTouchEnable(false);
+// 	_descframe->removeFromParent();
+// 	_descframe->setVisible(false);
+// 	DropDragDelegate::getInstance()->addDropLayer(this);
+}
+void SkillUiLayer::onItemSelect(SkillItemData &data)
+{
+	setDetailData(data);
+	_detailFrame->setVisible(true);
+}
+
+void SkillUiLayer::setSkill( const SkillItemData &data )
+{
+	int index = data.orderingRule - 1;
+	if(data.canUse)
+		_listItems->setEnable(index, true);
+
+	_listItems->setData(index, data);
+}
+
+void SkillUiLayer:: setSkill( const SkillData *skill)
+{
+	SkillItemData data;
+	data.id = skill->proto->id;//技能id
+	data.iconName = skill->proto->iconFrameName;//技能icon
+	data.name = skill->proto->skillName;//技能名称
+	data.level = skill->proto->skill_level;
+	data.curSkill = skill->proficiency;
+	data.maxSkill = skill->proto->maxProficienty;
+	data.cd = skill->proto->max_cd;
+	data.mp = skill->proto->mp;
+	data.LvItem_3to4 = skill->proto->LvItem_3to4;
+	data.LvItem_6to7 = skill->proto->LvItem_6to7;
+	data.nextLevel = skill->proto->need_role_lv_next_skill;
+	data.activity = skill->activity;
+	data.desc = skill->proto->desc;
+	data.nextDes = skill->proto->nextDes;	
+	data.dropTest = skill->proto->dropTest;
+	data.replaceId = skill->proto->replaceId;
+	data.canUse = skill->canUse;
+	data.isAtive = skill->proto->isAtive;//1是主动技能 0是被动技能
+	data.isMononmer = skill->proto->isMononmer;// 是否单体攻击
+	data.isNeedBook = skill->proto->isNeedBook;// 是否需要技能书
+	data.lv = skill->proto->need_role_lv;
+	data.orderingRule = skill->proto->orderingRule;
+	setSkill(data);
+	
+// 	if(bInited)
+// 	{
+// 		onItemSelect(data);
+// 	}
+}
+
+void SkillUiLayer::setJinengdian( int value)
+{
+	//修改显示格式 原 99999改为 99999/技能点上限 add by XSea 2014.10.21
+	//CCString *str = CCString::createWithFormat("%d%s%d", value, "\x2F", VIPMgr::getInstance()->getLocalVipData().skillPointTop);
+	std::ostringstream ostr;
+	if(value >= 100000)
+	{
+		ostr << value / 10000 << GET_STR(9033).c_str();
+	}
+	else
+	{
+		ostr << value;
+	}
+	_jinengdian->setString(ostr.str().c_str());
+}
+
+void SkillUiLayer::setSuoxujinengdian( int value ,int max )//所需技能点
+{
+	CCString *str = CCString::createWithFormat("%d/%d", value,max);
+	_suoxujinengdian->setString(str->getCString());
+}
+
+void SkillUiLayer::setDetailIcon( const char *frameName )
+{
+	//_skillIcon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName));
+	_skillIcon->setDisplayFrame(PackageManager::getInstance()->getIconFrameByName(frameName));
+}
+
+void SkillUiLayer::setDetailName( const char *name )
+{
+	_skillName->setString(name);
+}
+
+void SkillUiLayer::setNextSkillDes( const char *name )
+{
+   _skillNestDes->setString(name);
+	//_skillNestDes->setString("...");
+}
+
+
+void SkillUiLayer::setDetailLevel( int level,int index )
+{
+	if(level < 9)
+		setStudyBtnShowState(true);
+	else
+	{
+		setStudyBtnShowState(false);
+	}
+
+	if (getSkillIsNoLearn(index - 1))
+	{
+		setStudyBtnShowState(false);
+	}
+	CCString *str = CCString::createWithFormat("%d", level);
+	_skillLevel->setString(str->getCString());
+}
+
+void SkillUiLayer::setDetailSkillSkill( float value )
+{
+	_progressTimer->setPercentage(value);
+}
+
+
+void SkillUiLayer::setDetailCd( float second )
+{
+	CCString *str = CCString::createWithFormat("%.1f", second);
+	_cd->setString(str->getCString());
+}
+
+void SkillUiLayer::setDetailMp( int mp )
+{
+	CCString *str = CCString::createWithFormat("%d", mp);
+	_mp->setString(str->getCString());
+}
+
+void SkillUiLayer::setDetailNextLevel( int level )
+{
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	if(lp->getLevel() < level)
+	{
+		_nextLevel->setColor(ccc3(255,0,0));
+	}
+	else
+	{
+		_nextLevel->setColor(ccc3(255,255,255));
+	}
+	CCString *str = CCString::createWithFormat("%d", level);
+	_nextLevel->setString(str->getCString());
+	if ( level == 0)//如果没有下一级等级需求
+	{
+		_nextLevel->setString(GET_STR(73).c_str());//已最高
+	}
+}
+
+void SkillUiLayer::setDetailDesc( const char *desc )
+{
+	_desc->setString(desc);
+}
+
+void SkillUiLayer::setDetailActivityState( bool activityState )
+{
+	CheckButton *checkBtn = dynamic_cast<CheckButton*>(_detailFrame->getChildByTag(20));
+	CC_ASSERT(checkBtn != NULL);
+	if(activityState)
+	{
+		checkBtn->setCheck(activityState);
+	}
+	else
+	{
+		checkBtn->setCheck(activityState);
+	}
+	//if(activityState)
+	//	setButtonSpriteFrame(_activityBtn, "skillui_skillclosebtn", "skillui_skillclosebtn", "skillui_skillclosebtn");
+	//else
+	//	setButtonSpriteFrame(_activityBtn, "skillui_skillopenbtn", "skillui_skillopenbtn", "skillui_skillopenbtn");
+}
+
+void SkillUiLayer::setDetailData( SkillItemData &data )//设置细节Ui显示数据
+{
+	setDetailIcon(data.iconName.c_str());
+	setDetailLevel(data.level,data.orderingRule);
+	setDetailMp(data.mp);
+	setDetailName(data.name.c_str());
+	if(data.canUse)
+	{
+		setDetailNextLevel(data.nextLevel);
+	}
+	else
+	{
+		setDetailNextLevel(data.lv);
+	}
+	setDetailSkillSkill(data.curSkill * 100.0f / data.maxSkill);
+	//setNextSkillDes(data.nextDes.c_str());
+	//zhanjiale:判断是否学习，未学习则显示技能书在哪可以拾取
+	if (data.activity)
+	{
+		setNextSkillDes(data.nextDes.c_str());//设置下一级技能描述
+	}
+	else
+	{
+		setNextSkillDes(data.dropTest.c_str());
+	}
+/*
+	if (data.curSkill == data.maxSkill)
+	{
+		ToolTip::getInstance()->push("\xE4\xBD\xBF\xE7\x94\xA8\xE4\xBA\x86\xE4\xB9\xA6\xE9\xA1\xB5");
+	}*/
+	setDetailDesc(data.desc.c_str());
+	setDetailCd(data.cd);
+	int smailSkillId = (data.id / 100) % 10;
+	if (smailSkillId == 8)//三个职业的第八个技能都是被动技能
+	{
+		setDetailActivityState(false);
+	}
+	else
+	{
+		setDetailActivityState(data.activity);
+	}
+
+	
+	LabelFT* baseLabel = Helper::getLabelFTByParentAndTag(_needBookState,1);
+	//if(NULL == _needBookState->getChildByTag(1))
+	if(baseLabel == NULL)
+	{
+		TTFConfig config;
+		config.fontFilePath=  FT_FONTFACE;
+		config.fontSize = 16;
+		config.outlineSize = 1;
+
+		baseLabel = LabelFT::createWithTTF(config,"");
+		//CCLabelTTF * label = CCLabelTTF::create();
+		CC_ASSERT(NULL != baseLabel);
+		baseLabel->setAnchorPoint(ccp(0,0));
+		baseLabel->setPosition(ccp(0,0));
+		//label->setFontSize(16);
+		//label->setHorizontalAlignment(kCCTextAlignmentLeft);
+		baseLabel->setHorizontalAlignment(LEFT);
+		baseLabel->setTag(1);
+		_needBookState->addChild(baseLabel);
+	}
+
+	const ItemTypeData &typeData = PackageManager::getInstance()->getItemTypeData(data.LvItem_3to4); 
+	std::string strBasic1 = replaceStr(GET_STR(9004),"***",typeData.name); 
+	
+	//if(NULL != static_cast<CCLabelTTF*>(_needBookState->getChildByTag(1)))
+	if(baseLabel != NULL)
+	{
+// 		static_cast<CCLabelTTF*>(_needBookState->getChildByTag(1))->setString(strBasic1.c_str());
+// 		static_cast<CCLabelTTF*>(_needBookState->getChildByTag(1))->setColor(ccc3(0x04,0xd3,0xd3));
+		baseLabel->setString(strBasic1.c_str());
+		baseLabel->setColor(ccc3(0x04,0xd3,0xd3));
+	}
+	LabelFT* baseLabel2 = Helper::getLabelFTByParentAndTag(_needBookState,2);
+	//if(NULL == _needBookState->getChildByTag(2))
+	if(baseLabel2 == NULL)
+	{
+		TTFConfig config;
+		config.fontFilePath=  FT_FONTFACE;
+		config.fontSize = 16;
+		config.outlineSize = 1;
+
+		baseLabel2 = LabelFT::createWithTTF(config,"");
+		//CCLabelTTF * label = CCLabelTTF::create();
+		CC_ASSERT(NULL != baseLabel2);
+		baseLabel2->setAnchorPoint(ccp(0,0));
+		//label->setFontSize(16);
+		//label->setHorizontalAlignment(kCCTextAlignmentLeft);
+		baseLabel2->setHorizontalAlignment(LEFT);
+		//label->setPosition(ccp(_needBookState->getChildByTag(1)->getContentSize().width,0));
+		if (baseLabel)
+		{
+			baseLabel2->setPosition(ccp(baseLabel->getContentSize().width,0));
+		}
+		baseLabel2->setTag(2);
+		_needBookState->addChild(baseLabel2);
+	}
+
+	int nTotalCount = PackageManager::getInstance()->getItemNumber(EICT_Bag, (unsigned int)data.LvItem_3to4); //获取背包指定物品总量
+	CCString *itemString = CCString::createWithFormat("%d%s%s",nTotalCount,"/","1");
+// 	if(NULL != static_cast<CCLabelTTF*>(_needBookState->getChildByTag(2)))
+// 		static_cast<CCLabelTTF*>(_needBookState->getChildByTag(2))->setString(itemString->getCString());
+	if (baseLabel2)
+	{
+		baseLabel2->setString(itemString->getCString());
+	}
+
+
+	if(data.curSkill >= data.maxSkill &&(3 == data.level || 6 == data.level))
+	{
+		_progressTimer->setVisible(false);
+		_suoxujinengdian->setVisible(false);
+		_progressBarBlank->setVisible(false);
+		std::string strBasic1 = GET_STR(9004); 
+	
+		CC_ASSERT(NULL != _needBookState->getChildByTag(1));
+		_needBookState->getChildByTag(1)->setVisible(true);
+		CC_ASSERT(NULL != _needBookState->getChildByTag(2));
+		_needBookState->getChildByTag(2)->setVisible(true);
+
+// 		if(nTotalCount < 1)
+// 			static_cast<CCLabelTTF*>(_needBookState->getChildByTag(2))->setColor(ccc3(255,0,0));
+// 		else
+// 			static_cast<CCLabelTTF*>(_needBookState->getChildByTag(2))->setColor(ccc3(0,255,0));
+		if (baseLabel2)
+		{
+			if(nTotalCount < 1)
+				baseLabel2->setColor(ccc3(255,0,0));
+			else
+				baseLabel2->setColor(ccc3(0,255,0));
+		}
+
+		CC_ASSERT(NULL !=_detailFrame);
+		CC_ASSERT(NULL !=_detailFrame->getChildByTag(21));
+		setButtonSpriteFrame(dynamic_cast<CCControlButton*>(_detailFrame->getChildByTag(21)),"skillui_tupobtnn","skillui_tupobtnn","skillui_tupobtnh");
+	}
+	else
+	{
+		_progressTimer->setVisible(true);
+		_progressBarBlank->setVisible(true);
+		_suoxujinengdian->setVisible(true);
+		std::string strBasic1 = GET_STR(9019); 
+		CC_ASSERT(NULL != _needBookState->getChildByTag(1));
+		_needBookState->getChildByTag(1)->setVisible(true);
+		CC_ASSERT(NULL != _needBookState->getChildByTag(2));
+		_needBookState->getChildByTag(2)->setVisible(false);
+		
+// 		if(NULL != static_cast<CCLabelTTF*>(_needBookState->getChildByTag(1)))
+// 			static_cast<CCLabelTTF*>(_needBookState->getChildByTag(1))->setString(strBasic1.c_str());
+		if (baseLabel)
+		{
+			baseLabel->setString(strBasic1.c_str());
+		}
+
+	
+		CC_ASSERT(NULL !=_detailFrame);
+		CC_ASSERT(NULL !=_detailFrame->getChildByTag(21));
+		setButtonSpriteFrame(dynamic_cast<CCControlButton*>(_detailFrame->getChildByTag(21)),"xiulian-convention","xiulian-convention","xiulian-click");
+	}
+
+	CCSprite *node = 	(CCSprite*)_detailFrame->getChildByTag(24);
+	CCSpriteFrame* noLearnSprite = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("skillui_nolearn");
+	CCSpriteFrame* maxLevelSprite = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("skillui_max");
+	if(9 > data.level)
+	{
+		setDetailProficient(data.curSkill, data.maxSkill);
+		setSuoxujinengdian( data.curSkill,data.maxSkill);
+		if(node)
+		{
+			if (getSkillIsNoLearn(data.orderingRule - 1))
+			{
+				node->setVisible(true);
+				if (noLearnSprite)
+					node->setDisplayFrame(noLearnSprite);
+			}
+			else
+			{
+				node->setVisible(false);
+			}
+		}
+
+	}
+	else
+	{
+		setDetailProficient(data.maxSkill, data.maxSkill);
+		setSuoxujinengdian( data.maxSkill,data.maxSkill);
+		if(node && maxLevelSprite)
+		{
+			node->setVisible(true);
+			node->setDisplayFrame(maxLevelSprite);
+		}
+	}
+
+	//int needJiNengDian = data.maxSkill - data.curSkill;
+	if(!data.canUse)
+	{
+		_detailFrame->getChildByTag(20)->setVisible(false);
+		_autoWenzi->setVisible(false);
+	}
+	else
+	{
+		_detailFrame->getChildByTag(20)->setVisible(data.replaceId != -1);
+		_autoWenzi->setVisible(data.replaceId != -1);
+	}
+	_detailData = data;
+
+	if (SkillManager::getInstance()->getSkillCanUpGrade(data.id) || SkillManager::getInstance()->getSkillCanBreak(data.id))
+	{
+		if (!World::getInstance()->isHighLight(_detailFrame->getChildByTag(21), WT_CCCONTROLBUTTON, WCT_SKILLUI))
+		{
+			World::getInstance()->SetHighLight(_detailFrame->getChildByTag(21), WT_CCCONTROLBUTTON, WCT_SKILLUI, 0, true,28, 13);
+		}
+	}else
+	{
+		if (World::getInstance()->isHighLight(_detailFrame->getChildByTag(21), WT_CCCONTROLBUTTON, WCT_SKILLUI))
+		{
+			World::getInstance()->SetHighLight(_detailFrame->getChildByTag(21), WT_CCCONTROLBUTTON, WCT_SKILLUI, 0, false);
+		}
+	}
+	World::getInstance()->checkIsRemoveRedFlag(RF_RoleHead);
+	World::getInstance()->checkIsRemoveRedFlag(RF_SystemSkill);
+}
+
+int SkillUiLayer::getSkillIndexFormId( int skillId )
+{
+	if(skillId < 0)
+		return -1;
+	int index = (skillId / 100) % 100 - 1;
+	CC_ASSERT(index >= 0 && index < MAX_SKILL_NUM);
+	return index;
+}
+
+bool SkillUiLayer::SkillUiLayerSkillcompfn( const SkillData *data1, const SkillData *data2 )
+{
+	if( data1->proto->need_role_lv_next_skill < data2->proto->need_role_lv_next_skill )
+		return true;
+	else
+		return false;
+}
+
+
+void SkillUiLayer::addSkillFromSkillManager()
+{
+	std::list<SkillData*> skills = SkillManager::getInstance()->getSkills();
+	skills.sort(SkillUiLayerSkillcompfn);
+ 	for(std::list<SkillData*>::const_iterator iter = skills.begin(); iter != skills.end(); ++ iter)
+	{
+		const SkillData *skill = *iter;
+		setSkill(skill);
+	}
+
+	if (!skills.empty())
+	{
+		 int index = SkillManager::getInstance()->GetCurIndex();
+		 if(0 <= index && SkillListItemUi::ITEMS_NUM > index)
+		 {
+			_listItems->selItem(index);
+			_skillIndex = index;
+		 }
+	}
+}
+
+void SkillUiLayer::updateData()
+{
+	addSkillFromSkillManager();
+	SkillItemData *data = _listItems->getCheckData();
+	if(data != NULL)
+		setDetailData(*data);
+}
+
+void SkillUiLayer::updateJinengdian()
+{
+	setJinengdian(RoleManager::getInstance()->getLocalPlayer()->getAttribute(RA_Jinengdian));
+}
+
+void SkillUiLayer::setDetailProficient( int cur, int max )
+{
+	_progressTimer->setPercentage((float)cur * 100.0f / (float)max);
+}
+
+void SkillUiLayer::onActivityStateChange( CheckButton* checkbut, bool activity)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_14);
+	//CC_ASSERT(activity == _detailData->activity);
+	int smailskillId = (_detailData.id / 100) % 10;
+	if (smailskillId == 8)//三个职业第八个技能都是被动
+	{
+		SkillManager::getInstance()->deactiveSkill(_detailData.id);
+		ToolTip::getInstance()->push("\xE8\xA2\xAB\xE5\x8A\xA8\xE6\x8A\x80\xE8\x83\xBD\xE4\xB8\x8D\xE8\x83\xBD\xE8\xAE\xBE\xE7\xBD\xAE\xE8\x87\xAA\xE5\x8A\xA8\xE9\x87\x8A\xE6\x94\xBE");
+		checkbut->setCheck(false);
+		GET_UI(HookSetUi, WCT_HookSetUi)->saveDataByType( GSST_AutoSkill );
+		return;
+	}
+	if(activity)
+	{
+		SkillManager::getInstance()->activeSkill(_detailData.id);
+	}
+	else
+	{
+		SkillManager::getInstance()->deactiveSkill(_detailData.id);
+	}
+	GET_UI(HookSetUi, WCT_HookSetUi)->saveDataByType( GSST_AutoSkill );
+}
+
+short SkillUiLayer::getItemBegin( CCTouch &touch, eGetResult &result )
+{
+	int index = _listItems->getSkillIdUnderPoint(&touch);
+	if(index != -1)
+	{
+		_skillListView->setTouchEnabled(false);
+		result = DropDragInterface::GR_SUCCESS;
+	}
+	else
+	{
+		_skillListView->setTouchEnabled(true);
+		if(isTouchOnNodeContent(_mainFrame, &touch))
+			result = DropDragInterface::GR_SUCCESS;
+		else if(_detailFrame->isVisible() && isTouchOnNodeContent(_detailFrame, &touch))
+			result = DropDragInterface::GR_SUCCESS;
+		else
+			result = DropDragInterface::GR_ERROR;
+	}
+
+	return index;
+}
+
+short SkillUiLayer::getItemEnd( CCTouch &touch, eGetResult &result, EItemConType src, short itemIndex )
+{
+	result = DropDragInterface::GR_ERROR;
+	return -1;
+}
+
+bool SkillUiLayer::onClicked( CCTouch &touch )
+{
+	if(isTouchOnNodeContent(_skillListLayer, &touch))
+	{
+
+		_listItems->touch(&touch);
+		_skillIndex = _listItems->getCheck();
+		return true;
+	}
+
+	if(_detailFrame->isVisible())
+	{
+		CCPoint p = _detailFrame->convertTouchToNodeSpace(&touch);
+		CCRect boundBox = _detailFrame->boundingBox();
+		CCRect rect(0, 0, boundBox.size.width, boundBox.size.height);
+		if(rect.containsPoint(p))
+			return true;
+	}
+
+	CCPoint p = _mainFrame->convertTouchToNodeSpace(&touch);
+	CCRect boundBox = _mainFrame->boundingBox();
+	CCRect rect(0, 0, boundBox.size.width, boundBox.size.height);
+	if(rect.containsPoint(p))
+		return true;
+
+	return false;
+}
+
+std::string SkillUiLayer::getSkillIconName( int index )
+{
+	return _listItems->getSkillIconName(index);
+}
+
+int SkillUiLayer::getSkillId( int index )
+{
+	return _listItems->getSkillId(index);
+}
+
+cocos2d::CCRect SkillUiLayer::getGuildBtnPos(int tag)
+{
+	if(tag == SkillUi::GP_CloseBtn)
+	{
+		CCSize size = _mainFrame->getContentSize();
+		CCPoint pt = _mainFrame->convertToWorldSpace(ccp(size.width - 10, size.height - 10));
+		return CCRect(pt.x - 23, pt.y - 33, 36, 36);
+	}
+	else if(tag == SkillUi::GP_Item0)
+	{
+		return _listItems->getItem0Pos(0);
+	}
+	else if(tag == SkillUi::GP_Item1)
+	{
+		return _listItems->getItem0Pos(1);
+	}
+	else if(tag == SkillUi::GP_StudyBtn)
+	{
+		CCNode *node = _detailFrame->getChildByTag(21);
+		CCPoint pt = node->convertToWorldSpace(ccp(0, 0));
+		CCSize size = node->getContentSize();
+		return CCRect(pt.x, pt.y, size.width, size.height);
+	}
+
+	return CCRect();
+}
+void SkillUiLayer::setStudyBtnShowState(bool isShow)
+{
+	CCNode *node = _detailFrame->getChildByTag(21);
+	if (node)
+	{
+		node->setVisible(isShow);
+	}
+}
+void SkillUiLayer::openQuickUi()
+{
+	QuickUi::getInstace()->open();
+}
+//add by lpf 2015-10-05
+void SkillUiLayer::showTips( CCNode *pNode )
+{
+	if (pNode == NULL)
+		return;
+	if (_tipsBgSprite == NULL)
+	{
+		std::string sSEDir = CFGReader::instance()->get_profile_string("Art","ICON","");
+		std::string sSEImageName = sSEDir + "tips.png";
+		_tipsBgSprite = CCScale9Sprite::create(sSEImageName.c_str());
+		_tipsBgSprite->setAnchorPoint(ccp(0, 0));
+		World::getInstance()->getScene()->addChild(_tipsBgSprite, WZ_MESSAGEBOX, 45);
+		CCPoint point = pNode->convertToWorldSpace(ccp(0, 0));
+		_tipsBgSprite->setPosition(ccp(point.x - 45, point.y + pNode->boundingBox().getMaxY() - 8));
+		float marginWidth = 8;
+		float marginHeight = 5;
+		TTFConfig config;
+		config.fontFilePath=  FT_FONTFACE;
+		config.fontSize = 16;
+		config.outlineSize = 1;
+
+		LabelFT* tempLabel = LabelFT::createWithTTF(config,"");
+		_tipsBgSprite->addChild(tempLabel);
+		tempLabel->setAnchorPoint(ccp(0, 0));
+		tempLabel->setPosition(ccp(marginWidth, marginHeight));
+		tempLabel->setString(GET_STR(8005).c_str());
+		CCSize tempLabelBBSize = tempLabel->getContentSize();
+		_tipsBgSprite->setContentSize(CCSize(tempLabelBBSize.width + marginWidth * 2, tempLabelBBSize.height + marginHeight * 2));
+	}
+}
+
+bool SkillUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCNode *labelTTF = _mainFrame->getChildByTag(6);
+	CCPoint point = labelTTF->convertToWorldSpace(ccp(0, 0));
+	CCRect rect = CCRect(point.x, point.y, 80, 20);
+	//CCPoint touchPos = pTouch->getLocation();
+	if (rect.containsPoint(pTouch->getLocation()))
+	{
+		showTips(labelTTF);
+		return true;
+	}
+	if(isTouchOnNodeContent(_detailFrame, pTouch))
+	{
+		return true;
+	}
+	return false;
+}
+
+void SkillUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (IS_VALID_PTR(_tipsBgSprite))
+	{
+		_tipsBgSprite->removeFromParent();
+		_tipsBgSprite = NULL;
+	}
+}
+
+bool SkillUiLayer::getSkillIsNoLearn(int index)
+{
+	return _listItems->getSkillIsNoLearn(index);
+}

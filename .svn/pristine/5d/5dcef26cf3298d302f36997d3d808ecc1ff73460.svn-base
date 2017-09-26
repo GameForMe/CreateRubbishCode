@@ -1,0 +1,195 @@
+/********************************************************************
+	date:	    2016/07/20
+	time:	    10:22
+	filename: 	SBKSDManager.h
+	file path:	E:\Work\develop_sbk_shendian\Client\code\source
+	file base:	
+	file ext:	h
+	author:		shenyaoyan
+	
+	purpose:	沙巴克神殿模块
+*********************************************************************/
+#ifndef SBKSDMANAGER_H_
+#define SBKSDMANAGER_H_
+
+#include "f_singleton.h"
+#include "tagDWORDTime.h"
+#include "shendian_proto.h"
+
+#define MAYDROPITEMMAX 6
+#define FIRSTPASSITEMMAX 3
+#define SDMINTEAMERNUM 2    //队友的数量，不包括自己，所以数值为2
+#define SHENDIANNPC 1007021
+#define SHENDIANDESCID 28  //沙巴克神殿介绍ID 
+
+struct defend_data     //守卫者数据
+{
+	bool isMonster;
+	int classType;
+	std::string name;
+	int level;
+	unsigned int attNum; 
+
+	defend_data()
+		: isMonster(false)
+		, classType(0)
+		, name("")
+		, level(0)
+		, attNum(0)
+	{
+
+	}
+};
+
+struct shendian_check_data
+{
+	short check_point;
+	unsigned int check_time;
+	int reward_jinbi;
+	int reward_exp;
+	int item_first_pass_id[FIRSTPASSITEMMAX];
+	int item_first_pass_num[FIRSTPASSITEMMAX];
+	unsigned int moster_id;
+	int moster_level;
+	unsigned int map_id;
+
+	shendian_check_data()
+		: check_point(0)
+		, check_time(0)
+		, reward_jinbi(0)
+		, reward_exp(0)
+		, moster_id(0)
+		, moster_level(0)
+		, map_id(0)
+	{
+		for ( int i = 0 ; i < FIRSTPASSITEMMAX ; ++i )
+		{
+			item_first_pass_id[i] = 0;
+			item_first_pass_num[i] = 0;
+		}
+	}
+};
+
+enum ShenDianTargetTag
+{
+	TTag_Pass,   //已通过关卡数
+	TTag_Remain, //剩余关卡数
+	TTag_Time,   //剩余时间
+};
+
+class TargetTouchItem;
+class TimeCountDownLayer;
+
+class SBKSDManager
+	: public f_singleton<SBKSDManager>
+	, public cocos2d::CCObject
+{
+public:
+	enum defender_type
+	{
+		defender_player = 1,
+		defender_npc = 2,
+	};
+
+public:
+	typedef std::vector<defend_data> check_defender_data;  //每一关守卫者数据
+	typedef std::map<int,check_defender_data> defend_player_data;  //全关守卫者数据
+	typedef std::map<int,shendian_check_data> check_data;
+	typedef std::map<int,TargetTouchItem*> target_touch_item;
+
+public:
+	SBKSDManager();
+	~SBKSDManager();
+
+	bool init();
+	void destory();
+
+	void init_reward_data();
+	void clear_defend_data();
+
+	bool ShenDianIsOpen();
+
+	void send_Enter_Shendian();
+	void send_View_Defender(int checkPoint);
+	void send_Firse_Prize();
+	void send_Team_Enter();
+	void send_Next_Gate();
+	void send_Change_TeamLeader();
+
+	unsigned int onServer_Enter_Success(s_net_cmd* cmd);
+	unsigned int onServer_View_Defender(s_net_cmd* cmd);
+	unsigned int onServer_First_Prize(s_net_cmd* cmd);
+	unsigned int onServer_Pass_Success(s_net_cmd* cmd);
+	unsigned int onServer_Pass_Fail(s_net_cmd* cmd);
+	unsigned int onServer_Gate_Info(s_net_cmd* cmd);
+	unsigned int onServer_Is_Open(s_net_cmd* cmd);
+
+	void createTargetItem(ShenDianTargetTag tag);
+	TargetTouchItem* getTargetItem(ShenDianTargetTag tag);
+	void updateTargetItem(ShenDianTargetTag tag);
+
+	bool is_pass_cur_level();
+
+	void onTaskUITimePressed();
+
+	void onEnterShenDianMap();
+	void onExitShenDianMap();
+
+	void update(float dt);
+
+	const defend_player_data& getCheckData();
+	const check_data& getData(); 
+
+	void showIndex(int index);
+	void openDefenderTips(int checkPoint);
+
+	bool isInShenDianMap(unsigned int mapID);
+
+	bool canInShenDian();
+
+	void deleteCountLayer();
+	
+	void openErrorTips();
+
+public:
+	inline void setHasPassNum(int passNum) { m_hasPassNum = passNum; }
+	inline int getHasPassNum() { return m_hasPassNum; }
+	inline int getRemainPassNum() { return SHEN_DIAN_GATE_COUNT-m_hasPassNum; }
+	inline void setRemainTime(unsigned int remainTime) { m_remainTime = remainTime; }
+	inline unsigned int getRemainTime() { return m_remainTime; }
+	inline bool getIsPassCheck(int index) { return m_isPassCheck[index]; }
+	inline void setIsPassCheck(int passNum);
+	inline const string& getGuildName() { return m_sbkGuildName; }
+	inline int getMaxCheck() { return m_maxCheck; }
+	inline int getDropItem(int index) { return m_shenDianDrop[index]; }
+	inline void setEnterCounts(int counts) { m_enterCounts = counts; }
+	inline int getEnterCounts() { return m_enterCounts; }
+	inline bool isPassAll() { return m_hasPassNum == SHEN_DIAN_GATE_COUNT; }
+private:
+	bool m_actIsOpen;                      //沙巴克神殿活动是否开启
+	defend_player_data m_defendPlayerData; //守卫者数据
+	check_data m_shenDianData;      //关卡数据
+	int m_shenDianDrop[MAYDROPITEMMAX];    //沙巴克神殿掉落数据，用于右侧显示6个item
+	bool m_isPassCheck[SHEN_DIAN_GATE_COUNT];     //是否过关数据
+
+	bool m_inited;              //是否init
+
+	target_touch_item m_targetItems; //左侧任务列表item
+
+	int m_hasPassNum;      // 已经通过的关卡
+	bool m_isInShenDianMap;  //是否是在神殿地图
+
+	unsigned int m_remainTime; //关卡剩余时间
+
+	std::string m_sbkGuildName; //沙巴克行会名称
+	int m_maxCheck;   //本周最大关卡
+
+	TimeCountDownLayer* m_countLayer; // 倒计时显示界面
+
+	bool m_curIsPass; //当前关卡是否过关
+	int m_enterCounts; //今日神殿进入次数
+
+	int m_open_error_num; //活动不开启原因
+};
+
+#endif

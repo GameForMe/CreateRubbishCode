@@ -1,0 +1,1217 @@
+#include "MasterPrenticeMgr.h"
+#include "cocos2d.h"
+#include "TCPClient.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "StringMgr.h"
+#include "ToolTip.h"
+#include "NameMgr2.h"
+#include "World.h"
+#include "MessageBoxUi.h"
+#include "UiTools.h"
+#include "TeamMgr.h"
+#include "FriendUi.h"
+#include "UiManager.h"
+#include "MasterPrenticeProto.h"
+#include "CommonDefine.h"
+#include "NewPlayerGuide.h"
+using namespace std;
+MasterPrenticeMgr::MasterPrenticeMgr()
+{
+}
+MasterPrenticeMgr::~MasterPrenticeMgr()
+{
+}
+MasterPrenticeMgr* MasterPrenticeMgr::getInstance()
+{
+	static MasterPrenticeMgr Mgr;
+	return &Mgr;
+}
+void MasterPrenticeMgr::Init()
+{
+	Clear();
+
+	REG_NAME_CB(this , &MasterPrenticeMgr::OnServer_GetName);
+
+	TCP_CLIENT->register_net_cmd("NET_SIS_make_master" , this , &MasterPrenticeMgr::OnServer_Make_Master);
+	TCP_CLIENT->register_net_cmd("NET_SIS_make_master_extend" , this , &MasterPrenticeMgr::OnServer_Make_Master_ex);
+	TCP_CLIENT->register_net_cmd("NET_SIS_make_master_result_to_master" , this , &MasterPrenticeMgr::OnServer_Make_Master_OK2Master);
+	TCP_CLIENT->register_net_cmd("NET_SIS_new_prentice" , this , &MasterPrenticeMgr::OnServer_New_Role_2_Old);
+	TCP_CLIENT->register_net_cmd("NET_SIS_master_and_prentices" , this , &MasterPrenticeMgr::OnServer_Roles_2_NewPrentice);
+	TCP_CLIENT->register_net_cmd("NET_SIS_make_prentice" , this , &MasterPrenticeMgr::OnServer_Make_Prentice);
+	TCP_CLIENT->register_net_cmd("NET_SIS_make_prentice_extend" , this , &MasterPrenticeMgr::OnServer_Make_Prentice_ex);
+	TCP_CLIENT->register_net_cmd("NET_SIS_make_prentice_result_to_prentice" , this , &MasterPrenticeMgr::OnServer_Make_Prentice_OK2Prentice);
+	TCP_CLIENT->register_net_cmd("NET_SIS_master_prentice_break" , this , &MasterPrenticeMgr::OnServer_Master_Prentice_Break);
+	TCP_CLIENT->register_net_cmd("NET_SIS_prentice_graduate" , this , &MasterPrenticeMgr::OnServer_Prentice_Graduate);
+	
+	TCP_CLIENT->register_net_cmd("NET_SIS_Master_teach_Prentice" , this , &MasterPrenticeMgr::OnServer_MasterTeachPrentice);
+	TCP_CLIENT->register_net_cmd("NET_SIS_master_moral_and_gradates" , this , &MasterPrenticeMgr::OnServer_InitMasterID);
+
+	TCP_CLIENT->register_net_cmd("NET_SIS_add_master" , this , &MasterPrenticeMgr::OnServer_Graduate_From_Master);
+	
+
+	TCP_CLIENT->register_net_cmd("NET_SIS_Master_Login" , this , &MasterPrenticeMgr::OnServer_MasterLogin);
+	TCP_CLIENT->register_net_cmd("NET_SIS_Master_Logout" , this , &MasterPrenticeMgr::OnServer_MasterLogout);
+	TCP_CLIENT->register_net_cmd("NET_SIS_Prentice_Login" , this , &MasterPrenticeMgr::OnServer_PrenticeLogin);
+	TCP_CLIENT->register_net_cmd("NET_SIS_Prentice_Logout" , this , &MasterPrenticeMgr::OnServer_PrenticeLogout);
+	TCP_CLIENT->register_net_cmd("NET_SIS_Brother_Login" , this , &MasterPrenticeMgr::OnServer_BrotherLogin);
+	TCP_CLIENT->register_net_cmd("NET_SIS_Brother_Logout", this , &MasterPrenticeMgr::OnServer_BrotherLogout);
+	return;
+}
+
+void MasterPrenticeMgr::Destroy()
+{
+	UNREG_NAME_CB(this , &MasterPrenticeMgr::OnServer_GetName);
+
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_make_master" , this , &MasterPrenticeMgr::OnServer_Make_Master);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_make_master_extend" , this , &MasterPrenticeMgr::OnServer_Make_Master_ex);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_make_master_result_to_master" , this , &MasterPrenticeMgr::OnServer_Make_Master_OK2Master);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_new_prentice" , this , &MasterPrenticeMgr::OnServer_New_Role_2_Old);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_master_and_prentices" , this , &MasterPrenticeMgr::OnServer_Roles_2_NewPrentice);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_make_prentice" , this , &MasterPrenticeMgr::OnServer_Make_Prentice);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_make_prentice_extend" , this , &MasterPrenticeMgr::OnServer_Make_Prentice_ex);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_make_prentice_result_to_prentice" , this , &MasterPrenticeMgr::OnServer_Make_Prentice_OK2Prentice);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_master_prentice_break" , this , &MasterPrenticeMgr::OnServer_Master_Prentice_Break);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_prentice_graduate" , this , &MasterPrenticeMgr::OnServer_Prentice_Graduate);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Master_teach_Prentice" , this , &MasterPrenticeMgr::OnServer_MasterTeachPrentice);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_master_moral_and_gradates" , this , &MasterPrenticeMgr::OnServer_InitMasterID);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_add_master" , this , &MasterPrenticeMgr::OnServer_Graduate_From_Master);
+
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Master_Login" , this , &MasterPrenticeMgr::OnServer_MasterLogin);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Master_Logout" , this , &MasterPrenticeMgr::OnServer_MasterLogout);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Prentice_Login" , this , &MasterPrenticeMgr::OnServer_PrenticeLogin);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Prentice_Logout" , this , &MasterPrenticeMgr::OnServer_PrenticeLogout);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Brother_Login" , this , &MasterPrenticeMgr::OnServer_BrotherLogin);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Brother_Logout", this , &MasterPrenticeMgr::OnServer_BrotherLogout);
+	return;
+}
+
+void MasterPrenticeMgr::Clear()
+{
+	m_master_id = (unsigned int)INVALID;
+	m_apply_master_role_id = (unsigned int)INVALID;
+	m_apply_prentice_role_id = (unsigned int)INVALID;
+	m_break_role_id = (unsigned int)INVALID;
+	m_bask_name_apply_master = false;
+	m_bask_name_apply_prentice = false;
+	m_master_prentice_member_vector.clear();
+	m_vecPrenticeId.clear();
+	return;
+}
+//发送拜师
+void MasterPrenticeMgr::Send_add_master( unsigned int role_id_ )
+{
+	//能否拜师预判断
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	if (role_id_ == ploc->getId())
+		return;
+	//拜师等级检查
+	if (ploc->getLevel() > PRENTICE_MAX_LEVEL || ploc->getLevel() < PRENTICE_MIN_LEVEL)
+	{
+		//提示：超过**级无法拜师
+		ToolTip::getInstance()->push(GET_STR(2235));
+		return;
+	}
+	//end
+	//是否有师傅
+	if (HasMaster())
+	{
+		//若本地玩家是师傅
+		if (IsMaster_Local(ploc->getId()))
+		{
+			//提示：您已是师傅，不能继续拜师
+			ToolTip::getInstance()->push(GET_STR(2233));
+		}
+		else
+		{
+			//提示：您已有师傅，不能继续拜师
+			ToolTip::getInstance()->push(GET_STR(2234));
+		}
+		return;
+	}
+	
+	NET_SIC_make_master send;
+	send.dwMaster = role_id_;
+	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+
+	return;
+}
+//拜师反馈
+unsigned int MasterPrenticeMgr::OnServer_Make_Master(s_net_cmd *cmd)
+{
+	NET_SIS_make_master* msg = (NET_SIS_make_master*)cmd;
+	switch( msg->dwError )
+	{
+	case E_MakeMaster_You_ForbidOp:
+		{
+			//操作失败，您刚解除师徒关系，在接下来的48小时中将不可以进行收徒和拜师。
+			ToolTip::getInstance()->push(GET_STR(2266));
+		}
+		break;
+	case E_MakeMaster_You_HasMaster:
+		{
+			//操作失败，您已有师傅，同时只能拥有一位师傅。
+			LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+			if(!ploc)
+				return 0;
+			//若本地玩家是师傅
+			if (IsMaster_Local(ploc->getId()))
+			{
+				//提示：您已是师傅，不能继续拜师
+				ToolTip::getInstance()->push(GET_STR(2233));
+			}
+			else
+			{
+				//提示：您已有师傅，不能继续拜师
+				ToolTip::getInstance()->push(GET_STR(2234));
+			}
+		}
+		break;
+
+	case E_MakeMaster_Your_OutOfLevel:
+		{
+			//操作失败，您已有师傅，同时只能拥有一位师傅。
+			ToolTip::getInstance()->push(GET_STR(2235));
+		}
+		break;
+	case E_MakeMaster_Master_ForbidOp:
+		{
+			//操作失败，拜师的等级必须要在1~25级之间。
+			ToolTip::getInstance()->push(GET_STR(2267));
+		}
+		break;
+	case E_MakeMaster_Master_OutOfLevel:
+		{
+			//操作失败，目标等级必须≥30级
+			ToolTip::getInstance()->push(GET_STR(2238));
+		}
+		break;
+
+	case E_MakeMaster_Master_MaxPrentices:
+		{
+			//操作失败，目标的弟子太多不能再收更多的徒弟了。
+			ToolTip::getInstance()->push(GET_STR(2239));
+		}
+		break;
+
+	case E_MakeMaster_Master_Refuse:
+		{
+			//提示：被拜师的人不同意
+			ToolTip::getInstance()->push(GET_STR(2241));
+		}
+		break;
+	case E_MakeMaster_Master_MinOfLevel:
+		{
+			// 操作失败，师傅等级必须大于自己的等级
+			ToolTip::getInstance()->push(GET_STR(2237));
+		}
+		break;
+	case E_MakeMaster_Master_Has_Graduates:
+		{
+			//  已出师的角色，不能再拜师
+			ToolTip::getInstance()->push(GET_STR(2236));
+		}
+		break;
+	case E_MasterPrentice_OutSafeArea://双方有不在安全区内的
+		{
+			ToolTip::getInstance()->push(GET_STR(2274));
+		}
+		break;
+	case E_MakeMaster_MasterIsPrentice://拜师的对象还是别人的徒弟
+		{
+			ToolTip::getInstance()->push(GET_STR(2278));
+		}
+		break;
+	case E_MakeMaster_MasterBusy://师傅忙
+		{
+			ToolTip::getInstance()->push(GET_STR(2285));
+		}
+		break;
+	case E_MakeMaster_ToConfirm://等待师傅确认
+		{
+			ToolTip::getInstance()->push(GET_STR(2289));
+		}
+		break;
+	case E_MakeMaster_Master_Suceessful:
+		{
+			//玩家拜师成功
+			ToolTip::getInstance()->push(STRING_TABLE["shitu_make_master"]);
+		}
+		break;
+	}
+	return 0;
+}
+
+void MasterPrenticeMgr::OnServer_Chushi_Notice(unsigned int pNum)
+{
+	if (pNum <= 5)
+		ToolTip::getInstance()->push(STRING_TABLE["shitu_chushi_notice_shifu_1_5"]);
+	else if (pNum >= 6 && pNum <= 10)
+		ToolTip::getInstance()->push(STRING_TABLE["shitu_chushi_notice_shifu_6_10"]);
+	else if (pNum >= 11 && pNum <= 20)
+		ToolTip::getInstance()->push(STRING_TABLE["shitu_chushi_notice_shifu_11_20"]);
+}
+
+void MasterPrenticeMgr::OnServer_Chushi_TuDi_Notice(short pLevel)
+{
+	if (pLevel == MASTER_CHUSHI_LEVEL)
+		if (HasMaster())
+			ToolTip::getInstance()->push(STRING_TABLE["shitu_chushi_notice_tudi"]);
+		
+}
+
+//发送招徒
+void MasterPrenticeMgr::Send_add_prentice( unsigned int role_id_ )
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	if(role_id_ == ploc->getId())
+		return;
+	//if (!IsMaster_Local(ploc->getId()))//本地玩家不是师傅
+	//	return;
+	//本地玩家等级检查
+	if (ploc->getLevel() < MASTER_MIN_LEVEL)
+	{
+		ToolTip::getInstance()->push(GET_STR(2273));
+		return;
+	}
+	//徒弟人满
+	if (m_master_prentice_member_vector.size() >= MAX_PRENTICE)
+	{
+		ToolTip::getInstance()->push(GET_STR(2244));
+		return;
+	}
+	NET_SIC_make_prentice send;
+	send.dwPrentice = role_id_;
+	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+	return;
+}
+//接收拜师消息
+unsigned int MasterPrenticeMgr::OnServer_Make_Master_ex( s_net_cmd *cmd )
+{
+	//如果当前被邀请方处在强类型引导中,则关闭引导（也就是跳过引导）  2016-3-17 金山
+	if (NewPlayerGuider::getInstance()->_IsGuide && NewPlayerGuider::getInstance()->getIsStrongGuide())
+	{
+		NewPlayerGuider::getInstance()->SkipNewGuide();
+	}
+
+	NET_SIS_make_master_extend* msg = (NET_SIS_make_master_extend*)cmd;
+	m_apply_master_role_id = msg->dwPrentice;
+	string roleName;
+	if (NameMgr2::getInstance()->queryName(msg->dwPrentice,roleName))
+	{
+		if (roleName.empty())
+			return 0;
+		std::ostringstream oss;
+		oss << roleName << GET_STR(2240);
+		MessageBoxUi *Ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, oss.str().c_str(), TEXT_UTF8_TONGYI,TEXT_UTF8_JUJUE);
+		World::getInstance()->getScene()->addChild(Ui, WZ_MESSAGEBOX);
+		Ui->signalOkBtnPressed.connect(this, &MasterPrenticeMgr::Agree_apply_master);
+		Ui->signalCancelBtnPressed.connect(this,&MasterPrenticeMgr::DisAgree_apply_master);
+	}
+	else
+	{
+		m_bask_name_apply_master = true;
+	}
+	return 0;
+}
+
+void MasterPrenticeMgr::Agree_apply_master()
+{
+	NET_SIC_make_master_extend send;
+	send.dwPrentice = m_apply_master_role_id;
+	send.byAck	  = 1;
+	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+	m_apply_master_role_id = (unsigned int)INVALID;
+}
+
+void MasterPrenticeMgr::DisAgree_apply_master()
+{
+	NET_SIC_make_master_extend send;
+	send.dwPrentice = m_apply_master_role_id;
+	send.byAck	  = 0;
+	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+	m_apply_master_role_id = (unsigned int)INVALID;
+}
+
+void MasterPrenticeMgr::OnServer_GetName( unsigned int roleid , const std::string& name )
+{
+	if (m_bask_name_apply_master && m_apply_master_role_id == roleid)
+	{
+		m_apply_master_role_id = roleid;
+		std::ostringstream oss;
+		oss << name << GET_STR(2240);
+		MessageBoxUi *Ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, oss.str().c_str(), TEXT_UTF8_TONGYI,TEXT_UTF8_JUJUE);
+		World::getInstance()->getScene()->addChild(Ui, WZ_MESSAGEBOX);
+		Ui->signalOkBtnPressed.connect(this, &MasterPrenticeMgr::Agree_apply_master);
+		Ui->signalCancelBtnPressed.connect(this,&MasterPrenticeMgr::DisAgree_apply_master);
+		m_bask_name_apply_master = false;
+	}
+	if (m_bask_name_apply_prentice && m_apply_prentice_role_id == roleid)
+	{
+		m_apply_prentice_role_id = roleid;
+		std::ostringstream oss;
+		oss << name << GET_STR(2252);
+		MessageBoxUi *Ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, oss.str().c_str(), TEXT_UTF8_TONGYI,TEXT_UTF8_JUJUE);
+		World::getInstance()->getScene()->addChild(Ui, WZ_MESSAGEBOX);
+		Ui->signalOkBtnPressed.connect(this, &MasterPrenticeMgr::Agree_apply_prentice);
+		Ui->signalCancelBtnPressed.connect(this,&MasterPrenticeMgr::DisAgree_apply_prentice);
+		m_bask_name_apply_prentice = false;
+	}
+
+	for (size_t i = 0;i < m_master_prentice_member_vector.size();i++)
+	{
+		if (roleid == m_master_prentice_member_vector[i].dw_role_id)
+		{
+			m_master_prentice_member_vector[i].role_name = name;
+			//UI刷新
+			GET_UI(FriendUi,WCT_FRIENDUI)->updateUiData();
+			break;
+		}
+	}
+}
+
+unsigned int MasterPrenticeMgr::OnServer_Make_Master_OK2Master( s_net_cmd *cmd )
+{
+	NET_SIS_make_master_result_to_master* msg = (NET_SIS_make_master_result_to_master*)cmd;
+	pushPrenticeToList(msg->dwPrentice);
+	string roleName;
+	if (NameMgr2::getInstance()->queryName(msg->dwPrentice,roleName))//肯定能找到，否则就是异常啦
+	{
+		if (roleName.empty())
+			return 0;
+		//提示：**成为了您的徒弟
+		std::ostringstream oss;
+		oss << roleName << STRING_TABLE["shitu_be_master"];
+		ToolTip::getInstance()->push(oss.str());
+	}
+	return 0;
+}
+//将新徒弟的资料同步给师傅与师兄
+unsigned int MasterPrenticeMgr::OnServer_New_Role_2_Old( s_net_cmd *cmd )
+{
+	NET_SIS_new_prentice* msg = (NET_SIS_new_prentice*)cmd;
+	tagMPMember_Local info;
+	bool bRefreshUI = false;
+	if (NameMgr2::getInstance()->queryName(msg->stMember.dw_role_id,info.role_name))
+	{
+		bRefreshUI = true;
+	}
+	info.dw_role_id  = msg->stMember.dw_role_id;
+	info.byLevel	 = msg->stMember.byLevel;
+	info.eClass		 = msg->stMember.eClass;
+	info.bySex		 = msg->stMember.bySex;
+	info.eMemberType = msg->stMember.eMemberType;
+	info.bOnline	 = msg->stMember.bOnline;
+	m_master_prentice_member_vector.push_back(info);
+	ReSort_Vec();
+	if (bRefreshUI)
+	{
+		//UI刷新
+		GET_UI(FriendUi,WCT_FRIENDUI)->updateUiData();
+	}
+	return 0;
+}
+//将师门的信息同步给新的徒弟
+unsigned int MasterPrenticeMgr::OnServer_Roles_2_NewPrentice( s_net_cmd* cmd )
+{
+	NET_SIS_master_and_prentices* msg = (NET_SIS_master_and_prentices*)cmd;
+	tagMPMember* pMember = msg->stMember;
+	for(int i = 0; i < msg->byNumber; i++)
+	{
+		// 拷贝数据
+		tagMPMember info;
+		memcpy(&info, pMember, sizeof(tagMPMember));
+		++pMember;
+		tagMPMember_Local tempInfo;
+		tempInfo.dw_role_id = info.dw_role_id;
+		tempInfo.byLevel = info.byLevel;
+		tempInfo.bOnline = info.bOnline;
+		tempInfo.eClass = info.eClass;
+		tempInfo.bySex = info.bySex;
+		tempInfo.eMemberType = info.eMemberType;
+		tempInfo.dwZhanli = info.dwZhanli;
+		if (tempInfo.eMemberType == EMPMT_MASTER)
+		{
+			m_master_id = tempInfo.dw_role_id;
+		}
+		else if (tempInfo.eMemberType == EMPMT_PRENTICE)
+		{
+			pushPrenticeToList(tempInfo.dw_role_id);
+		}
+		if (NameMgr2::getInstance()->queryName(tempInfo.dw_role_id,tempInfo.role_name))
+		{
+		}
+		if (!Is_XiaoHuoBan(tempInfo.dw_role_id))//防止同一角色多次加入
+		{
+			m_master_prentice_member_vector.push_back(tempInfo);
+		}
+		
+	}
+	ReSort_Vec();
+	//UI刷新
+	GET_UI(FriendUi,WCT_FRIENDUI)->updateUiData();
+	return 0;
+}
+//重排顺序，保证师傅位于第一位（若本地玩家不是师傅的情况下）
+void MasterPrenticeMgr::ReSort_Vec()
+{
+	size_t length = m_master_prentice_member_vector.size();
+	size_t index = 0;
+	for (size_t i = 0;i < length;i++)
+	{
+		if (EMPMT_MASTER == m_master_prentice_member_vector[i].eMemberType)
+		{
+			index = i;
+		}
+	}
+	if (index != 0)
+	{
+		std::swap(m_master_prentice_member_vector[0],m_master_prentice_member_vector[index]);
+	}
+}
+
+unsigned int MasterPrenticeMgr::OnServer_Make_Prentice( s_net_cmd* cmd )
+{
+	NET_SIS_make_prentice* msg = (NET_SIS_make_prentice*)cmd;
+	if (msg->dwError == E_MakePrentice_Prentice_Successful)
+	{
+		//m_vecPrenticeId.push_back(msg->dwPrentice);
+		pushPrenticeToList(msg->dwPrentice);
+	}
+	
+	resolveErrorCode(msg->dwError);
+	return 0;
+}
+
+void MasterPrenticeMgr::resolveErrorCode(unsigned int pErrorID)
+{
+	switch( pErrorID )
+	{
+	case E_MakePrentice_You_ForbidOp:
+		{
+			//操作失败，您刚解除师徒关系，在接下来的48小时中将不可以进行收徒和拜师。
+			ToolTip::getInstance()->push(GET_STR(2266));
+		}
+		break;
+	case E_MakePrentice_Your_OutOfLevel:
+		{
+			//操作失败，收徒等级必须≥60级
+			ToolTip::getInstance()->push(GET_STR(2273));
+		}
+		break;
+	case E_MakePrentice_Prentice_HasMaster:
+		{
+			//操作失败，目标已有师傅。
+			ToolTip::getInstance()->push(GET_STR(2246));
+		}
+		break;
+	case E_MakePrentice_Your_MaxPrentices:
+		{
+			//操作失败，您弟子太多不能再收更多的徒弟了。
+			ToolTip::getInstance()->push(GET_STR(2244));
+		}
+		break;
+	case E_MakePrentice_Prentice_OutOfLevel:
+		{
+			//操作失败，目标的等级必须要在1~25级之间
+			ToolTip::getInstance()->push(GET_STR(2247));
+		}
+		break;
+	case E_MakePrentice_Prentice_ForbidOp:
+		{
+			///操作失败，目标刚解除师徒关系，在48小时中将不可以进行拜师。
+			ToolTip::getInstance()->push(GET_STR(2267));
+		}
+		break;
+	case E_MakePrentice_Prentice_Refuse:
+		{
+			//XXX暂时不愿意成为您的弟子。
+			ToolTip::getInstance()->push(GET_STR(2250));
+		}
+		break;
+	case E_MakePrentice_Prentice_MaxOfLevel:
+		{
+			// 操作失败，徒弟等级必须小于自己的等级
+			ToolTip::getInstance()->push(GET_STR(2248));
+		}
+		break;
+	case E_MakePrentice_Prentice_Has_Graduates:
+		{
+			// 已出师的角色不可以被收为徒弟
+			ToolTip::getInstance()->push(GET_STR(2249));
+		}
+		break;
+	case E_MasterPrentice_OutSafeArea://双方有不在安全区内的
+		{
+			ToolTip::getInstance()->push(GET_STR(2274));
+		}
+		break;
+	case E_MakePrentice_NotMaster://试图收徒的人还不是师傅
+		{
+			ToolTip::getInstance()->push(GET_STR(2279));
+		}
+		break;
+	case E_MakePrentice_PrenticeBusy://徒弟忙
+		{
+			ToolTip::getInstance()->push(GET_STR(2286));
+		}
+		break;
+	case E_MakePrentice_ToConfirm://等待徒弟确认
+		{
+			ToolTip::getInstance()->push(GET_STR(2290));
+		}
+		break;
+	case E_MakePrentice_Prentice_Successful:
+		{
+			ToolTip::getInstance()->push(GET_STR(2251));
+		}
+		break;
+	case E_AddMaster_Level_Lack:
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["shitu_ui_chushi_unenough_level"]);
+		}
+		break;
+	case E_AddMaster_You_NoMaster:
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["shitu_ui_chushi_no_master"]);
+		}
+		break;
+	}
+}
+
+
+unsigned int MasterPrenticeMgr::OnServer_Make_Prentice_ex( s_net_cmd* cmd )
+{
+	//如果当前被邀请方处在强类型引导中,则关闭引导（也就是跳过引导）  2016-3-17 金山
+	if (NewPlayerGuider::getInstance()->_IsGuide && NewPlayerGuider::getInstance()->getIsStrongGuide())
+	{
+		NewPlayerGuider::getInstance()->SkipNewGuide();
+	}
+
+	NET_SIS_make_prentice_extend* msg = (NET_SIS_make_prentice_extend*)cmd;
+
+	m_apply_prentice_role_id = msg->dwMaster;
+	string roleName;
+	if (NameMgr2::getInstance()->queryName(msg->dwMaster,roleName))
+	{
+		if (roleName.empty())
+			return 0;
+		std::ostringstream oss;
+		oss << roleName << GET_STR(2252);
+		MessageBoxUi *Ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, oss.str().c_str(),TEXT_UTF8_TONGYI,TEXT_UTF8_JUJUE);
+		World::getInstance()->getScene()->addChild(Ui, WZ_MESSAGEBOX);
+		Ui->signalOkBtnPressed.connect(this, &MasterPrenticeMgr::Agree_apply_prentice);
+		Ui->signalCancelBtnPressed.connect(this,&MasterPrenticeMgr::DisAgree_apply_prentice);
+	}
+	else
+	{
+		m_bask_name_apply_prentice = true;
+	}
+
+	return 0;
+}
+
+void MasterPrenticeMgr::Agree_apply_prentice()
+{
+	NET_SIC_make_prentice_extend send;
+	send.dwMaster = m_apply_prentice_role_id;
+	send.byAck = 1;
+	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+	m_apply_prentice_role_id = (unsigned int)INVALID;
+	return;
+}
+
+void MasterPrenticeMgr::DisAgree_apply_prentice()
+{
+	NET_SIC_make_prentice_extend send;
+	send.dwMaster = m_apply_prentice_role_id;
+	send.byAck = 0;
+	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+	m_apply_prentice_role_id = (unsigned int)INVALID;
+	return;
+}
+
+unsigned int MasterPrenticeMgr::OnServer_Make_Prentice_OK2Prentice( s_net_cmd* cmd )
+{
+	NET_SIS_make_prentice_result_to_prentice* msg = (NET_SIS_make_prentice_result_to_prentice*)cmd;
+	string roleName;
+	m_master_id = msg->dwMaster;
+	if (NameMgr2::getInstance()->queryName(msg->dwMaster,roleName))//肯定能找到，否则就是异常啦
+	{
+		if (roleName.empty())
+			return 0;
+		//提示：**成为了您的师傅
+		std::ostringstream oss;
+		oss << roleName << GET_STR(2253);
+		ToolTip::getInstance()->push(oss.str());
+	}
+	return 0;
+}
+
+void MasterPrenticeMgr::Master_Prentice_Break( unsigned int roleID )
+{
+	if ((unsigned int )INVALID == roleID)
+		return;
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	if(roleID == ploc->getId())
+		return;
+	if (!Is_XiaoHuoBan(roleID))//不是同一师门的
+		return;
+	//若本地玩家是师傅
+// 	if (IsMaster_Local(ploc->getId()))
+// 	{
+// 		m_break_role_id = roleID;
+// 	}
+// 	//本地玩家是徒弟
+// 	else
+// 	{
+// 		m_break_role_id = (unsigned int)INVALID;
+// 	}
+
+	//若本地玩家是师傅
+	if (m_master_id == roleID)
+	{
+		m_break_role_id = (unsigned int)INVALID;
+	}
+	else if(IsMasterByRoleID(roleID))
+	{
+		m_break_role_id = roleID;
+	}
+	else
+	{
+		return;
+	}
+
+	std::string roleName = "";
+	if (!NameMgr2::getInstance()->queryName(roleID,roleName))
+		return;
+	if (roleName.empty())
+		return;
+	//统一提示
+	std::string strout = replaceStr(GET_STR(2254),"**",roleName);
+	MessageBoxUi *Ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, strout.c_str(), TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+	World::getInstance()->getScene()->addChild(Ui, WZ_MESSAGEBOX);
+	Ui->signalOkBtnPressed.connect(this, &MasterPrenticeMgr::Confirm_Break);
+}
+
+void MasterPrenticeMgr::Confirm_Break()
+{
+	NET_SIC_master_prentice_break send;
+	send.dw_role_id = m_break_role_id;
+	send.dwNpcID = (unsigned int)INVALID;
+	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+}
+
+unsigned int MasterPrenticeMgr::OnServer_Master_Prentice_Break( s_net_cmd* cmd )
+{
+	NET_SIS_master_prentice_break* msg = (NET_SIS_master_prentice_break*)cmd;
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return 0;
+	if (msg->dw_role_id == ploc->getId())//若是自己脱离师门
+	{
+		//若是师傅主动的
+		if (msg->byMasterOP)
+		{
+			ToolTip::getInstance()->push(GET_STR(2257));
+		}
+		else//若是徒弟主动的
+		{
+			ToolTip::getInstance()->push(GET_STR(2256));
+		}
+		m_master_id = (unsigned int)INVALID;
+		delete_master_relation();
+		//UI刷新
+		GET_UI(FriendUi,WCT_FRIENDUI)->updateUiData();
+	}
+	else//若是师兄弟脱离师门
+	{
+		tagMPMember_Local tmpInfo;
+		if (getMemberInfo(msg->dw_role_id,tmpInfo))
+		{
+			//若是师傅主动的
+			if (msg->byMasterOP)
+			{
+				std::string strout = replaceStr(GET_STR(2258),"**",tmpInfo.role_name);
+				if (!tmpInfo.role_name.empty())
+				{
+					ToolTip::getInstance()->push(strout);
+				}
+			}
+			else//若是徒弟主动的
+			{
+				if (!tmpInfo.role_name.empty())
+				{
+					std::ostringstream oss;
+					oss << tmpInfo.role_name << GET_STR(2259);
+					ToolTip::getInstance()->push(oss.str());
+				}
+			}
+			delate_from_master_prentice(msg->dw_role_id);
+			delete_prentice_info(msg->dw_role_id);
+			//UI刷新
+			GET_UI(FriendUi,WCT_FRIENDUI)->updateUiData();
+		}
+	}
+	return 0;
+}
+
+void MasterPrenticeMgr::delete_master_relation()
+{
+	master_prentice_member_vector::iterator iter_begin = m_master_prentice_member_vector.begin();
+	master_prentice_member_vector::iterator iter;
+
+	for(iter = iter_begin; iter != m_master_prentice_member_vector.end();)
+	{
+		if(iter->eMemberType == EMPMT_MASTER || iter->eMemberType == EMPMT_BROTHER)
+			iter = m_master_prentice_member_vector.erase(iter);
+		else
+			++iter;
+	}
+	return;
+}
+
+void MasterPrenticeMgr::delete_prentice_info(unsigned int role_id_)
+{
+	vector<unsigned int>::iterator iter = m_vecPrenticeId.begin();
+	while(iter != m_vecPrenticeId.end())
+	{
+		if (role_id_ == *iter)
+		{
+			m_vecPrenticeId.erase(iter);
+			break;
+		}
+		iter++;
+	}
+}
+
+void MasterPrenticeMgr::delate_from_master_prentice( unsigned int role_id_ )
+{
+	master_prentice_member_vector::iterator iter;
+	for(iter = m_master_prentice_member_vector.begin(); iter != m_master_prentice_member_vector.end();/* ++iter*/)
+	{
+		tagMPMember_Local& mpInfo = *iter;
+		if(mpInfo.dw_role_id == role_id_)
+		{
+			iter = m_master_prentice_member_vector.erase(iter);
+			break;
+		}
+		else
+			++iter;
+	}
+	return;
+}
+unsigned int MasterPrenticeMgr::OnServer_Graduate_From_Master(s_net_cmd* cmd)//徒弟出师
+{
+	NET_SIS_add_master* msg = (NET_SIS_add_master*)cmd;
+	CC_ASSERT(msg);
+	if (msg->dw_error_code == 0)
+	{
+		ToolTip::getInstance()->push(GET_STR(2260));
+		GET_UI(FriendUi,WCT_FRIENDUI)->updateUiData();
+		return 0;
+	}
+	resolveErrorCode(msg->dw_error_code);
+	return 0;
+}
+
+unsigned int MasterPrenticeMgr::OnServer_Prentice_Graduate( s_net_cmd* cmd )
+{
+	NET_SIS_prentice_graduate* msg = (NET_SIS_prentice_graduate*)cmd;
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return 0;
+	if (msg->dwPrentice == ploc->getId())//若是自己毕业，则删除所有的师门数据
+	{
+		delete_master_relation();
+		m_master_id = (unsigned int)INVALID;
+		GET_UI(FriendUi,WCT_FRIENDUI)->updateUiData();
+		ToolTip::getInstance()->push(GET_STR(2260));
+	}
+	else//若是师兄毕业，则删除该师兄的信息
+	{
+		tagMPMember_Local tmpInfo;
+		if (getMemberInfo(msg->dwPrentice,tmpInfo))
+		{
+			if(!tmpInfo.role_name.empty())
+			{
+				std::string strout = replaceStr(GET_STR(2261),"**",tmpInfo.role_name);
+				ToolTip::getInstance()->push(strout);
+			}
+		}
+		delate_from_master_prentice(msg->dwPrentice);
+		delete_prentice_info(msg->dwPrentice);
+	}
+	return 0;
+}
+
+void MasterPrenticeMgr::MasterTeach_Prentice( unsigned int role_id_ )
+{
+	//本地玩家必须是师傅
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	if (!IsMaster_Local(ploc->getId()))
+		return;
+	if (!Is_XiaoHuoBan(role_id_))
+		return;
+	NET_SIC_Master_teach_Prentice send;
+	send.dwPrentice = role_id_;
+	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+}
+
+unsigned int MasterPrenticeMgr::OnServer_MasterTeachPrentice( s_net_cmd *cmd )
+{
+	NET_SIS_Master_teach_Prentice *msg = (NET_SIS_Master_teach_Prentice*)cmd;
+	if (msg->dw_error != 0)//仅师傅收到
+	{
+		tagMPMember_Local tmpInfo;
+		if (!getMemberInfo(msg->dwPrentice,tmpInfo))
+			return 0;
+		if(tmpInfo.role_name.empty())
+			return 0;
+		if (E_MasterTeach_Prentice_offline == msg->dw_error)
+		{
+			std::string strout = replaceStr(GET_STR(2262),"**",tmpInfo.role_name);
+			ToolTip::getInstance()->push(strout);
+		}
+		else if(E_MasterTeach_Prentice_full == msg->dw_error)
+		{
+			std::string strout = replaceStr(GET_STR(2263),"**",tmpInfo.role_name);
+			ToolTip::getInstance()->push(strout);
+		}
+		else
+		{
+			//do nothing
+		}
+	}
+	else//传功成功
+	{
+		LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+		if(!ploc)
+			return 0;
+		if (msg->dwAddExp <= 0)
+			return 0;
+		if (msg->dwPrentice == ploc->getId())//若本地玩家是徒弟
+		{
+			std::ostringstream oss;
+			oss << GET_STR(2264) << msg->dwAddExp;
+			ToolTip::getInstance()->push(oss.str());
+		}
+		else//是师傅
+		{
+			tagMPMember_Local tmpInfo;
+			if (!getMemberInfo(msg->dwPrentice,tmpInfo))
+				return 0;
+			if(tmpInfo.role_name.empty())
+				return 0;
+			std::string str = replaceStr(GET_STR(2265),"**",tmpInfo.role_name);
+			std::ostringstream oss;
+			oss << str << msg->dwAddExp;
+			ToolTip::getInstance()->push(oss.str());
+		}
+	}
+	return 0;
+}
+//出师条件：徒弟与师傅组队（该队伍只要有徒弟与师傅即可，可以多于两个人）到一个Npc处主动出师
+void MasterPrenticeMgr::Prentcie_graduate_from_master()
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(ploc))
+		return;
+	//检查本地玩家是否已入师门
+	if (!IsInMasterRelationShip_Local(ploc->getId()))
+	{
+		ToolTip::getInstance()->push(GET_STR(2268));
+		return;
+	}
+	//是否是徒弟
+	if (IsMaster_Local((ploc->getId())))
+	{
+		ToolTip::getInstance()->push(GET_STR(2269));
+		return;
+	}
+	//出师等级检查
+	if(ploc->getLevel() < MASTER_CHUSHI_LEVEL)
+	{
+		ToolTip::getInstance()->push(GET_STR(2270));
+		return;
+	}
+	//首先需检查组队信息
+	unsigned int teampID = TeamMgr::getInstance()->get_team_id();
+	if (!IS_VALID(teampID))
+	{
+		ToolTip::getInstance()->push(GET_STR(2271));
+		return;
+	}
+	//师傅是否在队伍中
+	if (!TeamMgr::getInstance()->is_teammate(GetMasterID()))
+	{
+		ToolTip::getInstance()->push(GET_STR(2271));
+		return;
+	}
+	//师傅必须要到场，目的是为了让师傅必须在线，好给奖励
+	Role* pRole = RoleManager::getInstance()->findRole(GetMasterID());
+	if (!IS_VALID_PTR(pRole))
+	{
+		//提示师傅也应到场
+		ToolTip::getInstance()->push(GET_STR(2272));
+		return;
+	}
+	NET_SIC_say_goodbye_to_master send;
+	send.byAck = 1;//绝逼要同意啊
+	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+	return;
+}
+void MasterPrenticeMgr::Prentcie_graduate_from_master_nocheck()
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(ploc))
+		return;
+	//检查本地玩家是否已入师门
+	if (!IsInMasterRelationShip_Local(ploc->getId()))
+	{
+		ToolTip::getInstance()->push(GET_STR(2268));
+		return;
+	}
+	NET_SIC_add_master send;
+	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+}
+
+unsigned int MasterPrenticeMgr::OnServer_InitMasterID( s_net_cmd *cmd )
+{
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return 0;
+	NET_SIS_master_moral_and_gradates* msg = (NET_SIS_master_moral_and_gradates*)cmd;
+	if (ploc->getId() != msg->dwMasterID)
+	{
+		//m_master_id = ploc->getId();
+		m_master_id = (msg->dwMasterID == 0 || msg->dwMasterID == (unsigned int)INVALID) ? (unsigned int)INVALID : msg->dwMasterID;
+	}
+	return 0;
+}
+
+unsigned int MasterPrenticeMgr::OnServer_MasterLogin( s_net_cmd* cmd )
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return 0;
+	if (!IsInMasterRelationShip_Local(ploc->getId()))
+		return 0;
+	if (IsMaster_Local(ploc->getId()))
+		return 0;
+	ToolTip::getInstance()->push(GET_STR(2281));
+	for (master_prentice_member_vector::iterator iter = m_master_prentice_member_vector.begin();iter != m_master_prentice_member_vector.end();++iter)
+	{
+		if ((*iter).dw_role_id == GetMasterID())
+		{
+			(*iter).bOnline = 1;
+		}
+	}
+	FriendUiLayer *uilayer = getUiNodeByTag<FriendUiLayer>(WCT_FRIENDUI);
+	if (uilayer)
+	{
+		uilayer->updateUiData();
+	}
+	return 0;
+}
+
+unsigned int MasterPrenticeMgr::OnServer_MasterLogout( s_net_cmd* cmd )
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return 0;
+	if (!IsInMasterRelationShip_Local(ploc->getId()))
+		return 0;
+	if (IsMaster_Local(ploc->getId()))
+		return 0;
+	ToolTip::getInstance()->push(GET_STR(2282));
+	for (master_prentice_member_vector::iterator iter = m_master_prentice_member_vector.begin();iter != m_master_prentice_member_vector.end();++iter)
+	{
+		if ((*iter).dw_role_id == GetMasterID())
+		{
+			(*iter).bOnline = 0;
+		}
+	}
+	FriendUiLayer *uilayer = getUiNodeByTag<FriendUiLayer>(WCT_FRIENDUI);
+	if (uilayer)
+	{
+		uilayer->updateUiData();
+	}
+	return 0;
+}
+
+unsigned int MasterPrenticeMgr::OnServer_PrenticeLogin( s_net_cmd* cmd )
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return 0;
+	if (!IsInMasterRelationShip_Local(ploc->getId()))
+		return 0;
+	if (!IsMaster_Local(ploc->getId()))
+		return 0;
+	NET_SIS_Prentice_Login* msg = (NET_SIS_Prentice_Login*)cmd;
+	string strPrentice = "";
+	NameMgr2::getInstance()->queryName(msg->dwPrentice,strPrentice);
+	if (strPrentice.empty())
+		return 0;
+	string strout = replaceStr(GET_STR(2283),"**",strPrentice);
+	ToolTip::getInstance()->push(strout);
+	for (master_prentice_member_vector::iterator iter = m_master_prentice_member_vector.begin();iter != m_master_prentice_member_vector.end();++iter)
+	{
+		if ((*iter).dw_role_id == msg->dwPrentice)
+		{
+			(*iter).bOnline = 1;
+		}
+	}
+	FriendUiLayer *uilayer = getUiNodeByTag<FriendUiLayer>(WCT_FRIENDUI);
+	if (uilayer)
+	{
+		uilayer->updateUiData();
+	}
+	return 0;
+}
+
+unsigned int MasterPrenticeMgr::OnServer_PrenticeLogout( s_net_cmd* cmd )
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return 0;
+	if (!IsInMasterRelationShip_Local(ploc->getId()))
+		return 0;
+	if (!IsMaster_Local(ploc->getId()))
+		return 0;
+	NET_SIS_Prentice_Logout* msg = (NET_SIS_Prentice_Logout*)cmd;
+	string strPrentice = "";
+	NameMgr2::getInstance()->queryName(msg->dwPrentice,strPrentice);
+	if (strPrentice.empty())
+		return 0;
+	string strout = replaceStr(GET_STR(2284),"**",strPrentice);
+	ToolTip::getInstance()->push(strout);
+	for (master_prentice_member_vector::iterator iter = m_master_prentice_member_vector.begin();iter != m_master_prentice_member_vector.end();++iter)
+	{
+		if ((*iter).dw_role_id == msg->dwPrentice)
+		{
+			(*iter).bOnline = 0;
+		}
+	}
+	FriendUiLayer *uilayer = getUiNodeByTag<FriendUiLayer>(WCT_FRIENDUI);
+	if (uilayer)
+	{
+		uilayer->updateUiData();
+	}
+	return 0;
+}
+
+unsigned int MasterPrenticeMgr::OnServer_BrotherLogin( s_net_cmd* cmd )
+{
+	NET_SIS_Brother_Login* msg = (NET_SIS_Brother_Login*)cmd;
+	for (master_prentice_member_vector::iterator iter = m_master_prentice_member_vector.begin();iter != m_master_prentice_member_vector.end();++iter)
+	{
+		if ((*iter).dw_role_id == msg->dwBrother)
+		{
+			(*iter).bOnline = 1;
+		}
+	}
+	FriendUiLayer *uilayer = getUiNodeByTag<FriendUiLayer>(WCT_FRIENDUI);
+	if (uilayer)
+	{
+		uilayer->updateUiData();
+	}
+	return 0;
+}
+
+unsigned int MasterPrenticeMgr::OnServer_BrotherLogout( s_net_cmd* cmd )
+{
+	NET_SIS_Brother_Logout* msg = (NET_SIS_Brother_Logout*)cmd;
+	for (master_prentice_member_vector::iterator iter = m_master_prentice_member_vector.begin();iter != m_master_prentice_member_vector.end();++iter)
+	{
+		if ((*iter).dw_role_id == msg->dwBrother)
+		{
+			(*iter).bOnline = 0;
+		}
+	}
+	FriendUiLayer *uilayer = getUiNodeByTag<FriendUiLayer>(WCT_FRIENDUI);
+	if (uilayer)
+	{
+		uilayer->updateUiData();
+	}
+	return 0;
+}
+
+bool MasterPrenticeMgr::IsMasterByRoleID(unsigned int roleID)
+{
+	vector<unsigned int>::iterator iter = m_vecPrenticeId.begin();
+	while(iter != m_vecPrenticeId.end())
+	{
+		if (*iter == roleID)
+			return true;
+		iter++;
+	}
+	return false;
+}
+
+void MasterPrenticeMgr::pushPrenticeToList(unsigned int pID)
+{
+	bool isHave = false;
+	vector<unsigned int>::iterator iter = m_vecPrenticeId.begin();
+	while(iter != m_vecPrenticeId.end())
+	{
+		if (*iter == pID)
+			isHave = true;
+		iter++;
+	}
+	if (!isHave)
+	{
+		m_vecPrenticeId.push_back(pID);
+	}
+}
+
+void MasterPrenticeMgr::updateRoleLevel( unsigned int roleId,int level )
+{
+	BOOST_FOREACH(tagMPMember_Local & one,m_master_prentice_member_vector)
+	{
+		if(one.dw_role_id == roleId)
+		{
+			one.byLevel = level;
+			break;
+		}
+	}
+}
+
+void MasterPrenticeMgr::updateRoleLevel( unsigned int roleId,bool online,int level,int rating )
+{
+	BOOST_FOREACH(tagMPMember_Local & one,m_master_prentice_member_vector)
+	{
+		if(one.dw_role_id == roleId)
+		{
+			one.bOnline = online;
+			one.byLevel = level;
+
+			break;
+		}
+	}
+}
+
+void MasterPrenticeMgr::updateRoleOnline( unsigned int roleId,bool online )
+{
+	BOOST_FOREACH(tagMPMember_Local & one,m_master_prentice_member_vector)
+	{
+		if(one.dw_role_id == roleId)
+		{
+			one.bOnline = online;
+		}
+	}
+}
+
+void MasterPrenticeMgr::delayDestroy()
+{
+	m_master_prentice_member_vector.clear();
+}

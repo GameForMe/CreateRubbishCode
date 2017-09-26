@@ -1,0 +1,407 @@
+#include "OneKeyCompleteUi.h"
+#include "CfgReader.h"
+#include "World.h"
+#include "BaseDefine.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "UiLoader.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "Auto_ActionMgr.h"
+#include "PackageManager.h"
+#include "MessageBoxUi.h"
+#include "World.h"
+#include "HuoYueUi.h"
+#include "StringMgr.h"
+#include "ToolTip.h"
+#include "ExchangeBusinessMgr.h"
+#include "StoreRechargeUi.h"
+#include "NumericalIniMgr.h"
+#include "VIPMgr.h"
+#include "QuestMgr.h"
+#include "boost/lexical_cast.hpp"
+using namespace boost;
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+#include "wzolJni.h"
+#endif
+
+CCNode * OneKeyCompleteUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["OneKeyCompleteUiLayer"] = UiLayerLoader<OneKeyCompleteUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("onekeycompleteui", nodeLoaders, _loadSpriteSheet);
+	if(uiNode != NULL)
+	{
+		OneKeyCompleteUiLayer *uiLayer = dynamic_cast<OneKeyCompleteUiLayer*>(uiNode);
+		CC_ASSERT(uiLayer != NULL);
+	}
+	return uiNode;
+}
+
+
+
+void OneKeyCompleteUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(0));
+	CC_ASSERT(_frame != NULL);
+	closeBtn = dynamic_cast<CCNode*>(_frame->getChildByTag(1));
+	oneKeyBtn = dynamic_cast<CCNode*>(_frame->getChildByTag(2));
+	doubleCompleteBtn = dynamic_cast<CCNode*>(_frame->getChildByTag(3));
+	findRoadBtn = dynamic_cast<CCNode*>(_frame->getChildByTag(4));
+}
+
+cocos2d::SEL_MenuHandler OneKeyCompleteUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler OneKeyCompleteUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onNormalRewardBtnPressed", OneKeyCompleteUiLayer::onNormalRewardBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onDoubleRewardBtnPressed", OneKeyCompleteUiLayer::onDoubleRewardBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onFindBtnPressed", OneKeyCompleteUiLayer::onFindBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", OneKeyCompleteUiLayer::onCloseBtnPressed);
+	return NULL;
+}
+
+void OneKeyCompleteUiLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+
+bool OneKeyCompleteUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+// 	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+// 	const CCSize &frameSize = _frame->getContentSize();
+// 	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+// 	if(frameRect.containsPoint(framePoint))
+// 	{
+// 		return true;
+// 	}
+/*
+	if (isTouchOnNodeContent(_frame,pTouch))
+	{
+		return false;
+	}
+*/
+	CCPoint Point = _frame->convertTouchToNodeSpace(pTouch);
+	CCRect stuff1(0.0f,0.0f,_frame->getContentSize().width,_frame->getContentSize().height);
+	if (stuff1.containsPoint(Point))
+	{
+		//判断是否按在按钮上
+		Point = closeBtn->convertTouchToNodeSpace(pTouch);
+		CCRect stuff2(0.0f,0.0f,closeBtn->getContentSize().width,closeBtn->getContentSize().height);
+		if (stuff2.containsPoint(Point))
+		{
+			return false;
+		}
+
+		Point = oneKeyBtn->convertTouchToNodeSpace(pTouch);
+		CCRect stuff3(0.0f,0.0f,oneKeyBtn->getContentSize().width,oneKeyBtn->getContentSize().height);
+		if (stuff3.containsPoint(Point))
+		{
+			return false;
+		}
+
+		Point = doubleCompleteBtn->convertTouchToNodeSpace(pTouch);
+		CCRect stuff4(0.0f,0.0f,doubleCompleteBtn->getContentSize().width,doubleCompleteBtn->getContentSize().height);
+		if (stuff4.containsPoint(Point))
+		{
+			return false;
+		}
+
+
+		Point = findRoadBtn->convertTouchToNodeSpace(pTouch);
+		CCRect stuff5(0.0f,0.0f,findRoadBtn->getContentSize().width,findRoadBtn->getContentSize().height);
+		if (stuff5.containsPoint(Point))
+		{
+			return false;
+		}
+		return true;
+	}
+
+	return true;
+}
+
+void OneKeyCompleteUiLayer::onNormalRewardBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//普通奖励;
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	ploc->SetOneKeyBeishu(1);
+	DailyQuestOneKeyFinsih();
+}
+
+void OneKeyCompleteUiLayer::onDoubleRewardBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//双倍奖励;
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	ploc->SetOneKeyBeishu(2);
+	DailyQuestOneKeyFinsih();
+}
+
+void OneKeyCompleteUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_OneKeyCompleUi);
+}
+
+void OneKeyCompleteUiLayer::confirmOneKeyFinish()
+{
+	//QuestMgr::getInstance()->setIsOneAccept(false);
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	if (!lp)
+		return;
+	HuoYueData* pdata = GET_UI(OneKeyCompleteUi,WCT_OneKeyCompleUi)->getItemData();
+	if (!pdata || -1 == pdata->index)
+		return;
+	lp->sendActivedone(OneKeyChangeIndex(pdata->index),lp->GetOneKeyBeishu());
+}
+
+void OneKeyCompleteUiLayer::ToCharge()
+{
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+}
+
+void OneKeyCompleteUiLayer::DailyQuestOneKeyFinsih()
+{
+	HuoYueData* data = GET_UI(OneKeyCompleteUi,WCT_OneKeyCompleUi)->getItemData();
+	if (!data || -1 == data->index)
+		return;
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	if (!lp)
+		return;
+	//玩家状态检查 gx add
+	if (AutoActionMgr::getInstance()->Get_Auto_Action())
+	{
+		AutoActionMgr::getInstance()->Set_Auto_Action(false);
+	}
+	if (lp->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	if (lp->isInRoleStateAny(RA_Stall))
+	{
+		ToolTip::getInstance()->push(GET_STR(2102));
+		return;
+	}
+	if (lp->isInRoleStateAny(RA_Exchange))
+	{
+		ExchangeBusinessMgr::getInstance()->CancleExchange();
+		return;
+	}
+
+	//玩家等级检查
+	if (lp->getLevel() < data->activeProto.nLevel)
+	{
+		ToolTip::getInstance()->push("\xE6\x82\xA8\xE5\xBD\x93\xE5\x89\x8D\xE7\xAD\x89\xE7\xBA\xA7\xE4\xB8\x8D\xE8\xB6\xB3");
+		return;
+	}
+
+	//对于军需任务应该要检查一下完成次数
+	if( data->activeProto.nOpenUi == EOP_JUNXU )
+	{
+		int nJunxuCoun = VIPMgr::getInstance()->getLocalVipData().junxuRenwuTimes;
+		if ( lp->getRoleDayClearInfo(ERDCT_DAILY_TASKS_COUNT) >= nJunxuCoun )
+		{
+			ToolTip::getInstance()->push(GET_STR(2099));
+			return;
+		}
+	}
+	
+	//玩家元宝检查
+	int needYuanbao = 0;//一键完成所需要的元宝与礼券
+	int needDiamond = 0;
+	std::string strBasic = "";
+	int _beishu = lp->GetOneKeyBeishu();
+	if (1 == _beishu)
+	{
+		needYuanbao = NumericalIniMgr::getInstance()->GetKuaisuDanbeiYuanbao();
+		needDiamond = needYuanbao;
+		strBasic = GET_STR(2291);
+	}
+	else if (2 == _beishu)
+	{
+		needYuanbao = NumericalIniMgr::getInstance()->GetKuaisuShuangbeiYuanbao();
+		needDiamond = 0;
+		strBasic = GET_STR(2292);
+	}
+	else
+	{
+		return;
+	}
+	INT64 nDiamond = PackageManager::getInstance()->getDiamond();
+	INT64 nYuanbao = PackageManager::getInstance()->getYuanBao();
+	//若是单倍完成
+	if (needDiamond > 0)
+	{
+		if (nYuanbao < needYuanbao && nDiamond < needDiamond)
+		{
+			//元宝不足，给充值提示
+			/*MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,
+				GET_STR(2100).c_str(), TEXT_UTF8_CHONGZHI, TEXT_UTF8_QUXIAO);
+			World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+			msgUi->signalOkBtnPressed.connect(this,&OneKeyCompleteUiLayer::ToCharge);*/
+			RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+			CLOSE_UI(WCT_OneKeyCompleUi);
+			return;	
+		}
+	}
+	//若是双倍完成
+	else
+	{
+		if (nYuanbao < needYuanbao)
+		{
+			//元宝不足，给充值提示
+			/*MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,
+				GET_STR(2100).c_str(), TEXT_UTF8_CHONGZHI, TEXT_UTF8_QUXIAO);
+			World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+			msgUi->signalOkBtnPressed.connect(this,&OneKeyCompleteUiLayer::ToCharge);*/
+			RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+			CLOSE_UI(WCT_OneKeyCompleUi);
+			return;
+		}
+	}
+	
+	//给消费确认提示
+	/*MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,strBasic.c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+	World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+	msgUi->signalOkBtnPressed.connect(this,&OneKeyCompleteUiLayer::confirmOneKeyFinish);*/
+	confirmOneKeyFinish();
+	CLOSE_UI(WCT_OneKeyCompleUi);
+}
+
+int OneKeyCompleteUiLayer::OneKeyChangeIndex(int index)
+{
+
+	return index;
+	/*	转换这个乱啊，我擦
+	int changedIndex = 0;
+	switch(index)
+	{
+	case HY_RIDECULTURE:
+		changedIndex = 2;
+		break;
+	case HY_SONGHUA:
+		changedIndex = 1;
+		break;
+	case HY_SHUANGXIU:
+		changedIndex = 3;
+		break;
+	case HY_TREASURE:
+		changedIndex = 14;
+		break;
+	case HY_GUILDXIANGHUO:
+		changedIndex = 0;
+		break;
+	case HY_MANYPERSONINS:
+		changedIndex = 15;
+		break;
+	case HY_MOBAI:
+		changedIndex = 6;
+		break;
+	case HY_QUARTERMASTER: //军需
+		changedIndex = 16;
+		break;
+	case HY_DRINK:
+		changedIndex = 13;
+		break;
+	case HY_EXPINS:
+		changedIndex = 19;
+		break;
+	case HY_ARENA:
+		changedIndex = 12;
+		break;
+	case HY_GONGFAINS:
+		changedIndex = 18;
+		break;
+	case HY_MONEYINS:
+		changedIndex = 17;
+		break;
+	default:
+		changedIndex = 0;
+		break;
+	}
+	return changedIndex;
+	*/
+}
+
+void OneKeyCompleteUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+}
+//寻路
+void OneKeyCompleteUiLayer::onFindBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	HuoYueData* _ItemData = GET_UI( OneKeyCompleteUi, WCT_OneKeyCompleUi )->getItemData();
+	if( !_ItemData )
+		return;
+	if(_ItemData->activeProto.nOpenUi == EOP_JUNXU)
+	{
+		LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+		if (!lp)
+			return;
+		lp->SetOneKeyBeishu(0);
+		//玩家状态检查 gx add
+		if (AutoActionMgr::getInstance()->Get_Auto_Action())
+		{
+			AutoActionMgr::getInstance()->Set_Auto_Action(false);
+		}
+		if (lp->isInRoleStateAny(RA_ShuangXiu))
+		{
+			ToolTip::getInstance()->push(GET_STR(2101));
+			return;
+		}
+		if (lp->isInRoleStateAny(RA_Stall))
+		{
+			ToolTip::getInstance()->push(GET_STR(2102));
+			return;
+		}
+		if (lp->isInRoleStateAny(RA_Exchange))
+		{
+			ExchangeBusinessMgr::getInstance()->CancleExchange();
+			return;
+		}
+
+		//玩家等级检查
+		if (lp->getLevel() < _ItemData->activeProto.nLevel)
+		{
+			ToolTip::getInstance()->push(GET_STR(9092));
+			return;
+		}
+		//完成次数检查
+		if (_ItemData->finishTimes >= _ItemData->activeProto.nMaxNum+_ItemData->getVIPExtraData(_ItemData->activeProto.ID))
+		{
+			ToolTip::getInstance()->push(GET_STR(2099));
+			return;
+		}
+
+		if (!lp->getAutoRunState())
+		{
+			lp->setAutoRunState(true);
+		}
+
+		std::string str2 = _ItemData->activeProto.MapName.substr(1, _ItemData->activeProto.MapName.length());
+		int mapid = lexical_cast<int>(str2);
+		RoleHeadUi *ui = World::getInstance()->getRoleHeadUi();
+		if (ui)
+		{
+			CC_ASSERT(NULL != ui);
+			CC_ASSERT(NULL != ui->GetRoleUI());
+			lp->SetisMouseClick(false);
+			//这里的设置主要是为了小飞鞋
+			ui->GetRoleUI()->SetMapidStr(_ItemData->activeProto.MapName);
+			ui->GetRoleUI()->SetQuestPosx(_ItemData->activeProto.nX);
+			ui->GetRoleUI()->SetQuestPosy(_ItemData->activeProto.nY);
+			ui->GetRoleUI()->SetNpcId(-1);
+		}
+		
+		//寻路
+		lp->runPathTo(ccp(_ItemData->activeProto.nX,_ItemData->activeProto.nY),mapid);
+	}
+}

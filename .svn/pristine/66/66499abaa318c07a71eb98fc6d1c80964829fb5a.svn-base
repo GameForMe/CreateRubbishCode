@@ -1,0 +1,436 @@
+#include "PvpDeathUi.h"
+#include "UiTools.h"
+#include "UiResourceMgr.h"
+#include "CfgReader.h"
+#include "UiLoader.h"
+#include "StringMgr.h"
+#include "ActionProto.h"
+#include "TCPClient.h"
+#include "UiTools.h"
+#include "RoleEquipUi.h"
+#include "UiManager.h"
+#include "RemoteRoleStateMgr.h"
+#include "MapManager.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "NameMgr2.h"
+
+
+PvpDeathUi::PvpDeathUi()
+{
+	
+}
+
+PvpDeathUi::~PvpDeathUi()
+{
+
+}
+
+CCNode * PvpDeathUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["PvpDeathUiLayer"] = UiNodeLoader<PvpDeathUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("pvpDeathui", nodeLoaders, _loadSpriteSheet);
+	CC_ASSERT(uiNode != NULL);
+	return uiNode;
+}
+
+PvpDeathUiLayer * PvpDeathUi::getUiLayer()
+{
+	return getUiNodeByTag<PvpDeathUiLayer>(WCT_PvpDeathUi);
+}
+
+void PvpDeathUi::updateData( unsigned int id,int type,int dwTime,int buffId, int level, int class_type, int point)
+{
+	if (getUiLayer())
+		getUiLayer()->updateData(id,type,dwTime,buffId, level, class_type, point);
+}
+
+PvpDeathUiLayer::PvpDeathUiLayer(): playerID(0),_neadTime(0)
+{
+	
+}
+
+PvpDeathUiLayer::~PvpDeathUiLayer()
+{
+	
+}
+
+cocos2d::SEL_MenuHandler PvpDeathUiLayer::onResolveCCBCCMenuItemSelector( CCObject *pTarget, const char *pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler PvpDeathUiLayer::onResolveCCBCCControlSelector( CCObject *pTarget, const char *pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLookPressedBtn", PvpDeathUiLayer::onLookPressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onYuanDiPressedBtn", PvpDeathUiLayer::onYuanDiPressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHuiChengPressedBtn", PvpDeathUiLayer::onHuiChengPressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onAnquanPressedBtn", PvpDeathUiLayer::onAnquanPressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onShachengPressedBtn", PvpDeathUiLayer::onShachengPressedBtn);
+	
+	return NULL;
+}
+
+void PvpDeathUiLayer::onNodeLoaded( cocos2d::CCNode *pNode, cocos2d::extension::CCNodeLoader *pNodeLoader )
+{
+	_frame=dynamic_cast<CCSprite*>(getChildByTag(0));
+	lable_9 = (CCLabelTTF*)_frame->getChildByTag(9);
+	lable_10 = (CCLabelTTF*)_frame->getChildByTag(10);
+	lable_11 = (CCLabelTTF*)_frame->getChildByTag(11);
+	lable_12 = (CCLabelTTF*)_frame->getChildByTag(12);
+	lable_9->setVisible(false);
+	lable_10->setVisible(true);
+	lable_11->setVisible(false);
+	lable_12->setVisible(false);
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void PvpDeathUiLayer::onExit()
+{
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool PvpDeathUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	return true;
+}
+
+void PvpDeathUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+
+}
+
+void PvpDeathUiLayer::onAnquanPressedBtn( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	NET_SIC_role_revive cmd;
+	cmd.eType = ERRT_SBKSafe;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_CRITICAL, false);
+	UiMgr::getInstance()->closeUi(WCT_PvpDeathUi,false);
+}
+void PvpDeathUiLayer::onShachengPressedBtn( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	NET_SIC_role_revive cmd;
+	cmd.eType = ERRT_SBK;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_CRITICAL, false);
+	UiMgr::getInstance()->closeUi(WCT_PvpDeathUi,false);
+}
+
+void PvpDeathUiLayer::onLookPressedBtn( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if (playerID != 0)
+	{
+		GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPlayerId(playerID);
+		RemoteRoleStateMgr::getInstance()->RefreshRemoteRoleAllInfo(playerID);
+	}
+}
+
+int PvpDeathUiLayer::getDeadHuifuTime(int dwTime)
+{
+	int dw_time = 0;
+	if (dwTime >= 1 && dwTime < 15)
+	{
+		dw_time = 30;
+	}
+	else if (dwTime > 15 && dwTime < 35 )
+	{
+		dw_time = 27;
+	}
+	else if (dwTime > 35 && dwTime < 60 )
+	{
+		dw_time = 24;
+	}
+	else if (dwTime > 60 && dwTime < 60 * 3 )
+	{
+		dw_time = 21;
+	}
+	else if (dwTime > 3*60 && dwTime < 60 * 5 )
+	{
+		dw_time = 18;
+	}
+	else if (dwTime > 5 * 60 && dwTime < 60 * 10 )
+	{
+		dw_time = 15;
+	}
+	else if (dwTime > 10 * 60 && dwTime < 60 * 15 )
+	{
+		dw_time = 12;
+	}
+	else if (dwTime > 20 * 60 && dwTime < 60 * 30 )
+	{
+		dw_time = 6;
+	}
+	else if (dwTime >= 30 * 60 )
+	{
+		dw_time = 3;
+	}
+	return dw_time;
+}
+
+void PvpDeathUiLayer::updateData( unsigned int id ,int type,int dwTime,int buffId, int level, int class_type, int point)
+{
+	Role* role = RoleManager::getInstance()->findRole(id);
+	if (role && role->getCreatureType() == CT_PLAYER)
+	{
+		Player* player = dynamic_cast<Player*>(role);
+		if (player)
+		{
+			playerID = id;
+			CCLabelTTF* pTTf = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(0));
+			if (pTTf)
+				pTTf->setString(player->getNameUtf8().c_str());
+			pTTf = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(1));
+			if (pTTf)
+				pTTf->setString(player->getNameUtf8().c_str()); 
+			pTTf = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(2));
+			if (pTTf)
+				pTTf->setString(CCString::createWithFormat("%d", player->getLevel())->getCString());
+			pTTf = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(3));
+			std::string sType;
+			int roleType = player->getAttribute(RA_ROLETYPE);
+			switch (roleType)
+			{
+			case EV_Warrior:
+				sType = GET_STR(8).c_str();
+				break;
+			case EV_Mage:
+				sType = GET_STR(9).c_str();
+				break;
+			case EV_Taoist:
+				sType = GET_STR(10).c_str();
+				break;
+			}
+			if (pTTf)
+				pTTf->setString(sType.c_str());
+			pTTf = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(4));
+			if (pTTf)
+				pTTf->setString(CCString::createWithFormat("%d", player->getAttribute(RA_BATTLE_POINT))->getCString());
+		}
+		if (type == -1)
+		{
+			return;
+		}
+		CCControlButton* yuandi =(CCControlButton*) _frame->getChildByTag(6);
+		CCControlButton* huicheng =(CCControlButton*) _frame->getChildByTag(5);
+		CCControlButton* anquanfuhuo =(CCControlButton*) _frame->getChildByTag(7);
+		shachengfuhuo = (CCControlButton*)(_frame->getChildByTag(8));		
+		//屏蔽复活时间
+		//dwTime = getDeadHuifuTime(dwTime);
+		//_neadTime = dwTime;
+		switch(type)
+		{
+		case 0:
+			shachengfuhuo->setVisible(true);
+			anquanfuhuo->setVisible(true);
+			huicheng->setVisible(false);
+			yuandi->setVisible(false);
+			lable_10->setVisible(false);
+			break;
+		case 1:
+			shachengfuhuo->setVisible(true);
+			anquanfuhuo->setVisible(true);
+			huicheng->setVisible(false);
+			yuandi->setVisible(false);
+			lable_10->setVisible(false);
+			//屏蔽复活时间
+			//CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&PvpDeathUiLayer::onSendYuandiHuifuType), this, 1.0f, false);
+			break;
+		case 2:
+			shachengfuhuo->setVisible(false);
+			anquanfuhuo->setVisible(false);
+			huicheng->setVisible(true);
+			yuandi->setVisible(false);
+			huicheng->setPosition(huicheng->getPositionX() - 100,huicheng->getPositionY());	
+			lable_10->setVisible(true);
+			break;
+		case 3:
+			shachengfuhuo->setVisible(false);
+			anquanfuhuo->setVisible(false);
+			huicheng->setVisible(true);
+			yuandi->setVisible(true);
+			lable_10->setVisible(true);
+			break;
+		default:
+			break;
+		}		
+	}
+	else if(IS_VALID(id) && IS_PLAYER(id))	// 不是视野内玩家杀死的
+	{
+		playerID = id;
+
+		std::string role_name("");
+		bool is_get = NameMgr2::getInstance()->queryName(playerID,role_name);
+		if(!is_get)
+		{
+			role_name = "";
+		}
+
+		CCLabelTTF* pTTf = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(0));
+		if (pTTf)
+			pTTf->setString(role_name.c_str());
+		pTTf = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(1));
+		if (pTTf)
+			pTTf->setString(role_name.c_str());
+		pTTf = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(2));
+		if (pTTf)
+			pTTf->setString(CCString::createWithFormat("%d", level)->getCString());
+		pTTf = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(3));
+		std::string sType;
+		int roleType = class_type;
+		switch (roleType)
+		{
+		case EV_Warrior:
+			sType = GET_STR(8).c_str();
+			break;
+		case EV_Mage:
+			sType = GET_STR(9).c_str();
+			break;
+		case EV_Taoist:
+			sType = GET_STR(10).c_str();
+			break;
+		}
+		if (pTTf)
+			pTTf->setString(sType.c_str());
+		pTTf = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(4));
+		if (pTTf)
+			pTTf->setString(CCString::createWithFormat("%d", point)->getCString());
+
+		if (type == -1)
+		{
+			return;
+		}
+		CCControlButton* yuandi =(CCControlButton*) _frame->getChildByTag(6);
+		CCControlButton* huicheng =(CCControlButton*) _frame->getChildByTag(5);
+		CCControlButton* anquanfuhuo =(CCControlButton*) _frame->getChildByTag(7);
+		shachengfuhuo = (CCControlButton*)(_frame->getChildByTag(8));		
+		//屏蔽复活时间
+		//dwTime = getDeadHuifuTime(dwTime);
+		//_neadTime = dwTime;
+		switch(type)
+		{
+		case 0:
+			shachengfuhuo->setVisible(true);
+			anquanfuhuo->setVisible(true);
+			huicheng->setVisible(false);
+			yuandi->setVisible(false);
+			lable_10->setVisible(false);
+			break;
+		case 1:
+			shachengfuhuo->setVisible(true);
+			anquanfuhuo->setVisible(true);
+			huicheng->setVisible(false);
+			yuandi->setVisible(false);
+			lable_10->setVisible(false);
+			//屏蔽复活时间
+			//CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&PvpDeathUiLayer::onSendYuandiHuifuType), this, 1.0f, false);
+			break;
+		case 2:
+			shachengfuhuo->setVisible(false);
+			anquanfuhuo->setVisible(false);
+			huicheng->setVisible(true);
+			yuandi->setVisible(false);
+			huicheng->setPosition(huicheng->getPositionX() - 100,huicheng->getPositionY());	
+			lable_10->setVisible(true);
+			break;
+		case 3:
+			shachengfuhuo->setVisible(false);
+			anquanfuhuo->setVisible(false);
+			huicheng->setVisible(true);
+			yuandi->setVisible(true);
+			lable_10->setVisible(true);
+			break;
+		default:
+			break;
+		}
+	}
+	else if (role == NULL)
+	{
+		LocalPlayer* localPlayer = RoleManager::getInstance()->getLocalPlayer();
+		if (localPlayer == NULL)
+			return;
+		std::vector<buffDestInfo> buffersId = localPlayer->getBuffersId();
+		bool find = false;
+		buffDestInfo info;
+		for(std::vector<buffDestInfo>::iterator iter = buffersId.begin(); iter != buffersId.end(); ++iter)
+		{
+			if(buffId == iter->buffId)
+			{
+				info.buffId = iter->buffId;
+				info.roleId = iter->roleId;
+				info.level = iter->level;
+				info.profession = iter->profession;
+				info.rating = iter->rating;
+				info.name = iter->name;
+				find = true;
+				break;
+			}
+		}
+		if (find == false)
+			return;
+		CCLabelTTF* pTTf = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(0));
+		if (pTTf)
+			pTTf->setString(info.name.c_str());
+		pTTf = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(1));
+		if (pTTf)
+			pTTf->setString(info.name.c_str()); 
+		pTTf = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(2));
+		if (pTTf)
+			pTTf->setString(CCString::createWithFormat("%d", info.level)->getCString());
+		pTTf = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(3));
+		std::string sType;
+		switch (info.profession)
+		{
+		case EV_Warrior:
+			sType = GET_STR(8).c_str();
+			break;
+		case EV_Mage:
+			sType = GET_STR(9).c_str();
+			break;
+		case EV_Taoist:
+			sType = GET_STR(10).c_str();
+			break;
+		}
+		if (pTTf)
+			pTTf->setString(sType.c_str());
+		pTTf = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(4));
+		if (pTTf)
+			pTTf->setString(CCString::createWithFormat("%d", info.rating)->getCString());
+	}
+}
+
+void PvpDeathUiLayer::onYuanDiPressedBtn( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	NET_SIC_role_revive cmd;
+	cmd.eType = ERRT_Perfection;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_CRITICAL, false);
+	UiMgr::getInstance()->closeUi(WCT_PvpDeathUi,false);
+	CLOSE_UI(WCT_PenaltyUi);
+}
+
+void PvpDeathUiLayer::onHuiChengPressedBtn( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	NET_SIC_role_revive cmd;
+	cmd.eType = ERRT_ReturnCity;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_CRITICAL, false);
+	UiMgr::getInstance()->closeUi(WCT_PvpDeathUi,false);
+	CLOSE_UI(WCT_PenaltyUi);
+}
+void PvpDeathUiLayer::onSendYuandiHuifuType(float dt)
+{
+	if (_neadTime != 0)
+	{
+		_neadTime --;
+		if (_neadTime >= 0)
+		{
+			lable_10->setVisible(false);
+			lable_9->setVisible(true);
+			lable_11->setVisible(true);
+			lable_12->setVisible(true);
+			lable_9->setString(CCString::createWithFormat("%d",_neadTime)->getCString());	
+			return;
+		}		
+	}	
+	shachengfuhuo->setEnabled(true);	
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&PvpDeathUiLayer::onSendYuandiHuifuType), this);	
+}

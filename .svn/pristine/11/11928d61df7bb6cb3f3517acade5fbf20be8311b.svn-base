@@ -1,0 +1,496 @@
+#include "RewardUi.h"
+#include "World.h"
+#include "UiResourceMgr.h"
+#include "CfgReader.h"
+#include "UiLoader.h"
+#include "BaseDefine.h"
+#include "ItemNode.h"
+#include "UiTools.h"
+#include "RewardMgr.h"
+#include "UiManager.h"
+#include "PackageManager.h"
+#include "RoleManager.h"
+#include "CmdAdapter.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "Player.h"
+#include "DBMgr.h"
+#include "EquipTipUi.h"
+#include "TouchSprite.h"
+#include "CheckButton.h"
+#include "ToolTip.h"
+#include "RoleEquipUi.h"
+#include "EquipShowUi.h"
+#include "StringMgr.h"
+
+const int WanMeiGiftTagBegin = 6;
+const int WanMeiGiftTagEnd = 11;
+
+CCNode * RewardUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["RewardUiLayer"] = UiLayerLoader<RewardUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("rewardui", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+RewardUiLayer * RewardUi::getUiLayer()
+{
+	return getUiNodeByTag<RewardUiLayer>(WCT_RewardUi);
+}
+
+void RewardUi::setTitle( const std::string &title )
+{
+	RewardUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setTitle(title);
+	}
+}
+
+void RewardUi::setItemData( short index, unsigned int typeId, int num )
+{
+	RewardUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setItemData(index, typeId, num);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler RewardUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler RewardUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", RewardUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGetBtnPressed", RewardUiLayer::onGetBtnPressed);
+	return NULL;
+}
+
+void RewardUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(NT_Frame));
+	CC_ASSERT(_frame != NULL);
+	for(int i = NT_ItemBegin ; i < NT_ItemBegin + NT_ItemNum; i ++)
+	{
+		CCNode *node = _frame->getChildByTag(i);
+		CC_ASSERT(node != NULL);
+		ItemNode *itemNode = ItemNode::create();
+		itemNode->setBlank();
+		itemNode->setPosition(node->getPosition());
+		itemNode->setTag(i + NT_ItemNodeBegin);
+		_frame->addChild(itemNode);
+	}
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -1, true);
+	setAllChildernButtonPriority(this, -1);
+}
+
+void RewardUiLayer::onExit()
+{
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool RewardUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	//if(isTouchOnNodeContent(_frame, pTouch))
+	//{
+	//	return true;
+	//}
+	//return false;
+	return true;
+}
+
+void RewardUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_RewardUi);
+}
+
+void RewardUiLayer::onGetBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_RewardUi);
+	//RewardMgr::getInstance()->clear(type);
+	RewardMgr::getInstance()->getSubReward(type);
+}
+
+void RewardUiLayer::setTitle( const std::string &title )
+{
+	CC_ASSERT(_frame != NULL);
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_Title));
+	CC_ASSERT(label != NULL);
+	label->setString(title.c_str());
+}
+
+ItemNode * RewardUiLayer::getItemNode( int index )
+{
+	ItemNode *node = dynamic_cast<ItemNode*>(_frame->getChildByTag(index + NT_ItemNodeBegin));
+	return node;
+}
+
+void RewardUiLayer::setItemData( short index, unsigned int typeId, int num )
+{
+	ItemNode *item = getItemNode(index);
+	if(item != NULL)
+	{
+		if(typeId != 0)
+		{
+			item->setDataId(typeId);
+			item->setNum(num);
+		}
+		else
+		{
+			item->setBlank();
+		}
+	}
+}
+//----------------------------30级完美礼包新做的界面-----------------------------------------------------
+
+WanMeiGiftUiMgr::WanMeiGiftUiMgr()
+{
+	itemId = 0;
+}
+WanMeiGiftUiMgr::~WanMeiGiftUiMgr()
+{
+
+}
+WanMeiGiftUiMgr* WanMeiGiftUiMgr::GetInstance()
+{
+	static WanMeiGiftUiMgr mgr;
+	return &mgr;
+}
+void WanMeiGiftUiMgr::openWanMeiGiftUi()
+{	
+	OPEN_UI(WCT_WANMEIGIFTNEWUI);
+}
+
+WanMeiGiftUi::WanMeiGiftUi()
+{
+
+}
+
+WanMeiGiftUi::~WanMeiGiftUi()
+{
+
+}
+
+CCNode* WanMeiGiftUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["30jilibaoUiLayer"] = UiLayerLoader<WanMeiGiftUiLayer>::loader();
+	nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+	CCNode* pNode = readUiFromCCBI("30jilibaoui", nodeLoaders, _loadSpriteSheet);
+	return pNode;
+}
+cocos2d::SEL_MenuHandler WanMeiGiftUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler WanMeiGiftUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onDakailibaoBtnPressed", WanMeiGiftUiLayer::onDakailibaoBtnPressed);  
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", WanMeiGiftUiLayer::onCloseBtnPressed);
+	return NULL;
+}
+bool WanMeiGiftUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	/*CCPoint point = pTouch->getLocationInView();
+	if (_resultNode->isVisible())
+	{
+	CCRect frameRect(0.0f,0.0f,_resultNode->getContentSize().width,_resultNode->getContentSize().height);
+	if (!frameRect.containsPoint(_resultNode->convertToNodeSpace(point)))
+	{
+	this->showContentSwitch(false);
+	}
+
+	}*/
+	return true;
+}
+void WanMeiGiftUiLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{	
+	_id = 0;
+	_frame = (CCSprite*)getChildByTag(0);
+	_topSprite = (CCSprite*)_frame->getChildByTag(3);
+	_centerNode = _frame->getChildByTag(4);
+	_resultNode = _frame->getChildByTag(5);
+	//_resultNode->setVisible(false);
+	i_WanMeiId = 0;
+	itemNodeId = 3;
+
+	int level = 30;
+	int eq = 1;
+	int quality = 3;
+	std::vector<int> passList;
+	passList.push_back(0);
+	passList.push_back(2);
+	Equip_ShowHelper::MakeItem(level,eq, passList,1,quality);
+	int arr[] = {0, 0, 0, 4, 2, 3, 11, 7, 8, 10, 5};
+	for(int i = 3; i < 11; i++)
+	{
+		CCLog("WanMeiGiftUiLayer::onNodeLoaded:%d", i);
+		CCNode *n = (CCNode*)(_resultNode->getChildByTag(i));
+		n->setVisible(false);
+		n->setScale(0.5);
+		n->setPosition(ccp(n->getPositionX(),n->getPositionY()-40));
+		if(n!=NULL)
+		{
+			CCLog("n is not null, i is %d", i);
+			ItemNode *node = ItemNode::create();
+			node->setConType(EICT_EquipShow);
+			node->setTag(2);
+			n->addChild(node,1);
+			f_item *item = PackageManager::getInstance()->getItem(EICT_EquipShow, (short)(arr[i] == 10?1:arr[i]));
+			if(item != NULL)
+			{
+				//node->setClickable(true);
+				node->removeEffectLayer();
+				node->initWithItem(item);
+				node->getSurroundSE("E1_39");
+			}
+		}
+	}
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+	std::string sSESurround = sSEDir + "E1_161.plist";
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSESurround.c_str());
+	for (int i = 6; i < 12; i++)
+	{
+	    CCSpriteFrame *frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("E1_16101");
+		CCSprite *sprite = dynamic_cast<CCSprite*>(_frame->getChildByTag(i));
+		sprite->setPosition(ccp(sprite->getPositionX(), sprite->getPositionY() + 30));
+		if (frame && sprite)
+		{
+			sprite->setDisplayFrame(frame);
+		}
+	}
+
+	GameActionNode *actionNode = GameActionNode::create();
+	actionNode->setPosition(ccp(0, 0));	
+	_centerNode->addChild(actionNode);
+	
+	//根据角色类型显示左上角标题和中间的道具图片
+	Role *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(ploc)
+	{
+		INT plocType = ploc->getRoleType();
+		if (plocType == RT_MWARRIOR || plocType == RT_WWARRIOR)
+		{
+			_topSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("30jilibao-zhanshi"));
+			std::string m_levelUpSEName = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_158.plist";
+			actionNode->InitWithPList(m_levelUpSEName.c_str(), "E1_158");
+		}
+		else if (plocType == RT_MMAGE ||plocType == RT_WMAGE)
+		{
+			_topSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("30jilibao-zifashi"));
+			std::string m_levelUpSEName = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_159.plist";
+			actionNode->InitWithPList(m_levelUpSEName.c_str(), "E1_159");
+		}
+		else if (plocType == RT_MTAOIST || plocType == RT_WTAOIST)
+		{
+			_topSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("30jilibao-daoshi"));
+			std::string m_levelUpSEName = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_160.plist";
+			actionNode->InitWithPList(m_levelUpSEName.c_str(), "E1_160");
+		}
+	}
+
+	actionNode->BeginAction(0.2, true);
+
+	//中间图片的跳跃动作
+	CCMoveBy *moveBy1 = CCMoveBy::create(1.0f, ccp(0, 30));
+	CCMoveBy *moveBy2 = dynamic_cast<CCMoveBy*>(moveBy1->reverse()->copy());
+	CCRepeatForever *repeate = CCRepeatForever::create(CCSequence::createWithTwoActions(moveBy1,moveBy2));
+	_centerNode->runAction(repeate);
+
+	for (int i = 0; i < 6; i++)
+	{
+		AnimationCache::createDefList(1, animList[i], false);
+		AnimationCache::getInstance()->getSinEffect(0, "E1_161", animList[i]);
+	}
+	
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void WanMeiGiftUiLayer::updateAllItemNode()
+{
+	for(int i = 3; i < 11; i++)
+	{	
+		//这里刷新ItemNode
+	}
+}
+
+void WanMeiGiftUiLayer::onDakailibaoBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	int yuanbaoNum=PackageManager::getInstance()->getTotalChargeYuanBao();
+	if (yuanbaoNum <= 0 && PackageManager::getInstance()->getYuanBao() <= 0)
+	{
+		CLOSE_UI(WCT_WANMEIGIFTNEWUI);
+		OPEN_UI(WCT_ShouChongUi);
+		return;
+	}
+	if (PackageManager::getInstance()->getYuanBao() <= 0)
+	{
+		//ToolTip::getInstance()->push(GET_STR(164));
+		CLOSE_UI(WCT_WANMEIGIFTNEWUI);
+		OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+		return;
+	}	
+	long long id = WanMeiGiftUiMgr::GetInstance()->GetItemId();
+	if (id != 0)
+	{
+		PackageManager::getInstance()->useBagItem(id);
+		WanMeiGiftUiMgr::GetInstance()->SetItemId(0);
+		//CLOSE_UI(WCT_WANMEIGIFTNEWUI);
+		//30级完美礼包包含11件物品，至少需要11个空格子
+		if (PackageManager::getInstance()->getBlankCount() >= 11 )
+		{
+			playBoxOpenAnims();
+		}
+	}
+	else
+	{
+		ToolTip::getInstance()->push(CCString::createWithFormat("%s","\xE8\xAF\xB7\xE9\x80\x89\xE6\x8B\xA9\xE8\xA6\x81\xE6\x89\x93\xE5\xBC\x80\xE7\x9A\x84\xE7\xA4\xBC\xE5\x8C\x85")->getCString());
+	}
+	
+} 
+void WanMeiGiftUiLayer::onCloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CLOSE_UI(WCT_WANMEIGIFTNEWUI);
+}
+
+void WanMeiGiftUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+}
+void WanMeiGiftUiLayer::onExit()
+{
+	AnimationCache::getInstance()->releaseSinEffect("E1_24");
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+
+void WanMeiGiftUiLayer::changeSpriteTexture(const char* imgName1, const char* imgName2)
+{
+	
+}
+
+void WanMeiGiftUiLayer::playBoxOpenAnims()
+{
+	_resultNode->setVisible(true);
+	CCControlButton* button = dynamic_cast<CCControlButton*>(_frame->getChildByTag(2));
+	button->setEnabled(false);
+	CCNode *node = _frame->getChildByTag(WanMeiGiftTagBegin);
+	if (node)
+	{
+		i_WanMeiId = WanMeiGiftTagBegin;
+		BSAnimate *anim = animList[WanMeiGiftTagBegin - 6][0];
+		anim->setTag(1);
+		anim->setDuration(0.5);
+		node->runAction(anim);
+		node->runAction(CCSequence::createWithTwoActions(anim, CCCallFuncN::create(this, SEL_CallFuncN(&WanMeiGiftUiLayer::animationCallback))));
+	}
+
+	
+}
+
+void WanMeiGiftUiLayer::animationCallback( CCNode *node )
+{
+	CCLog("ItemNodeID is %d", itemNodeId);
+	CCMoveBy *nodeMoveBy = CCMoveBy::create(0.3f, ccp(0, 30));
+	CCScaleTo *nodeScaleTo = CCScaleTo::create(0.3f, 1.0);
+	CCArray *actionArray = CCArray::create();
+	
+	actionArray->addObject(CCEaseOut::create(nodeScaleTo, 0.3));
+	actionArray->addObject(CCEaseIn::create(nodeMoveBy, 0.3));
+	//actionArray->addObject(nodeFadeIn);
+	CCSpawn *nodeSpawn = CCSpawn::create(actionArray);
+	CCNode *animTempNode = NULL;
+	if (node)
+	{
+		if (i_WanMeiId < WanMeiGiftTagEnd && _frame)
+		{
+			
+			if(itemNodeId == 3 || itemNodeId == 10)
+			{
+				animTempNode = _resultNode->getChildByTag(itemNodeId++);
+				animTempNode->setVisible(true);
+				animTempNode->runAction(CCSequence::createWithTwoActions(dynamic_cast<CCSpawn*>(nodeSpawn->copy()), CCCallFuncN::create(this, SEL_CallFuncN(&WanMeiGiftUiLayer::showNumberCorner))));
+
+			}else if (itemNodeId == 4 || itemNodeId == 8)
+			{
+				animTempNode = _resultNode->getChildByTag(itemNodeId++);
+				animTempNode->setVisible(true);
+				animTempNode->runAction(dynamic_cast<CCSpawn*>(nodeSpawn->copy()));
+				animTempNode = _resultNode->getChildByTag(itemNodeId++);
+				animTempNode->setVisible(true);
+				animTempNode->runAction(nodeSpawn);
+			}else 
+			{
+				animTempNode = _resultNode->getChildByTag(itemNodeId++);
+				animTempNode->setVisible(true);
+				animTempNode->runAction(nodeSpawn);
+			}
+
+			i_WanMeiId++;
+			node = _frame->getChildByTag(i_WanMeiId);
+			if (!node)
+				return;
+			BSAnimate *anim = animList[i_WanMeiId - 6][0];
+			anim->setTag(i_WanMeiId - WanMeiGiftTagBegin);
+			anim->setDuration(0.5);
+			node->runAction(anim);
+			node->runAction(CCSequence::createWithTwoActions(anim, CCCallFuncN::create(this, SEL_CallFuncN(&WanMeiGiftUiLayer::animationCallback))));
+		}else
+		{
+			CCNode *node4 = _resultNode->getChildByTag(itemNodeId++);
+			node4->setVisible(true);
+			node4->runAction(CCSequence::createWithTwoActions(dynamic_cast<CCSpawn*>(nodeSpawn->copy()), CCCallFuncN::create(this, SEL_CallFuncN(&WanMeiGiftUiLayer::showNumberCorner))));
+			this->showContentSwitch(true);
+		}
+		
+	}
+}
+
+void WanMeiGiftUiLayer::showNumberCorner(CCNode *node)
+{
+	if (node != NULL)
+	{
+		CCNode *tempNode = node->getChildByTag(1);
+		tempNode->setPosition(ccp(tempNode->getPositionX() - 30, tempNode->getPositionY() - 25));
+		tempNode->setVisible(true);
+	}
+}
+
+void WanMeiGiftUiLayer::showContentSwitch(bool isShowContent)
+{
+	
+	for (int i = 3; i < 11; i++)
+	{
+		CCLog("WanMeiGiftUiLayer::showContentSwitch:%d",i);
+		CCNode *node = _resultNode->getChildByTag(i);
+		if (node)
+		{
+			ItemNode *itemNode = dynamic_cast<ItemNode*>(node->getChildByTag(2));
+			if (itemNode)
+			{
+				itemNode->setClickable(isShowContent);
+			}else
+			{
+				CCLog("itemNode is null, i is %d", i);
+
+			}
+		}else
+		{
+
+			CCLog("node is null, i is %d",i);
+		}
+		
+	}
+	_resultNode->setVisible(isShowContent);
+	
+}

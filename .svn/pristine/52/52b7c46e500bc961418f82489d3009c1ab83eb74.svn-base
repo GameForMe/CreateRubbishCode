@@ -1,0 +1,327 @@
+#include "EquipLevelUpNoticeUi.h"
+#include "EquipLevelUpNoticeMgr.h"
+#include "UiLoader.h"
+#include "DBMgr.h"
+#include "MallMgr.h"
+#include "World.h"
+#include "BuySetUi.h"
+#include "WorldPacket.h"
+#include "CommonMsgDefine.h"
+#include "TCPClient.h"
+#include "FubenInfoUi.h"
+#include "EquipLevelUpUi.h"
+#include "EquipFusionManager.h"
+#include "EquipLevelUpUiMgr.h"
+#include "FubenUI.h"
+#include "EquipUpStarUIMgr.h"
+#include "HuoYueUi.h"
+#include "ForgingDecomUI.h"
+//////////////////////////////////////////////////////////////////////////
+
+EquipLevelUpNoticeUi::EquipLevelUpNoticeUi()
+{
+
+}
+
+EquipLevelUpNoticeUi::~EquipLevelUpNoticeUi()
+{
+
+}
+
+CCNode* EquipLevelUpNoticeUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["EquipLevelNoticeUiLayer"] = UiLayerLoader<EquipLevelUpNoticeUiLayer>::loader();
+	CCNode* pNode = readUiFromCCBI("equiplevelnotice", nodeLoaders, _loadSpriteSheet);
+	
+
+	return pNode;
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler EquipLevelUpNoticeUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler EquipLevelUpNoticeUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGoToGetBtnPressed", EquipLevelUpNoticeUiLayer::onGoToGetBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBuyBtnPressed", EquipLevelUpNoticeUiLayer::onGoToBugBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", EquipLevelUpNoticeUiLayer::onCloseBtnPressed);
+	return NULL;
+}
+
+
+void EquipLevelUpNoticeUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(0));
+	itemPic = dynamic_cast<CCSprite*>(_frame->getChildByTag(ITEMPIC));
+	itemName = (CCLabelTTF*)(_frame->getChildByTag(ITEMNAME));
+	itemYuanbao = (CCLabelTTF*)(_frame->getChildByTag(ITEMYUANBAO));
+	itemYuanbao->setVisible(false);
+	itemConut = (CCLabelTTF*)(_frame->getChildByTag(ITEMCONUT));
+	itemShuoming_1 = (CCLabelTTF*)(_frame->getChildByTag(ITEMSHUOMING_1));
+	itemShuoming_1->setDimensions(CCSize(280.0f,0.0f));
+	itemShuoming_2 = (CCLabelTTF*)(_frame->getChildByTag(ITEMSHUOMING_2));
+	itemShuoming_2->setDimensions(CCSize(280.0f,0.0f));
+	itemConut->setString(" ");
+	CCSize uiSize = _frame->getContentSize();
+	gotoBtn=dynamic_cast<CCControlButton*>(_frame->getChildByTag(ITEMSHUOMBTN));
+	gotoBtn->setPositionX(uiSize.width/2);
+	gotoBuyBtn=dynamic_cast<CCControlButton*>(_frame->getChildByTag(ITEMSHUOMBTN2));
+	gotoBuyBtn->setVisible(false);
+	/*bool show=EquipLevelupNoticeUiMgr::getInstance()->getGotoBtnShow();
+	if (!show)
+	{
+		gotoBuyBtn->setPositionX(_frame->getContentSize().width/2);
+	}
+	gotoBtn->setVisible(show);*/
+	setItemData();
+}
+
+void EquipLevelUpNoticeUiLayer::setItemData()
+{
+	std::string itemNameMsg = "";
+	//int _itemConut = 0;
+	std::string itemShuomingMgr_1 = "";
+	std::string itemShuomingMgr_2 = "";
+	int iconMsgId = 0;
+	int fubenMsgNum = 0;//副本章节
+	int fubenMsgTag = 0;//副本章节内的tag
+	int isMsgHero = 0;//是否是精英副本
+	int fubenMgrId = 0;
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM ItemTipData WHERE id = ?1");
+	cmd->set_integer32(1 , EquipLevelupNoticeUiMgr::getInstance()->getNoticeData().itemId);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("name");
+		itemNameMsg = table->get_text(idx);
+		idx = table->get_index("desc");
+		itemShuomingMgr_1 = table->get_text(idx);
+		idx = table->get_index("sdesc");
+		itemShuomingMgr_2 = table->get_text(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	//int id =  EquipLevelupNoticeUiMgr::getInstance()->getNoticeData().itemId;
+// 	c_sql_command* cmd_2 = c_db_manager::getSingleton()->begin_operation("SELECT * FROM equiplevelnotice WHERE itemid = ?1");
+// 	cmd_2->set_integer32(1 , EquipLevelupNoticeUiMgr::getInstance()->getNoticeData().itemId);
+// 	CCLog("EquipLevelupNoticeUiMgr::getInstance()->getNoticeData().itemId=%d",EquipLevelupNoticeUiMgr::getInstance()->getNoticeData().itemId);
+// 	c_sql_table* table_2 = c_db_manager::getSingleton()->create_table();
+// 	while(table_2->retrieve_row())
+// 	{
+// 		unsigned int idx = table_2->get_index("number");
+// 		fubenMsgNum = table_2->get_integer32(idx);
+// 		idx = table_2->get_index("tag");
+// 		fubenMsgTag = table_2->get_integer32(idx);
+// 		idx = table_2->get_index("iconid");
+// 		iconMsgId = table_2->get_integer32(idx);
+// 		idx = table_2->get_index("ishero");
+// 		isMsgHero = table_2->get_integer32(idx);
+// 		idx = table_2->get_index("fubenid");
+// 		fubenMgrId = table_2->get_integer32(idx);
+// 		CCLog("fubenMgrId=%d",fubenMgrId);
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table_2);
+// 	c_db_manager::getSingleton()->end_operation(cmd_2);
+
+	int itemId = EquipLevelupNoticeUiMgr::getInstance()->getNoticeData().itemId;
+	const EquipLevelNoticeData* data = EquipLevelupNoticeUiMgr::getInstance()->get_equip_level_notice_data(itemId);
+
+	if (data)
+	{
+		fubenMsgNum = data->fubenNum;
+		fubenMsgTag = data->fubenTag;
+		iconMsgId = data->iconId;
+		isMsgHero = data->isHero;
+		fubenMgrId = data->fubenId;
+	}
+
+	EquipLevelupNoticeUiMgr::getInstance()->setNoticeDataIconId(iconMsgId);
+	EquipLevelupNoticeUiMgr::getInstance()->setNoticeDataFubenNum(fubenMsgNum);
+	EquipLevelupNoticeUiMgr::getInstance()->setNoticeDataFubenTag(fubenMsgTag);
+	EquipLevelupNoticeUiMgr::getInstance()->setNoticeDataIsHero(isMsgHero);
+	EquipLevelupNoticeUiMgr::getInstance()->setNoticeDatafubenId(fubenMgrId);
+	std::string filePath = CCString::createWithFormat("%s%d%s","Art/ICON/",iconMsgId,".png")->getCString();
+	itemPic->initWithFile(filePath.c_str());
+
+	itemName->setString(itemNameMsg.c_str());//物品的名字
+	itemShuoming_1->setString(itemShuomingMgr_1.c_str());//物品的说明1
+	itemShuoming_2->setString(itemShuomingMgr_2.c_str());//物品的说明2
+
+	const MallMgr::Mall_SingleItem_Map* mallDataMap = MallMgr::getInstance()->GetNotSaleItems();//获取商城不出售的物品; 
+	int count=1;
+	CC_ASSERT(mallDataMap != NULL);
+	{
+		CCLog("mallDataMap==%d,Count==%d",mallDataMap->size(),count);
+		MallMgr::Mall_SingleItem_Map::const_iterator iter = mallDataMap->find(EquipLevelupNoticeUiMgr::getInstance()->getNoticeData().itemId);
+		if(iter != mallDataMap->end())
+		{
+			_EquipLvstuffInfo = iter->second;
+			count++;
+		}
+	}
+	int tempTouchIndex = EquipLevelupNoticeUiMgr::getInstance()->getTouchIndex();
+	int tempNeesItemNum = EquipLevelupNoticeUiMgr::getInstance()->getNeedItemNum(tempTouchIndex);
+	itemYuanbao->setString(CCString::createWithFormat("%s%d","\xE8\xB4\xAD\xE4\xB9\xB0\xE6\x9D\x90\xE6\x96\x99\xE6\x89\x80\xE9\x9C\x80\xE5\x85\x83\xE5\xAE\x9D",_EquipLvstuffInfo.nPrice * tempNeesItemNum)->getCString());//购买材料所需元宝
+	itemConut->setString(CCString::createWithFormat("%d",tempNeesItemNum)->getCString());
+}
+
+void EquipLevelUpNoticeUiLayer::onEnter()
+{
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+}
+
+void EquipLevelUpNoticeUiLayer::onExit()
+{
+	//CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+
+void EquipLevelUpNoticeUiLayer::onGoToGetBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	INT id = EquipLevelupNoticeUiMgr::getInstance()->getNoticeData().fubenId;
+	CCLog("fubenMgrId222=%d",id);
+	switch(id)
+	{
+	case 100://藏宝阁
+		OPEN_UI(WCT_TreasureLoftUi);
+		break;
+	case 101://神秘宝箱
+		//OPEN_UI(WCT_MysteryBoxUi);
+		break;
+	case 102://星魂特殊处理
+		{
+			FubenInfoUi* pUI = (FubenInfoUi*)OPEN_UI(WCT_FubenInfoUI);
+			if(pUI)
+			{
+				pUI->getUiLayer()->SetFubenIDAndRefresh(FubenMgr::GetInstance().getMaxHeroFubenId());
+			}
+		}
+		break;
+	case 1:
+		{
+			if (EquipLevelupNoticeUiMgr::getInstance()->getOpenUiId() == WCT_EquipFusionUi)
+			{
+				ForgingDecomUI *forgingDecomUI = (ForgingDecomUI*)OPEN_UI(WCT_ForgingDecomUI);
+				if (forgingDecomUI)
+				{
+					ForgingDecomUILayer *uiLayer = dynamic_cast<ForgingDecomUILayer*>(forgingDecomUI->getUiLayer());
+					uiLayer->showFrame(ForgingDecomUILayer::T_Decompose);
+					uiLayer->updateDecomChoose();
+					uiLayer->updateDecomPackage();
+				}
+			}else
+			{
+				HuoYueUi* pHuoYueUI=(HuoYueUi*)OPEN_UI(WCT_HuoyueUi);
+				eWroldChildTag uiTag=EquipLevelupNoticeUiMgr::getInstance()->getSwitchUiTag();
+				if(pHuoYueUI){
+					pHuoYueUI->getUiLayer()->setSwitchUiTag(uiTag);
+				}
+			}
+			CLOSE_UI(WCT_EQUIPLEVELUPNOTICEUI);
+			break;
+		}
+	default:
+		if (id > 1 && id <= 10)
+		{
+			FubenMgr::GetInstance().setOpenID(id);
+			OPEN_UI(WCT_FubenDuoRenUI);
+			CLOSE_UI(WCT_EQUIPLEVELUPNOTICEUI);
+			break;
+		}
+		FubenInfoUi* pUI = (FubenInfoUi*)OPEN_UI(WCT_FubenInfoUI);
+		if(pUI)
+		{
+			pUI->getUiLayer()->setIsEquipLevelUp();
+			int itemNameMsg = NIMHEROFUBENID + 1;//第一个精英副本是12,以前说是11,有时间看看为啥这么设定的
+			if (EquipLevelupNoticeUiMgr::getInstance()->getNoticeData().fubenId == 0)
+			{
+				pUI->getUiLayer()->SetFubenIDAndRefresh(itemNameMsg);
+			}
+			else
+			{
+				pUI->getUiLayer()->SetFubenIDAndRefresh(id);
+			}
+		}
+		break;
+	}
+}
+
+void EquipLevelUpNoticeUiLayer::onGoToBugBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+
+	const MallMgr::Mall_SingleItem_Map* mallDataMap = MallMgr::getInstance()->GetNotSaleItems(); //获取商城不出售的物品
+	CC_ASSERT(mallDataMap != NULL);
+	{
+		MallMgr::Mall_SingleItem_Map::const_iterator iter = mallDataMap->find(EquipLevelupNoticeUiMgr::getInstance()->getNoticeData().itemId);
+		if(iter != mallDataMap->end())
+		{
+			_EquipLvstuffInfo = iter->second;
+		}
+	}
+
+	//Src装备ID(INT64)
+	int tempTouchIndex = EquipLevelupNoticeUiMgr::getInstance()->getTouchIndex();
+	int tempNeesItemNum = EquipLevelupNoticeUiMgr::getInstance()->getNeedItemNum(tempTouchIndex);
+
+	INT16 buyNum = (INT16)tempNeesItemNum;
+	WorldPacket C2G_Msg(NET_C2G_PROC_BUY_EQUIP_LEVEL_UP_ITEM);//组装消息头
+	C2G_Msg << _EquipLvstuffInfo.uItemTypeID;
+	C2G_Msg << buyNum;
+	C2G_Msg << (BYTE)_EquipLvstuffInfo.byIndexInServer;
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_IDLE, false);//发送
+	close();
+}
+
+void EquipLevelUpNoticeUiLayer::onBuyOkPressed(bool isOk, int num)
+{
+	if (isOk == false)
+	{
+		return;
+	}
+	switch(EquipLevelupNoticeUiMgr::getInstance()->getOpenUiId())
+	{
+	case WCT_EquipLevelUpUi:
+		{
+			//Src装备ID(INT64)
+			INT16 buyNum = (INT16)num;
+			WorldPacket C2G_Msg(NET_C2G_PROC_BUY_EQUIP_LEVEL_UP_ITEM);//组装消息头
+			C2G_Msg << _EquipLvstuffInfo.uItemTypeID;
+			C2G_Msg << buyNum;
+			C2G_Msg << (BYTE)_EquipLvstuffInfo.byIndexInServer;
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_IDLE, false);//发送
+			break;
+		}
+	case WCT_EQUIPUPSTARUI:
+		{
+			break;
+		}
+	}
+	//OPEN_UI(EquipLevelupNoticeUiMgr::getInstance()->getOpenUiId());
+}
+
+void EquipLevelUpNoticeUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	close();
+}
+
+void EquipLevelUpNoticeUiLayer::close()
+{
+	CLOSE_UI(WCT_EQUIPLEVELUPNOTICEUI);
+}
+
+bool EquipLevelUpNoticeUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if ( !isVisible() || !isRunning() || !hasVisibleParents() )
+	{
+		return false;
+	}
+	return true;
+}

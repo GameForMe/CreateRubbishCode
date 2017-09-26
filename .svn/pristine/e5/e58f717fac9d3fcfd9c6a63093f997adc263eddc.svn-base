@@ -1,0 +1,242 @@
+#include "TaskUi.h"
+#include "TouchSprite.h"
+#include "CfgReader.h"
+#include "QuestMgr.h"
+bool TaskUi::init()
+{
+	if(!CCLayer::init())
+		return false;
+
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("TaskUiLayer", TaskUiLoader::loader());
+	ccNodeLoaderLibrary->registerCCNodeLoader("TouchSprite", TouchSpriteLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode * node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "taskui.ccbi").c_str());
+	ccbReader->release();
+	if(node != NULL) {
+		node->setTag(1);
+		addChild(node);
+
+		CCNode *recentTask = node->getChildByTag(1);
+		CCNode *recentTaskMain = recentTask->getChildByTag(1);
+		CCNode *recentTaskDetail = recentTask->getChildByTag(2);
+		_masterTaskName = static_cast<CCLabelTTF*>(recentTaskMain->getChildByTag(1));
+		_brachTaskName = static_cast<CCLabelTTF*>(recentTaskMain->getChildByTag(2));
+		_brachTaskName2 = static_cast<CCLabelTTF*>(recentTaskMain->getChildByTag(4));
+		_exerciseTaskName = static_cast<CCLabelTTF*>(recentTaskMain->getChildByTag(3));
+		_taskName = static_cast<CCLabelTTF*>(recentTaskDetail->getChildByTag(4));
+		_taskDesc = static_cast<CCLabelTTF*>(recentTaskDetail->getChildByTag(5));
+		_taskAim = static_cast<CCLabelTTF*>(recentTaskDetail->getChildByTag(6));
+		_taskReward = static_cast<CCLabelTTF*>(recentTaskDetail->getChildByTag(7));
+		TouchSprite *master = static_cast<TouchSprite*>(recentTaskMain->getChildByTag(4));
+		TouchSprite *brach = static_cast<TouchSprite*>(recentTaskMain->getChildByTag(5));
+		TouchSprite *exercise = static_cast<TouchSprite*>(recentTaskMain->getChildByTag(6));
+		master->signalTouched.connect(this, &TaskUi::onMasterTaskPressed);
+		brach->signalTouched.connect(this, &TaskUi::onBrachTaskPressed);
+		exercise->signalTouched.connect(this, &TaskUi::onExerciseTaskPressed);
+
+		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1,true);
+		const s_quest_detail& qd = QuestMgr::getInstance()->getDetail();
+		setMasterTaskTitle(qd.title.c_str());
+		signalFindAimBtnPressed.connect(QuestMgr::getInstance() , &QuestMgr::onFindTarget);
+		return true;
+	}
+	return false;
+}
+
+bool TaskUi::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	//点击在frame上，返回ture
+	CCNode *node = getChildByTag(1);
+	CCNode *recentTask = node->getChildByTag(1);
+	CCNode *recentTaskMain = recentTask->getChildByTag(1);
+	CCNode *recentTaskDetail = recentTask->getChildByTag(2);
+
+	CCPoint framePoint = recentTaskMain->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = recentTaskMain->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		return true;
+	}
+	else
+	{
+		if(recentTaskDetail->isVisible())
+		{
+			CCPoint detailPoint = recentTaskDetail->convertTouchToNodeSpace(pTouch);
+			const CCSize &detailSize = recentTaskDetail->getContentSize();
+			CCRect detailRect(0.0f, 0.0f, detailSize.width, detailSize.height);
+			if(detailRect.containsPoint(detailPoint))
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+void TaskUi::onExit()
+{
+	//CCNode *node = getChildByTag(1);
+	//CCNode *recentTask = node->getChildByTag(1);
+	//CCNode *recentTaskMain = recentTask->getChildByTag(1);
+	//TouchSprite *master = static_cast<TouchSprite*>(recentTaskMain->getChildByTag(4));
+	//TouchSprite *brach = static_cast<TouchSprite*>(recentTaskMain->getChildByTag(5));
+	//TouchSprite *exercise = static_cast<TouchSprite*>(recentTaskMain->getChildByTag(6));
+	//master->signalTouched.disconnect(this, &TaskUi::onMasterTaskPressed);
+	//brach->signalTouched.disconnect(this, &TaskUi::onBrachTaskPressed);
+	//exercise->signalTouched.disconnect(this, &TaskUi::onExerciseTaskPressed);
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+
+void TaskUi::onMasterTaskPressed( TouchSprite *, bool )
+{
+	signalMasterTaskPressed.emit();
+	setDetailTaskUiVisiable(true);
+	const s_quest_detail& qd = QuestMgr::getInstance()->getDetail();
+	setDetailTaskName(qd.title.c_str());
+	if(!qd.autoc)//!需要格式化字符串
+	{
+		std::string subs = qd.target.substr(0 , qd.target.size() - 4);
+		std::string num = qd.target.substr(qd.target.size() - 3 , qd.target.size());
+		char buf[128];
+		sprintf(buf , subs.c_str() , atoi(num.c_str()));
+		setDetailTaskAim(buf);
+	}
+	else
+		setDetailTaskAim(qd.target.c_str());
+	//setDetailTaskDesc(qd.desc.c_str());
+
+	std::stringstream reward;
+	reward<<"\xe5\xa5\x96\xe5\x8a\xb1\xe7\xbb\x8f\xe9\xaa\x8c"<<qd.reward_exp<<"\n";//!奖励经验
+	if(qd.reward_gold)
+		reward<<"\xe5\xa5\x96\xe5\x8a\xb1\xe9\x87\x91\xe5\xb8\x81"<<qd.reward_gold<<"\n";//!奖励金币
+	if(qd.reward_item1)
+		reward<<"\xe5\xa5\x96\xe5\x8a\xb1\xe7\x89\xa9\xe5\x93\x81"<<QuestMgr::getInstance()->getItemName(qd.reward_item1)<<"\n";//!奖励物品
+	if(qd.reward_item2)
+		reward<<"\xe5\xa5\x96\xe5\x8a\xb1\xe7\x89\xa9\xe5\x93\x81"<<QuestMgr::getInstance()->getItemName(qd.reward_item2)<<"\n";//!奖励物品
+	if(qd.reward_item3)
+		reward<<"\xe5\xa5\x96\xe5\x8a\xb1\xe7\x89\xa9\xe5\x93\x81"<<QuestMgr::getInstance()->getItemName(qd.reward_item3)<<"\n";//!奖励物品
+	setDetailTaskReward(reward.str().c_str());
+}
+
+void TaskUi::onBrachTaskPressed( TouchSprite *, bool )
+{
+	signalBranchTaskPressed.emit();
+	setDetailTaskUiVisiable(true);
+}
+
+void TaskUi::onExerciseTaskPressed( TouchSprite *, bool )
+{
+	signalExerciseTaskPressed.emit();
+	setDetailTaskUiVisiable(true);
+}
+
+void TaskUi::setMasterTaskTitle( const char *title )
+{
+	_masterTaskName->setString(title);
+}
+
+void TaskUi::setBranchTaskTitle( const char *title )
+{
+	_brachTaskName->setString(title);
+}
+
+void TaskUi::setExerciseTaskTitle( const char *title )
+{
+	_exerciseTaskName->setString(title);
+}
+
+void TaskUi::setDetailTaskName( const char *name )
+{
+	_taskName->setString(name);
+}
+
+void TaskUi::setDetailTaskDesc( const char *desc )
+{
+	_taskDesc->setString(desc);
+}
+
+void TaskUi::setDetailTaskAim( const char *aim )
+{
+	_taskAim->setString(aim);
+}
+
+void TaskUi::setDetailTaskReward( const char *str )
+{
+	_taskReward->setString(str);
+}
+
+void TaskUi::setDetailTaskUiVisiable( bool visiable )
+{
+	CCNode *node = getChildByTag(1);
+	CCNode *recentTask = node->getChildByTag(1);
+	CCNode *recentTaskDetail = recentTask->getChildByTag(2);
+
+	recentTaskDetail->setVisible(visiable);
+}
+
+TaskUi::~TaskUi()
+{
+	signalFindAimBtnPressed.disconnect(QuestMgr::getInstance() , &QuestMgr::onFindTarget);
+}
+
+void TaskUi::setBranchTaskTitle2( const char *title )
+{
+	_brachTaskName2->setString(title);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler TaskUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler TaskUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", TaskUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onDetailCloseBtnPressed", TaskUiLayer::onDetailCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onFindAimBtnPressed", TaskUiLayer::onFindAimBtnPressed);
+	return NULL;
+}
+
+bool TaskUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+
+void TaskUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	return;
+}
+
+void TaskUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	TaskUi *ui = dynamic_cast<TaskUi*>(getParent());
+	CC_ASSERT(ui != NULL);
+	ui->removeFromParent();
+}
+
+void TaskUiLayer::onDetailCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	TaskUi *ui = dynamic_cast<TaskUi*>(getParent());
+	CC_ASSERT(ui != NULL);
+	ui->setDetailTaskUiVisiable(false);
+}
+
+void TaskUiLayer::onFindAimBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CCNode *node = getChildByTag(1);
+	CCNode *detailFrame = node->getChildByTag(2);
+	CC_ASSERT(detailFrame != NULL);
+	if(detailFrame->isVisible())
+	{
+		TaskUi *ui = dynamic_cast<TaskUi*>(getParent());
+		CC_ASSERT(ui != NULL);
+		ui->signalFindAimBtnPressed.emit();
+	}
+}

@@ -1,0 +1,474 @@
+/**
+ *	@file		UseOilUi.cpp
+ *	@author		guantiejun
+ *	@date		2016/05/06
+ *	@version	
+ *	@brief		祝福油使用界面
+ */
+
+#include "UseOilUi.h"
+#include "CommonClient.h"
+#include "PackageManager.h"
+#include "StringMgr.h"
+#include "UiLoader.h"
+#include "UiManager.h"
+#include "f_string_table.h"
+#include "GameEventDefine.h"
+#include "f_event_system.h"
+#include "InputMessageBox.h"
+#include "UsefulFunction.h"
+#include <algorithm>
+#include "client_common_define.h"
+
+const int max_luck_num = 7;
+const int input_max_num = 999;
+
+UseOilUi::UseOilUi()
+{
+
+}
+
+UseOilUi::~UseOilUi()
+{
+
+}
+
+CCNode * UseOilUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["UseOilUiLayer"] = UiLayerLoader<UseOilUiLayer>::loader();
+	nodeLoaders["CheckButton"] = CheckButtonLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("piliangshiyong", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+UseOilUiLayer * UseOilUi::getUiLayer()
+{
+	return getUiNodeByTag<UseOilUiLayer>(WCT_USE_OIL_UI);
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+UseOilUiLayer::UseOilUiLayer()
+: m_check_1(NULL)
+, m_check_2(NULL)
+, m_use(NULL)
+, m_stop(NULL)
+, m_button_1(NULL)
+, m_button_2(NULL)
+, m_label_1(NULL)
+, m_label_2(NULL)
+, m_label_3(NULL)
+, m_label_4(NULL)
+, m_label_5(NULL)
+, m_label_6(NULL)
+, m_equip_name(NULL)
+, m_luck_num(NULL)
+, m_oil_num(NULL)
+, m_fight_num(NULL)
+, m_item_node(NULL)
+, m_equip_id(0)
+, m_cur_oil_num(0)
+, m_cur_weapon_luck(0)
+, m_to_oil_num(0)
+, m_to_luck_num(0)
+, m_final_oil_num(0)
+, m_is_update(false)
+, m_is_receve_back(true)
+{
+
+}
+
+UseOilUiLayer::~UseOilUiLayer()
+{
+
+}
+
+cocos2d::extension::SEL_CCControlHandler UseOilUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(UseOilUiLayer,onUse);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(UseOilUiLayer,onStop);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(UseOilUiLayer,onClick1);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(UseOilUiLayer,onClick2);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(UseOilUiLayer,onClose);
+
+	return NULL;
+}
+
+cocos2d::SEL_MenuHandler UseOilUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+
+	return NULL;
+}
+
+bool UseOilUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CheckButton*, m_check_1);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CheckButton*, m_check_2);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*, m_item_node);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*, m_use);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*, m_stop);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*, m_button_1);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*, m_button_2);
+
+	return false;
+}
+
+void UseOilUiLayer::onEnter()
+{
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&UseOilUiLayer::update_second), this, 1.0f, false);
+	REGISTER_EVENT(use_oil_return_event,UseOilUiLayer,recive_role_info);
+	NormalLayer::onEnter();
+}
+
+void UseOilUiLayer::onExit()
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&UseOilUiLayer::update_second), this);
+	UNREGISTER_EVENT(use_oil_return_event,UseOilUiLayer,recive_role_info);
+	NormalLayer::onExit();
+}
+
+void UseOilUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_label_1 = Helper::getLabelFTByParentAndTag(getChildByTag(0), 1);
+	m_label_2 = Helper::getLabelFTByParentAndTag(getChildByTag(0), 2);
+	m_label_3 = Helper::getLabelFTByParentAndTag(getChildByTag(0), 3);
+	m_label_4 = Helper::getLabelFTByParentAndTag(getChildByTag(0), 4);
+	m_label_5 = Helper::getLabelFTByParentAndTag(getChildByTag(0), 5);
+	m_label_6 = Helper::getLabelFTByParentAndTag(getChildByTag(0), 6);
+	m_equip_name = Helper::getLabelFTByParentAndTag(getChildByTag(0), 7);
+	m_luck_num = Helper::getLabelFTByParentAndTag(getChildByTag(0), 8);
+	m_oil_num = Helper::getLabelFTByParentAndTag(getChildByTag(0), 9);
+	Helper::getLabelFTByParentAndTag(getChildByTag(0), 10);
+	Helper::getLabelFTByParentAndTag(getChildByTag(0), 11);
+	Helper::getLabelFTByParentAndTag(getChildByTag(0), 20);
+
+	m_check_1->setCheck(true);
+	m_check_2->setCheck(false);
+	m_check_1->signalStateChanged.connect(this, &UseOilUiLayer::on_check_1);
+	m_check_2->signalStateChanged.connect(this, &UseOilUiLayer::on_check_2);
+
+	m_button_1->setZoomOnTouchDown(false);
+	m_button_2->setZoomOnTouchDown(false);
+
+	create_fight_effect();
+	refresh_node();
+	refresh_check_info();
+	set_default_value();
+}
+
+void UseOilUiLayer::onUse(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	if(m_cur_weapon_luck >= max_luck_num)
+	{
+		UsefulFunction::show_string_cur("luck_value_error_3");
+		return;
+	}
+
+	if(m_cur_oil_num <= 0)
+	{
+		UsefulFunction::show_string_cur("have_no_oil");
+		return;
+	}
+
+	bool is_check_1 = m_check_1->isCheckd();
+	if(is_check_1)
+	{
+		if(m_cur_weapon_luck >= m_to_luck_num)
+		{
+			UsefulFunction::show_string_cur("luck_value_error_2");
+			return;
+		}
+	}
+
+	m_final_oil_num = m_to_oil_num;
+
+
+	set_update(true);
+}
+
+void UseOilUiLayer::onStop(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	set_update(false);
+}
+
+void UseOilUiLayer::onClick1(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	InputMessageBox::getInstace()->open();
+	InputMessageBox::getInstace()->setMessage(STRING_TABLE["input_luck_num"]);
+	InputMessageBox::getInstace()->setNumOnly(true, max_luck_num);
+	InputMessageBox::getInstace()->setDefaultText(1);
+	InputMessageBox::getInstace()->getBtnSignal()->connect(this, &UseOilUiLayer::on_input_luck_num);
+	InputMessageBox::getInstace()->getUiLayer()->setNumOnlyPosition(ccp(672,300));
+}
+
+void UseOilUiLayer::onClick2(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	InputMessageBox::getInstace()->open();
+	InputMessageBox::getInstace()->setMessage(STRING_TABLE["input_oil_num"]);
+	int num = (std::min)(PackageManager::getInstance()->getItemNumber(EICT_Bag, oil_type_id), input_max_num);
+	InputMessageBox::getInstace()->setNumOnly(true, num);
+	InputMessageBox::getInstace()->setDefaultText(1);
+	InputMessageBox::getInstace()->getBtnSignal()->connect(this, &UseOilUiLayer::on_input_oil_num);
+	InputMessageBox::getInstace()->getUiLayer()->setNumOnlyPosition(ccp(672,300));
+}
+
+void UseOilUiLayer::onClose(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	CLOSE_UI(WCT_USE_OIL_UI);
+}
+
+void UseOilUiLayer::on_check_1(CheckButton *check_button, bool check)
+{
+	m_check_2->setCheck(!check);
+	refresh_check_info();
+}
+
+void UseOilUiLayer::on_check_2(CheckButton *check_button, bool check)
+{
+	m_check_1->setCheck(!check);
+	refresh_check_info();
+}
+
+void UseOilUiLayer::update_second(float dt)
+{
+	if(!m_is_receve_back)
+		return;
+
+	if(!m_is_update)
+		return;
+
+	bool is_send_info = use_item();
+	if(!is_send_info)
+	{
+		set_update(false);
+		m_is_receve_back = true;
+		return;
+	}
+
+	m_is_receve_back = false;
+}
+
+void UseOilUiLayer::set_update(bool is_update)
+{
+	m_is_update = is_update;
+
+	m_use->setVisible(!is_update);
+	m_stop->setVisible(is_update);
+	m_check_1->SetTouchEnable(!is_update);
+	m_check_2->SetTouchEnable(!is_update);
+	if(is_update)
+	{
+		m_button_1->setEnabled(false);
+		m_button_2->setEnabled(false);
+	}
+	else
+	{
+		bool is_check_1 = m_check_1->isCheckd();
+		m_button_1->setEnabled(is_check_1);
+		m_button_2->setEnabled(!is_check_1);
+	}
+}
+
+void UseOilUiLayer::on_input_luck_num(bool is_ok, std::string str)
+{
+	if(is_ok)
+	{
+		int num = atoi(str.c_str());
+		if(num > max_luck_num){num = max_luck_num;}
+		if(num < m_cur_weapon_luck) {num = m_cur_weapon_luck;}
+
+		m_to_luck_num = num;
+		refresh_check_info();
+	}
+}
+
+void UseOilUiLayer::on_input_oil_num(bool is_ok, std::string str)
+{
+	if(is_ok)
+	{
+		int num = atoi(str.c_str());
+		if(num > m_cur_oil_num){num = m_cur_oil_num;}
+		if(num < 1) {num = 1;}
+
+		m_to_oil_num = num;
+		refresh_check_info();
+	}
+}
+
+void UseOilUiLayer::recive_role_info(use_oil_return_event* event)
+{
+ 	m_is_receve_back = true;
+	if(!event->is_success)
+	{
+		set_update(false);
+		m_final_oil_num = 0;
+		return;
+	}
+	m_final_oil_num = m_final_oil_num - 1;
+	refresh_node();
+}
+
+void UseOilUiLayer::refresh_node()
+{
+	PackageManager::ItemMap* item_map = PackageManager::getInstance()->getItemMap(EICT_Equip);
+	f_item* item_wepon = PackageManager::getInstance()->getItem(*item_map, (short)EEP_RightHand);
+	if(!IS_VALID_PTR(item_wepon))
+		return;
+
+	f_equipment* equip = dynamic_cast<f_equipment*>(item_wepon);
+	if(!IS_VALID_PTR(equip))
+		return;
+
+	string str;
+	safe_sprintf(str, "%d", equip->get_fightli());
+	m_fight_num->setString(str.c_str());
+
+	string str1;
+	m_cur_weapon_luck = int(equip->m_equipex.byLuck);
+	safe_sprintf(str1, "%d", m_cur_weapon_luck);
+	m_luck_num->setString(str1);
+
+	str.clear();
+	safe_sprintf(str, "%s", equip->GetItemName());
+	m_equip_name->setString(str);
+
+	ItemNode* equip_icon = ItemNode::create();
+	if(!IS_VALID_PTR(equip_icon))
+	{
+		return;
+	}
+
+	m_item_node->removeAllChildrenWithCleanup(true);
+	equip_icon->hideItemOpBtn();
+	equip_icon->setAnchorPoint(ccp(0.5,0.5));
+	equip_icon->setPosition(ccp(m_item_node->getContentSize().width/2 ,m_item_node->getContentSize().height/2));
+	m_item_node->addChild(equip_icon);
+	equip_icon->setIsEquipUI(WCT_EQUIP_TIPS_UI_TAG);
+	equip_icon->hideItemOpBtnEx();
+	equip_icon->initWithItem(equip, false);
+	equip_icon->setNum(1);
+	equip_icon->setClickable(true);
+
+
+	m_cur_oil_num = PackageManager::getInstance()->getItemNumber(EICT_Bag, oil_type_id);
+	str.clear();
+	safe_sprintf(str, "%d", m_cur_oil_num);
+	m_oil_num->setString(str.c_str());
+}
+
+void UseOilUiLayer::refresh_check_info()
+{
+	string str;
+	safe_sprintf(str, "%d", m_to_luck_num);
+	m_label_2->setString(str.c_str());
+
+	str.clear();
+	safe_sprintf(str, "%d", m_to_oil_num);
+	m_label_5->setString(str);
+
+	bool is_check_1 = m_check_1->isCheckd();
+	m_button_1->setEnabled(is_check_1);
+	m_button_2->setEnabled(!is_check_1);
+	m_label_1->setColor(is_check_1 ? ccWHITE : ccGRAY);
+	m_label_2->setColor(is_check_1 ? ccWHITE : ccGRAY);
+	m_label_3->setColor(is_check_1 ? ccWHITE : ccGRAY);
+	m_label_4->setColor(is_check_1 ? ccGRAY : ccWHITE);
+	m_label_5->setColor(is_check_1 ? ccGRAY : ccWHITE);
+	m_label_6->setColor(is_check_1 ? ccGRAY : ccWHITE);
+}
+
+bool UseOilUiLayer::use_item()
+{
+	if(m_cur_weapon_luck >= max_luck_num)
+	{
+		UsefulFunction::show_string_cur("luck_value_error_3");
+		return false;
+	}
+
+	if(m_cur_oil_num <= 0)
+	{
+		UsefulFunction::show_string_cur("have_no_oil");
+		return false;
+	}
+
+	bool check_1 = m_check_1->isCheckd();
+	if(check_1)
+	{
+		if(m_to_luck_num <= m_cur_weapon_luck)
+		{
+			UsefulFunction::show_string_cur("luck_value_error_1");
+			return false;
+		}
+	}
+	else
+	{
+		if(m_final_oil_num <= 0)
+		{
+			UsefulFunction::show_string_cur("luck_value_error_4");
+			return false;
+		}
+	}
+
+	f_item* item = PackageManager::getInstance()->getItem(EICT_Bag, (unsigned int)oil_type_id);
+	if(!IS_VALID_PTR(item))
+		return false;
+
+	return PackageManager::getInstance()->use_one_oil(item->get_item_id());
+}
+
+void UseOilUiLayer::set_default_value()
+{
+	PackageManager::ItemMap* item_map = PackageManager::getInstance()->getItemMap(EICT_Equip);
+	f_item* item_wepon = PackageManager::getInstance()->getItem(*item_map, (short)EEP_RightHand);
+	if(!IS_VALID_PTR(item_wepon))
+		return;
+
+	f_equipment* equip = dynamic_cast<f_equipment*>(item_wepon);
+	if(!IS_VALID_PTR(equip))
+		return;
+
+	string str1;
+	m_to_luck_num = int(equip->m_equipex.byLuck);
+	safe_sprintf(str1, "%d", m_to_luck_num);
+	m_label_2->setString(str1);
+
+	string str2;
+	m_to_oil_num = (std::min)(PackageManager::getInstance()->getItemNumber(EICT_Bag, oil_type_id), input_max_num);
+	safe_sprintf(str2, "%d", m_to_oil_num);
+	m_label_5->setString(str2.c_str());
+
+	m_use->setVisible(true);
+	m_stop->setVisible(false);
+}
+
+void UseOilUiLayer::create_fight_effect()
+{
+	GameActionNode* effect = GameActionNode::create();
+	effect->InitTextureWithSpriteFrame("E1_50");
+	getChildByTag(0)->addChild(effect, RZN_EFFECT);
+	CCNode* node = getChildByTag(0)->getChildByTag(100);
+	if(!IS_VALID_PTR(node))
+		return;
+
+	CCPoint point = ccp(node->getPositionX() + node->getContentSize().width / 4 + 12, node->getPositionY() - node->getContentSize().height / 4 - 2);
+	effect->setPosition(point);
+	effect->BeginAction(0.07f, true);
+	effect->setScale(0.6f);
+
+	getChildByTag(0)->getChildByTag(101)->setZOrder(RZN_EFFECT + 1);
+	CCLabelTTF*	temp_text = dynamic_cast<CCLabelTTF*>(getChildByTag(0)->getChildByTag(102));
+	if(temp_text)
+	{
+		temp_text->setString("");
+	}
+
+	m_fight_num = CCLabelBMFont::create();
+	m_fight_num->setFntFile("Art/Scene/fontNum.fnt");
+	getChildByTag(0)->addChild(m_fight_num, RZN_EFFECT + 1);
+	m_fight_num->setPosition(getChildByTag(0)->getChildByTag(102)->getPosition());
+	m_fight_num->setAnchorPoint(ccp(0.0f, 0.5f));
+	m_fight_num->setScale(0.5f);
+}

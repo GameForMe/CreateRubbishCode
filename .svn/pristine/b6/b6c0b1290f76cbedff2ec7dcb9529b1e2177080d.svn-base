@@ -1,0 +1,851 @@
+#include "KaifuHuodongMgr.h"
+#include "TCPClient.h"
+#include "KaifuhuodongUi.h"
+#include "UiTools.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "PackageManager.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "MiniMapUi.h"
+#include "World.h"
+#include "CommonMsgDefine.h"
+#include "WorldPacket.h"
+#include "BusinessUi.h"
+#include "GameEventDefine.h"
+#include "f_string_table.h"
+
+KaifuHuodongMgr* KaifuHuodongMgr::getInstance()
+{
+	static KaifuHuodongMgr mgr;
+	return &mgr; 
+}
+
+KaifuHuodongMgr::KaifuHuodongMgr()
+	: isGetData(false)
+	, _isReceiveSucceed(false)
+	, _iosShowRecharge(false)
+	, _iosShowGift(false)
+	, m_hasGetYunyingData(false)
+	, _iosShowActCentre(false)
+	, m_hasGetYunyingRankData(false)
+	, sendNum(0)
+	, receiveNum(0)
+	, m_canResetYunying(false)
+{
+
+}
+
+KaifuHuodongMgr::~KaifuHuodongMgr()
+{
+
+}
+
+void KaifuHuodongMgr::init()
+{
+	//!注册网络消息
+	TCP_CLIENT->register_net_cmd("NET_SIS_Request_Activity",this,&KaifuHuodongMgr::onServerRequest_Activity);
+	TCP_CLIENT->register_net_cmd("NET_SIS_Request_Activity_Result",this,&KaifuHuodongMgr::onServerRequest_Activity_Result);
+	TCP_CLIENT->register_net_cmd("NET_SIS_IOS_Recharge_Function",this,&KaifuHuodongMgr::onServerIosRechargeFunction);
+	TCP_CLIENT->register_net_cmd(NET_G2C_ProtoKaifuActivity,this,&KaifuHuodongMgr::onServer_ProtoKaifuActivity);
+	TCP_CLIENT->register_net_cmd(NET_G2C_ProtoKaifuItemActivity,this,&KaifuHuodongMgr::onServer_ProtoKaifuItemActivity);
+	//运营活动 新加
+	TCP_CLIENT->register_net_cmd("NET_SIS_Request_YunYing_Activity",this,&KaifuHuodongMgr::onServerRequest_YunyingAct);
+	TCP_CLIENT->register_net_cmd("NET_SIS_YunYing_Activity_Rank",this,&KaifuHuodongMgr::onServerRequest_YunyingRank);
+	TCP_CLIENT->register_net_cmd(NET_G2C_ProtoYunYingActivity,this,&KaifuHuodongMgr::onServer_ProtoYunyingActivity);
+	TCP_CLIENT->register_net_cmd(NET_G2C_ProtoYunYingItemActivity,this,&KaifuHuodongMgr::onServer_ProtoYunyingItemActivity);
+	TCP_CLIENT->register_net_cmd(NET_G2C_ActivityBuyResult,this,&KaifuHuodongMgr::onXianshiBuyResult);
+	TCP_CLIENT->register_net_cmd(NET_S2C_Tidy_Act,this,&KaifuHuodongMgr::onServerAllActive);
+	TCP_CLIENT->register_net_cmd("NET_GS2C_Refresh_Activity",this,&KaifuHuodongMgr::onServerCanResetYunying);
+	
+	m_ActivityList.clear();
+	m_YunyingActList.clear();
+	//m_YunyingRankList.clear();
+	clear_YunyingRankList();
+	isGetData = false;
+	_iosShowRecharge = false;
+	_iosShowGift = false;
+	_iosShowActCentre = false;
+	m_hasGetYunyingData = false;
+	m_canResetYunying = false;
+
+	KaifuHuodongMgr::getInstance()->requestData();
+	requestYunyingData();
+	requestYunyingRankData();
+}
+
+void KaifuHuodongMgr::destroy()
+{
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Request_Activity",this,&KaifuHuodongMgr::onServerRequest_Activity);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Request_Activity_Result",this,&KaifuHuodongMgr::onServerRequest_Activity_Result);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_IOS_Recharge_Function",this,&KaifuHuodongMgr::onServerIosRechargeFunction);
+	TCP_CLIENT->unregister_net_cmd(NET_G2C_ProtoKaifuActivity,this,&KaifuHuodongMgr::onServer_ProtoKaifuActivity);
+	TCP_CLIENT->unregister_net_cmd(NET_G2C_ProtoKaifuItemActivity,this,&KaifuHuodongMgr::onServer_ProtoKaifuItemActivity);
+	//运营活动 新加
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Request_YunYing_Activity",this,&KaifuHuodongMgr::onServerRequest_YunyingAct);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_YunYing_Activity_Rank",this,&KaifuHuodongMgr::onServerRequest_YunyingRank);
+	TCP_CLIENT->unregister_net_cmd(NET_G2C_ProtoYunYingActivity,this,&KaifuHuodongMgr::onServer_ProtoYunyingActivity);
+	TCP_CLIENT->unregister_net_cmd(NET_G2C_ProtoYunYingItemActivity,this,&KaifuHuodongMgr::onServer_ProtoYunyingItemActivity);
+	TCP_CLIENT->unregister_net_cmd(NET_G2C_ActivityBuyResult,this,&KaifuHuodongMgr::onXianshiBuyResult);
+	TCP_CLIENT->unregister_net_cmd(NET_S2C_Tidy_Act,this,&KaifuHuodongMgr::onServerAllActive);
+	TCP_CLIENT->unregister_net_cmd("NET_GS2C_Refresh_Activity",this,&KaifuHuodongMgr::onServerAllActive);
+
+	m_ActivityList.clear();
+	m_YunyingActList.clear();
+	//m_YunyingRankList.clear();
+	clear_YunyingRankList();
+	isGetData = false;
+	_iosShowRecharge = false;
+	_iosShowGift = false;
+	_iosShowActCentre = false;
+	m_hasGetYunyingData = false;
+	m_canResetYunying = false;
+}
+
+unsigned int KaifuHuodongMgr::onServerRequest_Activity( s_net_cmd* cmd )
+{
+	NET_SIS_Request_Activity* pActivity = (NET_SIS_Request_Activity*)cmd;
+	if (pActivity->isUpdata)
+	{
+		//全部更新
+		m_ActivityList.clear();
+		for (int i = 0; i < pActivity->m_DataNum; i++)
+		{
+			m_ActivityList.insert(std::make_pair(pActivity->byData[i].m_iId, pActivity->byData[i]));
+		}
+		if (GET_UI(KaifuhuodongUi, WCT_KaifuActivity)->getUiLayer())
+		{
+			GET_UI(KaifuhuodongUi, WCT_KaifuActivity)->getUiLayer()->updateData();
+		}
+	}
+	else
+	{
+		for (int i = 0; i < pActivity->m_DataNum; i++)
+		{
+			std::map<int, SPacket_Activity>::iterator it = m_ActivityList.find(pActivity->byData[i].m_iId);
+			if (it != m_ActivityList.end())
+			{
+				memcpy(&it->second, &pActivity->byData[i], sizeof(SPacket_Activity));
+
+			}
+		}
+		if (GET_UI(KaifuhuodongUi, WCT_KaifuActivity)->getUiLayer() && _isReceiveSucceed)
+		{
+			GET_UI(KaifuhuodongUi, WCT_KaifuActivity)->getUiLayer()->updateReceiveRewardBtnState(2);
+			_isReceiveSucceed = false;
+		}
+	}
+	return 0;
+}
+
+unsigned int KaifuHuodongMgr::onServerRequest_Activity_Result( s_net_cmd* cmd )
+{
+	NET_SIS_Request_Activity_Result* pActivity = (NET_SIS_Request_Activity_Result*)cmd;
+	if (pActivity->result == 0)//领取成功
+	{
+		ToolTip::getInstance()->push(GET_STR(6011));//奖励已经领取
+	}
+	else if (pActivity->result == 1)//已经领取
+	{
+		ToolTip::getInstance()->push(GET_STR(6007));//奖励已经领取
+	}
+	else if (pActivity->result == 2)//您的背包已满
+	{
+		ToolTip::getInstance()->push(GET_STR(2027));//奖励已经领取
+	}
+	//防止运营点击后没有领取到物品，按钮不能恢复点击 16.2.11
+	if(pActivity->result != 0 && GET_UI(BusinessUi, WCT_BusinessUi)->getUiLayer()){
+		GET_UI(BusinessUi, WCT_BusinessUi)->getUiLayer()->updateReceiveRewardBtnState();
+	}
+
+	return 0;
+}
+
+bool KaifuHuodongMgr::requestData()
+{
+	//请求数据
+	if (!isGetData)
+	{
+		//LoadInfoFromDB();
+		NET_SIC_Request_Activity send;
+		send.type = 0;
+		TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+		isGetData = true;
+		return false;
+	}
+	return true;
+}
+
+void KaifuHuodongMgr::LoadInfoFromDB()
+{
+	//LocalPlayer* local = RoleManager::getInstance()->getLocalPlayer();
+	m_Activity_VecProto.clear();
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM kfhd");
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	LocalPlayer* pRole = RoleManager::getInstance()->getLocalPlayer();
+	int nPro = pRole->getAttribute(RA_ROLETYPE);				//获得玩家职业
+	while(table->retrieve_row())
+	{
+		SProtoKaifuActivity tmpInfo;
+		unsigned int idx = table->get_index("Id");
+		tmpInfo.id = table->get_integer32(idx);
+		idx = table->get_index("Activityid");
+		tmpInfo.activityID = table->get_integer32(idx);
+		idx = table->get_index("Name");
+		tmpInfo.name = table->get_text(idx);
+		idx = table->get_index("describe");
+		tmpInfo.describe = table->get_text(idx);
+		idx = table->get_index(" Title");
+		tmpInfo.title = table->get_text(idx);
+		m_Activity_VecProto.insert(std::make_pair(tmpInfo.activityID, tmpInfo));
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM kfhdChild");
+	table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		SProtoKaifuItemActivity tmpInfo;
+		unsigned int idx = table->get_index("Id");
+		tmpInfo.id = table->get_integer32(idx);
+		idx = table->get_index("TypeID");
+		tmpInfo.activityID = table->get_integer32(idx);
+		idx = table->get_index("acttype");
+		tmpInfo.actType = table->get_integer32(idx);
+		idx = table->get_index("value");
+		tmpInfo._value = table->get_integer32(idx);
+		if (nPro == 1)
+		{
+			idx = table->get_index("reward1");
+		}
+		else if (nPro == 2)
+		{
+			idx = table->get_index("reward2");
+		}
+		else if (nPro == 3)
+		{
+			idx = table->get_index("reward3");
+		}
+		std::string strReward = table->get_text(idx);
+		part_string(strReward.c_str(), tmpInfo.reward, MAX_Activity_Reward);
+		idx = table->get_index("num");
+		std::string strNum = table->get_text(idx);
+		part_string(strNum.c_str(), tmpInfo.m_Num, MAX_Activity_Reward);
+		idx = table->get_index("AnniuName");
+		tmpInfo.btnName = table->get_text(idx);
+		
+
+		SProtoKaifuActivity* pActivity = getKaifuActivity(tmpInfo.activityID);
+		pActivity->actType = tmpInfo.actType;
+		if (pActivity)
+		{
+			pActivity->m_ActivityItem_VecProto.push_back(tmpInfo);
+		}
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+}
+
+SProtoKaifuActivity* KaifuHuodongMgr::getKaifuActivity( int id )
+{
+	std::map<int, SProtoKaifuActivity>::iterator it = m_Activity_VecProto.find(id);
+	if (it != m_Activity_VecProto.end())
+	{
+		return &(*it).second;
+	}
+	return NULL;
+}
+
+void KaifuHuodongMgr::getReward( int id, int index)
+{
+	std::map<int, SPacket_Activity>::iterator it = m_ActivityList.find(id);
+	if (it != m_ActivityList.end())
+	{
+		if ((*it).second.byData[index].m_iID > 0  && (*it).second.byData[index].m_iValue == 1)
+		{
+
+			int bagCount = PackageManager::getInstance()->getBlankCount();//获取玩家背包空格数
+			if (bagCount < 3)
+			{
+				ToolTip::getInstance()->push(GET_STR(2027));
+				return;
+			}
+			else
+			{
+				NET_SIC_Request_Activity send;
+				send.type = 1;
+				send.actID = id;
+				send.targetId = (*it).second.byData[index].m_iID;
+				TCP_CLIENT->send_net_cmd(&send , NP_NORMAL, false);
+				_isReceiveSucceed = true;
+
+				if (GET_UI(KaifuhuodongUi, WCT_KaifuActivity)->getUiLayer())
+					GET_UI(KaifuhuodongUi, WCT_KaifuActivity)->getUiLayer()->updateReceiveRewardBtnState(1);
+			}
+		}
+		else if ((*it).second.byData[index].m_iID > 0  && (*it).second.byData[index].m_iValue == 0)
+		{
+			if ((*it).second.m_iId == 1)
+			{
+				ToolTip::getInstance()->push(GET_STR(6009));//不在领奖时间内
+			}
+			else if ((*it).second.m_iId == 2)
+			{
+				ToolTip::getInstance()->push(GET_STR(2176));//您的等级不足
+			}
+			else
+			{
+				ToolTip::getInstance()->push(GET_STR(9527));
+			}
+		}
+		else if ((*it).second.byData[index].m_iID > 0  && (*it).second.byData[index].m_iValue == 2)
+		{
+			ToolTip::getInstance()->push(GET_STR(6007));//奖励已经领取
+		}
+	}
+}
+
+SPacket_Activity* KaifuHuodongMgr::getKaifuPacketActivity( int id )
+{
+	std::map<int, SPacket_Activity>::iterator it = m_ActivityList.find(id);
+	if (it != m_ActivityList.end())
+	{
+		return &(*it).second;
+	}
+	return NULL;
+}
+
+
+unsigned int KaifuHuodongMgr::onServerIosRechargeFunction( s_net_cmd* cmd )
+{
+	NET_SIS_IOS_Recharge_Function* msg = (NET_SIS_IOS_Recharge_Function*)cmd;
+	if (msg)
+	{
+		setIosShowRecharge(msg->isRechargeOpen);
+		setIosShowGift(msg->isGiftOpen);
+		setIosShowActCentre(msg->isActCentreOpen);
+		MiniMapUi* pUI = World::getInstance()->getMiniMapUi();
+		if (pUI)
+		{
+			if (msg->isRechargeOpen)
+				pUI->showIosRechargeFunction(msg->isRechargeOpen);
+			if (msg->isGiftOpen)
+				pUI->showGiftBtn(msg->isGiftOpen);
+			if (msg->isActCentreOpen)
+				pUI->showYunyingBtn(msg->isActCentreOpen);
+		}
+	}
+	return 0;
+}
+
+void KaifuHuodongMgr::reset()
+{
+	isGetData = false;
+	m_hasGetYunyingData = false;
+	m_canResetYunying = false;
+	requestData();
+	requestYunyingData();
+	requestYunyingRankData();
+}
+
+void KaifuHuodongMgr::setIosShowRecharge( bool isShow )
+{
+	_iosShowRecharge = isShow;
+}
+
+bool KaifuHuodongMgr::getIosShowRecharge()
+{
+	return _iosShowRecharge;
+}
+
+void KaifuHuodongMgr::setIosShowGift( bool isShow )
+{
+	_iosShowGift = isShow;
+}
+
+bool KaifuHuodongMgr::getIosShowGift()
+{
+	return _iosShowGift;
+}
+
+void KaifuHuodongMgr::setIosShowActCentre( bool isShow )
+{
+	_iosShowActCentre = isShow;
+}
+
+bool KaifuHuodongMgr::getIosShowActCentre()
+{
+	return _iosShowActCentre;
+}
+
+unsigned int KaifuHuodongMgr::onServer_ProtoKaifuActivity( s_net_cmd* cmd )
+{
+	WorldPacket Msg((const void*)cmd);
+	int count = 0;
+	Msg >> count;
+	if (count <= 0)
+		return 0;
+	m_Activity_VecProto.clear();
+	for (int i = 0;i < count;++i)
+	{
+		SProtoKaifuActivity tmpInfo;
+		Msg >> tmpInfo.id;
+		Msg >> tmpInfo.activityID;
+		Msg >> tmpInfo.name;
+		Msg >> tmpInfo.describe;
+		Msg >> tmpInfo.title;
+		Msg >> tmpInfo.actType;
+		m_Activity_VecProto.insert(std::make_pair(tmpInfo.activityID, tmpInfo));
+	}
+
+	return 0;
+}
+
+unsigned int KaifuHuodongMgr::onServer_ProtoKaifuItemActivity( s_net_cmd* cmd )
+{
+	WorldPacket Msg((const void*)cmd);
+	int count = 0;
+	Msg >> count;
+	if (count <= 0)
+		return 0;
+	//LocalPlayer* pRole = RoleManager::getInstance()->getLocalPlayer();
+	//int nPro = pRole->getAttribute(RA_ROLETYPE);				//获得玩家职业
+	for (int i = 0;i < count;++i)
+	{
+		SProtoKaifuItemActivity tmpInfo;
+		Msg >> tmpInfo.id;
+		Msg >> tmpInfo.activityID;
+		Msg >> tmpInfo.actType;
+		Msg >> tmpInfo._value;
+		Msg.read(&tmpInfo.reward, sizeof(tmpInfo.reward));
+		Msg.read(&tmpInfo.m_Num, sizeof(tmpInfo.m_Num));
+		Msg >> tmpInfo.btnName;
+
+		SProtoKaifuActivity* pActivity = getKaifuActivity(tmpInfo.activityID);
+		if (pActivity)
+		{
+			pActivity->actType = tmpInfo.actType;
+			pActivity->m_ActivityItem_VecProto.push_back(tmpInfo);
+		}
+	}
+
+	return 0;
+}
+
+bool KaifuHuodongMgr::requestYunyingData()
+{
+	//获取运营活动信息
+	NET_SIC_Request_Activity send;
+	send.type = 4;
+	TCP_CLIENT->send_net_cmd(&send, NP_NORMAL, false);
+	m_hasGetYunyingData = true;
+	if(!m_hasGetYunyingData){
+		return false;
+	}
+	return true;
+}
+
+bool KaifuHuodongMgr::requestYunyingRankData()
+{
+	sendNum=0;
+	receiveNum=0;
+	//m_YunyingRankList.clear();
+	clear_YunyingRankList();
+	std::map<int,SProtoYunYingActivity>::iterator it=m_ActivityYunying.begin();
+	for (;it!=m_ActivityYunying.end();++it)
+	{
+		if ( IsActRank((*it).second.actType))
+		{			
+			//获取运营活动排行榜信息
+			NET_SIC_Request_Activity send;
+			send.type = 5;
+			send.actID = (*it).second.activityID;
+			TCP_CLIENT->send_net_cmd(&send, NP_NORMAL, false);
+			sendNum++;
+		}
+	}
+	if (0==sendNum)
+	{
+		return false;
+	}
+	return true;
+}
+
+SProtoYunYingActivity* KaifuHuodongMgr::getYunyingActivity(int id)
+{
+	std::map<int, SProtoYunYingActivity>::iterator it = m_ActivityYunying.find(id);
+	if (it != m_ActivityYunying.end()){
+		return &(*it).second;
+	}
+	return NULL;
+}
+
+SPacket_YunYing_Activity* KaifuHuodongMgr::getYunyingPacketActivity(int id)
+{
+	std::list<SPacket_YunYing_Activity>::iterator iterTemp = m_YunyingActList.begin();
+	for(; iterTemp != m_YunyingActList.end(); ++iterTemp){
+		SPacket_YunYing_Activity* temp = &(*iterTemp);
+		if(temp->m_iId == id){
+			return temp;
+		}
+	}
+
+	return NULL;
+}
+
+YunYing_Rank_Act* KaifuHuodongMgr::getYunYingRankAct(int id)
+{
+	std::map<int,YunYing_Rank_Act>::iterator iterTemp = m_YunyingRankList.find(id);
+	if (iterTemp!=m_YunyingRankList.end())
+	{
+		return &(*iterTemp).second;
+	}
+	return NULL;
+}
+
+NET_SIS_YunYing_Activity_Rank_Item* KaifuHuodongMgr::getYunyingRankItem(int id,int index)
+{
+	std::map<int,YunYing_Rank_Act>::iterator iterTemp = m_YunyingRankList.find(id);
+	if (iterTemp!=m_YunyingRankList.end())
+	{
+		std::list<NET_SIS_YunYing_Activity_Rank_Item>::iterator it=iterTemp->second.tempList.begin();
+		int num=0;
+		for(;it!=iterTemp->second.tempList.end();++it)
+		{
+			if (num==index)
+			{
+				return &(*it);
+			}
+			num++;
+		}
+	}
+	return NULL;
+}
+
+unsigned int KaifuHuodongMgr::onServerRequest_YunyingAct(s_net_cmd* cmd)
+{
+	NET_SIS_Request_YunYing_Activity* pActivity = (NET_SIS_Request_YunYing_Activity*)cmd;
+	if (pActivity->isUpdata){
+		//全部更新
+		m_YunyingActList.clear();
+		for (int i = 0; i < pActivity->m_DataNum; i++){
+			m_YunyingActList.push_back(pActivity->byData[i]);
+		}
+		if (GET_UI(BusinessUi, WCT_BusinessUi)->getUiLayer()){
+			GET_UI(BusinessUi, WCT_BusinessUi)->getUiLayer()->updateData();
+		}
+	}
+	else{
+		std::list<SPacket_YunYing_Activity>::iterator iterTemp;
+		int listIndex = 0;
+		for (int i = 0; i < pActivity->m_DataNum; ++i){
+			listIndex = 0;
+			for(iterTemp = m_YunyingActList.begin(); iterTemp != m_YunyingActList.end();++iterTemp){
+				SPacket_YunYing_Activity temp = (*iterTemp);
+				if(temp.m_iId == pActivity->byData[i].m_iId){
+					*iterTemp = pActivity->byData[i];
+					break;
+				}
+				++listIndex;
+				
+			}
+		}
+
+		if (GET_UI(BusinessUi, WCT_BusinessUi)->getUiLayer()){
+			GET_UI(BusinessUi, WCT_BusinessUi)->getUiLayer()->updateReceiveRewardBtnState();
+		}
+	}
+	return 0;
+}
+
+unsigned int KaifuHuodongMgr::onServerRequest_YunyingRank(s_net_cmd* cmd)
+{
+	WorldPacket Msg((const void*)cmd);
+	YunYing_Rank_Act aRank;
+	Msg>>aRank.nActID;
+	Msg>>aRank.nCount;
+	Msg>>aRank.nOrder;
+	Msg>>aRank.nScore;
+	Msg>>aRank.dwBeginTime;
+	Msg>>aRank.dwEndTime;
+	Msg>>aRank.nState;
+	Msg>>aRank.nMinScore;
+
+	for ( int i=0; i< aRank.nCount; ++i )
+	{
+		NET_SIS_YunYing_Activity_Rank_Item tmp;
+		Msg>>tmp;
+		aRank.tempList.push_back(tmp);
+	}
+	if ( (aRank.nState == EAS_Activity_Process) || (aRank.nState == EAS_Activity_Show) )
+	{
+		auto itor = m_YunyingRankList.find(aRank.nActID);
+		if (itor == m_YunyingRankList.end())
+		{
+			m_YunyingRankList.insert(std::make_pair(aRank.nActID,aRank));
+		}
+	}
+
+	receiveNum++;
+	if (receiveNum==sendNum)
+	{
+// 		GETYUNYINGRANK send;
+// 		SEND_EVENT(&send);
+		CHANGEBUSINESSRANKLIST trans;
+		SEND_EVENT(&trans);
+	}
+
+	return 0;
+}
+
+unsigned int KaifuHuodongMgr::onServer_ProtoYunyingActivity(s_net_cmd* cmd)
+{
+	WorldPacket Msg((const void*)cmd);
+	int count = 0;
+	Msg >> count;
+	if (count <= 0)
+		return 0;
+	//m_ActivityYunying.clear();
+	clear_ActivityYunying();
+// 	CLEARLIST trans;
+// 	SEND_EVENT(&trans);
+	for (int i = 0;i < count;++i){
+		SProtoYunYingActivity tmpInfo;
+		Msg >> tmpInfo.id;
+		Msg >> tmpInfo.activityID;
+		Msg >> tmpInfo.name;
+		Msg >> tmpInfo.describe;
+		Msg >> tmpInfo.title;
+		Msg >> tmpInfo.actType;
+		Msg >> tmpInfo.reconmmend;
+		Msg >> tmpInfo.score_clear;
+
+ 		if ( IsActRank(tmpInfo.actType) )
+ 		{
+ 			Msg >> tmpInfo.showTitle;
+ 		}
+		m_ActivityYunying.insert(std::make_pair(tmpInfo.activityID, tmpInfo));
+	}
+
+	requestYunyingData();
+	requestYunyingRankData();
+// 	if (!getRankData)
+// 	{
+// 		CHANGEBUSINESSRANKLIST trans;
+// 		SEND_EVENT(&trans);
+// 	}
+	m_canResetYunying = false;
+	return 0;
+}
+
+unsigned int KaifuHuodongMgr::onServer_ProtoYunyingItemActivity( s_net_cmd* cmd )
+{
+	WorldPacket Msg((const void*)cmd);
+	int count = 0;
+	Msg >> count;
+	if (count <= 0)
+		return 0;
+	//LocalPlayer* pRole = RoleManager::getInstance()->getLocalPlayer();
+	//int nPro = pRole->getAttribute(RA_ROLETYPE);				//获得玩家职业
+	for (int i = 0;i < count;++i){
+		SProtoKaifuItemActivity tmpInfo;
+		Msg >> tmpInfo.id;
+		Msg >> tmpInfo.activityID;
+		Msg >> tmpInfo.actType;
+		Msg >> tmpInfo._value;
+		Msg.read(&tmpInfo.reward, sizeof(tmpInfo.reward));
+		Msg.read(&tmpInfo.m_Num, sizeof(tmpInfo.m_Num));
+		Msg >> tmpInfo.btnName;
+
+		SProtoYunYingActivity* pActivity = getYunyingActivity(tmpInfo.activityID);
+		if (pActivity){
+			pActivity->actType = tmpInfo.actType;
+			pActivity->m_ActivityItem_VecProto.push_back(tmpInfo);
+		}
+	}
+
+	return 0;
+}
+
+bool KaifuHuodongMgr::getYunyingReward( int id, int index)
+{
+	SPacket_YunYing_Activity* it = getYunyingPacketActivity(id);
+	std::map<int, SProtoYunYingActivity>::iterator itActTemp = m_ActivityYunying.find(id);
+
+	if (it != NULL && itActTemp != m_ActivityYunying.end()){
+		if (it->byData[index].m_iID > 0  && (*it).byData[index].m_iValue == 1){
+			int bagCount = PackageManager::getInstance()->getBlankCount();//获取玩家背包空格数
+			int itemCount = 0;
+			for(int itemIdx = 0; itemIdx < MAX_Activity_Reward; ++itemIdx){
+				if((*itActTemp).second.m_ActivityItem_VecProto[0].reward[itemIdx] > 0 && (*itActTemp).second.m_ActivityItem_VecProto[0].m_Num[itemIdx] > 0){
+					++itemCount;
+				}
+			}
+
+			if (bagCount < itemCount){
+				ToolTip::getInstance()->push(GET_STR(2027));
+				return false;
+			}else{
+				NET_SIC_Request_Activity send;
+				if((*itActTemp).second.actType == EOSAT_Activity_Shop){
+					send.type = 3;
+				}else{
+					send.type = 1;
+				}
+				send.actID = id;
+				send.targetId = (*it).byData[index].m_iID;
+				TCP_CLIENT->send_net_cmd(&send , NP_NORMAL, false);
+				return true;
+			}
+		}
+		else if((*it).byData[index].m_iID > 0  && (*it).byData[index].m_iValue == 0){
+			if ((*it).m_iId == 1){
+				ToolTip::getInstance()->push(GET_STR(6009));//不在领奖时间内
+			}
+			else if ((*it).m_iId == 2){
+				ToolTip::getInstance()->push(GET_STR(2176));//您的等级不足
+			}
+			else{
+				ToolTip::getInstance()->push(GET_STR(9527));
+			}
+		}
+		else if ((*it).byData[index].m_iID > 0  && (*it).byData[index].m_iValue == 2){
+			ToolTip::getInstance()->push(GET_STR(6007));//奖励已经领取
+		}
+	}
+	return false;
+}
+
+bool KaifuHuodongMgr::checkHaveYunyingReward()
+{
+	std::list<SPacket_YunYing_Activity>::iterator it = m_YunyingActList.begin();
+	if(it != m_YunyingActList.end()){
+		for (; it != m_YunyingActList.end(); ++it){
+			for(int dataIndex = 0; dataIndex < PACKET_ACT_MAX_TAR; ++dataIndex){
+				if ((*it).byData[dataIndex].m_iValue == 1){//可领取
+					return true;
+				}
+			}
+		}
+	}
+	return false;
+}
+
+unsigned int KaifuHuodongMgr::onXianshiBuyResult(s_net_cmd* cmd)
+{
+	WorldPacket Msg((const void*)cmd);
+	int resultIdx = 0;
+	Msg >> resultIdx;
+	switch(resultIdx){
+		case EABR_Activity_Sucess:
+			{
+				ToolTip::getInstance()->push(GET_STR(7102));
+			}
+			break;
+		case EABR_Activity_NotShop:// 不是限时购买活动
+			{
+				ToolTip::getInstance()->push(GET_STR(9330));
+			}
+			break;
+		case EABR_Activity_NotProcess:// 不在活动期限内
+			{
+				ToolTip::getInstance()->push(GET_STR(6009));
+			}
+			break;
+		case EABR_Activity_YuanBao:// 元宝不足
+			{
+				RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+			}
+			break;
+		case EABR_Activity_BagFreeSize:// 背包空间不足
+			{
+				ToolTip::getInstance()->push(GET_STR(6008));
+			}
+			break;
+		case EABR_Activity_BugLimit:// 限时购买 次数 达到上限
+			{
+				ToolTip::getInstance()->push(GET_STR(9150));
+			}
+			break;
+		case EABR_SystemError:// 系统内部错误
+			{
+				ToolTip::getInstance()->push(GET_STR(7096));
+			}
+			break;
+		default:
+			{
+
+			}
+			break;
+	}
+	if (GET_UI(BusinessUi, WCT_BusinessUi)->getUiLayer()){
+		GET_UI(BusinessUi, WCT_BusinessUi)->getUiLayer()->updateReceiveRewardBtnState();
+	}
+
+	return 0;
+}
+
+int KaifuHuodongMgr::getYunYingActListSize()
+{
+	return m_YunyingActList.size();
+}
+
+int KaifuHuodongMgr::getActYunYingMapSize()
+{
+	return m_ActivityYunying.size();
+}
+
+unsigned int KaifuHuodongMgr::onServerAllActive(s_net_cmd* cmd)
+{
+	WorldPacket Msg((const void*)cmd);
+	int count = 0;
+	Msg >> count;
+	if (count <= 0 )
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["no_activity_so_you_must_wait"]);
+		return 0;
+	}
+	requestYunyingData();
+	requestYunyingRankData();
+	OPEN_UI(WCT_BusinessUi);
+// 	if (!getRankData)
+// 	{
+// 		CHANGEBUSINESSRANKLIST trans;
+// 		SEND_EVENT(&trans);
+// 	}
+
+	return 0;
+}
+
+unsigned int KaifuHuodongMgr::onServerCanResetYunying(s_net_cmd* cmd)
+{
+	m_canResetYunying = true;
+	if (IS_UI_OPEN(WCT_BusinessUi))
+	{
+		WorldPacket C2G_Msg(NET_C2G_ProtoYunYingActivity);
+		TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);
+	}
+	return 0;
+}
+
+void KaifuHuodongMgr::requestYunyingAllData()
+{
+	if (m_canResetYunying)
+	{
+		WorldPacket C2G_Msg(NET_C2G_ProtoYunYingActivity);
+		TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);
+ 		OPEN_UI(WCT_BusinessUi);
+// 		if (true)
+// 		{
+// 			CHANGEBUSINESSRANKLIST trans;
+// 			SEND_EVENT(&trans);
+// 		}
+	}
+	else
+	{
+		WorldPacket C2G_Msg(NET_C2S_Tidy_Act);
+		TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);
+	}
+}

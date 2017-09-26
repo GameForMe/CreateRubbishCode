@@ -1,0 +1,533 @@
+#include "UserProUi.h"
+#include "UiManager.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "World.h"
+#include "BaseDefine.h"
+#include "CfgReader.h"
+#include "CCEGLView.h"
+#include "ActivityMgr.h"
+#include "UiResourceMgr.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "ChatUi.h"
+#include "StringMgr.h"
+#include "ClientUpdate.h"
+#include "Login.h"
+#include "LoginUi.h"
+#include "f_string_util.h"
+#include "Helper.h"
+#include "ClientCfg.h"
+#include "NoticeBoardUi.h"
+#include "f_event_system.h"
+#include "GameEventDefine.h"
+#include "UIUtil.h"
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+#include "wzolJni.h"
+#endif
+
+
+UserProUi *UserProUi::getInstance()
+{
+	static UserProUi instance;
+
+	return &instance;
+}
+UserProUi::UserProUi()
+{	
+	//IsListLoad = false;
+	//m_verticalList = NULL;
+	//_scrollView = NULL;
+	m_iCurrentPageIndex = 0;
+	m_iPageCount = 0;
+	m_fLabelViewWidth = 540.0f;
+	m_isFAQShow = true;
+	initProStrFromXML();
+}
+UserProUi::~UserProUi()
+{
+	
+}
+
+// void UserProUi::destroy()
+// {
+// // 	if(m_verticalList != NULL)
+// // 	{	
+// // 		delete m_verticalList;
+// // 		m_verticalList = NULL;
+// // 	}
+// 
+// // 	if(_scrollView != NULL)
+// // 	{
+// // 		_scrollView->release();
+// // 	}
+// }
+
+void UserProUi::initProStrFromXML()
+{
+	m_vecProString.clear();
+	m_vecFAQString.clear();
+	f_data_set dataset;
+	std::list<std::string> fields;
+	bool ret =dataset.load("Config/UserProcotol.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		int id = dataset.get_int("id",one.c_str(),0);
+		string t_proStr = dataset.get_string("str_pro",one.c_str(),"");
+		m_vecProString.push_back(t_proStr);
+	});
+
+	fields.clear();
+	dataset.clear();
+	ret =dataset.load("Config/LoginFAQ.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		int id = dataset.get_int("id",one.c_str(),0);
+		string t_proStr = dataset.get_string("str_pro",one.c_str(),"");
+		m_vecFAQString.push_back(t_proStr);
+	});
+
+	m_iPageCount = m_isFAQShow ? m_vecFAQString.size():m_vecProString.size();
+	m_iCurrentPageIndex = 0;
+}
+
+void UserProUi::refreshUIByType(bool pIsFAQ)
+{
+	m_isFAQShow = pIsFAQ;
+	m_iPageCount = m_isFAQShow ? m_vecFAQString.size() : m_vecProString.size();
+	m_iCurrentPageIndex = 0;
+	//Todo 刷新界面
+	UserProUiLayer* t_layer = getUiLayer();
+	if (t_layer)
+	{
+		t_layer->refreshPageText();
+		//_scrollView->setContentOffset(_scrollView->minContainerOffset());
+	}
+}
+
+
+void UserProUi::goChangeCurrentPage(bool pisNext)
+{
+	int tempIndex =  m_iCurrentPageIndex + (pisNext ? 1 : -1) ;
+	if (tempIndex < 0 || tempIndex >= m_iPageCount )
+		return;
+	m_iCurrentPageIndex = tempIndex;
+	//Todo 刷新界面
+	UserProUiLayer* t_layer = getUiLayer();
+	if (t_layer)
+	{
+		t_layer->refreshPageText();
+		//_scrollView->setContentOffset(_scrollView->minContainerOffset());
+	}
+}
+
+string UserProUi::getCurrentProString()
+{
+	return m_isFAQShow ? m_vecFAQString[m_iCurrentPageIndex] : m_vecProString[m_iCurrentPageIndex];
+}
+string UserProUi::getPageNumString()
+{
+	std::string strKey;
+	safe_sprintf(strKey, "%d/%d", m_iCurrentPageIndex + 1,m_iPageCount);
+	return strKey;
+}
+// void UserProUi::LoadNoticeListOnce()
+// {
+// 	if(IsListLoad)
+// 	{
+// 		return;
+// 	}
+// 	UserProUiLayer* uiLayer = getUiLayer();
+// 	if (uiLayer != NULL)
+// 	{	
+// 		std::string noticeText = m_vecProString[m_iCurrentPageIndex];
+// 		if(noticeText == "")
+// 		{
+// 			return;
+// 		}
+// // 		CCNode* ContainNode = uiLayer->GetContainerNode();
+// // 		if(ContainNode != NULL)
+// // 		{
+// // 			_scrollView = createScrollViewWithContent(ContainNode);
+// // 			_scrollView->retain();
+// // 		}
+// 		
+// 		//if(_scrollView != NULL)
+// // 		{
+// // 			m_verticalList = new VerticalList<UserProList>;
+// // 			m_verticalList->addToScrollView(_scrollView);
+// // 			m_verticalList->setMinSize(ContainNode->getContentSize());
+// // 
+// // 			UserProList *notice = new UserProList;
+// // 			notice->setData(noticeText);
+// // 			m_verticalList->addItem(notice);
+// // 			m_verticalList->updateDisplay();
+// // 			uiLayer->updateData();
+// // 			IsListLoad = true;
+// // 		}
+// 	}
+// }
+
+
+
+
+void UserProUi::open()
+{
+	if (getUiLayer() != NULL)
+	{
+		return;
+	}
+	CCNodeLoaderLibrary *ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("YongHuXieYiUiLayer",UiLayerLoader<UserProUiLayer>::loader());
+	cocos2d::extension::CCBReader *ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode *node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art","UI","") + "yonghuxieyi.ccbi").c_str());
+	CC_ASSERT(node != NULL);
+
+	_plist = ccbReader->getLoadedSpriteSheet();
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+
+	ccbReader->release();
+	CCScene *scene = UiMgr::getInstance()->getCurScene();
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+    //node->setPosition(ccp((winSize.width-UI_WIDTH) / 2.0f, (winSize.height - UI_HEIGHT) / 2.0f));
+	scene->addChild(node, WZ_POPUI, WCT_UserProtocolUI);
+	
+	bool isFirstOpen = ClientCfg::getInstance()->getInt("general", "isFirstOpen", 1) == 1;
+	m_isFAQShow = !isFirstOpen;
+	
+	m_iPageCount = m_isFAQShow ? m_vecFAQString.size() : m_vecProString.size();
+	m_iCurrentPageIndex = 0;
+
+	if(node != NULL)
+	{
+		UserProUiLayer *uiLayer = dynamic_cast<UserProUiLayer*>(node);
+		CC_ASSERT(uiLayer != NULL);
+		uiLayer->initBtnShow(isFirstOpen);
+		//uiLayer->updateData();
+		m_fLabelViewWidth = uiLayer->GetContainerNode()->getContentSize().width;
+	}
+	//LoadNoticeListOnce();
+	UserProUiLayer* t_layer = getUiLayer();
+	if (t_layer)
+	{
+		t_layer->refreshPageText();
+		//_scrollView->setContentOffset(_scrollView->minContainerOffset());
+	}
+}
+
+void UserProUi::close()
+{
+	UserProUiLayer *layer = getUiLayer();
+	if (layer != NULL)
+	{
+		UiResourceMgr::getInstance()->releasePlistFile(_plist);
+		_plist.clear();
+
+		CCScene *scene = UiMgr::getInstance()->getCurScene();
+		CCNode* node = dynamic_cast<CCNode*>(scene->getChildByTag(WCT_UserProtocolUI));
+		scene->removeChildByTag(WCT_UserProtocolUI);
+		if (node != NULL)
+		{
+			node = NULL;
+		}
+
+		bool ifFirstOpen = ClientCfg::getInstance()->getInt("general", "isFirstOpen", 1) == 1;
+		if (ifFirstOpen)
+		{
+			NoticeBoardUi::getInstance()->open();
+			NoticeBoardUi::getInstance()->LoadNoticeListOnce();
+			ClientCfg::getInstance()->setInt("general", "isFirstOpen", 0);
+		}
+			
+	}
+}
+
+UserProUiLayer *UserProUi::getUiLayer()
+{
+	CCScene *scene = UiMgr::getInstance()->getCurScene();
+	if(scene == NULL)
+	{
+		return NULL;
+	}
+	else
+	{
+		return dynamic_cast<UserProUiLayer*>(scene->getChildByTag(WCT_UserProtocolUI));
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler UserProUiLayer::onResolveCCBCCMenuItemSelector( CCObject *pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler UserProUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+ 	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onJianTouBtnPressedLeft", UserProUiLayer::onArrowBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onJianTouBtnPressedRight", UserProUiLayer::onArrowBtnPressed);
+ 	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", UserProUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onWenTiBtnPressed", UserProUiLayer::onTitleBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onxieYiBtnPressed", UserProUiLayer::onTitleBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onTongYiBtnPressed", UserProUiLayer::onProSwitchBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onJuJueBtnPressed", UserProUiLayer::onProSwitchBtnPressed);
+	return NULL;
+}
+
+void UserProUiLayer::onNodeLoaded( cocos2d::CCNode *pNode, cocos2d::extension::CCNodeLoader *pNodeLoader )
+{
+	_frame = NULL;
+	_container = NULL;
+
+	_frame = (CCLayer*)getChildByTag(0);
+	CC_ASSERT(_frame != NULL);
+	_container = _frame->getChildByTag(1);
+	CC_ASSERT(_container != NULL);
+	_pageFt = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(this->getChildByTag(0)->getChildByTag(NT_PageLabelTag)));
+
+	_scrollView = createScrollViewWithContent(_container);
+
+	m_verticalList = new VerticalList<UserProList>;
+	m_verticalList->addToScrollView(_scrollView);
+	m_verticalList->setMinSize(_container->getContentSize());
+
+	std::string const& noticeText =UserProUi::getInstance()->get_notice_text();
+	UserProList *notice = new UserProList;
+	notice->setData(noticeText);
+	m_verticalList->addItem(notice);
+	m_verticalList->updateDisplay();
+
+	_container->addChild(_scrollView);
+	//updateData();
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+	setAllChildernButtonPriority(this, -1);
+
+}
+
+void UserProUiLayer::onTitleBtnPressed(cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+
+	CCNode* pNode = dynamic_cast<CCNode*>(pSender);
+	if (pNode)
+	{
+		bool isFAQ = NT_FAQBtnTag == pNode->getTag();
+		UserProUi::getInstance()->refreshUIByType(isFAQ);
+		CCControlButton* button = dynamic_cast<CCControlButton*>(getChildByTag(0)->getChildByTag(2));
+		button->setHighlighted(isFAQ);
+		button = dynamic_cast<CCControlButton*>(getChildByTag(0)->getChildByTag(3));
+		button->setHighlighted(!isFAQ);
+		
+	}
+}
+void UserProUiLayer::onProSwitchBtnPressed(cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CCNode* pNode = dynamic_cast<CCNode*>(pSender);
+	if (pNode)
+	{
+		//bool isAgree = ( NT_AgreeProBtnTag == pNode->getTag());
+		ClientCfg::getInstance()->setInt("general", "isProCheckOK", true);
+		UserProUi::getInstance()->close();
+		login_userpro_event event;
+		//event.show = isAgree;
+        event.show = true;
+		SEND_EVENT(&event);
+	}
+}
+
+void UserProUiLayer::onCloseBtnPressed( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_8);
+    ClientCfg::getInstance()->setInt("general", "isProCheckOK", true);
+    UserProUi::getInstance()->close();
+    login_userpro_event event;
+    event.show = true;
+    SEND_EVENT(&event);
+    //UserProUi::getInstance()->close();
+}
+
+void UserProUiLayer::onArrowBtnPressed(cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CCNode* pNode = dynamic_cast<CCNode*>(pSender);
+	if (pNode)
+	{
+		UserProUi::getInstance()->goChangeCurrentPage( NT_ArrowRightBtnTag == pNode->getTag());
+	}
+}
+
+
+bool UserProUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (_frame == NULL)
+	{
+		return false;
+	}
+
+	UserProUiLayer *layer = UserProUi::getInstance()->getUiLayer();
+	if (layer == NULL)
+		return false;
+
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		return true;
+	}
+	else
+	{
+		if(ClientUpdate::getInstance()->_currentScene == ST_LOGINSCENE)
+		{
+			LoginUi *ParentLayer = Login::getInstance()->GetLoginUi();
+			if(ParentLayer != NULL)
+			{
+				CCNode* ParentFrame = dynamic_cast<CCLayer*>(ParentLayer->getChildByTag(0));
+				if(ParentFrame != NULL)
+				{
+					CCLayer* ParentFrameLayer = dynamic_cast<CCLayer*>(ParentFrame->getChildByTag(1));
+					if(ParentFrameLayer != NULL)
+					{
+						CCNode* NoticeButton = ParentFrameLayer->getChildByTag(72);
+						CCNode* NoticeButton1 = ParentFrameLayer->getChildByTag(73);
+						if(NoticeButton != NULL)
+						{
+							if(isTouchOnNodeContent(NoticeButton, pTouch) || isTouchOnNodeContent(NoticeButton1, pTouch))
+								return true;
+						}
+
+					}
+				}
+				
+			}
+		}
+		UserProUi::getInstance()->close();
+		return false;
+	}
+	return true;
+}
+
+void UserProUiLayer::onExit()
+{
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+UserProUiLayer::UserProUiLayer()
+	:m_verticalList(NULL)
+	,_scrollView(NULL)
+	,_frame(NULL)
+	,_container(NULL)
+	,_pageFt(NULL)
+{
+
+}
+
+UserProUiLayer::~UserProUiLayer()
+{
+// 	_frame = NULL;
+// 	if(_container !=NULL)
+// 	{
+// 		_container->removeAllChildren();
+// 	}
+// 	_container = NULL;
+
+	CC_SAFE_DELETE(m_verticalList);
+}
+
+// void UserProUiLayer::updateData()
+// {
+// 
+// // 	CCScrollView* tempscrollView = UserProUi::getInstance()->GetNoticeScroll();
+// // 	if(tempscrollView == NULL)
+// // 	{
+// // 		return;
+// // 	}
+// // 	//CCLog("add succeed");
+// // 	_container->addChild(tempscrollView);
+// 
+// }
+
+void UserProUiLayer::refreshPageText()
+{
+	UserProList *notice = m_verticalList->getItem(0);
+	if (notice)
+	{
+		string str = UserProUi::getInstance()->getCurrentProString();
+		notice->setData(str);
+		m_verticalList->setMinSize(notice->getContentSize());
+		m_verticalList->updateDisplay();
+		_pageFt->setString(UserProUi::getInstance()->getPageNumString().c_str());
+
+		_scrollView->setContentOffset(_scrollView->minContainerOffset());
+	}
+}
+
+UserProList::UserProList()
+{
+
+}
+
+UserProList::~UserProList()
+{
+
+}
+
+cocos2d::CCSize UserProList::getContentSize()
+{
+	return _contentSize;
+}
+
+void UserProList::setData( const std::string &text )
+{
+	CustomLabel* pCustomLabel = dynamic_cast<CustomLabel*>(_node->getChildByTag(NTT_Text));
+	if (pCustomLabel == NULL)
+	{
+		pCustomLabel = CustomLabel::create();
+		pCustomLabel->setAnchorPoint(ccp(0.5f, 0.5f));
+		pCustomLabel->setTag(NTT_Text);
+		float t_width = UserProUi::getInstance()->getLabelViewWidth();
+		pCustomLabel->setContentSize(CCSize(t_width, 0.0f));
+		/*_node->addChild(pCustomLabel);*/
+		UIUtil::childNodeAlign(_node,pCustomLabel,eha_center,eva_center,CCPointZero);
+	}
+	std::string ctext = text;
+	pCustomLabel->SetFontSize(16.0f);
+	pCustomLabel->SetMargin(2);
+	pCustomLabel->SetFontName("");
+	pCustomLabel->SetString(ctext);
+	
+	_contentSize.height = pCustomLabel->getContentSize().height;
+	_contentSize.width = pCustomLabel->getContentSize().width;
+	_node->setAnchorPoint(ccp(.5f,.5f));
+	_node->setContentSize(_contentSize);
+	UIUtil::childNodeAlign(_node,pCustomLabel,eha_center,eva_center,CCPointZero,true);
+}
+
+CCLabelTTF * UserProList::getLabel( eNonticTextTag tag )
+{
+	return dynamic_cast<CCLabelTTF*>(_node->getChildByTag(tag));
+}
+
+void UserProUiLayer::initBtnShow(bool isFirstShow)
+{
+	CCNode* pNode = getChildByTag(0)->getChildByTag(NT_FirstOpenNodeTag);
+	pNode->setVisible(isFirstShow);
+	CCControlButton* faqBtn = dynamic_cast<CCControlButton*>(getChildByTag(0)->getChildByTag(NT_FAQBtnTag));
+	faqBtn->setVisible(!isFirstShow);
+	faqBtn->setHighlighted(!isFirstShow);
+
+	faqBtn = dynamic_cast<CCControlButton*>(getChildByTag(0)->getChildByTag(NT_PROBtnTag));
+	faqBtn->setVisible(!isFirstShow);
+	faqBtn->setHighlighted(isFirstShow);
+
+	faqBtn = dynamic_cast<CCControlButton*>(getChildByTag(0)->getChildByTag(NT_AgreeProBtnTag));
+	faqBtn->setVisible(isFirstShow);
+	faqBtn = dynamic_cast<CCControlButton*>(getChildByTag(0)->getChildByTag(NT_RefuseProBtnTag));
+	faqBtn->setVisible(isFirstShow);
+
+}

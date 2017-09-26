@@ -107,9 +107,9 @@ public class main : MonoBehaviour
 			List<string> valNameArr = new List<string> ();
 			List<string> funNameArr = new List<string> ();
 			int num = UnityEngine.Random.Range (5, 10);
-			string fileName = GetRandomFileName (num);
+			string fileName = ToolsSet. GetRandomFileName (num);
 			while (usedNameArr.IndexOf (fileName) >= 0) {
-				fileName = GetRandomFileName (num);
+				fileName = ToolsSet. GetRandomFileName (num);
 			}
 			Debug.Log ("file " + fileName);
 			//=========  开始创建一对匹配的文件
@@ -150,9 +150,9 @@ public class main : MonoBehaviour
 	string AddOnePublicProp (StreamWriter sw_H, StreamWriter sw_Cpp, string fileName, List<string> valNameArr)
 	{
 		int valNamenum = UnityEngine.Random.Range (5, 10);
-		string valName = GetRandomFileName (valNamenum);
+		string valName = ToolsSet. GetRandomFileName (valNamenum);
 		while (valNameArr.IndexOf (valName) >= 0) {
-			valName = GetRandomFileName (valNamenum);
+			valName = ToolsSet. GetRandomFileName (valNamenum);
 		}
 	
 		sw_H.WriteLine ("int " + valName + ";"); // 写入
@@ -163,9 +163,9 @@ public class main : MonoBehaviour
 	{
 		int funNameNum	= UnityEngine.Random.Range (5, 10);
 
-		string funName = GetRandomFileName (funNameNum);
+		string funName = ToolsSet. GetRandomFileName (funNameNum);
 		while (funNameArr.IndexOf (funName) >= 0||valNameArr.IndexOf (funName) >= 0) {
-			funName = GetRandomFileName (funNameNum);
+			funName = ToolsSet. GetRandomFileName (funNameNum);
 		}
 	
 		//写几种可能的函数;
@@ -222,17 +222,6 @@ public class main : MonoBehaviour
 	}
 
 
-	string GetRandomFileName (int num)
-	{
-		System. Random r = new System.Random ();
-		string s = string.Empty;
-		string str = string.Empty;
-		for (int i = 0; i < num; i++) {
-			s = ((char)r.Next (97, 123)).ToString ();
-			str += s;
-		}
-		return str;
-	}
 
 
 	//只有 h 文件和cpp 文件需要; 需要成对出现 要匹配;
@@ -244,7 +233,7 @@ public class main : MonoBehaviour
 		FileInfo file = new FileInfo (sourceFile+cppName+".h");
 		string contentStr = "";
 		if (file.Exists) {
-			// true is overwrite
+			// true is overwrite0
 			contentStr = File.ReadAllText (sourceFile+cppName+".h");
 		} 
 		bool isCanInsert = false;
@@ -396,9 +385,9 @@ public class main : MonoBehaviour
 	string CreateOnePublicProp ( List<string> valNameArr)
 	{
 		int valNamenum = UnityEngine.Random.Range (5, 10);
-		string valName = GetRandomFileName (valNamenum);
+		string valName = ToolsSet. GetRandomFileName (valNamenum);
 		while (valNameArr.IndexOf (valName) >= 0) {
-			valName = GetRandomFileName (valNamenum);
+			valName = ToolsSet. GetRandomFileName (valNamenum);
 		}
 
 
@@ -409,9 +398,9 @@ public class main : MonoBehaviour
 	{
 		int funNameNum	= UnityEngine.Random.Range (5, 10);
 
-		string funName = GetRandomFileName (funNameNum);
+		string funName = ToolsSet. GetRandomFileName (funNameNum);
 		while (funNameArr.IndexOf (funName) >= 0 ||valNameArr.IndexOf (funName) >= 0 ) {
-			funName = GetRandomFileName (funNameNum);
+			funName = ToolsSet. GetRandomFileName (funNameNum);
 		}
 		string funStr = "\r\n";
 		string funHStr = "\r\n";

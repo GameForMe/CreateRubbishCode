@@ -1,0 +1,168 @@
+/**
+ *	@file		TeamMatchApplyItem.cpp
+ *	@author		guantiejun
+ *	@date		2016/07/04
+ *	@version	
+ *	@brief		∂”ŒÈ∆•≈‰…Í«Î¡–±Ì
+ */
+
+#include "TeamMatchApplyItem.h"
+#include "CommonClient.h"
+#include "TeamMgr.h"
+#include "CfgReader.h"
+#include "TCPClient.h"
+#include "NameMgr2.h"
+#include "World.h"
+#include "GameEventDefine.h"
+
+TeamMatchApplyItem::TeamMatchApplyItem()
+: m_name(NULL)
+, m_apply(NULL)
+, m_have_apply(NULL)
+, m_level(NULL)
+, m_role_id(INVALID)
+{
+	for(int i = 0; i < MAX_TEAM_NUM; ++i)
+	{
+		m_class[i] = NULL;
+	}
+
+	REGISTER_EVENT(apply_team_success,TeamMatchApplyItem,on_event_apply_team_success);
+}
+
+TeamMatchApplyItem::~TeamMatchApplyItem()
+{
+	UNREGISTER_EVENT(apply_team_success,TeamMatchApplyItem,on_event_apply_team_success);
+}
+
+cocos2d::extension::SEL_CCControlHandler TeamMatchApplyItem::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamMatchApplyItem,onApply);
+
+	return NULL;
+}
+
+cocos2d::SEL_MenuHandler TeamMatchApplyItem::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+
+	return NULL;
+}
+
+bool TeamMatchApplyItem::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*,m_apply);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_have_apply);
+
+	return false;
+}
+
+void TeamMatchApplyItem::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	for(int i = 0; i < MAX_TEAM_NUM; ++i)
+	{
+		m_class[i] = dynamic_cast<CCSprite*>(getChildByTag(i + 1));
+	}
+
+	m_name = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(getChildByTag(6))));
+	m_level = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(getChildByTag(7))));
+	Helper::getLabelFTByParentAndTag(this, 8);
+}
+
+void TeamMatchApplyItem::onApply(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	on_sure_send_apply();
+}
+
+void TeamMatchApplyItem::on_sure_send_apply()
+{
+	TeamMgr::getInstance()->MakeTeammate(m_role_id);
+}
+
+TeamMatchApplyItem* TeamMatchApplyItem::create_item(const char* szFile,CCObject*pOwner,UiInterface* holder)
+{
+	CCNodeLoaderLibrary* lib  = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string strFullPath  = CFGReader::instance()->get_ui_ccbi_filepath(szFile);
+	CCNode* node = reader->readNodeGraphFromFile(strFullPath.c_str(),pOwner);
+	TeamMatchApplyItem* item = dynamic_cast<TeamMatchApplyItem*>(node);
+	CC_ASSERT(item);
+
+	if(holder)
+	{
+		holder->mergeSheet(reader->getLoadedSpriteSheet());
+	}
+	return item;
+}
+
+void TeamMatchApplyItem::refresh_info(STeamListInfo& info, DWORD role_name_crc, bool is_have_apply)
+{
+	m_role_id = role_name_crc;
+	set_apply_state(is_have_apply);
+
+	std::stringstream ss;
+	ss<<info.dwMinLevel<<"-"<<info.dwMaxLevel;
+	m_level->setString(ss.str().c_str());
+
+	int role_num = 0;
+	for(int i = 0; i < MAX_TEAM_NUM; ++i)
+	{
+		m_class[i]->setVisible(true);
+		string class_pic_name = get_class_pic((info.bySex[i] == 0) ? false : true, EClassType(info.byProfs[i]));
+		if(!class_pic_name.empty())
+		{
+			m_class[i]->initWithSpriteFrameName(class_pic_name.c_str());
+			++role_num;
+		}
+		else
+		{
+			m_class[i]->setVisible(false);
+		}
+	}
+
+	char name[X_SHORT_NAME];
+	memset(name, 0, sizeof(char) * X_SHORT_NAME);
+	Utf16ToUtf8(info.szRoleName, name, X_SHORT_NAME, 0);
+
+	string name_str = name;
+	string str;
+	safe_sprintf(str, STRING_TABLE["team_name_cue"], name_str.c_str(), role_num, 5);
+	m_name->setString(str.c_str());
+}
+
+string TeamMatchApplyItem::get_class_pic(bool is_male, EClassType role_class)
+{
+	switch (role_class)
+	{
+	case RT_Warrior:
+		{
+			return "duiwu_zhan";
+		}
+		break;
+	case RT_Mage:
+		{
+			return "duiwu_fa";
+		}
+		break;
+	case RT_Taoist:
+		{
+			return "duiwu_dao";
+		}
+		break;
+	}
+	return "";
+}
+
+void TeamMatchApplyItem::set_apply_state(bool is_apply)
+{
+	m_apply->setVisible(!is_apply);
+	m_have_apply->setVisible(is_apply);
+}
+
+void TeamMatchApplyItem::on_event_apply_team_success(apply_team_success* event)
+{
+	if(event->leader_id == m_role_id)
+	{
+		set_apply_state(true);
+	}
+}

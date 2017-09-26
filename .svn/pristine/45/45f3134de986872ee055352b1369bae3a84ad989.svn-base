@@ -1,0 +1,484 @@
+#include "cocos2d.h"
+#include "TCPClient.h"
+#include "MessageBoxUi.h"
+#include "World.h"
+#include "BaseDefine.h"
+#include "ServerTime.h"
+#include "MallMgr.h"
+#include "PackageManager.h"
+#include "StoreUi.h"
+#include "StringMgr.h"
+#include "ChatMgr.h"
+#include "UiManager.h"
+#include "ToolTip.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "RechargeUi.h"
+#include "CommonMsgDefine.h"
+#include "WorldPacket.h"
+#include "StoreRechargeUi.h"
+#include "UiTools.h"
+#include "SecondVerifyMgr.h"
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+#include "wzolJni.h"
+#endif
+MallMgr::MallMgr()
+	: _init(false),_bNeedReload(false)
+{
+	
+}
+MallMgr::~MallMgr()
+{
+	//clearMallInfo();
+}
+void MallMgr::Destroy()
+{
+	clearMallInfo();
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_mall_item" , this , &MallMgr::onServerGetMallAllItem);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_mall_buy_item" , this , &MallMgr::onServerBuyMallItem);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_update_mall" , this , &MallMgr::onServerUpdateMall);
+	TCP_CLIENT->unregister_net_cmd(NET_S2C_BILL_CONFIG , this , &MallMgr::onLoadChargeMoney);
+	TCP_CLIENT->unregister_net_cmd("NET_S2C_RECHARGE_CP_ORDER" , this , &MallMgr::onCpOreder);
+}
+MallMgr* MallMgr::getInstance()
+{
+	static MallMgr mgr;
+	return &mgr;
+}
+
+void MallMgr::OpenMall()
+{
+	for (int index = 0;index < MAX_MALL_SHEETS;index++)
+	{
+		m_MallItemsInfo_Array[index].clear();
+	}
+	TCP_CLIENT->register_net_cmd("NET_SIS_mall_item" , this , &MallMgr::onServerGetMallAllItem);
+	TCP_CLIENT->register_net_cmd("NET_SIS_mall_buy_item" , this , &MallMgr::onServerBuyMallItem);
+
+	TCP_CLIENT->register_net_cmd("NET_SIS_update_mall" , this , &MallMgr::onServerUpdateMall);
+
+	TCP_CLIENT->register_net_cmd(NET_S2C_BILL_CONFIG , this , &MallMgr::onLoadChargeMoney);
+
+	TCP_CLIENT->register_net_cmd("NET_S2C_RECHARGE_CP_ORDER" , this , &MallMgr::onCpOreder);
+
+	NET_SIC_mall_get cmd;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+
+	//充值的配置
+	sendLoadChargeMoney();
+	return;
+}
+/*
+0 热卖；1 常用；2 强化；3 宝石；4 装扮；5 兑换 
+*/
+//说明：服务器商城全部数据都会同步给客户端
+unsigned int MallMgr::onServerGetMallAllItem(s_net_cmd *cmd)
+{
+	NET_SIS_mall_item* msg = (NET_SIS_mall_item*)cmd;
+	tagMallItemProto* pItem = reinterpret_cast<tagMallItemProto*>(msg->byData);
+	
+	for (int i = 0;i < msg->nItemNum;i++)
+	{
+		Tag_MallItemInfo temp;
+		temp.dwID = pItem[i].dwID;
+		temp.uItemTypeID = pItem[i].dw_data_id;
+		temp.byIndexInServer = pItem[i].byIndexInServer;
+		temp.dwTimeSaleStart = pItem[i].dwTimeSaleStart;
+		temp.dwTimeSaleEnd = pItem[i].dwTimeSaleEnd;
+		temp.dwSaleBegin = pItem[i].dwSaleBegin;
+		temp.dwSaleEnd = pItem[i].dwSaleEnd;
+		temp.nPrice = pItem[i].nPrice;
+		temp.nSalePrice = pItem[i].nSalePrice;
+		temp.typeIndex = pItem[i].n8Kind;
+		temp.bShowIconPlist = (pItem[i].nIsShow != 0);
+		//判断是否是热销
+		/*if (pItem[i].bHot)
+		{
+			m_MallHotItems_Map.insert(std::make_pair(temp.dwID,temp));
+		}*/
+		if (temp.typeIndex < 0 || temp.typeIndex >= MAX_MALL_SHEETS)
+			continue;//非法数据
+		if( temp.typeIndex < MAX_MALL_SHEETS - 1 ) //商城出售的商品，索引0-4
+			m_MallItemsInfo_Array[temp.typeIndex].insert(std::make_pair(temp.dwID,temp));
+		
+		m_MallItemsInfo_NotSale.insert(std::make_pair(temp.uItemTypeID,temp));
+	}
+	_init = true;
+	_bNeedReload = false;
+	//调用ui更新
+	GET_UI(StoreUi, WCT_STOREUI)->updateData();
+
+	return 0;
+}
+
+// const Tag_MallItemInfo& MallMgr::getTagMallItemInfo(unsigned int typeID)
+// {
+// 	for(int i=0; i< MAX_MALL_SHEETS-1; ++i)
+// 	{
+// 		Mall_SingleItem_Map::iterator itor = m_MallItemsInfo_Array[i].begin();
+// 		for ( ; itor!=m_MallItemsInfo_Array[i].end(); ++itor)
+// 		{
+// 			if (typeID == itor->second.uItemTypeID)
+// 			{
+// 				return itor->second;
+// 			}
+// 		}
+// 	}
+// }
+
+void MallMgr::BuyProduct(signed char typeIndex,unsigned int typeID,short buyNum)
+{
+	if (typeIndex < 0 || typeIndex >= MAX_MALL_SHEETS)
+		return;
+	if (-1 == typeID)
+		return;
+	if (buyNum <= 0)
+		return;
+	int beiBaoSpaces = PackageManager::getInstance()->getBlankCount();//获取玩家背包空格数
+	
+	//先进行客户端预判断
+	if (beiBaoSpaces <= 0)
+	{
+		ToolTip::getInstance()->push(GET_STR(161));
+		return;
+	}
+	//
+	int perPrice = -1;//实际单价
+	unsigned char indexInServer = 0;
+	Tag_MallItemInfo tempItem;
+
+	Mall_SingleItem_Map::iterator iter = m_MallItemsInfo_Array[typeIndex].find(typeID);
+	if (iter == m_MallItemsInfo_Array[typeIndex].end())
+		return;
+	tempItem = iter->second;
+
+	//预判断购买物品数量是否超过了该物品的最大堆叠数
+	const ItemTypeData &typeData = PackageManager::getInstance()->getItemTypeData(tempItem.uItemTypeID);
+	if (buyNum > typeData.stackNumber)
+		return;//非法购买，忽略
+	//若是热销商品
+	/*if (0 == typeIndex)
+	{
+	Mall_SingleItem_Map::iterator iter = m_MallHotItems_Map.find(typeID);
+	if (iter == m_MallHotItems_Map.end())
+	return;
+	tempItem = iter->second;
+	}
+	else
+	{
+
+	}*/
+	perPrice = tempItem.nPrice;
+	//判断是否处于促销期内;
+	if (tempItem.isInPromote())
+	{
+		perPrice = tempItem.nSalePrice;
+	}
+	
+	//若是普通元宝或钻石购买;
+	if (EXCHANGE_GOODS_INDEX != typeIndex)
+	{
+		int costItemNum = 0;
+		if (tempItem.uItemTypeID == 1002004)
+		{
+			//优先消耗代金券
+			costItemNum = PackageManager::getInstance()->getItemNumber(EICT_Bag, 1102191);
+		}
+		if(typeIndex!=3){ //如果是元宝购买
+			int nonBindYuanBao = PackageManager::getInstance()->getYuanBao();//获取玩家非绑定元宝;
+			if (perPrice*buyNum > costItemNum *perPrice  + nonBindYuanBao)
+			{
+				/*MessageBoxUi *mallUI = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(164).c_str(), "\xE5\x85\x85\xE5\x80\xBC","\xE5\x8F\x96\xE6\xB6\x88");
+				World::getInstance()->getScene()->addChild(mallUI, WZ_MESSAGEBOX);
+				mallUI->signalOkBtnPressed.connect(this, &MallMgr::ToCharge);*/
+				RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+				CLOSE_UI(WCT_STOREUI);
+				return;
+			}
+		}
+		else{ //如果是钻石购买
+			int nonBindDiamond=PackageManager::getInstance()->getDiamond();//获取玩家非绑定钻石
+			if(perPrice*buyNum>(costItemNum*perPrice+nonBindDiamond))
+			{
+				RechargeNewUiMgr::GetInstance()->openRechargeNewUi(false);
+				CLOSE_UI(WCT_STOREUI);
+				return;
+			}
+		}
+	}
+	//若是兑换;
+	else
+	{
+		LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+		if(!ploc)
+			return;
+		int rongyuan = ploc->getAttribute(RA_RONGYU_POINT);//获取玩家荣誉点;
+		if (perPrice*buyNum > rongyuan)
+		{
+			ToolTip::getInstance()->push(GET_STR(232));
+			return;
+		}
+	}
+
+	NET_SIC_mall_buy_item cmd;
+	cmd.dw_data_id = tempItem.dwID;
+	cmd.n16BuyNum = buyNum;
+	cmd.nPrice = perPrice;
+	cmd.byIndexInServer = tempItem.byIndexInServer;
+	std::function<void(bool)> func = [cmd](bool isSuccess){
+		if (isSuccess)
+			TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+	};
+	SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+
+	
+	return;
+}
+void MallMgr::ToCharge()
+{
+	//充值预留;
+//#ifndef WIN32
+//	WzolJni::getInstance()->payJni();
+//#endif
+	int yuanbaoNum=PackageManager::getInstance()->getTotalChargeYuanBao();
+	if (yuanbaoNum<=0)
+	{
+		OPEN_UI(WCT_ShouChongUi);
+	}
+	else
+	{
+		OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+	}
+}
+unsigned int MallMgr::onServerBuyMallItem(s_net_cmd *cmd)
+{
+	NET_SIS_mall_buy_item* msg = (NET_SIS_mall_buy_item*)cmd;
+	if (0 == msg->dw_error_code)
+	{
+		//ToolTip::getInstance()->push("\xE8\xB4\xAD\xE4\xB9\xB0\xE6\x88\x90\xE5\x8A\x9F\x0D\x0A");//不能不处理
+		ToolTip::getInstance()->push(GET_STR(7102));
+	}
+	else if (E_Mall_Close == msg->dw_error_code)
+	{
+		ToolTip::getInstance()->push(GET_STR(165));
+		return 0;
+	}
+	else if (-100 == msg->dw_error_code)
+	{
+		//背包没有足够的空间;
+		ToolTip::getInstance()->push(GET_STR(161));
+		return 0;
+	}
+	else if (-200 == msg->dw_error_code)
+	{
+		//元宝不足;
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+		return 0;
+	}
+	else if (-201 == msg->dw_error_code)
+	{
+		//荣誉点不足;
+		ToolTip::getInstance()->push(GET_STR(232));
+	}
+	else if (E_Mall_YuanBao_Error == msg->dw_error_code)//该商品已过打折期
+	{
+		ToolTip::getInstance()->push(GET_STR(2226));
+	}
+	else if (E_MALL_SALE_START == msg->dw_error_code)//该商品还未上架
+	{
+		ToolTip::getInstance()->push(GET_STR(2224));
+	}
+	else if (E_MALL_SALE_END == msg->dw_error_code)//该商品已经下架
+	{
+		ToolTip::getInstance()->push(GET_STR(2225));
+	}
+	else
+	{
+		// do nothing;
+	}
+	return 0;
+}
+const MallMgr::Mall_SingleItem_Map* MallMgr::GetSheetItemsByIndex(char index)
+{
+	if (index < 0 || index >= MAX_MALL_SHEETS)
+		return NULL;
+	return &(m_MallItemsInfo_Array[index]);
+}
+
+void MallMgr::clearMallInfo()
+{
+	for (int i = 0;i < MAX_MALL_SHEETS;i++)
+	{
+		m_MallItemsInfo_Array[i].clear();
+	}
+}
+
+bool MallMgr::CanShowInShell(const Tag_MallItemInfo& tag_info,unsigned int dwCurTime)
+{
+	if (tag_info.dwSaleBegin != INVALID && tag_info.dwSaleEnd != INVALID)//若当前时间位于上下架时间之间
+	{
+		if (dwCurTime > tag_info.dwSaleBegin && dwCurTime < tag_info.dwSaleEnd)
+		{
+			return true;
+		}
+	}
+	else if (INVALID == tag_info.dwSaleBegin && INVALID == tag_info.dwSaleEnd)
+	{
+		return true;
+	}
+	else 
+	{
+		//do nothing
+	}
+	return false;
+}
+
+unsigned int MallMgr::onServerUpdateMall( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_update_mall"))
+	{
+		_bNeedReload = true;
+		_init = false;
+		clearMallInfo();
+		//调用ui更新
+		GET_UI(StoreUi, WCT_STOREUI)->updateData();
+	}
+	return 0;
+}
+
+void MallMgr::ReloadMallData()
+{
+	NET_SIC_mall_get cmd;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+	return;
+}
+
+//获取商城不出售的商品
+const MallMgr::Mall_SingleItem_Map* MallMgr::GetNotSaleItems()
+{
+	return &(m_MallItemsInfo_NotSale);
+}
+
+
+//获得充值界面元宝的动态配置
+void MallMgr::sendLoadChargeMoney()
+{
+	WorldPacket C2G_Msg(NET_C2S_REQUEST_BILL_CONFIG);	//组装消息头
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);
+}
+
+unsigned int MallMgr::onLoadChargeMoney( s_net_cmd* cmd )
+{
+	WorldPacket Msg((const void*)cmd);
+	INT32 num=0;
+	_chargemoney.clear();
+	Msg >>num;
+	recharge_files nTmpRF;
+	for (int i=0;i<num;i++)
+	{
+		Msg>>nTmpRF.m_Value;
+		Msg>>nTmpRF.m_Scale;
+		_chargemoney.push_back(nTmpRF);
+	}
+
+	StoreRechargeUiLayer *uilayer = getUiNodeByTag<StoreRechargeUiLayer>(WCT_StoreRechargeUi);
+	if(uilayer)
+		uilayer->updateData();
+	return 0;
+}
+
+unsigned int  MallMgr::onCpOreder(s_net_cmd* cmd) 
+{
+	NET_S2C_RECHARGE_CP_ORDER *pCpOrder = (NET_S2C_RECHARGE_CP_ORDER*)cmd;
+	cocos2d::CCLog("(%f,%f)-%d-(%s, %s)", 
+		pCpOrder->pay,
+		pCpOrder->payscale,
+		pCpOrder->payway,
+		pCpOrder->cporder,
+		pCpOrder->timestamp);
+
+#ifdef _USE_SDK
+	WzolJni::getInstance()->pay2Jni(
+		pCpOrder->pay,
+		pCpOrder->payscale,
+		pCpOrder->payway,
+		pCpOrder->cporder,
+		pCpOrder->timestamp);
+#else
+
+#endif
+	return 0;
+}
+
+Tag_MallItemInfo const* MallMgr::get_mall_item_info_ptr_by_itemid( unsigned int model_id ) const
+{
+	for(int i=0; i< MAX_MALL_SHEETS; ++i)
+	{
+		auto iter = m_MallItemsInfo_Array[i].begin();
+		auto end =m_MallItemsInfo_Array[i].end();
+
+		auto finder =std::find_if(iter,end,[=](Mall_SingleItem_Map::value_type const& kv)->bool{
+			return kv.second.uItemTypeID == model_id;
+		});
+
+		if (finder != end)
+		{
+			return &(*finder).second;
+		}
+	}
+
+	return NULL;
+}
+
+Tag_MallItemInfo const* MallMgr::get_mall_item_info_ptr_by_id( unsigned int goods_id ) const
+{
+	for(int i=0; i< MAX_MALL_SHEETS; ++i)
+	{
+		//auto iter = m_MallItemsInfo_Array[i].begin();
+		//auto end =m_MallItemsInfo_Array[i].end();
+		auto finder = m_MallItemsInfo_Array[i].find(goods_id);
+
+		if (finder != m_MallItemsInfo_Array[i].end())
+		{
+			return &(*finder).second;
+		}
+	}
+
+	return NULL;
+}
+
+void MallMgr::on_buy( bool ok,int num,int type,unsigned int goods_id)
+{
+	if(ok)
+		BuyProduct(type, goods_id, num);
+}
+
+Tag_MallItemInfo const* MallMgr::get_mall_item_info_ptr_by_kind( unsigned int model_id,int kind ) const
+{
+// 	if (kind >=0 && kind < MAX_MALL_SHEETS)
+// 	{
+// 		Mall_SingleItem_Map const& target_map = m_MallItemsInfo_Array[kind];
+// 		
+// 		auto finder = std::find_if(target_map.begin(),target_map.end(),
+// 			[=](Mall_SingleItem_Map::value_type const& kv)->bool{
+// 			return kv.second.uItemTypeID == model_id;
+// 		});
+// 
+// 		if (finder != target_map.end())
+// 		{
+// 			return &finder->second;
+// 		}
+// 	}
+
+	auto finder = std::find_if(m_MallItemsInfo_NotSale.begin(),m_MallItemsInfo_NotSale.end(),
+		[=](Mall_SingleItem_Map::value_type const& kv)->bool{
+			return kv.second.uItemTypeID == model_id;
+	});
+
+	if (finder != m_MallItemsInfo_NotSale.end())
+	{
+		return &finder->second;
+	}
+
+	return NULL;
+}

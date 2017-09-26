@@ -1,0 +1,1097 @@
+#include "EquipShowUi.h"
+#include "CfgReader.h"
+#include "ItemNode.h"
+#include "PackageManager.h"
+#include "CmdAdapter.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "Player.h"
+#include "DBMgr.h"
+#include "AnimationCache.h"
+#include "EquipTipUi.h"
+#include "World.h"
+#include "TouchSprite.h"
+#include "RoleManager.h"
+#include "UiResourceMgr.h"
+#include "UiTools.h"
+#include "UiLoader.h"
+#include "UiManager.h"
+#include "CheckButton.h"
+#include "ToolTip.h"
+#include "RoleEquipUi.h"
+#include "StringMgr.h"
+#include "MirValuableBookUi.h"
+#include "QuestMgr.h"
+
+//////////////////////////////////////////////////////////////////////////
+
+#ifndef ccmax
+#define ccmax(a,b)            (((a) > (b)) ? (a) : (b))
+#endif
+
+#ifndef ccmin
+#define ccmin(a,b)            (((a) < (b)) ? (a) : (b))
+#endif
+
+const INT G_RATING_ATT[][25] = {
+	//物攻下限 物攻上限 魔攻下限 魔攻上限 道攻下限 道攻上限 物防下限 物防上限 魔防下限 魔防上限 命中   闪避  暴击  反暴击   hp  mp  hp恢复  mp恢复 噬魔 破盾 腐蚀 真伤 减伤 抵抗 抵抗
+	{1000,1000,0,0,0,0,1000,1000,1000,1000,1200,1200,1200,1200,200,200,200,200,1200,550,550,1500,550,550,550},	
+	{0,0,1000,1000,0,0,1000,1000,1000,1000,1200,1200,1200,1200,200,200,200,200,1200,550,550,1500,550,550,550},	
+	{0,0,0,0,1000,1000,1000,1000,1000,1000,1200,1200,1200,1200,200,200,200,200,1200,550,550,1500,550,550,550},	
+	{1000,1000,1000,1000,1000,1000,1000,1000,1000,1000,1200,1200,1200,1200,200,200,200,200,1200,550,550,1500,550,550,550}		
+};
+
+CCNode * EquipShowUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["EquipShowUiLayer"] = UiLayerLoader<EquipShowUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("Equipzhanshi", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+void EquipShowUi::updateDisplay()
+{
+	EquipShowUiLayer *uiLayer = getUiNodeByTag<EquipShowUiLayer>(WCT_EquipShowUi);
+	if(uiLayer != NULL)
+	{
+		//uiLayer->updateDisplay();
+	}
+}
+
+
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler EquipShowUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler EquipShowUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onClosePressedBtn", EquipShowUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLevel30PressedBtn", EquipShowUiLayer::onLevel30PressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLevel40PressedBtn", EquipShowUiLayer::onLevel40PressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLevel50PressedBtn", EquipShowUiLayer::onLevel50PressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLevel60PressedBtn", EquipShowUiLayer::onLevel60PressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLevel70PressedBtn", EquipShowUiLayer::onLevel70PressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLevel80PressedBtn", EquipShowUiLayer::onLevel80PressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLevel90PressedBtn", EquipShowUiLayer::onLevel90PressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHuoQuPressedBtn", EquipShowUiLayer::onHuoQuPressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBossPressedBtn", EquipShowUiLayer::onBossPressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBattlePressedBtn", EquipShowUiLayer::onBattlePressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onFubenPressedBtn", EquipShowUiLayer::onFubenPressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onEquipLevelPressedBtn", EquipShowUiLayer::onEquipLevelPressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRechargePressedBtn", EquipShowUiLayer::onRechargePressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onEquipPressedBtn", EquipShowUiLayer::onEquipPressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onShiZhuangPressedBtn", EquipShowUiLayer::onShiZhuangPressedBtn);
+	return NULL;
+}
+
+bool EquipShowUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+
+ItemNode* EquipShowUiLayer::createNode()
+{
+	ItemNode *node = ItemNode::create();
+	node->setConType(EICT_EquipShow);
+	node->setAnchorPoint(ccp(0,0));
+	return node;
+}
+
+void EquipShowUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_id = 0;
+	_displayNode = NULL;
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(0));
+	equipSprite=dynamic_cast<CCSprite*>(_frame->getChildByTag(1));
+	shiZhuangSprite=dynamic_cast<CCSprite*>(_frame->getChildByTag(2));
+	for(int i = EEP_Equip_Start; i < EEP_Fashion; i ++)
+	{
+		CCNode *n = _frame->getChildByTag(1)->getChildByTag(i);
+		if(n!=NULL)
+		{
+			ItemNode* inode = createNode();
+			n->addChild(inode,1,1);
+		}
+	}
+
+	for (int i=4;i<17;i++)
+	{
+		CCNode *n = _frame->getChildByTag(2)->getChildByTag(i);
+		if(n!=NULL)
+		{
+			ItemNode* inode = createNode();
+			n->addChild(inode,1,1);
+		}
+	}
+	setAllChildernButtonPriority(this,-1);
+	roadSprite=(CCSprite*)_frame->getChildByTag(5);
+	//CFG_ARR[EquipShowUiLayer::CF_REC] = "RecNo";
+
+	LocalPlayer *role = RoleManager::getInstance()->getLocalPlayer();
+	//f_equipment* equip = dynamic_cast<f_equipment*>(pitem);
+
+	_suite50Btn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(13));
+	_suite60Btn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(14));
+	_suite70Btn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(15));
+
+	CCSpriteFrame *normalFrame50;
+	CCSpriteFrame *highLightFrame50;
+	CCSpriteFrame *disableFrame50;
+	CCSpriteFrame *normalFrame60;
+	CCSpriteFrame *highLightFrame60;
+	CCSpriteFrame *disableFrame60;
+	CCSpriteFrame *normalFrame70;
+	CCSpriteFrame *highLightFrame70;
+	CCSpriteFrame *disableFrame70;
+	if (role->GetRoleData(RA_ROLETYPE) == EV_Warrior)
+	{
+		normalFrame50 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv501btnn");
+		highLightFrame50 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv501btnh");
+		disableFrame50=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv501btnh");
+		normalFrame60 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv601btnn");
+		highLightFrame60 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv601btnh");
+		disableFrame60=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv601btnh");
+		normalFrame70 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv701btnn");
+		highLightFrame70 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv701btnh");
+		disableFrame70= CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv701btnh");
+	}
+	if (role->GetRoleData(RA_ROLETYPE) == EV_Mage)
+	{
+		normalFrame50 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv502btnn");
+		highLightFrame50 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv502btnh");
+		disableFrame50=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv502btnh");
+		normalFrame60 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv602btnn");
+		highLightFrame60 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv602btnh");
+		disableFrame60=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv602btnh");
+		normalFrame70 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv702btnn");
+		highLightFrame70 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv702btnh");
+		disableFrame70=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv702btnh");
+	}
+	if (role->GetRoleData(RA_ROLETYPE) == EV_Taoist)
+	{
+		normalFrame50 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv503btnn");
+		highLightFrame50 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv503btnh");
+		disableFrame50=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv503btnh");
+		normalFrame60 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv603btnn");
+		highLightFrame60 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv603btnh");
+		disableFrame60=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv603btnh");
+		normalFrame70 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv703btnn");
+		highLightFrame70 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv703btnh");
+		disableFrame70=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("equipzhanshi_lv703btnh");
+	}
+	_suite50Btn->setBackgroundSpriteFrameForState(normalFrame50, CCControlStateNormal);
+	_suite50Btn->setBackgroundSpriteFrameForState(highLightFrame50, CCControlStateHighlighted);
+	_suite50Btn->setBackgroundSpriteFrameForState(disableFrame50,CCControlStateDisabled);
+	_suite60Btn->setBackgroundSpriteFrameForState(normalFrame60, CCControlStateNormal);
+	_suite60Btn->setBackgroundSpriteFrameForState(highLightFrame60, CCControlStateHighlighted);
+	_suite60Btn->setBackgroundSpriteFrameForState(disableFrame60,CCControlStateDisabled);
+	_suite70Btn->setBackgroundSpriteFrameForState(normalFrame70, CCControlStateNormal);
+	_suite70Btn->setBackgroundSpriteFrameForState(highLightFrame70, CCControlStateHighlighted);
+	_suite70Btn->setBackgroundSpriteFrameForState(disableFrame70,CCControlStateDisabled);
+}
+
+const static std::string CFG_ARR[CF_END] = 
+{
+	"","RecNo","typeId","Name","Profession","Profession1","Level",
+	"Durability","Pos","PosIndex","Sex","levelUpId","stuff1Id","stuff1Num",
+	"stuff2Id","stuff2Num","stuff3Id","stuff3Num","j33","j34","j35",
+	"j36","j37","j38","j12","j13","j14","j15","j8","j10","j16","j17",
+	"j19","j21","Luck","Desc","suitId","referLv","quality","taozhuanglv",
+	"kind","baoshi1","baoshi2","baoshi3","baoshi4","baoshi5","stronglv",
+	"f33","f34","f35",
+	"f36","f37","f38","f12","f13","f14","f15","f8","f10","f16","f17",
+	"f19","f21","xing",
+};
+
+void EquipShowUiLayer::onEnter()
+{
+	setTouchPriority(0);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+	///
+	_displayNode = RoleDisplayNode::create();
+	CCNode *node = _frame->getChildByTag(4);
+	node->addChild(_displayNode);
+	///
+	isEquip=1;
+	setLevel(30);
+	setEquipShowButton(Level30Btn,false);
+	_flag = 1;
+	//this->scheduleOnce(schedule_selector(EquipShowUiLayer::onLoadCalback), 0.5f);
+
+	if(NULL == _mLocalPlayer)
+		_mLocalPlayer = RoleManager::getInstance()->getLocalPlayer();
+	updateButtonDisplay();
+}
+
+
+void EquipShowUiLayer::onExit()
+{
+	CCLayer::onExit();
+	//CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	PackageManager::getInstance()->destoryCon(EICT_EquipShow);
+	_mLocalPlayer = NULL;
+}
+
+void EquipShowUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_EquipShowUi);
+	OPEN_UI(WCT_MirValuableBookUi);
+}
+
+void EquipShowUiLayer::onLevel30PressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	/*
+	if(NULL == _mLocalPlayer  || 30 > _mLocalPlayer->getLevel())
+	{
+		ToolTip::getInstance()->push(GET_STR(7262));
+		return ;
+	}*/
+
+	setLevel(30);
+	setEquipShowButton(Level30Btn,false);
+}
+
+void EquipShowUiLayer::onLevel40PressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	/*
+	if(NULL == _mLocalPlayer  || 30 > _mLocalPlayer->getLevel())
+	{
+		ToolTip::getInstance()->push(GET_STR(7262));
+		return ;
+	}
+	*/
+	setLevel(40);
+	setEquipShowButton(Level40Btn,false);
+}
+
+void EquipShowUiLayer::onLevel50PressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	/*
+	if(NULL == _mLocalPlayer  || 40 > _mLocalPlayer->getLevel())
+	{
+		ToolTip::getInstance()->push(GET_STR(7262));
+		return ;
+	}*/
+
+	setLevel(50);
+	setEquipShowButton(Level50Btn,false);
+}
+
+void EquipShowUiLayer::onLevel60PressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	/*
+	if(NULL == _mLocalPlayer  || 50 > _mLocalPlayer->getLevel())
+	{
+		ToolTip::getInstance()->push(GET_STR(7262));
+		return ;
+	}*/
+
+	setLevel(60);
+	setEquipShowButton(Level60Btn,false);
+}
+
+void EquipShowUiLayer::onLevel70PressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	/*
+	if(NULL == _mLocalPlayer  || 60 > _mLocalPlayer->getLevel())
+	{
+		ToolTip::getInstance()->push(GET_STR(7262));
+		return ;
+	}
+	*/
+	setLevel(70);
+	setEquipShowButton(Level70Btn,false);
+}
+
+void EquipShowUiLayer::onLevel80PressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	/*
+	if(NULL == _mLocalPlayer  || 70 > _mLocalPlayer->getLevel())
+	{
+		ToolTip::getInstance()->push(GET_STR(7262));
+		return ;
+	}*/
+
+	setLevel(80);
+	setEquipShowButton(Level80Btn,false);
+}
+
+void EquipShowUiLayer::onLevel90PressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	/*
+	if(NULL == _mLocalPlayer  || 80 > _mLocalPlayer->getLevel())
+	{
+		ToolTip::getInstance()->push(GET_STR(7262));
+		return ;
+	}*/
+
+	setLevel(90);
+	setEquipShowButton(Level90Btn,false);
+}
+
+void EquipShowUiLayer::onHuoQuPressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	roadSprite->setVisible(true);
+}
+
+void EquipShowUiLayer::onBossPressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if (levelLimint(WCT_BOSSPKUI_NEW))
+	{
+		OPEN_UI(WCT_BOSSPKUI_NEW);
+		CLOSE_UI(WCT_EquipShowUi);
+	}
+	else
+	{
+		ToolTip::getInstance()->push(GET_STR(153));
+	}
+}
+
+void EquipShowUiLayer::onBattlePressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if (levelLimint(WCT_FubenUI))
+	{
+		OPEN_UI(WCT_FubenUI);
+		CLOSE_UI(WCT_EquipShowUi);
+	}
+	else
+	{
+		ToolTip::getInstance()->push(GET_STR(153));
+	}
+	
+}
+
+void EquipShowUiLayer::onFubenPressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if(levelLimint(WCT_FubenDuoRenUI))
+	{
+		//OPEN_UI(WCT_FubenDuoRenUI);
+		QuestMgr::getInstance()->onSelectRunNpc(1002008);
+		CLOSE_UI(WCT_EquipShowUi);
+	}
+	else
+	{
+		ToolTip::getInstance()->push(GET_STR(153));
+	}
+	
+}
+
+void EquipShowUiLayer::onEquipLevelPressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if(levelLimint(E_MVB_EquipLvUP))
+	{
+		PackageManager::getInstance()->FindEquipWithMVB(E_MVB_EquipLvUP);
+		CLOSE_UI(WCT_EquipShowUi);
+	}
+	else
+	{
+		ToolTip::getInstance()->push(GET_STR(153));
+	}
+	
+}
+
+void EquipShowUiLayer::onRechargePressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if(levelLimint(WCT_ForgingDecomUI))
+	{
+		OPEN_UI(WCT_ForgingDecomUI);
+		CLOSE_UI(WCT_EquipShowUi);
+	}
+	else
+	{
+		ToolTip::getInstance()->push(GET_STR(153));
+	}
+	
+}
+
+void EquipShowUiLayer::onEquipPressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	isEquip=1;
+	onChange();
+	roadSprite->setVisible(false);
+}
+
+void EquipShowUiLayer::onLoadCalback( float dt )
+{
+	_flag = 0;
+	onChange(); 
+}
+
+void EquipShowUiLayer::onChange()
+{
+	//if (_flag == 1)
+	//	return;
+	equipSprite->setVisible(isEquip == 1?true:false);
+	shiZhuangSprite->setVisible(isEquip == 2?true:false);
+	setSelectTable();
+	setSeletWing();
+	setSelectWeapon();
+	updateDisplay();
+}
+
+void EquipShowUiLayer::onShiZhuangPressedBtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	isEquip=2;
+	onChange();
+	roadSprite->setVisible(false);
+}
+
+void EquipShowUiLayer::setSelectTable()
+{
+	std::vector<int> param;
+	Equip_ShowHelper::MakeItem(_level,isEquip,param);
+}
+
+void EquipShowUiLayer::updateOne(int page,int i, bool is)
+{
+	CCNode* n = _frame->getChildByTag(page)->getChildByTag(i);
+	if (!n)
+		return;
+	ItemNode *node = dynamic_cast<ItemNode*>(n->getChildByTag(1));
+	f_item *item = PackageManager::getInstance()->getItem(EICT_EquipShow, (short)i);
+	node->setClickable(is);
+	if(item == NULL)
+	{
+		node->setBlank();
+		node->setClickable(false);
+	}
+	else
+	{
+		node->removeEffectLayer();
+		node->initWithItem(item);
+	}
+}
+
+void EquipShowUiLayer::updateDisplay()
+{
+	for(int i = EEP_Equip_Start; i < EEP_Fashion; i++)
+	{
+		bool is = isEquip == 1?true:false;
+		updateOne(1,i,is);
+	}
+
+	for (int i=4;i<17;i++)
+	{
+		bool is = isEquip == 2?true:false;
+		updateOne(2,i,is);
+	}
+	updateAvatar();
+}
+void EquipShowUiLayer::updateButtonDisplay()
+{
+	int level = _mLocalPlayer->getLevel();
+	for(int i = Level30Btn; i < LevelCountBtn; ++i)
+	{
+		CCControlButton *btn=dynamic_cast<CCControlButton*>(_frame->getChildByTag(i));
+		if(level < 40)
+		{
+			if( i <= Level50Btn)
+			{
+				btn->setVisible(true);
+			}
+			else
+			{
+				btn->setVisible(false);
+			}
+		}
+		else if(level < 50)
+		{
+			if(i <= Level70Btn)
+			{
+				btn->setVisible(true);
+			}
+			else
+			{
+				btn->setVisible(false);
+			}
+		}
+		else if(level < 60)
+		{
+			if(i <= Level80Btn)
+			{
+				btn->setVisible(true);
+			}
+			else
+			{
+				btn->setVisible(false);
+			}
+		}
+		else
+		{
+			btn->setVisible(true);
+		}
+	}
+}
+void EquipShowUiLayer::updateAvatarOne(int rolepos, short bagpos)
+{
+	//LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	if (rolepos==1)
+	{
+		_displayNode->setAttrabute(ePlayerDisplayAttr(rolepos), wingId);
+		return;
+	}
+	if (rolepos==2)
+	{
+		_displayNode->setAttrabute(ePlayerDisplayAttr(rolepos),WeaponId);
+		return;
+	}
+	f_item *item = PackageManager::getInstance()->getItem(EICT_EquipShow, bagpos);
+	if (item)
+		_displayNode->setAttrabute(ePlayerDisplayAttr(rolepos), item->get_item_type_id());
+	else
+	{
+		 _displayNode->setAttrabute(ePlayerDisplayAttr(rolepos),NULL);
+	}
+}
+
+void EquipShowUiLayer::updateAvatar()
+{
+	if (isEquip==2)
+	{
+		updateAvatarOne(0,12);
+	}
+	else
+	{
+		updateAvatarOne(0,2);
+	}
+	updateAvatarOne(1,4);
+	updateAvatarOne(2,0);
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	_displayNode->setRoleId(lp->getId());
+	_displayNode->loadAnimate();
+}
+
+bool EquipShowUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if ( !isVisible() || !isRunning() || !hasVisibleParents() )
+	{
+		return false;
+	}
+	roadSprite->setVisible(false);
+	return true;
+}
+
+void EquipShowUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+
+}
+
+void EquipShowUiLayer::setLevel(int level)
+{
+	_level=level;
+	onChange();
+}
+
+void EquipShowUiLayer::setSeletWing()
+{
+	wingId=0;
+// 	LocalPlayer* pl = RoleManager::getInstance()->getLocalPlayer();
+// 	int sex = pl->getAttribute(RA_SEX);
+// 	int pf = pl->getAttribute(RA_ROLETYPE);
+// 	std::string str = "SELECT * FROM EquipZhanshi WHERE taozhuanglv = ?1  AND kind = ?2";
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation(str);
+// 	cmd->set_integer32(1 , _level);
+// 	cmd->set_integer32(2 , 2);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		int tab_sex = 0;
+// 		int idx=table->get_index("Sex");
+// 		tab_sex = table->get_integer32(idx);
+// 		bool b_sex = (tab_sex == -1) || (tab_sex == sex);
+// 		int tab_pf = 0;
+// 		idx=table->get_index("Profession1");
+// 		tab_pf = table->get_integer32(idx);
+// 		bool b_pf = (tab_pf == -1) || (tab_pf == pf);
+// 
+// 
+// 		if ( b_sex && b_pf )
+// 		{
+// 			tagEquip info;
+// 			info.n64_serial = _id;
+// 			info.eConType = EICT_EquipShow;
+// 
+// 			int idx = table->get_index("typeId");
+// 			info.dw_data_id = table->get_integer32(idx);
+// 
+// 			idx=table->get_index("PosIndex");
+// 			info.n16Index=table->get_integer32(idx);
+// 
+// 			int edx = 0;
+// 			if (info.n16Index==4)
+// 			{
+// 				wingId=info.dw_data_id;
+// 			}
+// 		}
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+}
+
+void EquipShowUiLayer::setEquipShowButton( int tag,bool visible )
+{
+	for ( int i = Level30Btn; i < LevelCountBtn; ++i)
+	{
+		CCControlButton *btn=dynamic_cast<CCControlButton*>(_frame->getChildByTag(i));
+		CC_ASSERT(btn!=NULL);
+		if (tag==i)
+		{
+			btn->setEnabled(visible);
+		}
+		else
+		{
+			btn->setEnabled(true);
+		}
+	}
+	roadSprite->setVisible(false);
+}
+
+void EquipShowUiLayer::setSelectWeapon()
+{
+	WeaponId=0;
+	LocalPlayer* pl = RoleManager::getInstance()->getLocalPlayer();
+	int sex = pl->getAttribute(RA_SEX);
+	int pf = pl->getAttribute(RA_ROLETYPE);
+
+	const PackageManager::Equip_Show_Info* showInfo = PackageManager::getInstance()->getEquipShowInfo();
+	std::for_each(showInfo->begin(),
+					showInfo->end(),
+					[&](PackageManager::Equip_Show_Info::value_type const& kv)
+	{
+		if ((kv.second.taoZhuangLevel == _level) && (kv.second.taoZhuangkind == 1))
+		{
+			bool b_sex = (kv.second.sex == -1) || (kv.second.sex == sex);
+			bool b_pf = (kv.second.profess == -1) || (kv.second.profess == pf);
+			if ( b_sex && b_pf)
+			{
+				if (kv.second.equip.n16Index==0)
+				{
+					WeaponId=kv.second.equip.dw_data_id;
+				}
+			}
+		}
+	});
+
+// 	std::string str = "SELECT * FROM EquipZhanshi WHERE taozhuanglv = ?1  AND kind = ?2";
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation(str);
+// 	cmd->set_integer32(1 , _level);
+// 	cmd->set_integer32(2 , 1);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		int tab_sex = 0;
+// 		int idx=table->get_index("Sex");
+// 		tab_sex = table->get_integer32(idx);
+// 		bool b_sex = (tab_sex == -1) || (tab_sex == sex);
+// 		int tab_pf = 0;
+// 		idx=table->get_index("Profession1");
+// 		tab_pf = table->get_integer32(idx);
+// 		bool b_pf = (tab_pf == -1) || (tab_pf == pf);
+// 
+// 
+// 		if ( b_sex && b_pf )
+// 		{
+// 			tagEquip info;
+// 			info.n64_serial = _id;
+// 			info.eConType = EICT_EquipShow;
+// 
+// 			int idx = table->get_index("typeId");
+// 			info.dw_data_id = table->get_integer32(idx);
+// 
+// 			idx=table->get_index("PosIndex");
+// 			info.n16Index=table->get_integer32(idx);
+// 
+// 			int edx = 0;
+// 			if (info.n16Index==0)
+// 			{
+// 				WeaponId=info.dw_data_id;
+// 			}
+// 		}
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+}
+
+bool EquipShowUiLayer::levelLimint(int ntag)
+{
+	int level=RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	bool falg=true;
+	switch (ntag)
+	{
+	case WCT_BOSSPKUI:
+		if (level<20)
+			falg=false;
+		break;
+	case WCT_FubenUI:
+		if (level<18)
+			falg=false;
+		break;
+	case WCT_FubenDuoRenUI:
+		if (level<22)
+			falg=false;
+		break;
+	case E_MVB_EquipLvUP:
+		if (level<20)
+			falg=false;
+		break;
+	case WCT_ForgingDecomUI:
+		if (level<16)
+			falg=false;
+		break;
+	}
+	return falg;
+}
+
+
+//计算装备战斗力
+int Rating_Helper::GetRatingNum(const tagEquip& info)
+
+{
+
+	int classParam = 0; //职业限定 
+	//0=战士,1=法师,2=道士
+	classParam=RoleManager::getInstance()->getLocalPlayer()->getAttribute(RA_ROLETYPE);
+	/*classParam = info.dw_data_id/100000%10 - 1;
+	classParam = ccmax(0, classParam);
+	classParam = ccmin(2, classParam);
+	CC_ASSERT(classParam>=0 && classParam<=2);
+	if (classParam > 2)
+	{
+		classParam = 0;
+	}*/
+//
+	double fRating = 0.0f;
+	// 附加属性
+	for (int i = 0; i < MAX_ADDITIONAL_EFFECT; i++)
+	{
+		Rating_Helper::AttRating eaa = Rating_Helper::ERA2EAA(info.equipSpec.EquipAttitionalAtt[i].eRoleAtt);
+		if (eaa == EAA_NULL) continue;
+
+		int nAttValue = info.equipSpec.EquipAttitionalAtt[i].nValue;
+		if (i < MAX_BASE_ATT)
+		{
+			nAttValue += Rating_Helper::getConsolidateAtt(nAttValue, info.equipSpec.byConsolidateLevel);
+		}
+		fRating += G_RATING_ATT[classParam][eaa]*nAttValue * 1.0;
+
+	}
+	// 宝石属性
+	for (int i = 0; i < MAX_EQUIPHOLE_NUM; i++)
+	{
+		tagConsolidateItem pGemProto;
+		Rating_Helper::GetConsolidateProto(info.equipSpec.dwHoleGemID[i], &pGemProto);
+		if(IS_VALID_PTR(&pGemProto))
+		{
+			for (int j = 0; j < MAX_CONSOLIDATE_ROLEATT; j++)
+			{
+				Rating_Helper::AttRating  eaa = Rating_Helper::ERA2EAA(pGemProto.tagRoleAtt[j].eRoleAtt);
+				if (eaa == EAA_NULL) continue;
+				fRating += G_RATING_ATT[classParam][eaa]*pGemProto.tagRoleAtt[j].nAttVal * 1.0;
+			}
+		}
+	}
+	/*FLOAT fQualityParam[] = { 1, 1.25, 1.5, 2, 3};
+	fRating = fRating * fQualityParam[info.equipSpec.byQuality] * (10+info.equipSpec.nLevel)/11.0f;*/
+	fRating = fRating / 1000.0;
+    return (INT)fRating;
+}
+
+Rating_Helper::AttRating Rating_Helper::ERA2EAA( ERoleAttribute eRoleAttribut )
+{
+	switch(eRoleAttribut)
+	{
+	case ERA_ExAttackMin:
+		return EAA_ExAttackMin;
+	case ERA_ExAttackMax:
+		return EAA_ExAttackMax;
+	case ERA_InAttackMin:
+		return EAA_InAttackMin;
+	case ERA_InAttackMax:
+		return EAA_InAttackMax;
+	case ERA_ArmorEx:
+		return EAA_ArmorEx;
+	case ERA_ArmorIn:
+		return EAA_ArmorIn;
+	case ERA_ExMinDefense:
+		return EAA_ExAttack;
+	case ERA_ExMaxDefense:
+		return EAA_ExDef;
+	case ERA_InMinDefense:
+		return EAA_InAttack;
+	case ERA_InMaxDefense:
+		return EAA_InDefense;
+	case ERA_HitRate:
+		return EAA_HitRate;
+	case ERA_Dodge:
+		return EAA_Dodge;
+	case ERA_Crit_Rate:
+		return EAA_Crit_Rate;
+	case ERA_UnCrit_Rate:
+		return EAA_UnCrit_Rate;
+	case ERA_MaxHP:
+		return EAA_MaxHP;
+	case ERA_MaxMP:
+		return EAA_MaxMP;
+	}
+	return EAA_NULL;
+}
+
+int Rating_Helper::getConsolidateAtt(INT32 nAttValue, BYTE byConsolidate)
+{
+	if (byConsolidate<=0 || byConsolidate > MAX_CONSOLIDATE_LEVEL)
+		return 0;
+
+	INT nParam[] = {300, 600, 900, 1400, 1900, 2400, 2900, 3500, 4100, 4700, 5300, 5900, 6500, 7200, 8000, 9000};
+
+	return ccmax(byConsolidate, nAttValue * (nParam[byConsolidate - 1] / 10000.0));
+}
+
+Rating_Helper::tagConsolidateItem* Rating_Helper::GetConsolidateProto( int dw_data_id, tagConsolidateItem* item )
+{
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EnchaseData WHERE id = ?1");
+	cmd->set_integer32(1 , dw_data_id);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	tagConsolidateItem solidataitem;
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("RoleAtt0");
+		solidataitem.tagRoleAtt[0].eRoleAtt=(ERoleAttribute)table->get_integer32(idx);
+		idx = table->get_index("AttValue0");
+		solidataitem.tagRoleAtt[0].nAttVal=(ERoleAttribute)table->get_integer32(idx);
+		idx=table->get_index("RoleAtt1");
+		solidataitem.tagRoleAtt[1].eRoleAtt=(ERoleAttribute)table->get_integer32(idx);
+		idx=table->get_index("AttValue1");
+		solidataitem.tagRoleAtt[1].nAttVal=(ERoleAttribute)table->get_integer32(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	memcpy(item, &solidataitem, sizeof(tagConsolidateItem));
+	return item;
+}
+
+Rating_Helper* Rating_Helper::getInstance()
+{
+	static Rating_Helper mgr;
+	return &mgr; 
+}
+
+Rating_Helper::Rating_Helper()
+{
+
+}
+
+Rating_Helper::~Rating_Helper()
+{
+
+}
+
+int Rating_Helper::GetNoGemRating(int typeId, int equipType)
+{
+	EquipBaseAttr equipAttr = PackageManager::getInstance()->getEquipBaseAttrDB(typeId);
+	int fRating = 0;
+	// 属性
+	for (int i = 0; i < MAX_ADDITIONAL_EFFECT; i++)
+	{
+		if (i >= EquipBaseAttr::EBA_Num)
+		{
+			continue;
+		}
+		int nAttValue = equipAttr.data[i];
+		Rating_Helper::AttRating eaa = ERA2EAA(equipAttr.convert((EquipBaseAttr::eEquipBaseAttr)(i)));
+		if (nAttValue <= 0 || eaa == EAA_NULL)
+		{
+			continue;
+		}
+		fRating += G_RATING_ATT[equipType][eaa]*nAttValue;
+	}
+	fRating = fRating / 1000;
+	return (INT)fRating;
+}
+
+int Rating_Helper::GetNoGemRating(const tagEquipSpec* info, int roleType)
+{
+	CC_ASSERT(info != NULL);
+	if(!info)
+	{
+		return NULL;
+	}
+	if (roleType < 0 || roleType > 3)
+	{
+		return -1;
+	}
+	int fRating = 0;
+	// 属性
+	for (int i = 0; i < MAX_ADDITIONAL_EFFECT; i++)
+	{
+		Rating_Helper::AttRating eaa = Rating_Helper::getInstance()->ERA2EAA(info->EquipAttitionalAtt[i].eRoleAtt);
+		if (eaa == EAA_NULL) continue;
+
+		int nAttValue = info->EquipAttitionalAtt[i].nValue;
+		if (i < MAX_BASE_ATT)
+		{
+			nAttValue += Rating_Helper::getInstance()->getConsolidateAtt(nAttValue, info->byConsolidateLevel);
+		}
+		fRating += G_RATING_ATT[roleType][eaa]*nAttValue;
+
+	}
+	const int luckAtt = 150000;	//幸运战斗i
+	fRating += luckAtt*info->byLuck * 1.0;
+	fRating = fRating / 1000;
+	return (INT)fRating;
+}
+
+void Equip_ShowHelper::MakeItem(int level, int isEquip,const std::vector<int>& passList,int type,int quality)
+{
+	LocalPlayer* pl = RoleManager::getInstance()->getLocalPlayer();
+	int sex = pl->getAttribute(RA_SEX);
+	int pf = pl->getAttribute(RA_ROLETYPE);
+// 	std::string str = "SELECT * FROM EquipZhanshi WHERE taozhuanglv = ?1  AND kind = ?2";
+// 	if (type)
+// 	{
+// 		str = "SELECT * FROM Equip30jilibao WHERE taozhuanglv = ?1  AND kind = ?2";
+// 	}
+
+	const PackageManager::Equip_Show_Info* showInfo = PackageManager::getInstance()->getEquipShowInfo();
+	int _id = 10000;
+
+	std::for_each(showInfo->begin(),
+					showInfo->end(),
+					[&](PackageManager::Equip_Show_Info::value_type const& kv)
+	{
+		if ((kv.second.taoZhuangLevel == level) && (kv.second.taoZhuangkind == isEquip))
+		{
+			bool b_sex = (kv.second.sex == -1) || (kv.second.sex == sex);
+			bool b_pf = (kv.second.profess == -1) || (kv.second.profess == pf);
+			if ( b_sex && b_pf)
+			{
+				tagEquip info = kv.second.equip;
+				info.n64_serial = _id;
+				info.eConType = EICT_EquipShow;
+				PackageManager::getInstance()->createEquip(info);
+				if (info.n16Index == 5 || info.n16Index == 9)
+				{
+					_id++;
+					info.n64_serial = _id;
+					if (info.n16Index == 5)
+					{
+						info.n16Index = 6;
+					}else if (info.n16Index == 9)
+					{
+						info.n16Index = 4;
+					}
+					PackageManager::getInstance()->createEquip(info);
+				}
+				_id++;
+			}
+		}
+	});
+	
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation(str);
+// 	cmd->set_integer32(1 , level);
+// 	cmd->set_integer32(2 , isEquip);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	int _id = 10000;
+// 	while(table->retrieve_row())
+// 	{
+// 		int tab_sex = 0;
+// 		int idx=table->get_index("Sex");
+// 		tab_sex = table->get_integer32(idx);
+// 		bool b_sex = (tab_sex == -1) || (tab_sex == sex);
+// 		int tab_pf = 0;
+// 		idx=table->get_index("Profession1");
+// 		tab_pf = table->get_integer32(idx);
+// 		bool b_pf = (tab_pf == -1) || (tab_pf == pf);
+// 
+// 		idx=table->get_index("PosIndex");
+// 		int n16Index=table->get_integer32(idx);
+// 
+// // 		std::vector<int>::const_iterator iter ,iend = passList.end();
+// // 		for (iter = passList.begin(); iter != iend; ++iter)
+// // 		{
+// // 			if (*iter == n16Index)
+// // 				continue;
+// // 		}
+// 
+// 		if ( b_sex && b_pf )
+// 		{
+// 			tagEquip info;
+// 			info.n64_serial = _id;
+// 			info.eConType = EICT_EquipShow;
+// 
+// 			int idx = table->get_index("typeId");
+// 			info.dw_data_id = table->get_integer32(idx);
+// 
+// 			info.n16Index=n16Index;
+// 
+// 			int edx = 0;
+// 			for (int i = CF_J33; i <= CF_J21 ;++i)
+// 			{
+// 				idx=table->get_index(CFG_ARR[i]);
+// 				int num =table->get_integer32(idx);
+// 				if (num > 0)
+// 				{
+// 					std::string numStr = CFG_ARR[i].substr(1, 2);
+// 					info.equipSpec.EquipAttitionalAtt[edx].eRoleAtt = (ERoleAttribute)atoi(numStr.c_str());
+// 					info.equipSpec.EquipAttitionalAtt[edx].nValue = num;
+// 					edx++;
+// 				}
+// 			}
+// 			edx = 12;
+// 			for (int i = CF_F33; i <= CF_F21 ;++i)
+// 			{
+// 				idx=table->get_index(CFG_ARR[i]);
+// 				int num =table->get_integer32(idx);
+// 				if (num > 0 || num == ERA_UNKNOW)
+// 				{
+// 					std::string numStr = CFG_ARR[i].substr(1, 2);
+// 					info.equipSpec.EquipAttitionalAtt[edx].eRoleAtt = (ERoleAttribute)atoi(numStr.c_str());
+// 					info.equipSpec.EquipAttitionalAtt[edx].nValue = num;
+// 					edx++;
+// 				}
+// 			}
+// 
+// 			edx = 0;
+// 			for (int i = CF_BAOSHI_1; i <= CF_BAOSHI_5 ;++i)
+// 			{
+// 				idx=table->get_index(CFG_ARR[i]);
+// 				int num =table->get_integer32(idx);
+// 				if (num > 0)
+// 				{
+// 					info.equipSpec.dwHoleGemID[edx] = num;
+// 					edx++;
+// 				}
+// 			}
+// 
+// 			idx=table->get_index(CFG_ARR[CF_STRONGLV]);
+// 			info.equipSpec.byConsolidateLevel = table->get_integer32(idx);
+// 
+// 			idx=table->get_index(CFG_ARR[CF_XING]);
+// 			info.equipSpec.nStarLv = table->get_integer32(idx);
+// 
+// 			idx=table->get_index(CFG_ARR[CF_QUALITY]);
+// 			info.equipSpec.byQuality = quality == -1 ?table->get_integer32(idx):quality;
+// 			info.equipSpec.nRating=Rating_Helper::getInstance()->GetRatingNum(info);
+// 				
+// 			PackageManager::getInstance()->createEquip(info);
+// 			if (info.n16Index == 5 || info.n16Index == 9)
+// 			{
+// 				_id++;
+// 				info.n64_serial = _id;
+// 				if (info.n16Index == 5)
+// 					info.n16Index = 6;
+// 				else if(info.n16Index == 9)
+// 					info.n16Index = 4;
+// 				PackageManager::getInstance()->createEquip(info);
+// 			}
+// 			_id++;
+// 		}
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+}

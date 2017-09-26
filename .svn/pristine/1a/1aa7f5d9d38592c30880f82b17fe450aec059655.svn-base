@@ -1,0 +1,872 @@
+#include "LoginUi.h"
+//#include "AudioPlayer.h"
+#include "CfgReader.h"
+#include "CrossSceneUI.h"
+#include "Login.h"
+#include "RegisterUi.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "ServerListUi.h"
+#include "UiResourceMgr.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h" 
+#include "NoticeBoardUi.h"
+#include "ClientCfg.h"
+#include "AppDelegate.h"
+#include "StringMgr.h"
+#include "TradingMgr.h"
+#include "Helper.h"
+#include "ClientUpdate.h"
+#include "UserProUi.h"
+#include "ToolTip.h"
+#include "f_string_table.h"
+#include "GameEventDefine.h"
+#include "f_event_system.h"
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+#include "wzolJni.h"
+#endif
+extern AppDelegate *g_AppDelegate;
+using namespace cocos2d::extension;
+
+//test
+//#include "AnimationCache.h"
+//#include "Player.h"
+//
+//class LoginInputDelegate : public CCTextFieldDelegate
+//{
+//public:
+//	LoginInputDelegate()
+//		: _pwd(false)
+//
+//	virtual bool onTextFieldInsertText(CCTextFieldTTF * sender, const char * text, int nLen)
+//	{
+//
+//	}
+//
+//	virtual bool onTextFieldDeleteBackward(CCTextFieldTTF * sender, const char * delText, int nLen)
+//	{
+//
+//	}
+//	
+//private:
+//	bool _pwd;
+//	std::string str;
+//};
+
+bool LoginUi::_isLoginBtnEnabel = false;
+
+bool LoginUi::init()
+{
+	CCLOG("-----------------login::init 1");
+	_user = NULL;
+	_password = NULL;
+	_isplay = false;
+	_bandingBtn = NULL;
+	isCanClick = true;
+	//AudioPlayer::getSigletonPtr()->playerMusic(AM_BACKGROUND);
+	CCLOG("-----------------login::init 2");
+	if(!CCLayer::init())
+		return false;
+	CCLOG("--------------------login::init 3");
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("LoginUiLoaderLayer", LoginUiLoader::loader());
+	ccNodeLoaderLibrary->registerCCNodeLoader("CheckButton",CheckButtonLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode * node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "loginUi.ccbi").c_str());
+	std::set<std::string>& logintexture = ccbReader->getLoadedSpriteSheet();
+	_plist = logintexture;	//[bing] login界面Texture没放
+	ccbReader->release();
+	CCLOG("---------------login::init 4");
+	_NodeMen = node->getChildByTag(0);
+	_NodeLogin = node->getChildByTag(1);
+	_align_node_down = node->getChildByTag(2);
+	//CCSize screenSize = CCEGLView::sharedOpenGLView()->getFrameSize();
+	CCSize screenSize = CCDirector::sharedDirector()->getWinSize();
+	CCSprite* backGround = dynamic_cast<CCSprite*>(_NodeMen->getChildByTag(1));
+	if(backGround != NULL)
+	{
+		const CCSize& uiEffectSize = backGround->getContentSize();
+		_NodeMen->setScaleX(screenSize.width / uiEffectSize.width);
+		_NodeMen->setScaleY(screenSize.height / uiEffectSize.height);
+	}
+	//_NodeMen->addChild(m_Version);
+	if(node != NULL && _NodeLogin!=NULL && _NodeMen!=NULL) 
+	{
+		CCLOG("-----------------login::init 5");
+		UiMgr::getInstance()->setNodeCenter(node);
+		//setPositionX(getPositionX() + UiMgr::getInstance()->getOffsetX());
+		//setPositionY(getPositionY() + UiMgr::getInstance()->getOffsetY());
+		CCLOG("-------------login::init 6");
+		addChild(node);
+		CCLOG("-------------login::init 6 - 1");
+		node->setTag(0);
+
+
+		CCLOG("----------------login::init 6 - 2");
+		_userNode = _NodeLogin->getChildByTag(1);
+		CCLOG("----------------login::init 6 - 3");
+		_pwdNode = _NodeLogin->getChildByTag(2);
+		CCLOG("----------------login::init 6 - 4");
+		loginBtn = (CCSprite*)_NodeLogin->getChildByTag(3);
+		CCLOG("----------------login::init 6 - 5");
+		CCSprite *m_sprite=dynamic_cast<CCSprite*>(_NodeLogin->getChildByTag(62));
+		m_sprite->setZOrder(1);
+		CCLOG("----------------login::init 6 - 5-2");
+		CCControlButton *m_button=dynamic_cast<CCControlButton*>(_align_node_down->getChildByTag(64));
+		m_button->_setZOrder(3);
+		CCLOG("----------------login::init 6 - 5-3");
+
+		CheckButton* t_checkBtn = dynamic_cast<CheckButton*>(_align_node_down->getChildByTag(13));
+		CC_ASSERT(t_checkBtn != NULL);
+		bool isProCheck = ClientCfg::getInstance()->getInt("general", "isProCheckOK", 0) == 1;
+		_userProIsOK = isProCheck;
+		t_checkBtn->setCheck(isProCheck);
+		t_checkBtn->signalStateChanged.connect(this, &LoginUi::onUserCheckBtnClicked);
+
+		Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_align_node_down->getChildByTag(74)));
+		m_Version = /*CCLabelTTF::create()*/Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_align_node_down->getChildByTag(75)));
+
+
+		Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_align_node_down->getChildByTag(76)));
+
+		m_MenEffect = GameActionNode::create();
+		//m_MenEffect->setPosition(ccp(nodeMen->getChildByTag(0)->getPosition().x,_NodeLogin->getChildByTag(0)->getPosition().y + 30));
+		_NodeMen->getChildByTag(0)->addChild(m_MenEffect,0);
+		std::string uiDirFire = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+		std::string uiDirPathFire = uiDirFire + "login_e_men_1.plist";
+		_plist.insert(uiDirPathFire);
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(uiDirPathFire.c_str());
+		uiDirPathFire = uiDirFire + "login_e_men_2.plist";
+		_plist.insert(uiDirPathFire);
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(uiDirPathFire.c_str());
+		CCLOG("----------------login::init 6 - 5-7");
+// 		for(int i = 1; i < 3; ++i)
+// 		{
+// 			CCString* pStr = CCString::createWithFormat("%s%02d","login_e_men", i);
+// 			if(!m_MenEffect->AddTexture(pStr->getCString(), "Effect", "png"))
+// 				break;
+// 		}
+		m_MenEffect->InitTextureWithSpriteFrame("login_e_men");
+		CCLOG("----------------login::init 6 - 5-8");
+		/*
+		//火的特效
+		m_FireLiftEffect = GameActionNode::create();
+		m_FireLiftEffect->setPosition(ccp(_NodeLogin->getChildByTag(50)->getPosition().x,_NodeLogin->getChildByTag(50)->getPosition().y + 30));
+		m_FireRightEffect = GameActionNode::create();
+		m_FireRightEffect->setPosition(ccp(_NodeLogin->getChildByTag(51)->getPosition().x,_NodeLogin->getChildByTag(51)->getPosition().y + 30));
+		node->addChild(m_FireLiftEffect,0);
+		node->addChild(m_FireRightEffect,0);
+		CCLOG("----------------login::init 6 - 5-4");
+		//加载中间龙球的特效
+		std::string uiDirboll= CFGReader::instance()->get_profile_string("Art", "Effect", "");
+		std::string uiDirPathboll = uiDirboll + "E1_29.plist";
+		CCLOG("----------------login::init 6 - 5-5");
+		//_plist.insert(uiDirPathboll);
+		//CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(uiDirPathboll.c_str());
+
+		m_BallmiddleEffect->InitWithPList(uiDirPathboll.c_str(), "E1_29");
+
+		m_BallmiddleEffect->BeginAction(0.1f, true);
+		CCLOG("----------------login::init 6 - 5-6");
+		//加载俩边的火焰特效
+		std::string uiDirFire = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+		std::string uiDirPathFire = uiDirFire + "login_e_fire.plist";
+		_plist.insert(uiDirPathFire);
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(uiDirPathFire.c_str());
+		CCLOG("----------------login::init 6 - 5-7");
+		for(int i = 1; i < 99; ++i)
+		{
+			CCString* pStr = CCString::createWithFormat("%s%02d","login_e_fire", i);
+			if(!m_FireLiftEffect->AddTexture(pStr->getCString(), "Effect", "png"))
+				break;
+			if(!m_FireRightEffect->AddTexture(pStr->getCString(), "Effect", "png"))
+				break;
+		}
+		CCLOG("----------------login::init 6 - 5-8");
+		m_FireLiftEffect->BeginAction(0.03f, true);
+		m_FireRightEffect->BeginAction(0.03f, true);
+		//加载两边球的特效
+		std::string uiDirBall = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+// 		std::string uiDirPathBall = uiDirBall + "login_e_ball.plist";
+// 		_plist.insert(uiDirPathBall);
+// 		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(uiDirPathBall.c_str());
+// 		for(int i = 1; i < 99; ++i)
+// 		{
+// 			CCString* pStr = CCString::createWithFormat("%s%02d","login_e_ball", i);
+// 			if(!m_BallLiftEffect->AddTexture(pStr->getCString(), "Effect", "png"))
+// 				break;
+// 			if(!m_BallRightEffect->AddTexture(pStr->getCString(), "Effect", "png"))
+// 				break;
+// 		}
+// 		m_BallLiftEffect->BeginAction(0.05f, true);
+// 		m_BallRightEffect->BeginAction(0.05f, true);
+		CCLOG("----------------login::init 6 - 5-9");
+		*/
+
+		//开始按钮特效
+		std::string uiDirBall = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+		std::string sBeginSE = uiDirBall + "E1_80.plist";
+		_plist.insert(sBeginSE);
+		CCLOG("----------------login::init 6 - 5-9");
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sBeginSE.c_str());
+		UiResourceMgr::getInstance()->retainPlistFile(_plist);
+		CCLOG("----------------login::init 6 - 5-10");
+
+// 		m_BeginAcNode = GameActionNode::create();
+// 		for(int j = 1; j < 99; ++j)
+// 		{
+// 			CCString* beginStr = CCString::createWithFormat("%s%02d", "E1_80", j);
+// 			if(!m_BeginAcNode->AddTexture(beginStr->getCString(), "Effect", "png"))
+// 				break;
+// 		}
+// 		CCLOG("----------------login::init 6 - 5-11");
+// //		CCPoint sePos = ccp(CCDirector::sharedDirector()->getWinSize().width / 2.0f, CCDirector::sharedDirector()->getWinSize().height * 5.0f / 12.0f);
+// 		CCPoint sePos = _NodeLogin->getChildByTag(3)->getPosition();
+// 		m_BeginAcNode->setPosition(sePos);
+// 		_NodeLogin->addChild(m_BeginAcNode, RZN_EFFECT);
+// 		m_BeginAcNode->BeginAction(0.05f, true);
+
+		std::string _profilePath = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_80.plist";
+		m_BeginAcNode = GameActionNode::create();
+		m_BeginAcNode->InitWithPList(_profilePath.c_str(), "E1_80");
+		//m_BeginAcNode->setAnchorPoint(ccp(0.5f,0.5f));
+		CCSize size = _NodeLogin->getChildByTag(3)->getContentSize();
+		//m_BeginAcNode->setPositionY(100);
+		m_BeginAcNode->setPosition(ccp(size.width/2,size.height + 110));
+		_NodeLogin->getChildByTag(3)->addChild(m_BeginAcNode, RZN_EFFECT);
+		m_BeginAcNode->BeginAction(0.05f, true);
+		//_NodeLogin->getChildByTag(3)->setPosition(ccp(100,100));
+		CCLOG("----------------login::init 6 - 5-12");
+		//选择的游戏区
+		CCControlButton *_zonettf = dynamic_cast<CCControlButton*>(_NodeLogin->getChildByTag(70));
+		if(_zonettf == NULL)
+		{
+			return false;
+		}
+		CCPoint point = _zonettf->getPosition();
+
+		TTFConfig fc;
+		fc.fontFilePath = FT_FONTFACE;
+		fc.fontSize = 20;
+		fc.outlineSize = 1;
+		LabelFT* _zone = LabelFT::createWithTTF(fc,"");
+		_zone->setHorizontalAlignment(HCENTER);
+		//_zone->setMaxLineWidth(_zone->getContentSize().width);
+		_zone->setPosition(point.x * 0.8,point.y);
+		CCLOG("----------------login::init 6 - 6");
+		ccColor3B textColor;
+		textColor.r = 0;
+		textColor.g = 232;
+		textColor.b = 255;
+		_zone->setColor(ccColor3B(textColor));
+		_zone->setTag(ZONE_TAG);
+		_NodeLogin->addChild(_zone);
+		CCLOG("----------------login::init 6 - 7");
+		//几服
+		_serverNum = (CCTextFieldTTF*)_NodeLogin->getChildByTag(54);
+		ccColor3B serverNumTextColor;
+		serverNumTextColor.r = 0;
+		serverNumTextColor.g = 232;
+		serverNumTextColor.b = 255;
+		_serverNum->setColor(ccColor3B(serverNumTextColor));
+		CC_ASSERT(_userNode != NULL && _pwdNode != NULL);
+		CCLOG("----------------login::init 6 - 8");
+		_userLength = _userNode->getContentSize().width;
+		CCLOG("----------------login::init 6 - 9");
+		_pwdLength = _pwdNode->getContentSize().width;
+		CCLOG("----------------login::init 6 - 10");
+		//_bandingBtn = dynamic_cast<CCControlButton*>(_NodeLogin->getChildByTag(8));
+		CCLOG("----------------login::init 6 - 11");
+		//CC_ASSERT(_bandingBtn != NULL);
+		CCLOG("----------------login::init 6 - 12");
+		//_bandingBtn->setVisible(false);
+
+		//ccColor3B textColor;
+		textColor.r = 0;
+		textColor.g = 0;
+		textColor.b = 0;
+		CCLOG("----------------login::init 7");
+		if(_userNode != NULL)
+		{
+			CCLOG("----------------login::init 8");
+			_user = createInputWithContent(_userNode, 16, false);
+			_NodeLogin->addChild(_user);
+		}
+		if(_pwdNode != NULL)
+		{
+			CCLOG("----------------login::init 9");
+			_password = createInputWithContent(_pwdNode, 16, false);
+			_NodeLogin->addChild(_password);
+		}
+		CCLOG("----------------login::init 10");
+		((LoginUiLoaderLayer*)node)->signalLoginPressed.connect(this, &LoginUi::loginBtnPressed);
+	//	((LoginUiLoaderLayer*)node)->signalRegisterPressed.connect(this, &LoginUi::registerBtnPressed);
+		CCLOG("----------------login::init 11");
+		((LoginUiLoaderLayer*)node)->signalonBoundingBtnPressed.connect(this, &LoginUi::onBoudingBtnPressed);
+		CCLOG("----------------login::init 12");
+		////((LoginUiLoaderLayer*)node)->signalonUserProtocolBtnPressed.connect(this, &LoginUi::onBoudingBtnPressed);
+
+		CCNode *nodeSwitchBtn=_NodeLogin->getChildByTag(64);
+		if (nodeSwitchBtn)
+		{
+			nodeSwitchBtn->setZOrder(1);
+			nodeSwitchBtn->setVisible(true);
+		}
+#ifndef _USE_SDK
+		//进入登录界面强制开
+		
+		CCLOG("---------------------LoginUi.cpp _USE_SDK");
+		ServerListUi::getInstance()->praseServerList();
+		bool ifFirstOpen = (ClientCfg::getInstance()->getInt("general", "isFirstOpen", 1) == 1);
+		if (ifFirstOpen)
+		{
+			UserProUi::getInstance()->open();
+		}
+		else
+		{
+			NoticeBoardUi::getInstance()->open();
+			NoticeBoardUi::getInstance()->LoadNoticeListOnce();
+		}
+		
+#endif
+
+#if (CC_TARGET_PLATFORM==CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+		if (nodeSwitchBtn)
+		{
+			if (WzolJni::getInstance()->hasSwitchAccount())
+			{
+				CCLOG("-------------- WzolJni::getInstance()->hasSwitchAccount 0");
+				nodeSwitchBtn->setVisible(true);
+			}
+			else
+			{
+				CCLOG("-------------- WzolJni::getInstance()->hasSwitchAccount 1");
+				nodeSwitchBtn->setVisible(false);
+			}
+		}
+		CCLOG("-------------- WzolJni::getInstance()->hasSwitchAccount 2");
+#ifdef _USE_SDK
+		CCNode * nodeTemp1 = _NodeLogin->getChildByTag(63);
+		if (nodeTemp1)
+		{
+			nodeTemp1->setVisible(false);
+		}
+#endif
+		CCLOG("-------------- WzolJni::getInstance()->hasSwitchAccount 3");
+		//登陆按键;
+		CCControlButton *loginBtn = static_cast<CCControlButton*>(_NodeLogin->getChildByTag(3));
+		CCLOG("-------------- WzolJni::getInstance()->hasSwitchAccount 4");
+		//点击换区
+		CCControlButton *selectAreaBtn = dynamic_cast<CCControlButton*>(_NodeLogin->getChildByTag(70));
+		CCLOG("-------------- WzolJni::getInstance()->hasSwitchAccount 5");
+		//公告
+		CCControlButton *NoticeBtn = dynamic_cast<CCControlButton*>(node->getChildByTag(71));
+		CCLOG("-------------- WzolJni::getInstance()->hasSwitchAccount 6====%x",loginBtn);
+
+		CCControlButton *t_userProBtn = dynamic_cast<CCControlButton*>(node->getChildByTag(LoginUiLoaderLayer::NT_UserProBtn));
+
+		CCControlButton *t_userProLabelBtn = dynamic_cast<CCControlButton*>(_align_node_down->getChildByTag(LoginUiLoaderLayer::NT_UserProLabelBtn));
+
+		//sdk 登陆慢导致下载serverlist前点击到按钮出现错误
+#ifdef _USE_SDK
+		loginBtn->setEnabled(false);
+		CCLOG("-------------- WzolJni::getInstance()->hasSwitchAccount 7====%x",NoticeBtn);
+		//		if(NoticeBtn != NULL)
+		NoticeBtn->setEnabled(false);
+		t_userProBtn->setEnabled(false);
+		//CCLog(" 349  LoginUi::t_userProBtn->setEnabled(true)");
+		t_userProLabelBtn->setEnabled(false);
+		//CCLog(" 349  LoginUi::t_userProLabelBtn->setEnabled(true)");
+		CCLOG("-------------- WzolJni::getInstance()->hasSwitchAccount 8===%x",selectAreaBtn);
+		//		if(selectAreaBtn != NULL)
+		selectAreaBtn->setEnabled(false);
+		_serverlistprased = false;
+#endif
+		CCLOG("-------------- WzolJni::getInstance()->hasSwitchAccount 9");
+        CCLOG("------------------login init end");
+		//if (loginBtn)
+		//	loginBtn
+#endif
+		return true;
+	}
+	return false;
+}
+
+bool LoginUi::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+#ifndef _USE_SDK
+	if(isTouchOnNodeContent(_userNode, pTouch))
+	{
+		_user->attachWithIME();
+		return true;
+	}
+	else if(isTouchOnNodeContent(_pwdNode, pTouch))
+	{
+		_password->attachWithIME();
+		return true;
+	}
+#endif
+	return false;
+}
+
+void LoginUi::onEnter()
+{
+	CCLOG("-------------------onEnter()  1 ");
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0,false);
+	CCLayer::onEnter();
+	schedule(SEL_SCHEDULE(&LoginUi::update), 0.2);
+	CCLOG("-------------------onEnter()  5 ");
+    REGISTER_EVENT(login_userpro_event,LoginUi,onUserProSwitchBtnSelect);
+
+#ifdef WIN32
+    string client_version = CCUserDefault::sharedUserDefault()->getStringForKey(KEY_OF_VERSION);
+    CCString* pStr = CCString::createWithFormat("%s", (GET_STR(9394) + client_version).c_str());
+    m_Version->setString(pStr->getCString());
+    //m_Version->setPosition(ccp(_NodeMen->getContentSize().width * 0.9, _NodeMen->getContentSize().height * 0.08));
+#else
+    std::string ver;
+    WzolJni::getInstance()->callPlatformWithReturn(GET_APP_VER, "", ver);
+    ver =GET_STR(9394)+ver;
+    m_Version->setString(ver.c_str());
+   // m_Version->setPosition(ccp(_NodeMen->getContentSize().width * 0.9, _NodeMen->getContentSize().height * 0.08));
+#endif
+}
+
+void LoginUi::onExit()
+{
+	UNREGISTER_EVENT(login_userpro_event,LoginUi,onUserProSwitchBtnSelect);
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+	_plist.clear();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+	unschedule(SEL_SCHEDULE(&LoginUi::update));
+}
+
+void LoginUi::onUserCheckBtnClicked(CheckButton *checkBtn, bool check)
+{
+	_userProIsOK = check; 
+	ClientCfg::getInstance()->setInt("general", "isProCheckOK", check);
+}
+
+void LoginUi::onUserProSwitchBtnSelect(login_userpro_event* pev)
+{
+	_userProIsOK = pev->show;
+	CheckButton* t_checkBtn = dynamic_cast<CheckButton*>(_align_node_down->getChildByTag(13));
+	CC_ASSERT(t_checkBtn != NULL);
+	t_checkBtn->setCheck(_userProIsOK);
+	ClientCfg::getInstance()->setInt("general", "isProCheckOK", _userProIsOK);
+}
+
+
+void LoginUi::loginBtnPressed()
+{
+	if (!_userProIsOK)
+	{
+		string strkey = STRING_TABLE["Login_User_Pro"];
+		ToolTip::getInstance()->push(strkey);
+		return;
+	}
+	if(isCanClick)
+	{
+		int CurStatus = ServerListUi::getInstance()->GetCurServerStatus();
+		if(CurStatus == ServerListItem::SS_Preserve)
+		{
+			MessageBoxUi *messageBox = NULL;
+			messageBox = MessageBoxUi::createWithOneBtn("", GET_STR(9602).c_str(),
+				"\xe7\xa1\xae\xe5\xae\x9a\x00\x00");
+
+			messageBox->signalOkBtnPressed.connect(this, &LoginUi::onMessageBoxCancelDoNothing);
+			CCDirector::sharedDirector()->getRunningScene()->addChild(messageBox, WZ_Z_MAX);
+			setAllChildernButtonPriority(messageBox, -100);
+		}
+		_user->setVisible(false);
+		_password->setVisible(false);
+		_NodeLogin->setVisible(false);
+		m_MenEffect->BeginAction(0.2f, false, true);
+		m_BeginAcNode->SetSpriteShow(false);
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(DOOR);
+		signalLoginPressed.emit();
+	}
+}
+void LoginUi::onMessageBoxCancelDoNothing()
+{
+	Login::getInstance()->setUiToLoginFromMen();
+}
+/*
+void LoginUi::registerBtnPressed()
+{
+	//一键注册;
+	//signalRegisterPressed.emit();
+	signalLoginPressed.emit();
+	//UiMgr::getInstance()->openUi(WCT_ServerList);
+}
+
+void LoginUi::onekeyPlayPressed()
+{
+	//一键试玩;
+	signalonekeyPlayPressed.emit();
+}*/
+
+void LoginUi::onEnterWebBtnPressed()
+{
+	//进入官网;
+	signalonEnterWebBtnPressed.emit();
+}
+
+void LoginUi::onAccessBBSBtnPressed()
+{
+	//访问论坛;
+	signalonAccessBBSBtnPressed.emit();
+}
+
+void LoginUi::onBoudingBtnPressed()
+{
+	//绑定账号;
+	signalonBoundingAccountBtnPressed.emit();
+}
+
+void LoginUi::onUserProtocolBtnPressed()
+{
+	//用户协议点击
+	//signalonUserProtocolBtnPressed.emit();
+}
+
+const char * LoginUi::getUserName()
+{
+	CC_ASSERT(_user != NULL);
+	return _user->getString();
+} 
+
+const char * LoginUi::getPassword()
+{
+	CC_ASSERT(_password != NULL);
+	return _password->getString();
+}
+
+void LoginUi::update( float dt )
+{
+    LabelFT* _zone = dynamic_cast<LabelFT*>(_NodeLogin->getChildByTag(ZONE_TAG));
+    CC_ASSERT(_zone != NULL);
+    if(_zone == NULL)
+    {
+        return;
+    }
+//#if (CC_TARGET_PLATFORM != CC_PLATFORM_IOS)
+//	string client_version = CCUserDefault::sharedUserDefault()->getStringForKey(KEY_OF_VERSION);
+//	CCString* pStr = CCString::createWithFormat("%s", (GET_STR(9394) + client_version).c_str());
+//	m_Version->setString(pStr->getCString());
+//	m_Version->setPosition(ccp(_NodeMen->getContentSize().width * 0.9, _NodeMen->getContentSize().height * 0.08));
+//#endif
+
+#ifdef WIN32
+	//登陆按键;
+	CCControlButton *btn = static_cast<CCControlButton*>(_NodeLogin->getChildByTag(3));
+	if(_password->getCharCount() == 0 ||
+		_user->getCharCount() == 0)
+	{
+		btn->setEnabled(false);
+	}
+	else
+	{
+		btn->setEnabled(true);
+	}
+	
+	if(_password->getCharCount() != 0 && !_password->isSecureTextEntry())
+	{
+		std::string pwd = _password->getString();
+		_password->setSecureTextEntry(true);
+		_password->setString(pwd.c_str());
+	}
+#endif
+
+#ifdef _USE_SDK
+	//if (ClientUpdate::getInstance()->getSDKInitFailedFlag())
+	{
+		int status = WzolJni::getInstance()->serverListStatus();
+		//bool _serverlistprased = false;
+		if (status==2)
+		{
+		}
+
+		if (status==1 && !_serverlistprased)
+		{
+			//[bing] 为什么走2次是因为SDK版不会手动点击换服按钮打开 ServerList在login层下载 所以需要在这里解析
+			ServerListUi::getInstance()->praseServerList();
+			_serverlistprased = true;
+			_isLoginBtnEnabel = true;
+
+/*			CCLog("---------------------LoginUi.cpp _USE_SDK");*/
+			//进入登录界面强制开
+			bool ifFirstOpen = (ClientCfg::getInstance()->getInt("general", "isFirstOpen", 1) == 1);
+			if (ifFirstOpen)
+			{
+				UserProUi::getInstance()->open();
+			}
+			else
+			{
+				NoticeBoardUi::getInstance()->open();
+				NoticeBoardUi::getInstance()->LoadNoticeListOnce();
+			}
+			Login::getInstance()->hideTip();
+		}
+
+		//登陆按键;
+		CCControlButton *btn = static_cast<CCControlButton*>(_NodeLogin->getChildByTag(3));
+		//点击换区
+		//CCLog("LoginUi::update ============= 1");
+		CCControlButton *selectAreaBtn = dynamic_cast<CCControlButton*>(_NodeLogin->getChildByTag(70));
+		//CCLog("LoginUi::update ============= 2");
+		//公告
+		CCControlButton *NoticeBtn = dynamic_cast<CCControlButton*>(this->getChildByTag(0)->getChildByTag(71));
+		CCControlButton *t_userProBtn = dynamic_cast<CCControlButton*>(this->getChildByTag(0)->getChildByTag(LoginUiLoaderLayer::NT_UserProBtn));
+		
+		CCControlButton *t_userProLabelBtn = dynamic_cast<CCControlButton*>(_align_node_down->getChildByTag(LoginUiLoaderLayer::NT_UserProLabelBtn));
+		//CCLog("LoginUi::update ============= 3");
+		if(_serverlistprased)
+		{
+			//btn->setEnabled(true);
+			selectAreaBtn->setEnabled(true);
+			NoticeBtn->setEnabled(true);
+			t_userProBtn->setEnabled(true);
+			//CCLog("LoginUi::t_userProBtn->setEnabled(true)");
+			t_userProLabelBtn->setEnabled(true);
+		}
+		else
+		{
+			//btn->setEnabled(false);
+			selectAreaBtn->setEnabled(false);
+			NoticeBtn->setEnabled(false);
+			t_userProBtn->setEnabled(false);
+			//CCLog("LoginUi::t_userProBtn->setEnabled(false)");
+			t_userProLabelBtn->setEnabled(false);
+		}
+
+		//[bing] 如果资源初始化成功才可以登录
+		//btn->setEnabled(Login::getInstance()->_resInited && _serverlistprased);
+		//ZHJL:自动更新后，资源不需要在这里初始化了，不用判断
+		btn->setEnabled(_isLoginBtnEnabel);
+
+		//CCLog("LoginUi::update ============= 4");
+	}
+	//else
+	{
+	}
+
+#endif
+   // CCLog("----------------LoginUi::update 1");
+	//更新后的UI显示是：若上次登录过则显示上次登录，否则显示推荐服;  //add by XSea 2014.10.22
+	std::string tmpAreaName = ServerListUi::getInstance()->curAreaName();
+	std::string tmpServerName = ServerListUi::getInstance()->curServerName();
+	std::string tmpServerNum = ServerListUi::getInstance()->curServerNum(); 
+	//如果有选中的区
+	if (!tmpAreaName.empty() && !tmpServerName.empty() && !tmpServerNum.empty())
+	{
+		tmpAreaName += tmpServerName; //不显示几区了 //add by XSea 2014.12.02
+		_zone->setString(tmpServerName.c_str());
+		_serverNum->setString(tmpServerNum.c_str());
+	}
+	else
+	{
+		//如果是记录上次的显示
+		std::string areaName = ClientCfg::getInstance()->getString("general", "area", "").c_str();
+		std::string serverNum = ClientCfg::getInstance()->getString("general", "servernum", "").c_str(); //大区改为显示几服 add by XSea 2014.10.22
+		std::string serverName = ClientCfg::getInstance()->getString("general", "server", "").c_str();
+		if((!areaName.empty()) && (!serverName.empty()) && (!serverNum.empty()))//说明上次登录过;
+		{
+			//UI 统一更新;
+			areaName += serverName; //不显示几区了 //add by XSea 2014.12.02
+			_zone->setString(serverName.c_str());
+			_serverNum->setString(serverNum.c_str());
+
+            ServerZone::Zone zone; ServerZone::Server server;
+            ServerListUi::getInstance()->getCurDataForLogin(zone,server);
+            ServerListUi::getInstance()->setCurServerStatus(server.status);
+            
+#ifdef _USE_SDK
+				extern int g_zoneid;
+				extern std::string g_zonename;
+				extern std::string g_zonenum;
+				extern std::string g_areaName;
+				
+                g_zonenum = server.num;
+                g_zonename = server.name;
+            
+                g_areaName = zone.name;
+                g_zoneid = zone.serial;
+#endif
+		}
+		else//未登录过则显示推荐服务器;
+		{
+			//UI 统一更新;
+			areaName = ServerListUi::getInstance()->recommandAreaName().c_str(); 
+			serverNum = ServerListUi::getInstance()->recommandServerNum().c_str();
+			serverName = ServerListUi::getInstance()->recommandServerName().c_str();
+			areaName += serverName; //不显示几区了 //add by XSea 2014.12.02
+			_zone->setString(serverName.c_str());
+			_serverNum->setString(serverNum.c_str());
+
+#ifdef _USE_SDK
+				extern int g_zoneid;
+				extern std::string g_zonename;
+				extern std::string g_zonenum;
+				extern std::string g_areaName;
+				ServerZone::Zone zone;
+				ServerZone::Server server;
+				ServerListUi::getInstance()->getCurDataForLogin(zone,server);
+                g_zonenum = server.num;
+				g_zonename = server.name;
+            
+				g_areaName = zone.name;
+				g_zoneid = zone.serial;
+#endif
+
+		}
+	}
+
+}
+
+void LoginUi::setUserName( const std::string &userName )
+{
+	_user->setString(userName.c_str());
+}
+
+void LoginUi::setPassword( const std::string &password )
+{
+	_password->setString(password.c_str());
+}
+
+LoginUi::LoginUi()
+{
+	
+}
+
+LoginUi::~LoginUi()
+{
+
+}
+
+void LoginUi::backToLoginFromMen()
+{
+	_user->setVisible(true);
+	_password->setVisible(true);
+	_NodeLogin->setVisible(true);
+	m_MenEffect->SetSpriteShow(false);
+}
+
+void LoginUi::restoreLoginBtn()
+{
+	_user->setVisible(true);
+	_password->setVisible(true);
+	_NodeLogin->setVisible(true);
+	m_MenEffect->StopAction();
+	m_MenEffect->SetSpriteShow(false);
+	m_BeginAcNode->SetSpriteShow(true);
+	//AudioPlayer::getSigletonPtr()->playerSoundUIEffect(DOOR);
+	//signalLoginPressed.emit();
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler LoginUiLoaderLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL; 
+}
+
+cocos2d::extension::SEL_CCControlHandler LoginUiLoaderLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "loginPressed", LoginUiLoaderLayer::loginPressed);
+/*
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "registerPressed", LoginUiLoaderLayer::registerPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onekeyPlayPressed",LoginUiLoaderLayer::onekeyPlayPressed);*/
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSwitchAccountBtnPressed", LoginUiLoaderLayer::onChangeAccount);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChangeService",LoginUiLoaderLayer::onChangeService);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onEnterWebBtnPressed",LoginUiLoaderLayer::onEnterWebBtnPressed);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onAccessBBSBtnPressed", LoginUiLoaderLayer::onAccessBBSBtnPressed);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBoundingBtnPressed", LoginUiLoaderLayer::onBoundingBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onNoticeBtnPressed", LoginUiLoaderLayer::onNoticeBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onUserProBtnPressed", LoginUiLoaderLayer::onUserProtocolBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onUserProLabelBtnPressed", LoginUiLoaderLayer::onUserProtocolBtnPressed);
+	return NULL;
+}
+
+bool LoginUiLoaderLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+
+void LoginUiLoaderLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	return;                                                                                                                                                                                                                    
+}
+
+void LoginUiLoaderLayer::loginPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//CCTextureCache::sharedTextureCache()->dumpCachedTextureInfo();
+	signalLoginPressed.emit();
+}
+
+void LoginUiLoaderLayer::onChangeAccount( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{//切换账号
+#if (CC_TARGET_PLATFORM==CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	if (WzolJni::getInstance()->hasSwitchAccount())
+	{
+		CCControlButton *loginBtn = dynamic_cast<CCControlButton*>(getChildByTag(1)->getChildByTag(3));
+		if (loginBtn)
+		{
+			loginBtn->setEnabled(false);
+		}
+		LoginUi::_isLoginBtnEnabel = false;
+		Login::getInstance()->setTicket("", "", (unsigned int)-1);
+		WzolJni::getInstance()->switchAccount();
+	}
+#endif
+}
+
+void LoginUiLoaderLayer::onChangeService( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	//选择服务列表;
+	ServerListUi::getInstance()->open();
+}
+
+void LoginUiLoaderLayer::onEnterWebBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+
+	//进入官网;
+	signalonEnterWebBtnPressed.emit();
+}
+
+void LoginUiLoaderLayer::onAccessBBSBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+
+	//访问论坛;
+	signalonAccessBBSBtnPressed.emit();
+}
+void LoginUiLoaderLayer::onUserProtocolBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+// 	查看用户协议
+// 		signalonUserProBtnPressed.emit();
+	UserProUi::getInstance()->open();
+}
+
+void LoginUiLoaderLayer::onBoundingBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//绑定账号;
+	signalonBoundingBtnPressed.emit();
+}
+void LoginUiLoaderLayer::onNoticeBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CCLog("-----------LoginUiLoaderLayer::onNoticeBtnPressed-------");
+	ServerListUi::getInstance()->praseServerList();
+	NoticeBoardUi::getInstance()->open();
+}
+
+LoginUiLoaderLayer::~LoginUiLoaderLayer()
+{
+
+}
+
+LoginUiLoaderLayer::LoginUiLoaderLayer()
+{
+
+}

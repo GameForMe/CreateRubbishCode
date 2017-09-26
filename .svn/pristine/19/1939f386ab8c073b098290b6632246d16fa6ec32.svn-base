@@ -1,0 +1,516 @@
+#include "CoreTreeUi.h"
+#include "World.h"
+#include "UiResourceMgr.h"
+#include "CfgReader.h"
+#include "UiLoader.h"
+#include "BaseDefine.h"
+#include "ItemNode.h"
+#include "UiTools.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "AnimationCache.h"
+#include "MapManager.h"
+#include "UiManager.h"
+#include "StringMgr.h"
+#include "ToolTip.h"
+#include "PackageManager.h"
+#include "GambleMgr.h"
+#include "MessageBoxUi.h"
+#include "Auto_ActionMgr.h"
+#include "ExchangeBusinessMgr.h"
+#include "VIPMgr.h"
+#include "OneKeyCompleteUi.h"
+#include "HearSayMgr.h"
+#include "ChatMgr.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "LocalPlayer.h"
+#include "WorldPacket.h"
+#include "CommonMsgDefine.h"
+#include "TCPClient.h"
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+#include "wzolJni.h"
+#endif
+
+//////////////////////////////////////////////////////////////////////////
+
+CCNode * CoreTreeUi::openUi()
+{
+	//请求摇钱树剩余天数
+	WorldPacket C2G_Msg(NET_C2G_REQUEST_MONEY_TREE_OVER_DAYS);//组装消息头 
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);//发送
+
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["CoreTreeUiLayer"] = UiLayerLoader<CoreTreeUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("coretreeui", nodeLoaders, _loadSpriteSheet);
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	uiNode->setPosition(ccp((winSize.width-UI_WIDTH) / 2.0f, (winSize.height - UI_HEIGHT) / 2.0f));
+	return uiNode;
+}
+
+CoreTreeUiLayer * CoreTreeUi::getUiLayer()
+{
+	return getUiNodeByTag<CoreTreeUiLayer>(WCT_CoreTreeUi);
+}
+
+void CoreTreeUi::updateData()
+{
+	CoreTreeUiLayer * ui = getUiLayer();
+	if(ui != NULL)
+	{
+		ui->updateDisplay();
+	}
+}
+cocos2d::CCPoint CoreTreeUi::getNumPoint( int i )
+{
+// 	CoreTreeUiLayer * ui = getUiLayer();
+// 	if ( ui != NULL)
+// 	{
+// 		ui->getNumPoint(i);
+// 	}
+ 	return CCPoint();
+}
+
+
+void CoreTreeUi::setNumber( int number )
+{
+	CoreTreeUiLayer * ui = getUiLayer();
+	if ( ui != NULL)
+	{
+		ui->setNumber(number);
+	}
+}
+
+void CoreTreeUi::setLestCount( int lastNumber )
+{
+	CoreTreeUiLayer * ui = getUiLayer();
+	if ( ui != NULL)
+	{
+		ui->setLestCount(lastNumber);
+	}
+}
+
+void CoreTreeUi::setGetYuanBao( int getYuanbao )
+{
+	CoreTreeUiLayer * ui = getUiLayer();
+	if ( ui != NULL)
+	{
+
+		ui->setGetYuanBao(getYuanbao);
+	}
+}
+
+void CoreTreeUi::setReCharge( int reCharge )
+{
+	CoreTreeUiLayer * ui = getUiLayer();
+	if ( ui != NULL)
+	{
+
+		ui->setReCharge(reCharge);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+CoreTreeUiLayer::CoreTreeUiLayer()
+    :_coretreeFrame(NULL)
+	,_coretreeSprite(NULL)
+	,_thousandsSprite(NULL)
+	,_hundardSprite(NULL)
+	,_tenSprite(NULL)
+	,_number(0)
+	,_lestCount(0)
+	,_getYuanBao(0)
+{
+	
+}
+
+CoreTreeUiLayer::~CoreTreeUiLayer()
+{
+	_scrollArray->release();
+}
+
+cocos2d::SEL_MenuHandler CoreTreeUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler CoreTreeUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", CoreTreeUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onKnowBtnPressed", CoreTreeUiLayer::onCloseBtn2Pressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRockBtnPressed", CoreTreeUiLayer::onRockBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onInstructBtnPressed", CoreTreeUiLayer::onInstructBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRechargeBtnPressed", CoreTreeUiLayer::onRechargeBtnPressed);
+	return NULL;
+}
+
+void CoreTreeUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+    _coretreeFrame = getChildByTag(NT_CoretreeFrame);
+    CC_ASSERT(_coretreeFrame != NULL);
+    
+//     CCNode *boardNode = _coretreeFrame->getChildByTag(NT_ScoreBord);
+//     CC_ASSERT(boardNode != NULL);
+	instructFrame = dynamic_cast<CCSprite*>(_coretreeFrame->getChildByTag(NT_InstructFrame));
+	instructFrame->setZOrder(RZN_EFFECT+2);
+	m_sSEName = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_21.plist";
+	_coretreeAcNode = GameActionNode::create();
+	_coretreeAcNode->InitWithPList(m_sSEName.c_str(), "E1_21");
+	_coretreeAcNode->setPosition(_coretreeFrame->getChildByTag(0)->getPosition());		//特效nodetag为0
+	_coretreeFrame->addChild(_coretreeAcNode, RZN_EFFECT);
+
+	_scrollArray = CCArray::create();
+	_scrollArray->retain();
+/*
+	//累计获得
+		_getyuanbaoBLabel = CCLabelBMFont::create();
+		_getyuanbaoBLabel->setFntFile("Art/Scene/fontNum.fnt");
+		_getyuanbaoBLabel->setPosition(_coretreeFrame->getChildByTag(NT_GetYuanbao)->getPosition());
+		_getyuanbaoBLabel->setAnchorPoint(ccp(0.0f, 0.5f));
+		_coretreeFrame->addChild(_getyuanbaoBLabel, RZN_EFFECT+1);
+		_getyuanbaoBLabel->setTag(36);
+		//剩余次数
+		_lestCounBLabel = CCLabelBMFont::create();
+		_lestCounBLabel->setFntFile("Art/Scene/fontNum.fnt");
+		_lestCounBLabel->setPosition(_coretreeFrame->getChildByTag(NT_LestCount)->getPosition());
+		_lestCounBLabel->setAnchorPoint(ccp(0.0f, 0.5f));
+		_lestCounBLabel->setScale(0.8f);
+		_coretreeFrame->addChild(_lestCounBLabel, RZN_EFFECT+1);
+		_lestCounBLabel->setTag(35);
+		*/
+		//再充值
+	_rechargeBLabel = CCLabelBMFont::create(); 
+	_rechargeBLabel->setFntFile("Art/Scene/fontNum.fnt");
+	_rechargeBLabel->setPosition(_coretreeFrame->getChildByTag(NT_ReCharge)->getPosition());
+	_rechargeBLabel->setAnchorPoint(ccp(0.0f, 0.5f));
+	_rechargeBLabel->setScale(0.8f);
+	_coretreeFrame->addChild(_rechargeBLabel, RZN_EFFECT+1);
+	_rechargeBLabel->setTag(34);
+
+	for (int i = 3; i >= 0; i --)
+	{
+
+		ScrollImage *_scroll = ScrollImage::create();
+		_scroll->setAnchorPoint(ccp(0.0f, 0.0f));
+		_scrollArray->addObject(_scroll);
+		_coretreeFrame->getChildByTag( 14 + i)->addChild(_scroll, 1);
+	}
+	
+	_getYuanBao = PackageManager::getInstance()->GetRecharge_Feedback();
+	if (_getYuanBao<0)
+		_getYuanBao = 0;
+	setGetYuanBao(_getYuanBao);
+	INT64 nTotalNum = PackageManager::getInstance()->GetTotalPeriodRecharge_Feedback();
+	_lestCount = nTotalNum/1000 - PackageManager::getInstance()->GetFeedbackTimes();
+	if (_lestCount <= 0)
+	{
+		_lestCount = 0;
+		//setEnableRockBtn(false);
+		//ToolTip::getInstance()->push("\xCA\xA3\xD3\xE0\xB4\xCE\xCA\xFD\xCE\xAA\x30\xA3\xAC\xB2\xBB\xBF\xC9\xB5\xE3\xBB\xF7");
+	}
+	setLestCount(_lestCount);
+
+	_reCharge = 1000 - nTotalNum%1000;
+	if (_reCharge < 0)
+		_reCharge = 1000;
+	setReCharge(_reCharge);
+	 
+	 // _CountDownLabel->setString(World::getInstance()->GetCountTime()->getc);
+// 	 m_nGHour = m_CountDTime / 3600;
+// 	 m_nGMinute = m_CountDTime % 3600;
+// 	 m_nGMinute /= 60;
+// 	 m_nGSecond = m_CountDTime %60;
+// 
+// 	 CCString* goldTimeStr = goldTimeStr = CCString::createWithFormat("%02d:%02d:%02d\xE5\x90\x8E\xE5\x85\x8D\xE8\xB4\xB9",m_nGHour,m_nGMinute,m_nGSecond);
+// 	 _CountDownLabel->setString(goldTimeStr->getCString());
+	//  this->schedule(schedule_selector(CoreTreeUiLayer::updateCountTime), 1.0f);
+	GambleMgr::getInstance()->setIsCoreTreeRunning(false);
+
+	//...整体缩小
+	this->setScale(0.8f);
+}
+
+void CoreTreeUiLayer::onEnter()
+{
+//	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+}
+
+void CoreTreeUiLayer::onExit()
+{
+	GambleMgr::getInstance()->setIsCoreTreeRunning(false);
+	CCLayer::onExit();
+//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool CoreTreeUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if ( !isVisible() || !isRunning() || !hasVisibleParents() )
+	{
+		return false;
+	}
+	if(isTouchOnNodeContent(this, pTouch))
+	{
+		return true;
+	}
+	return false;
+}
+
+void CoreTreeUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+
+}
+
+void CoreTreeUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+//	stopAnimation();
+	CLOSE_UI(WCT_CoreTreeUi);
+}
+
+void CoreTreeUiLayer::onCloseBtn2Pressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	setInstrcutshow(false);
+}
+
+void CoreTreeUiLayer::onInstructBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	setInstrcutshow(true);
+}
+
+void CoreTreeUiLayer::onRechargeBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+}
+
+void CoreTreeUiLayer::onRockBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_19);
+	
+	//setEnableRockBtn(false);
+	//add by vvv 2014.10.22
+	if (_lestCount <= 0)
+	{
+		//摇钱剩余次数不足，请充值后继续。
+		ToolTip::getInstance()->push("\xE6\x91\x87\xE9\x92\xB1\xE5\x89\xA9\xE4\xBD\x99\xE6\xAC\xA1\xE6\x95\xB0\xE4\xB8\x8D\xE8\xB6\xB3\xEF\xBC\x8C\xE8\xAF\xB7\xE5\x85\x85\xE5\x80\xBC\xE5\x90\x8E\xE7\xBB\xA7\xE7\xBB\xAD\xE3\x80\x82");
+	}
+	else
+	{
+		if (!GambleMgr::getInstance()->getIsCoreTreeRunning())
+		{
+			GambleMgr::getInstance()->setIsCoreTreeRunning(true);
+			GambleMgr::getInstance()->Recharge_Gamble();
+		}
+		else
+		{
+			ToolTip::getInstance()->push(GET_STR(7129));
+		}
+	}
+}
+
+void CoreTreeUiLayer::updateDisplay()
+{
+	runAnimation();
+	runNumRock();
+	
+	_lestCount = PackageManager::getInstance()->GetTotalPeriodRecharge_Feedback()/1000 - PackageManager::getInstance()->GetFeedbackTimes();
+	if (_lestCount < 0)
+	{
+		_lestCount = 0;
+	}
+	setLestCount(_lestCount);
+	schedule(schedule_selector(CoreTreeUiLayer::rockFinish), 3.0f);
+
+	
+}
+void CoreTreeUiLayer::runAnimation()
+{
+	if(_coretreeAcNode->GetActionState())
+	{
+		_coretreeAcNode->StopAction();
+	}
+	_coretreeAcNode->playAnimOnce(0.15, false);
+	/*AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0,"yaoqianshu", anims);
+	BSAnimate *animste = anims[0];
+	if (_coretreeSprite == NULL)
+	{
+		_coretreeSprite = CCSprite::create();
+		//_coretreeSprite->setAnchorPoint(ccp(0.0f, 1.0f));
+		_specialnode->addChild(_coretreeSprite);
+		_coretreeSprite->runAction(animste);
+	}
+	else
+	{
+		_coretreeSprite->runAction(animste);
+	}*/
+}
+
+// void CoreTreeUiLayer::stopAnimation()
+// {
+// 	if (_coretreeSprite != NULL)
+// 	{
+// 		_coretreeSprite->stopAllActions();
+// 		_coretreeSprite->removeFromParent();
+// 		_coretreeSprite = NULL;
+// 	}
+// }
+
+void CoreTreeUiLayer::runNumRock()
+{
+	int buf[4],temp=0,i=0;
+	int number_temp = _number;
+	do 
+	{
+		temp = number_temp / 10;
+		buf[i] = number_temp % 10;
+		ScrollImage *si = static_cast<ScrollImage*>(_scrollArray->objectAtIndex(i));
+		if (si)
+		{
+			si->setNumber(buf[i],(i+1), true);
+		}
+		number_temp = temp;
+		++i;
+	} while (4 != i);	
+}
+
+void CoreTreeUiLayer::setEnableRockBtn( bool enable )
+{////add by vvv 2014.10.22  按钮不可点击状态暂时不用，显示为点击弹出文字提示
+	CCControlButton *btn = dynamic_cast<CCControlButton*>(_coretreeFrame->getChildByTag(NT_RockBtn));
+	CC_ASSERT(btn != NULL);
+	btn->setTouchEnabled(enable);
+	if (enable)
+		setButtonSpriteFrame(btn,"cointreeui_cashbtnn","cointreeui_cashbtnh","cointreeui_cashbtnn");
+	else
+		setButtonSpriteFrame(btn,"cointreeui_cashbtnn","cointreeui_cashbtnh","cointreeui_cashbtnn");	
+	   ToolTip::getInstance()->push("\xCA\xA3\xD3\xE0\xB4\xCE\xCA\xFD\xCE\xAA\x30\xA3\xAC\xB2\xBB\xBF\xC9\xB5\xE3\xBB\xF7");
+}
+
+void CoreTreeUiLayer::setInstrcutshow( bool show )
+{
+	//CCSize size = CCDirector::sharedDirector()->getWinSize();
+    instructFrame = dynamic_cast<CCSprite*>(_coretreeFrame->getChildByTag(NT_InstructFrame));
+	CC_ASSERT(instructFrame != NULL);
+	/*if (show)
+	{*/
+		//instructFrame->setPosition(ccp(size.width * 0.5f ,size.height * 0.5f));
+		instructFrame->setVisible(show);
+//	}
+	/*else
+	{
+		instructFrame->setPosition(ccp(size.width * 1.5f ,size.height * 1.5f));
+	}*/
+}
+
+void CoreTreeUiLayer::setNumber( int number )
+{
+	_number = number;
+}
+
+void CoreTreeUiLayer::setReCharge( int reCharge )
+{
+// 	CCLabelTTF *label = dynamic_cast<CCLabelTTF *>(_coretreeFrame->getChildByTag(NT_ReCharge));
+// 	label->setVisible(false);
+	char buf[64];
+	sprintf(buf, "%d", reCharge);
+	_rechargeBLabel->setString(buf);
+// 	CCFiniteTimeAction *scl = CCScaleTo::create(0.2, 1.2);
+// 	CCFiniteTimeAction *re = CCScaleTo::create(0.2, 1);
+// 	CCAction *seq = CCSequence::create(scl, re, NULL);
+// 	_rechargeBLabel->runAction(seq);
+}
+
+void CoreTreeUiLayer::setLestCount( int lessCount)
+{
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF *>(_coretreeFrame->getChildByTag(NT_LestCount));
+ 	//label->setVisible(false);
+	char buf[64];
+	sprintf(buf, "%d", lessCount);
+	label->setString(buf);
+	CCFiniteTimeAction *scl = CCScaleTo::create(0.2, 1.2);
+	CCFiniteTimeAction *re = CCScaleTo::create(0.2, 1);
+	CCAction *seq = CCSequence::create(scl, re, NULL);
+	label->runAction(seq);
+
+}
+
+void CoreTreeUiLayer::setGetYuanBao( int getYuanbao )
+{
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF *>(_coretreeFrame->getChildByTag(NT_GetYuanbao));
+// 	 label->setVisible(false);
+	
+	char buf[64];
+	sprintf(buf, "%d", getYuanbao);
+	label->setString(buf);
+ 	CCFiniteTimeAction *scl = CCScaleTo::create(0.2, 1.2);
+ 	CCFiniteTimeAction *re = CCScaleTo::create(0.2, 1);
+ 	CCAction *seq = CCSequence::create(scl, re, NULL);
+ 	label->runAction(seq);
+}
+
+void CoreTreeUiLayer::rockFinish(float dt)
+{
+	unschedule(schedule_selector(CoreTreeUiLayer::rockFinish));
+
+	if (_lestCount <= 0)
+	{
+		//setEnableRockBtn(false);
+	}
+	else
+	{}
+		//setEnableRockBtn(true);
+	_getYuanBao = PackageManager::getInstance()->GetRecharge_Feedback();
+	if (_getYuanBao < 0)
+		_getYuanBao = 0;
+	setGetYuanBao(_getYuanBao);
+	INT64 nTotalNum = PackageManager::getInstance()->GetTotalPeriodRecharge_Feedback();
+	_reCharge = 1000 - nTotalNum%1000;
+	if (_reCharge < 0)
+		_reCharge = 1000;
+	setReCharge(_reCharge);
+
+	//聊天框显示
+	s_receive_chat_info info;
+	info.send_channel = ESCC_System;
+	std::stringstream ss;
+	ss<<_number;
+	std::string str = replaceStr(GET_STR(2032),"**",ss.str());
+	info.chat_text = str;
+	ChatMgr::getInstance()->ShowInfoByChatChannel(info);
+	//自己看到全服公告
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	if(_number <= 0)
+		return;
+	HearSayChannel hearSay;
+	hearSay.dwRoleID = ploc->getId();
+	hearSay.dwParam0 = _number;
+	HearSayMgr::getInstance()->Parse_RechargeGamble_To_String(hearSay,true);
+	GambleMgr::getInstance()->setIsCoreTreeRunning(false);
+	return;
+}
+
+//刷新摇钱树剩余天数
+void CoreTreeUiLayer::RefreshMoneyTreeOverDays( unsigned int dwDays )
+{
+	//倒计时
+	_CountDownLabel=dynamic_cast<CCLabelTTF*>(_coretreeFrame->getChildByTag(NT_CountDownLabel));
+	CC_ASSERT(_CountDownLabel != NULL);
+
+	if( dwDays <= 0 )
+		_CountDownLabel->setString("");
+	else
+	{
+		CCString* CountTimeStr = CCString::createWithFormat("%d\xE5\xA4\xA9",dwDays);
+		_CountDownLabel->setString(CountTimeStr->getCString());
+	}
+}

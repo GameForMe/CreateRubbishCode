@@ -1,0 +1,238 @@
+#include "AutoUpdateUi.h"
+#include "CommonClient.h"
+#include "UiTools.h"
+#include "CfgReader.h"
+#include "f_string_util.h"
+#include "f_string_table.h"
+
+AutoUpdateUi::AutoUpdateUi()
+	:_noticeNode(NULL)
+	,_size(NULL)
+	,_progressNode(NULL)
+	,_progressSp(NULL)
+	,_progressTitle(NULL)
+	,_targetVer(NULL)
+	,_progressByte(NULL)
+	,_progressPct(NULL)
+	,_progressTimer(NULL)
+	,_progressRoot(NULL)
+{
+
+}
+
+AutoUpdateUi::~AutoUpdateUi()
+{
+
+}
+
+/*
+cocos2d::extension::SEL_CCControlHandler AutoUpdateUi::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(AutoUpdateUi,onOK);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(AutoUpdateUi,onCancel);
+	return NULL;
+}
+*/
+
+bool AutoUpdateUi::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,_noticeNode);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,_size);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,_progressNode);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,_progressSp);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,_progressTitle);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,_targetVer);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,_progressByte);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,_progressPct);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,_progressRoot);
+
+	return false;
+}
+
+void AutoUpdateUi::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_noticeNode->setVisible(false);
+	_progressNode->setVisible(false);
+
+	_progressTimer = initHProgressBarWithSprite(_progressSp);
+	_progressSp->getParent()->addChild(_progressTimer);
+	_progressSp->setVisible(false);
+
+	_progressTimer->setPercentage(0);
+	_progressByte->setString("");
+	_progressPct->setString("");
+    
+    CCSprite *bgSprite = dynamic_cast<CCSprite*>(this->getChildByTag(0));
+    if (bgSprite) {
+        fullScreen(bgSprite);
+    }
+}
+
+AutoUpdateUi* AutoUpdateUi::createFromCCBI( CCObject* pOwner ,AssetsManager* mgr)
+{
+	CCNodeLoaderLibrary* lib  = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	REG_AUTO_LOADER(AutoUpdateUi);
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	//std::string strFilepath = CFGReader::instance()->get_ui_ccbi_filepath(szFile);
+	CCNode* node = reader->readNodeGraphFromFile("Art/UI/autoupdateui2.ccbi",pOwner);
+	CC_ASSERT(node);
+
+	AutoUpdateUi* view = dynamic_cast<AutoUpdateUi*>(node);
+	view->setAM(mgr);
+	return view;
+}
+
+void AutoUpdateUi::setDisplayType( int type )
+{
+	_noticeNode->setVisible(type ==0);
+	_progressNode->setVisible(type ==1);
+}
+
+void AutoUpdateUi::showUpConfirm( int size )
+{
+	setDisplayType(0);
+
+// 	std::string tmp;
+// 	safe_sprintf(tmp,"%f M",(float)size / (float)1000000);
+	_size->setString(getDisplaySizeString(size).c_str());
+}
+
+void AutoUpdateUi::updateProgress(int pct)
+{
+	_progressTimer->setPercentage(pct);
+
+	std::string tmp;
+	safe_sprintf(tmp,"%d%%",pct);
+	_progressPct->setString(tmp.c_str());
+
+	int nTotalSize = _am->getTargetVersionSize();
+	/*safe_sprintf(tmp,"%d/%d",nTotalSize*pct/100,nTotalSize);*/
+	_progressByte->setString(getDisplaySizeString(nTotalSize).c_str());
+}
+
+void AutoUpdateUi::showProgressState( int nState,bool bNeedRestart )
+{
+	setDisplayType(1);
+	
+
+	if (bNeedRestart)
+	{
+		_progressTitle->setString(STRING_TABLE["ver_notice_restart"]);
+
+		CCLog("showProgressState :reboot");
+	}
+	else
+	{
+		CCLog("showProgressState :%d",nState);
+
+		setStateText(nState);
+	}
+
+	switch (nState)
+	{
+	case EUS_CheckUrl:
+		{
+			hideTimer();
+			_targetVer->setString("");
+		}
+		break;
+	case EUS_Unzip:
+		{
+			hideTimer();
+			
+			_targetVer->setString(_am->getTargetVersion().c_str());
+		}
+		break;
+	case EUS_DownloadingZip:
+		{
+			showTimer();
+
+			_targetVer->setString(_am->getTargetVersion().c_str());
+		}
+		break;
+	case EUS_Success:
+		{
+			hideTimer();
+
+			_targetVer->setString(_am->getTargetVersion().c_str());
+		}
+		break;
+	case EUS_Finish :
+		{
+			hideTimer();
+			_targetVer->setString(_am->getTargetVersion().c_str());
+		}
+		break;
+
+	default:
+		break;
+	}
+}
+
+void AutoUpdateUi::showErrorCode( int state )
+{
+	setDisplayType(1);
+
+	hideTimer();
+	
+	if(state != 3)
+		setErrorText(state);
+}
+
+void AutoUpdateUi::setStateText( int state )
+{
+	std::string tmp;
+	safe_sprintf(tmp,"ver_notice_%d",state);
+	_progressTitle->setString(STRING_TABLE[tmp.c_str()]);
+}
+
+void AutoUpdateUi::setErrorText( int error )
+{
+	std::string tmp;
+	safe_sprintf(tmp,"ver_error_%d",error);
+	_progressTitle->setString(STRING_TABLE[tmp.c_str()]);
+}
+
+void AutoUpdateUi::hideTimer()
+{
+	_progressRoot->setVisible(false);
+
+	_progressByte->setVisible(false);
+	_progressPct->setVisible(false);
+	_progressTimer->setVisible(false);
+}
+
+void AutoUpdateUi::showTimer()
+{
+	_progressRoot->setVisible(true);
+
+	_progressByte->setVisible(true);
+	_progressPct->setVisible(true);
+	_progressTimer->setVisible(true);
+}
+
+std::string AutoUpdateUi::getDisplaySizeString( int size )
+{
+	std::string strDisplaySize;
+	if (size< 1000000)
+		safe_sprintf(strDisplaySize,"%0.2fKB",float(size) / 1000.0f);
+	else
+		safe_sprintf(strDisplaySize,"%0.2fMB",float(size) / 1000000.0f);
+	return strDisplaySize;
+}
+
+/*
+AutoUpdateUi* AutoUpdateUi::create( AssetsManager* mgr )
+{
+	AutoUpdateUi * ptr = new AutoUpdateUi(); 
+	if(ptr != NULL && ptr->init()) 
+	{ 
+		ptr->setAM(mgr);
+		ptr->autorelease(); 
+		return ptr; 
+	} 
+	CC_SAFE_DELETE(ptr); 
+	return NULL; 
+}
+*/

@@ -1,0 +1,537 @@
+#include "MessageBoxUi.h"
+#include "CfgReader.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "CheckButton.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "NewPlayerGuide.h"
+#include "RoleManager.h"
+#include "PackageManager.h"
+#include "Helper.h"
+#include "ChatUi.h"
+#include "UiManager.h"
+#include "LabelEx.h"
+#include "World.h"
+//[bing] 按钮在world中的位置 共用
+static CCRect m_rcBtn[2];
+MessageBoxUi *g_msgUi = NULL;
+
+bool MessageBoxUi::init()
+{
+	is_signal_hide = true;
+
+	if(!CCLayer::init())
+		return false;
+
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("MessageBoxUiLayer", MessageBoxUiLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode * node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "messagebox.ccbi").c_str());
+	//std::set<std::string> _usedSheet =  ccbReader->getLoadedSpriteSheet();
+	ccbReader->release();
+	if(node != NULL) {
+		addChild(node);
+		_frame = (CCSprite*)node->getChildByTag(0);
+		CC_ASSERT(_frame != NULL);
+		//_title = (CCLabelTTF*)_frame->getChildByTag(0);
+		_title = Helper::getLabelFTByParentAndTag(_frame,0);
+		CC_ASSERT(_title);
+		if (_title)
+		{
+			_title->setVisible(true);
+			_title->setAnchorPoint(ccp(0.5f, 0.5f));
+			//_title->setDimensions(CCSize(0, 0));
+			_title->setDimensions(0, 0);
+		}
+		//_message = (CCLabelTTF*)_frame->getChildByTag(1);
+		_message = Helper::getLabelFTByParentAndTag(_frame,1);
+		CC_ASSERT(_message);
+		_okBtn = (CCControlButton*)_frame->getChildByTag(2);
+		_cancelBtn = (CCControlButton*)_frame->getChildByTag(3);
+		Helper::replaceControlButtonTextLabel(_okBtn);
+		Helper::replaceControlButtonTextLabel(_cancelBtn);
+		//_contentMessage=(CCLabelTTF*)_frame->getChildByTag(4);
+		_contentMessage = Helper::getLabelFTByParentAndTag(_frame, 4);
+		CC_ASSERT(_contentMessage);
+		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -9,true);
+		setAllChildernButtonPriority(node, -10);
+		return true; 
+	}
+	return false;
+}
+
+MessageBoxUi* MessageBoxUi::createWithOneBtn( const char *title, const char *msg, const char *btnStr )
+{
+	//extern MessageBoxUi *g_msgUi;
+	//if (g_msgUi != NULL)
+	//{
+	//	return g_msgUi;
+	//}
+	MessageBoxUi *ui = MessageBoxUi::create();
+	ui->_okBtn->setVisible(true);
+	ui->_cancelBtn->setVisible(false);
+	const CCSize &size = ui->_frame->getContentSize();
+	ui->_okBtn->setPosition(size.width / 2, ui->_okBtn->getPositionY());
+
+	ui->_okBtn->setTitleForState(CCString::create(btnStr), CCControlStateNormal);
+
+	CCPoint cp = ui->_cancelBtn->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = ui->_cancelBtn->getContentSize();
+	m_rcBtn[1] = CCRect(cp.x, cp.y, cs.width, cs.height);
+	cp = ui->_okBtn->convertToWorldSpace(ccp(0, 0));
+	cs = ui->_okBtn->getContentSize();
+	m_rcBtn[0] = CCRect(cp.x, cp.y, cs.width, cs.height);
+
+	if (ui->_title)
+	{
+		ui->_title->setVisible(false);
+		ui->_title->setString(title);
+		ui->_title->setColor(ccc3(0xfe, 0xf8, 0xd8));
+	}
+
+	if (ui->_contentMessage)
+		ui->_contentMessage->setVisible(false);
+	
+	if (ui->_message)
+	{
+		ui->_message->setString(msg);
+		ui->_message->setColor(ccc3(0xfe, 0xf8, 0xd8));
+	}
+
+	ui->_frame->getChildByTag(101)->setVisible(false);                  //【ji】：设置关闭按钮
+
+	//[bing] 新手引导要用
+	NewPlayerGuider::getInstance()->onMessgaeBoxOpen();
+	//extern MessageBoxUi *g_msgUi;
+	//clearSelf();
+	g_msgUi = ui;
+	return ui;
+}
+
+MessageBoxUi* MessageBoxUi::createWithTwoBtn( const char *title, const char *msg, const char *btnStr1, const char *btnStr2 )
+{
+	MessageBoxUi *ui = MessageBoxUi::create();
+	ui->_okBtn->setVisible(true);
+	ui->_cancelBtn->setVisible(true);
+	ui->_okBtn->setTitleForState(CCString::create(btnStr1), CCControlStateNormal);
+	ui->_cancelBtn->setTitleForState(CCString::create(btnStr2), CCControlStateNormal);
+
+	if (ui->_title)
+	{
+		ui->_title->setString(title);
+		ui->_title->setColor(ccc3(0xfe, 0xf8, 0xd8));
+	}
+	if (ui->_message)
+	{
+		ui->_message->setString(msg);
+		ui->_message->setColor(ccc3(0xfe, 0xf8, 0xd8));
+	}
+	if (ui->_contentMessage)
+		ui->_contentMessage->setVisible(false);
+	
+	
+
+	ui->_frame->getChildByTag(101)->setVisible(false);						 //【ji】：设置关闭按钮
+
+	CCPoint cp = ui->_cancelBtn->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = ui->_cancelBtn->getContentSize();
+	m_rcBtn[1] = CCRect(cp.x, cp.y, cs.width, cs.height);
+	cp = ui->_okBtn->convertToWorldSpace(ccp(0, 0));
+	cs = ui->_okBtn->getContentSize();
+	m_rcBtn[0] = CCRect(cp.x, cp.y, cs.width, cs.height);	
+
+	//[bing] 新手引导要用
+	NewPlayerGuider::getInstance()->onMessgaeBoxOpen();
+
+	//extern MessageBoxUi *g_msgUi;
+	//clearSelf();
+	g_msgUi = ui;
+	return ui;
+}
+
+MessageBoxUi* MessageBoxUi::createWithTwoBtn_LabelEx( const char *title, const char *msg, const char *btnStr1, const char *btnStr2 )
+{
+	MessageBoxUi *ui = MessageBoxUi::create();
+	ui->_okBtn->setVisible(true);
+	ui->_cancelBtn->setVisible(true);
+
+ 	ui->_okBtn->setTitleForState(CCString::create(btnStr1), CCControlStateNormal);
+ 	ui->_cancelBtn->setTitleForState(CCString::create(btnStr2), CCControlStateNormal);
+
+	if (ui->_title)
+	{
+		ui->_title->setString(title);
+		ui->_title->setColor(ccc3(0xfe, 0xf8, 0xd8));
+	}
+	if (ui->_message)
+	{
+		LabelEx * label=LabelEx::create();
+		label->setAnchorPoint(ccp(0.0f, 1.0f));
+		label->setContentSize(ui->_message->getContentSize());
+		label->setPosition(ui->_message->getPosition());
+		//string str = msg;
+		label->set_text(msg);
+		ui->_frame->addChild(label);
+		ui->_message->setVisible(false);
+	}
+	if (ui->_contentMessage)
+		ui->_contentMessage->setVisible(false);
+
+
+
+	ui->_frame->getChildByTag(101)->setVisible(false);						 //【ji】：设置关闭按钮
+
+	CCPoint cp = ui->_cancelBtn->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = ui->_cancelBtn->getContentSize();
+	m_rcBtn[1] = CCRect(cp.x, cp.y, cs.width, cs.height);
+	cp = ui->_okBtn->convertToWorldSpace(ccp(0, 0));
+	cs = ui->_okBtn->getContentSize();
+	m_rcBtn[0] = CCRect(cp.x, cp.y, cs.width, cs.height);	
+
+	//[bing] 新手引导要用
+	NewPlayerGuider::getInstance()->onMessgaeBoxOpen();
+
+	//extern MessageBoxUi *g_msgUi;
+	//clearSelf();
+	g_msgUi = ui;
+	return ui;
+}
+
+void MessageBoxUi::updateYandiFuHuoBtnPosition(int lenth)
+{
+	if (!RoleManager::getInstance()->onGetRoleIsCanLive())
+	{	
+		CCNode* btnOk = this->_okBtn;
+		btnOk->setVisible(false);
+		CCNode* node = this->_cancelBtn;		
+		this->_cancelBtn->setPosition(ccp(node->getPositionX() - lenth,node->getPositionY()));
+	}
+}
+
+CCPoint MessageBoxUi::getMsgLabelPt()
+{
+	if (_message)
+	{
+		return _message->getPosition();
+	}
+	return ccp(0.0f,0.0f);
+}
+
+void MessageBoxUi::setMsgLabelPt(CCPoint pt)
+{
+	if (_message)
+		_message->setPosition(pt);
+}
+
+void MessageBoxUi::addToFrame(CCNode* node)
+{
+	_frame->addChild(node);
+}
+
+void MessageBoxUi::setSignalHide( bool signal_hide)
+{
+	is_signal_hide = signal_hide; 
+}
+
+void MessageBoxUi::updateMsgInfo(const char* title, const char* msg)
+{
+	setButtonEnable( true);
+	
+	if (_contentMessage)
+	{
+		_contentMessage->setString(title);
+		//_contentMessage->setDimensions(ccp(290,0));
+		_contentMessage->setDimensions(290,0);
+	}
+	
+	if (_message)
+	{
+		_message->setString(msg);
+		_message->setColor(ccc3(0xfe, 0xf8, 0xd8));
+	}
+}
+
+void MessageBoxUi::setButtonEnable(bool isEnbale)
+{
+	_okBtn->setEnabled(isEnbale);
+	_cancelBtn->setEnabled(isEnbale);
+}
+
+MessageBoxUi * MessageBoxUi::createWithTwoBtnWithCheck( const char *title, const char *msg, const char *btnStr1, const char *btnStr2, bool checkState )
+{
+	MessageBoxUi *ui = MessageBoxUi::create();
+	if (ui->_title)
+	{
+		ui->_title->setVisible(false);
+	}
+	
+	ui->_okBtn->setVisible(true);
+	ui->_cancelBtn->setVisible(true);
+
+ 	ui->_okBtn->setTitleForState(CCString::create(btnStr1), CCControlStateNormal);
+ 	ui->_cancelBtn->setTitleForState(CCString::create(btnStr2), CCControlStateNormal);
+
+	if (ui->_contentMessage)
+	{
+		ui->_contentMessage->setString(title);
+		//ui->_contentMessage->setDimensions(ccp(290,0));
+		ui->_contentMessage->setDimensions(290,0);
+		ui->_contentMessage->setColor(ccc3(0xfe, 0xf8, 0xd8));
+	}
+	if (ui->_message)
+	{
+		ui->_message->setString(msg);
+		ui->_message->setColor(ccc3(0xfe, 0xf8, 0xd8));
+	}
+
+	//CCSize titleSize = ui->_contentMessage->getContentSize();
+	//CCPoint titlePos = ui->_contentMessage->getPosition();
+
+	CheckButton *checkBtn = CheckButton::create();
+	checkBtn->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("messagebox_signrect"));
+	checkBtn->setCheckSignSprite("messagebox_sign");
+	CCSize size = checkBtn->getContentSize();
+	//checkBtn->setPosition(ccp(45 + size.width / 2,titlePos.y - titleSize.height - 17 - 15));//框/add by vvv 2014.11
+	CCPoint btnPt = ui->_okBtn->getPosition();
+	checkBtn->setPosition(ccp(45 + size.width / 2,btnPt.y + 50));
+
+	checkBtn->setCheck(checkState);
+	checkBtn->signalStateChanged.connect(ui, &MessageBoxUi::checkStateChanged);
+	checkBtn->setTouchProprity(-10);
+	ui->_frame->addChild(checkBtn);
+	CCPoint checkPos = checkBtn->getPosition();
+
+	//CCPoint pos = ui->_message->getPosition();
+	//ui->_message->setPosition(ccp(10 + size.width, checkPos.y + size.height / 2.0 ));
+	//ui->_message->setPosition(ccp(60+ size.width / 2 + 45,titlePos.y - titleSize.height -6 - 15));//下次不再提示//add by vvv 2014.10.30
+	if (ui->_message)
+		ui->_message->setPosition(ccp(60+ size.width / 2 + 45,btnPt.y + 11 + 50));
+	ui->_frame->getChildByTag(101)->setVisible(false);					 //【ji】：设置关闭按钮
+
+	CCPoint cp = ui->_cancelBtn->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = ui->_cancelBtn->getContentSize();
+	m_rcBtn[1] = CCRect(cp.x, cp.y, cs.width, cs.height);
+	cp = ui->_okBtn->convertToWorldSpace(ccp(0, 0));
+	cs = ui->_okBtn->getContentSize();
+	m_rcBtn[0] = CCRect(cp.x, cp.y, cs.width, cs.height);
+	//[bing] 新手引导要用
+	NewPlayerGuider::getInstance()->onMessgaeBoxOpen();
+
+	//extern MessageBoxUi *g_msgUi;
+	//clearSelf();
+	g_msgUi = ui;
+	return ui;
+}
+
+MessageBoxUi* MessageBoxUi::createWithTwoBtnAndCloseBtn( const char* title, const char* msg, const char* btnStr1, const char* btnStr2 )
+{
+	MessageBoxUi *ui = MessageBoxUi::create();
+	ui->_okBtn->setVisible(true);
+	ui->_cancelBtn->setVisible(true);
+	if (ui->_contentMessage)
+		ui->_contentMessage->setVisible(false);
+
+ 	ui->_okBtn->setTitleForState(CCString::create(btnStr1), CCControlStateNormal);
+ 	ui->_cancelBtn->setTitleForState(CCString::create(btnStr2), CCControlStateNormal);
+
+	if (ui->_title)
+	{
+		ui->_title->setString(title);
+		ui->_title->setColor(ccc3(0xfe, 0xf8, 0xd8));
+	}
+	
+	if (ui->_message)
+	{
+		ui->_message->setString(msg);
+		ui->_message->setColor(ccc3(0xfe, 0xf8, 0xd8));
+	}
+	
+	ui->_frame->getChildByTag(101)->setVisible(true);					 //【ji】：设置关闭按钮
+
+	CCPoint cp = ui->_cancelBtn->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = ui->_cancelBtn->getContentSize();
+	m_rcBtn[1] = CCRect(cp.x, cp.y, cs.width, cs.height);
+	cp = ui->_okBtn->convertToWorldSpace(ccp(0, 0));
+	cs = ui->_okBtn->getContentSize();
+	m_rcBtn[0] = CCRect(cp.x, cp.y, cs.width, cs.height);
+
+	//[bing] 新手引导要用
+	NewPlayerGuider::getInstance()->onMessgaeBoxOpen();
+
+	//extern MessageBoxUi *g_msgUi;
+	//clearSelf();
+	g_msgUi = ui;
+	return ui;
+}
+
+
+MessageBoxUi* MessageBoxUi::getMessageBox()
+{
+	//extern MessageBoxUi *g_msgUi;
+	return g_msgUi;
+}
+
+void MessageBoxUi::onExit()
+{
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	g_msgUi = NULL;
+}
+
+bool MessageBoxUi::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	return true;
+}
+
+void MessageBoxUi::checkStateChanged( CheckButton*, bool val)
+{
+	signalCheckStateChange.emit(val);
+}
+
+void MessageBoxUi::clearSelf()
+{
+	if( g_msgUi )
+	{
+		g_msgUi->removeFromParentAndCleanup(true);
+		g_msgUi = NULL;
+		MessageBoxUi* messageBox = dynamic_cast<MessageBoxUi*>(World::getInstance()->getScene()->getChildByTag(WCT_TeamMessageBox));
+		if (messageBox)
+		{
+			messageBox->removeFromParentAndCleanup(true);
+			messageBox = NULL;
+		}
+	}
+}
+
+cocos2d::CCRect MessageBoxUi::GetBtnPos( int nIdx )
+{
+	if(nIdx < 0 || nIdx >= 2)
+		return CCRect();
+
+	return m_rcBtn[nIdx];
+}
+
+MessageBoxUi* MessageBoxUi::createWithTwoBtnEx( const char *title, const char *msg, const char *btnStr1, const char *btnStr2 )
+{
+	MessageBoxUi *ui = MessageBoxUi::create();
+	ui->_okBtn->setVisible(true);
+	ui->_cancelBtn->setVisible(true);
+
+ 	ui->_okBtn->setTitleForState(CCString::create(btnStr1), CCControlStateNormal);
+ 	ui->_cancelBtn->setTitleForState(CCString::create(btnStr2), CCControlStateNormal);
+
+	if (ui->_title)
+	{
+		ui->_title->setString(title);
+		ui->_title->setColor(ccc3(0xfe, 0xf8, 0xd8));
+	}
+	if (ui->_message)
+	{
+
+		CustomLabel * label=CustomLabel::create();
+		label->setAnchorPoint(ccp(0.0f, 1.0f));
+		label->SetFontSize(ui->_message->getTTFConfig().fontSize);
+		label->setContentSize(ui->_message->getContentSize());
+		label->setPosition(ui->_message->getPosition());
+		string str = msg;
+		label->SetString(str);
+		ui->_frame->addChild(label);
+		ui->_message->setVisible(false);
+		
+	}
+	if (ui->_contentMessage)
+		ui->_contentMessage->setVisible(false);
+
+
+	ui->_frame->getChildByTag(101)->setVisible(false);						 //【ji】：设置关闭按钮
+
+	CCPoint cp = ui->_cancelBtn->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = ui->_cancelBtn->getContentSize();
+	m_rcBtn[1] = CCRect(cp.x, cp.y, cs.width, cs.height);
+	cp = ui->_okBtn->convertToWorldSpace(ccp(0, 0));
+	cs = ui->_okBtn->getContentSize();
+	m_rcBtn[0] = CCRect(cp.x, cp.y, cs.width, cs.height);	
+
+	g_msgUi = ui;
+	return ui;
+}
+
+
+void MessageBoxUi::close()
+{
+	removeFromParentAndCleanup(true);
+	UiMgr::getInstance()->closeLinkMessageBoxUi(m_eLinkUi);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler MessageBoxUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler MessageBoxUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "okBtnPressed", MessageBoxUiLayer::onOkBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "cancelBtnPressed", MessageBoxUiLayer::onCancelBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", MessageBoxUiLayer::onCloseBtnPressed);
+	return NULL;
+}
+
+bool MessageBoxUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+
+void MessageBoxUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	return;
+}
+
+void MessageBoxUiLayer::onOkBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	MessageBoxUi *ui = dynamic_cast<MessageBoxUi*>(getParent());
+	CC_ASSERT(ui != NULL);
+	ui->signalOkBtnPressed.emit();
+
+	if( ui->getSignalHideState() )
+	{
+		ui->close();
+		//extern MessageBoxUi *g_msgUi;
+		g_msgUi = NULL;
+	}
+	else
+	{
+		ui->setButtonEnable(false);
+	}
+}
+
+void MessageBoxUiLayer::onCancelBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	MessageBoxUi *ui = dynamic_cast<MessageBoxUi*>(getParent());
+	CC_ASSERT(ui != NULL);
+	ui->signalCancelBtnPressed.emit();
+
+	ui->close();
+	//extern MessageBoxUi *g_msgUi;	
+	g_msgUi = NULL;	
+}
+
+void MessageBoxUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	MessageBoxUi* ui = dynamic_cast<MessageBoxUi*>(getParent());
+	CC_ASSERT(ui != NULL);
+	ui->close();
+	//extern MessageBoxUi *g_msgUi;
+	g_msgUi = NULL;
+}
+
+void MessageBoxUi::setLinkUITag(eWroldChildTag pType)
+{
+	m_eLinkUi = pType;
+	UiMgr::getInstance()->addMessageBoxUi(pType,this);
+}

@@ -1,0 +1,232 @@
+/**
+ *	@file		ZZZFLDTipsUI.cpp
+ *	@author		shenyaoyan
+ *	@date		2016/05/13
+ *	@version	
+ *	@brief		主宰者飞龙蛋的tips界面
+ */
+
+#include "ZZZFLDTipsUI.h"
+#include "CommonClient.h"
+#include "World.h"
+#include "UiLoader.h"
+#include "ZZZTitleTipsUI.h"
+#include "CommonView.h"
+#include "ItemNode.h"
+#include "PackageManager.h"
+
+ZZZFLDTipsUI::ZZZFLDTipsUI()
+	: m_spriteFrame(NULL)
+	, m_titlePro(NULL)
+	, m_titleShow(NULL)
+{
+	for (int i=0; i<MAX_LABEL_NUMBER; i++)
+	{
+		m_titleLabel[i]=NULL;
+		m_titleNumber[i]=NULL;
+	}
+}
+
+ZZZFLDTipsUI::~ZZZFLDTipsUI()
+{
+
+}
+
+bool ZZZFLDTipsUI::onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode)
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*, m_spriteFrame);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*, m_titlePro);
+	return f_btn_func_component::onAssignCCBMemberVariable(pTarget,pMemberVariableName,pNode);
+}
+
+SEL_MenuHandler ZZZFLDTipsUI::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+SEL_CCControlHandler ZZZFLDTipsUI::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onusedBtnPressed", ZZZFLDTipsUI::onUsedBtnPressed);
+	return f_btn_func_component::onResolveCCBCCControlSelector(pTarget,pSelectorName);
+}
+
+void ZZZFLDTipsUI::onNodeLoaded(CCNode * pNode, CCNodeLoader * pNodeLoader)
+{
+	CC_ASSERT(m_spriteFrame);
+	this->setContentSize(m_spriteFrame->getContentSize());
+	this->setAnchorPoint(m_spriteFrame->getAnchorPoint());
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_titlePro);
+
+	m_titleShow = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_spriteFrame->getChildByTag(ZZZ_LABEL_Show)));
+
+	for( int i = 0 ; i < MAX_LABEL_NUMBER ; ++i )
+	{
+		m_titleLabel[i] = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_spriteFrame->getChildByTag(ZZZ_LABEL_1+i)));
+		m_titleNumber[i] = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_spriteFrame->getChildByTag(ZZZ_NUMBER_1+i)));
+	}
+
+	set_close_fn(std::bind(&ZZZFLDTipsUI::close,this));
+}
+
+ZZZFLDTipsUI* ZZZFLDTipsUI::getInstance()
+{
+	static ZZZFLDTipsUI instance;
+	return &instance;
+}
+
+ZZZFLDTipsUI* ZZZFLDTipsUI::open()
+{
+	CCScene* scene = World::getInstance()->getScene();
+	if (scene)
+	{
+		CCNodeLoaderLibrary* ccNodeLoaderLibrary = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+		ccNodeLoaderLibrary->registerCCNodeLoader("ZZZFLDTipsUI",UiLayerLoader<ZZZFLDTipsUI>::loader());
+		CCBReader* ccbReader = new CCBReader(ccNodeLoaderLibrary);
+		std::string fileName = CFGReader::instance()->get_profile_string("Art","UI","")+"zhuzaizhezuoqi.ccbi";
+		CCNode* node = ccbReader->readNodeGraphFromFile(fileName.c_str());
+		ccbReader->release();
+		if (node != NULL)
+		{
+			scene->addChild(node,WZ_POPUI,WCT_ZZZ_ITEM_TIPS_UI);
+		}
+		ZZZFLDTipsUI* tipsUI = dynamic_cast<ZZZFLDTipsUI*>(node);
+		return tipsUI;
+	}
+	return NULL;
+}
+
+void ZZZFLDTipsUI::close()
+{
+	CCScene* scene = World::getInstance()->getScene();
+	if (scene)
+	{
+		scene->removeChildByTag(WCT_ZZZ_ITEM_TIPS_UI);
+	}
+}
+
+void ZZZFLDTipsUI::onEnter()
+{
+	setTouchPriority(-1);
+	setTouchEnabled(true);
+	setAllChildernButtonPriority(m_spriteFrame,-1);
+	CCLayer::onEnter();
+}
+
+void ZZZFLDTipsUI::onExit()
+{
+	CCLayer::onExit();
+}
+
+bool ZZZFLDTipsUI::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (isTouchOnNodeContent(this,pTouch))
+	{
+		return true;
+	}
+	close();
+	return false;
+}
+
+void ZZZFLDTipsUI::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+
+}
+
+void ZZZFLDTipsUI::setData(int index)
+{
+	m_idx = (short)index;
+	std::string descStr = "";
+	std::string proStr = "";
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM ItemTipData WHERE id = ?");
+	cmd->set_integer32(1 , ZZZFLYDRAGON);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("desc");
+		descStr = table->get_text(idx);
+		idx = table->get_index("sdesc");
+		proStr = table->get_text(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	if ( descStr != "" )
+	{
+		m_titleShow->setString(descStr.c_str());
+	}
+
+	if ( proStr != "" )
+	{
+		std::vector<std::string> rideProperty = split_str(proStr,'\\');
+		int number = 0;
+		for (std::vector<std::string>::iterator itor = rideProperty.begin(); itor != rideProperty.end(); ++itor,++number)
+		{
+			int dev = (*itor).find_first_of("+");
+			std::string descStr = (*itor).substr(0,dev);
+			std::string conStr = (*itor).substr(dev,(*itor).length());
+			m_titleLabel[number]->setString(descStr.c_str());
+			m_titleLabel[number]->setVisible(true);
+			m_titleNumber[number]->setString(conStr.c_str());
+			m_titleNumber[number]->setVisible(true);
+		}
+		for ( ; number!=MAX_LABEL_NUMBER ; ++number )
+		{
+			m_titleLabel[number]->setVisible(false);
+			m_titleNumber[number]->setVisible(false);
+		}
+	}
+}
+
+void ZZZFLDTipsUI::setPlace(const CCPoint& point)
+{
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+
+	bool putLeft = false;
+	bool putBottom = false;
+	if(point.x > winSize.width / 2.0f)
+		putLeft = true;
+	if(point.y > winSize.height / 2.0f)
+		putBottom = true;
+
+	CCSize uiSize = this->getContentSize();
+
+	float posX = 0;
+	float posY = 0;
+	if(putLeft)
+	{
+		posX = point.x - uiSize.width - ITEMNODE_CONTENTWIDTH / 2.0f;
+		if(posX < 0.f)
+			posX = 0.f;
+	}
+	else
+	{
+		posX =abs(point.x) + ITEMNODE_CONTENTWIDTH / 2.0f;//vv 2014.10.6 修改物品tips显示位置
+		if(posX + uiSize.width > winSize.width)
+			posX = winSize.width - uiSize.width;
+	}
+
+	if(putBottom)
+	{
+		posY = point.y + ITEMNODE_CONTENTHEIGHT / 2.0f - uiSize.height;
+		if(posY < 0.f)
+			posY = 0.f;
+	}
+	else
+	{
+		posY = point.y - ITEMNODE_CONTENTHEIGHT / 2.0f;
+		if(posY + uiSize.height > winSize.height)
+			posY = winSize.height - uiSize.height;
+	}
+	this->setPosition(ccp(posX, posY));
+}
+
+void ZZZFLDTipsUI::setButtonVisible(bool isShow)
+{
+	set_btn_type(isShow?eUseBtn:eHideAll);
+}
+
+void ZZZFLDTipsUI::onUsedBtnPressed(CCObject* pSender, CCControlEvent pCCControlEvent)
+{
+	PackageManager::getInstance()->useBagItem(m_idx);
+	close();
+}

@@ -1,0 +1,271 @@
+#include "TeamSettingPanel.h"
+#include "CommonClient.h"
+#include "RadioMutex.h"
+#include "TuningScrollView.h"
+#include "CommonDefine.h"
+#include "CfgReader.h"
+#include "BaseDefine.h"
+#include "UIUtil.h"
+#include "GameEventDefine.h"
+#include "StringMgr.h"
+
+//const int NUM_IN_VIEW = 5;
+const int NUM_OFFSET = 2;
+const int MAX_LEVEL = 100;
+
+TeamSettingPanel::TeamSettingPanel()
+	:mpSelector(NULL)
+	,mpClassMutex(NULL)
+	,mpTargetMutex(NULL)
+	,mpLvLower(NULL)
+	,mpLvUpper(NULL)
+	,mpTargetSV(NULL)
+{
+
+}
+
+TeamSettingPanel::~TeamSettingPanel()
+{
+
+}
+
+cocos2d::extension::SEL_CCControlHandler TeamSettingPanel::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamSettingPanel,onTarget);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamSettingPanel,onNone);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamSettingPanel,onAllClass);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamSettingPanel,onWarr);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamSettingPanel,onMag);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamSettingPanel,onPri);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamSettingPanel,onApply);
+
+	return NULL;
+}
+
+bool TeamSettingPanel::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(RadioMutex*,mpClassMutex);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(RadioMutex*,mpTargetMutex);
+
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(TuningScrollView*,mpLvLower);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(TuningScrollView*,mpLvUpper);
+
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCScrollView*,mpTargetSV);
+
+	return false;
+}
+
+void TeamSettingPanel::onTarget( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	CCNode* btn = dynamic_cast<CCNode*>(pSender);
+	CCNode* parent = btn->getParent();
+	moFilterCache.nTarget = parent->getTag();
+
+}
+
+void TeamSettingPanel::onNone( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	moFilterCache.nLevelUpper = 100;
+	moFilterCache.nLevelLower = 1;
+
+	mpLvLower->scroll_to_pos(moFilterCache.nLevelLower + NUM_OFFSET -1);
+	mpLvUpper->scroll_to_pos(moFilterCache.nLevelUpper + NUM_OFFSET -1);
+}
+
+void TeamSettingPanel::onAllClass( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	moFilterCache.nClassType = 0;
+	
+}
+
+void TeamSettingPanel::onWarr( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	moFilterCache.nClassType = 1;
+}
+
+void TeamSettingPanel::onMag( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	moFilterCache.nClassType = 2;
+}
+
+void TeamSettingPanel::onPri( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	moFilterCache.nClassType = 3;
+}
+
+void TeamSettingPanel::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	//moFilterCache = TeamMgr::getInstance()->getTeamFilter();
+
+	//initTuningSV();
+	//initTargetSV();
+}
+
+void TeamSettingPanel::scorllEnd( TuningScrollView* scroll,size_t endAt )
+{
+	size_t num =  endAt - NUM_OFFSET +1;
+
+	if (scroll == mpLvUpper)
+	{
+		moFilterCache.nLevelUpper = num;
+		if (moFilterCache.nLevelUpper < moFilterCache.nLevelLower)
+		{
+			std::swap(moFilterCache.nLevelUpper,moFilterCache.nLevelLower);
+		}
+	}
+	else if (scroll == mpLvLower)
+	{
+		moFilterCache.nLevelLower = num;
+		if (moFilterCache.nLevelLower > moFilterCache.nLevelUpper)
+		{
+			std::swap(moFilterCache.nLevelUpper,moFilterCache.nLevelLower);
+		}
+	}
+}
+
+
+
+void TeamSettingPanel::initTuningSV()
+{
+	mpLvLower->setContentSize(mpLvLower->getViewSize());
+	mpLvLower->setBounceable(true);
+	mpLvLower->setStopedCB(boost::bind(&TeamSettingPanel::scorllEnd,this,_1,_2));
+	mpLvUpper->setContentSize(mpLvLower->getViewSize());
+
+	mpLvUpper->setStopedCB(boost::bind(&TeamSettingPanel::scorllEnd,this,_1,_2));
+
+	CCSize size  = mpLvLower->getViewSize();
+	float fHeight =  size.height/5;
+	CCSize nodeSize = CCSize(size.width,fHeight);
+
+	//¿Õ°×
+	for (int i = 0; i < NUM_OFFSET ; ++i)
+	{
+		{
+			CCNode* emptyNode = CCNode::create();
+			emptyNode->setContentSize(nodeSize);
+			emptyNode->setAnchorPoint(ccp(0.5f,0.5f));
+
+			mpLvLower->add_item(emptyNode);
+		}
+
+		{
+			CCNode* emptyNode = CCNode::create();
+			emptyNode->setContentSize(nodeSize);
+			emptyNode->setAnchorPoint(ccp(0.5f,0.5f));
+
+			mpLvUpper->add_item(emptyNode);
+		}
+	}
+	//Êý×Ö
+	std::string strTmp;
+	for (int i = 0; i < MAX_LEVEL ; ++i)
+	{
+		{
+			CCNode* emptyNode = CCNode::create();
+			emptyNode->setContentSize(nodeSize);
+			emptyNode->setAnchorPoint(ccp(0.5f,0.5f));
+
+			safe_sprintf(strTmp,"%d",i+1);
+			CCLabelTTF* num = CCLabelTTF::create(strTmp.c_str(),FONT_NAME,16);
+			UIUtil::childNodeAlign(emptyNode,num,eha_center,eva_center,CCPointZero);
+
+			mpLvLower->add_item(emptyNode);
+		}
+
+		{
+			CCNode* emptyNode = CCNode::create();
+			emptyNode->setContentSize(nodeSize);
+			emptyNode->setAnchorPoint(ccp(0.5f,0.5f));
+
+			safe_sprintf(strTmp,"%d",i+1);
+			CCLabelTTF* num = CCLabelTTF::create(strTmp.c_str(),FONT_NAME,16);
+			UIUtil::childNodeAlign(emptyNode,num,eha_center,eva_center,CCPointZero);
+
+			mpLvUpper->add_item(emptyNode);
+		}
+	}
+
+	//¿Õ°×
+	for (int i = 0; i < NUM_OFFSET ; ++i)
+	{
+		{
+			CCNode* emptyNode = CCNode::create();
+			emptyNode->setContentSize(nodeSize);
+			emptyNode->setAnchorPoint(ccp(0.5f,0.5f));
+
+			mpLvLower->add_item(emptyNode);
+		}
+		{
+			CCNode* emptyNode = CCNode::create();
+			emptyNode->setContentSize(nodeSize);
+			emptyNode->setAnchorPoint(ccp(0.5f,0.5f));
+
+			mpLvUpper->add_item(emptyNode);
+		}
+	}
+
+	stTeamFilter const& filter = /*TeamMgr::getInstance()->getTeamFilter()*/moFilterCache;
+	mpLvLower->scroll_to_pos(filter.nLevelLower +NUM_OFFSET-1 );
+	mpLvUpper->scroll_to_pos(filter.nLevelUpper +NUM_OFFSET-1 );
+}
+
+void TeamSettingPanel::initTargetSV()
+{
+	CCNodeLoaderLibrary* lib  = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string strFilepath = CFGReader::instance()->get_ui_ccbi_filepath("duiwuxianzhiitem");
+	CCNode* node = reader->readNodeGraphFromFile(strFilepath.c_str(),this);
+	CC_ASSERT(node);
+
+	mpTargetSV->setContainer(node);
+	mpTargetSV->updateInset();
+
+	mpTargetSV->setContentOffset(ccp(0,mpTargetSV->getViewSize().height - mpTargetSV->getContentSize().height));
+	
+	mpTargetMutex->select(moFilterCache.nTarget,false);
+}
+
+TeamSettingPanel* TeamSettingPanel::createPanel( const char* szFile,CCObject* pOwner )
+{
+	CCNodeLoaderLibrary* lib  = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	lib->registerCCNodeLoader("TuningScrollView",TuningScrollViewLoader::loader());
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string strFilepath = CFGReader::instance()->get_ui_ccbi_filepath(szFile);
+	CCNode* node = reader->readNodeGraphFromFile(strFilepath.c_str(),pOwner);
+	CC_ASSERT(node);
+	TeamSettingPanel* panel =dynamic_cast<TeamSettingPanel*>(node);
+	return panel;
+}
+
+void TeamSettingPanel::onApply( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	apply();
+	close();
+}
+
+void TeamSettingPanel::apply()
+{
+	TeamMgr::getInstance()->setTeamFilter(moFilterCache);
+	
+	ChangeFilterSettingTargetType evt;
+	evt.targetString = moFilterCache.nTarget ==0?GET_STR(9003):GET_STR(9006 + moFilterCache.nTarget);
+	SEND_EVENT(&evt);
+}
+
+void TeamSettingPanel::setup( stTeamFilter const& filter )
+{
+	moFilterCache  = filter;
+
+	initTuningSV();
+	initTargetSV();
+
+	initClass();
+}
+
+void TeamSettingPanel::initClass()
+{
+	mpClassMutex->select(moFilterCache.nClassType);
+}

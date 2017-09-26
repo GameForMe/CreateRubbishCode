@@ -1,0 +1,85 @@
+#include "ScrollImage.h"
+#include "UiManager.h"
+
+ScrollImage::ScrollImage()
+	:_enableRockBtn(false)
+	,m_numberSize(33)
+	,m_maskWith(50)
+	,m_maskHeight(48)
+	,screenScaleX(0)
+	,screenScaleY(0)
+{
+	
+}
+ScrollImage::~ScrollImage()
+{
+	numsImageArray->release();
+}
+bool ScrollImage::init()
+{
+	visibleNode = CCNode::create();
+	visibleNode->setAnchorPoint(ccp(0.0f, 0.0f));
+	this->addChild(visibleNode);
+
+	numsImageArray = CCArray::create(); 
+	
+	for(int i = 0; i < 20; i ++){
+		CCSprite * single = CCSprite::create();
+		char buf[64];
+		if ( i< 10)
+		{
+			sprintf(buf, "cointreeui_%d", i+10);
+		} 
+		else if (i >= 10)
+		{
+			sprintf(buf, "cointreeui_%d", i );//scall
+		}
+
+		single->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(buf));
+		m_numberSize = single->getContentSize().height;
+		visibleNode->addChild(single);
+		single->setAnchorPoint(ccp(0.0f, 0.0f));
+		single->setPosition(ccp(0, m_numberSize * i));
+		numsImageArray->addObject(single);
+	}
+	numsImageArray->retain();
+	
+	//坑爹的缩放
+	CCEGLView *eglView = CCEGLView::sharedOpenGLView();
+	screenScaleX = eglView->getScaleX();
+	screenScaleY = eglView->getScaleY();
+	m_maskWith = m_maskWith * screenScaleX;
+	m_maskHeight = m_maskHeight * screenScaleY;
+	return true;
+}
+
+void ScrollImage::setNumber(int var,  float speed, bool up = true)
+{
+	this->stopAllActions();
+	visibleNode->setPosition(CCPointZero);
+	
+	CCPoint moveToPosition = ccp(visibleNode->getPositionX(),-(static_cast<CCLabelTTF *>(numsImageArray->objectAtIndex(10 + var)))->getPositionY());
+
+	float timeRand = speed*0.8f + (rand()%10)/10; //  0 -- 9 
+
+	CCMoveTo * moveAction = CCMoveTo::create((timeRand), moveToPosition);
+	
+	visibleNode->runAction(moveAction);
+}
+
+void ScrollImage::visit()
+{
+	glEnable(GL_SCISSOR_TEST);  
+
+	CCNode *node = this->getParent();
+	CCPoint pos = CCPointZero;  
+	pos = node->convertToWorldSpace(pos);  
+	CCRect rect = CCRectMake(pos.x*screenScaleX, pos.y*screenScaleY,m_maskWith, m_maskHeight);//裁剪显示区域
+
+	glScissor(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height);
+
+	CCNode::visit(); 
+
+	glDisable(GL_SCISSOR_TEST);  	
+}
+

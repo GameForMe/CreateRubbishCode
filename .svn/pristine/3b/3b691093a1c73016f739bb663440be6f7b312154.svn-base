@@ -1,0 +1,277 @@
+#ifndef TEAMMGR_H
+#define TEAMMGR_H
+/**
+ *	@file		TeamMgr.h
+ *	@author		gx
+ *	@date		2013/5/21
+ *	@version	
+ *	@brief		队伍管理类
+ */
+#include "CmdAdapter.h"
+#include "TeamProto.h"
+#include "WaitRespQueue.h"
+#include "client_common_define.h"
+#include <vector>
+#include <map>
+
+// 队伍任务目标
+enum e_team_target_type
+{
+	e_target_null = -1,			// 空项标识
+	e_target_near,				// 附近队伍
+	e_target_own_quest,			// 可接任务
+	e_target_limit_active,		// 限时活动
+	e_target_world_boss,		// 世界boss
+	e_target_field_boss,		// 野外boss
+	e_target_multi_instance,	// 多人副本
+	e_target_auto_action,		// 挂机队伍
+	e_target_protect_skydoor,	// 守卫天关
+	e_target_underground_aisle,	// 地宫长廊
+	e_target_double_practice,	// 双休队伍
+	e_target_num,				// 类型数量
+};
+
+struct stTeamTargetInfo
+{
+	e_team_target_type			select_type;
+	int							select_index;
+	int							level_min;
+	int							level_max;
+	bool						is_matching_state;
+
+	stTeamTargetInfo()
+		: select_type(e_target_null)
+		, select_index(0)
+		, level_min(1)
+		, level_max(100)
+		, is_matching_state(false)
+	{}
+
+	void reset(){select_type = e_target_null; select_index = 0; level_min = 1; level_max = 100; is_matching_state = false;}
+	void set_info(e_team_target_type type, int index, int min, int max){select_type = type, select_index = index, level_min = min, level_max = max;}
+	void set_matching_state(bool is_match){is_matching_state = is_match;}
+	bool is_have_target() const {return select_type > e_target_near;}
+	bool is_have_small_target() const {return select_index > 0;}
+	bool is_level_fill(int level) const {return level >= level_min && level <= level_max;}
+};
+
+struct stTeamFilter
+{
+	int nLevelLower;
+	int nLevelUpper;
+	int nClassType;//0是没有1,2,3
+	bool bForbid;//禁制入队
+	int nTarget;//抽象目标
+
+	stTeamFilter():nLevelLower(1)
+		,nLevelUpper(100)
+		,nClassType(0)
+		,bForbid(false)
+		,nTarget(0)
+	{
+
+	}
+
+	void reset(){nLevelLower=1;nLevelUpper =100;nClassType=0;bForbid=false;nTarget =0;}
+
+	bool limitByClass()const{return this->nClassType!=0;}
+	bool limitByLv()const{return this->nLevelLower>1 || this->nLevelUpper <100;}
+};
+
+class MessageBoxUi;
+class TeamMgr
+{
+public:
+	typedef std::vector<tagTeammateData> teammates_vector;
+private:
+	unsigned int				m_TeamID;					//本地玩家当前所在队伍ID
+	teammates_vector		    m_TeammatesInfo;			//本地玩家所在队伍的成员信息
+	std::vector<unsigned int>  m_troubles;					//队伍中掉线，死亡的玩家
+	unsigned int				m_TeamLeaderID;				//队伍队长ID
+	unsigned int				m_TeamLeaderID_Extra;		//用于保存变更队长前的队长ID
+	unsigned int               m_InviterID;					//邀请者的ID（用于获取邀请者名字，队长ID）
+	unsigned int               m_InviterTeamMenRoleID;		//邀请者的ID（真正的邀请者，可能是队员邀请）
+	unsigned int				m_DestID;					//被邀请者的ID
+	unsigned int				m_ApplyID;					//申请人ID
+	unsigned int               m_KickingMemberID;			//正在驱除的队员（用于等待确认）
+	unsigned int				m_LocalPlayerID;			//额外再保存一份本地玩家ID
+	unsigned int				m_ChangingLeaderID;			//见习队长
+	bool						m_bLeaderInviting;			//标识队长正在邀请
+	bool						m_bMemberInviting;			//标识队员正在邀请
+	bool						m_bInvitedReplay;			//标识邀请方不同意邀请
+	bool						m_bApply2Leader;			//标识队员申请入队
+	bool						m_bSignalRegister;			//标识特殊消息是否已经注册
+	unsigned int							m_nDesFubenID;				//将要进入的副本ID
+	unsigned int							_chatRoleId;
+	unsigned int							_chatRoomId;			//聊天室id
+	MessageBoxUi *				m_pMessageBox;
+	bool						m_pIsFubenPrepare;
+	float						m_pPrepareTime;
+
+	stTeamTargetInfo			m_team_target_info;	// 队伍目标信息
+
+	bool						m_bIsCanJoin;		//是否可以加入
+	stTeamFilter				moTeamFilter;
+
+	WaitRespQueue 				moRespQueue;
+
+	std::map<UINT,DWORD>		m_pInviteMap;		//正在邀请的玩家
+	float						m_pLastDelTime;
+
+	e_team_target_type			m_player_match_type;
+	int							m_player_match_index;
+	std::map<DWORD, DWORD>		m_apply_team_map;
+
+	DWORD						m_apply_to_role_id;	// 申请的玩家ID
+	unsigned int				m_temp_invite_to_role_id;
+	unsigned int				m_temp_invite_ro_role_name_crc;
+	unsigned int				m_temp_apply_player_id;
+	unsigned int				m_temp_agree_leader_id;
+	unsigned int				m_temp_agree_member_id;
+
+public:
+	TeamMgr();
+	~TeamMgr();
+	static TeamMgr* getInstance();
+	void Destroy();
+	void delayDestroy();
+	void Init();
+	void Init_Signal();
+	void Refresh_GroupInfo();
+	void ClearInfo();
+	void update(float dt);
+	/*client2sever*/
+	void InviteRemoteRoleJoinTeam(unsigned int uDestRoleID, const std::string* name = NULL);//邀请玩家加入队伍
+	void ApplyJoinTeam(unsigned int uDestRoleID);//申请加入远方玩家的队伍
+	void KickMember(unsigned int uDestRoleID);//踢玩家出队
+	void ChangerTeamLeader(unsigned int uDestRoleID);//变更队长
+	void LeaveTeam();//玩家离开队伍
+	void sendOwnCreatTeam(e_team_target_type first, int second, int level_min, int level_max);//创建队伍
+	void send_change_team_target(e_team_target_type target_type, int select_index , int level_min, int level_max);	//修改队伍设置
+	void sendTeamCanJoin(bool canJoin);
+	void sendGotoLeaderNear();
+	/*sever2client*/
+	unsigned int onServerInviteJoinTeam(s_net_cmd *cmd);//收到别人的组队邀请,双方收包
+	unsigned int onServerInvitetoLeader(s_net_cmd *cmd);//本地玩家发起邀请后的服务器返回错误码
+	unsigned int onServerPlayerTeamSet(s_net_cmd *cmd);//队长变更的广播
+	unsigned int onServerInviteReplay(s_net_cmd *cmd);//本地玩家发起邀请，对方是否接受的返回，如果对方则接收全体队伍消息，new 这里会生成一个默认模板的队伍
+	unsigned int onServerRoleStateToTeammate(s_net_cmd *cmd);	//服务器更新队员状态,主要是离线
+	unsigned int onServerMemberInviteJoinTeamToLeader(s_net_cmd *cmd);//非队长的队员邀请，本地玩家是队长，队长决策
+	unsigned int onServerMemberInviteJoinTeam(s_net_cmd *cmd);//本地队员发起的邀请的回包
+	unsigned int onServerApplyJoinTeamToLeader(s_net_cmd *cmd);//本地队长收到申请
+	unsigned int onServerMemberInviteJoinTeamReply(s_net_cmd *cmd);//本地队员邀请远程散户收到远程队长回应包
+	unsigned int onServerApplyJoinTeam(s_net_cmd *cmd);//本地玩家对人发起入队申请，服务器对此动作的回包
+	unsigned int onServerGetTeamID(s_net_cmd *cmd);//获取队伍id
+	unsigned int onServerApplyJoinTeamReply(s_net_cmd *cmd);//本地玩家发起入队申请的服务器回包
+	unsigned int onServerKickMember(s_net_cmd *cmd);//踢人广播
+	unsigned int onServerChangeLeader(s_net_cmd *cmd);//换队长广播
+	unsigned int onServerLeaveTeam(s_net_cmd *cmd);//离队广播
+	unsigned int onServerMemberOnline(s_net_cmd *cmd);//队员下线广播
+	unsigned int onServerRemoteattChange_Signle(s_net_cmd *cmd);//队伍里的远程玩家状态改变，主要是对血条之类的处理
+	unsigned int onServerGetPlayerName(s_net_cmd *cmd);
+	unsigned int onServerTeammateLevelChange(s_net_cmd *cmd);//队伍里远程玩家等级变化
+	unsigned int onServerTeamFubenState(s_net_cmd *cmd);//队伍成员的副本状态
+	unsigned int onTeamChatRoom(s_net_cmd *cmd);//队伍聊天
+	unsigned int onServerFubenPrepare(s_net_cmd *cmd);//副本准备
+	unsigned int onServerOwnCreatTeam(s_net_cmd *cmd);
+	unsigned int onServerChangeTeamTarget(s_net_cmd *cmd);
+	unsigned int onServerTeamCanJoin(s_net_cmd *cmd);
+	unsigned int onServerGotoLeaderNear(s_net_cmd *cmd);
+	unsigned int onServerDismissTeam(s_net_cmd *cmd);
+	unsigned int onServerPlayerMatch(s_net_cmd *cmd);
+	unsigned int onServerPlayerCancelMatch(s_net_cmd *cmd);
+	unsigned int onDeleteApplyData(s_net_cmd *cmd);
+
+	/*Msgbox信号连接函数*/
+	void onSignalAgreeInvite();
+	void onSignalDisagreeInvite();
+	void onSignalLeaderAgreeMemberInvite();
+	void onSignalLeaderDisagreeMemberInvite();
+	void onSignalLeaderAgreeApply();
+	void onSignalLeaderDisagreeApply();
+	void onSignalKickMemberConfirm();
+	void onSignalKickMemberCancel();
+	void onSignalLeaveTeamConfirm();
+	void onSignalChangeTeamLeaderConfirm();
+	/*UI调用接口函数*/
+	void MakeTeammate(unsigned int uDestRoleID);
+	/*类辅助功能函数声明*/
+	inline bool is_inteam() const { return m_TeamID != (unsigned int)INVALID /*&& (m_TeammatesInfo.size() > 0)*/; }//本地玩家是否在队伍中	
+	inline int get_teammate_num() const { return (int)m_TeammatesInfo.size(); }//获得队友数量
+	inline bool is_team_full()const { return m_TeammatesInfo.size() == MAX_TEAM_NUM-1; }//队伍是否已满	
+	inline teammates_vector get_teammate_list() const{ return m_TeammatesInfo; }//获得队友列表	
+	inline bool is_team_leader(unsigned int roleID) const{return roleID == m_TeamLeaderID;}//是否是队长	
+	bool is_teammate(unsigned int roleID);//是否是队友
+	const tagTeammateData* get_teammate_data(unsigned int const role_id_);//获取队友数据
+	void initialTeamInfo();//重新初始化类成员
+	void swapTeamLeaderPosFirst(unsigned int uLeaderID);//将队长信息置于队伍信息数组的第一位
+	inline unsigned int getLeaderID() const {return m_TeamLeaderID;}
+	inline unsigned int getLocalID() const {return m_LocalPlayerID;}
+	bool is_teammate_online(unsigned int role_id);//获取某个队友是否在线
+	inline unsigned int get_team_id() const {return m_TeamID;}
+
+	void onGetName(unsigned int roleid , const std::string& name);
+
+	//设置副本id
+	void setFubenID(unsigned int nFubenID){m_nDesFubenID = nFubenID;};
+	int getFubenID(){return m_nDesFubenID ;};
+
+	void getTeammateLocalPlayerData(tagTeammateData &teammate);
+	const teammates_vector *getTeamPlayData(){return &m_TeammatesInfo;};
+	void swapTeamLeaderPosFirst(unsigned int uLeaderID,teammates_vector &TeammatesInfo);//将队长信息置于队伍信息数组的第一位
+	STeam_Set_State m_state[MAX_TEAM_NUM];
+	STeam_Set_State getState(int i){return m_state[i];};
+	void setChatChannelRoleId(unsigned int id = -1) {_chatRoleId = id;}
+	bool isAllProfessionInTeam();
+	//bool isAllRoleInSameMap(unsigned int npcId);
+	bool isAllRoleLevelEnough(int level);
+
+	unsigned int getChatRoomId() { return _chatRoomId;}
+
+	void fubenAgree();
+	void fubenNoAgree();
+
+	stTeamFilter const& getTeamFilter()const{return moTeamFilter;}
+	void setTeamFilter(stTeamFilter const& filter){moTeamFilter = filter;}
+
+	void resetFilter(){moTeamFilter.reset();}
+
+	bool tryToMakeTeammate(unsigned int dwRoleID,bool isUiApply = false);
+
+	void removeResp(boost::shared_ptr<RespItem> const& ptr);
+	boost::shared_ptr<RespItem> const& getLastResp()const{return moRespQueue.getLast();}
+
+	WaitRespQueue::RespQueue const&  getRespQueue()const{return moRespQueue.getQueue();}
+	bool isQueueEmpty()const{return moRespQueue.getQueue().empty();}
+
+	inline WaitRespQueue& get_resp_queue() {return moRespQueue;}
+
+	const string get_target_name_by_target_type(e_team_target_type target_type);
+	const string get_target_index_name_by_target_type_and_index(e_team_target_type target_type, int index);
+
+	inline stTeamTargetInfo const& get_team_target_info()const{return m_team_target_info;}
+
+	inline e_team_target_type get_player_match_type(){return m_player_match_type;}
+	inline int get_player_match_index(){return m_player_match_index;}
+	inline bool is_player_in_match(){return m_player_match_type > 0;}
+
+	inline bool is_matching_state(){return m_team_target_info.is_matching_state;}
+	void delete_other_role_apply_by_id(DWORD role_id);
+	void clear_other_role_apply();
+	void send_player_match(e_team_target_type target_type, int index);
+	inline std::map<DWORD, DWORD>& get_apply_team_list() {return m_apply_team_map;}
+	void deal_with_team_apply(unsigned int leader_id, unsigned int menber_id, int is_agree);
+	void clear_quick_team_info();
+	bool get_is_have_apply_role();
+	bool open_quick_team(e_quick_team_open_type type);
+	void show_error_info(DWORD error);
+
+private:
+	void clearRespQueueAndCloseFrame();
+	void delete_role_from_apply_list(DWORD role_id);
+	void send_send_invite_team();
+	void send_send_invite_team_with_crc();
+	void send_apply_team();
+	void send_deal_with_team_apply();
+};
+#endif

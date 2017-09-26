@@ -1,0 +1,1014 @@
+#include "SystemUi.h"
+#include "CfgReader.h"
+//#include "NewPlayerGuide.h"
+#include "PackageUi.h"
+#include "StrengthenUi.h"
+#include "StoreUi.h"
+#include "TianmingUi.h"
+#include "EquipLevelUpUi.h"
+#include "GuildListUi.h"
+#include "MessageBoxUi.h"
+#include "GuildFrameUi.h"
+#include "World.h"
+#include "HookSetUi.h"
+#include "StringMgr.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "DayActivityUi.h"
+#include "TradeUi.h"
+#include "InstanceUi.h"
+#include "UiTools.h"
+#include "UiLoader.h"
+#include "UiManager.h"
+#include "ShortCutUi.h"
+#include "JoyStick.h"
+#include "ChatUi.h"
+#include "RoleEquipUi.h"
+#include "ToolTip.h"
+#include "MountUi.h"
+#include "NewGuildBibleUi.h"
+#include "UiManager.h"
+#include "MartialEquipUi.h"
+#include "MartialObtainUi.h"
+#include "WuXueUi.h"
+#include "CoreTreeUi.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "BaseDefine.h"
+#include "NewFuncGuider.h"
+#include "CommonDefine.h"
+#include "GameEventDefine.h"
+#include "NumericalIniMgr.h"
+#include "ImmediateEquipUi.h"
+#include "ItemAutoUseDaojuTip.h"
+#include "ClientCfg.h"
+#include "MiniMapUi.h"
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+#include "wzolJni.h"
+#endif
+/*#include "MartialObtainUi.h"*/
+
+SystemUi::SystemUi()
+	: _show(false)
+{
+	REGISTER_EVENT(RoleHeadPressed,SystemUi,onHeadPressed);
+	REGISTER_EVENT(system_ui_hide,SystemUi,onGuildHelpPressed);
+	REGISTER_EVENT(clear_safe_verify_red_point,SystemUi,onSafeVerifyHighLight);
+}
+
+CCNode* SystemUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["SystemUiLoaderLayer"] = UiLayerLoader<SystemUiLoaderLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("systemui", nodeLoaders, _loadSpriteSheet);
+	if(uiNode != NULL)
+	{
+		uiNode->setPosition(ccp(UiMgr::getInstance()->getOffsetX(), -100.f));
+		_show = false;
+	}
+	return uiNode;
+}
+
+void SystemUi::showUi( bool showState )
+{
+	CCNode *uiNode = getUiNodeByTag<SystemUiLoaderLayer>(WCT_SystemUi);
+	if(uiNode != NULL)
+	{
+		uiNode->stopAllActions();
+		const CCPoint &current = uiNode->getPosition();
+		CCAction *action = NULL;
+		if(showState)
+		{
+			float positionY = 0.0f;
+			float dis = positionY - current.y;
+			action = CCMoveTo::create(dis / 500.0f, ccp(UiMgr::getInstance()->getOffsetX(), positionY));
+		}
+		else
+		{
+			float positionY = -100.f;
+			float dis = current.y - positionY;
+			action = CCMoveTo::create(dis / 500.0f, ccp(UiMgr::getInstance()->getOffsetX(), positionY));
+		}
+		uiNode->runAction(action);
+	}
+}
+
+void SystemUi::slotChangeShowState()
+{
+	_show = !_show;
+	showUi(_show);
+
+	//显示隐藏相关ui
+	GET_UI(ShortCutUi, WCT_ShorCutUi)->showUi(!_show);
+	GET_UI(JoyStickUi, WCT_JoyStick)->showUi(!_show);
+	GET_UI(ChatUi, WCT_ChatUi)->showUi(!_show);
+
+	//打开mini地图 2016-3-17 金山
+	MiniMapUi* pUI = World::getInstance()->getMiniMapUi();World::getInstance()->getMiniMapUi();
+	if (pUI)
+	{
+		pUI->showUi(true);
+	}
+}
+
+void SystemUi::resetShowState()
+{
+	if(_show)
+	{//如果显示，则切换
+		slotChangeShowState();
+	}
+}
+
+cocos2d::CCRect SystemUi::getBtnPos(int tag)
+{
+	SystemUiLoaderLayer *layer = getUiNodeByTag<SystemUiLoaderLayer>(WCT_SystemUi);
+	if(layer != NULL)
+	{
+		return layer->getBtnPos(tag);
+	}
+
+	return CCRect(0.0f,0.0f,0.0f,0.0f);
+}
+
+cocos2d::CCPoint SystemUi::getBagBtnPos()
+{
+	SystemUiLoaderLayer *layer = getUiNodeByTag<SystemUiLoaderLayer>(WCT_SystemUi);
+	if(layer != NULL)
+	{
+		return layer->getBagBtnPos();
+	}
+
+	return CCPoint();
+}
+
+void SystemUi::resetShowStateNoChat()
+{
+	if(_show)
+	{
+		_show = !_show;
+		showUi(_show);
+	}
+}
+
+void SystemUi::playShiftAction( size_t index,bool bShowShortcut,float& fDelayOutput )
+{
+	fDelayOutput = 0.0f;
+	SystemUiLoaderLayer *layer = getUiNodeByTag<SystemUiLoaderLayer>(WCT_SystemUi);
+	//如果现实就直接切入动画
+	if (_show)
+	{
+		if(layer != NULL)
+		{
+			layer->delayPlayShift(index);
+		}
+	}
+	else//先切换一下
+	{
+		if(layer != NULL)
+		{
+			const CCPoint &current = layer->getPosition();
+			float positionY = 0.0f;
+			float dis = positionY - current.y;
+			float fDelay = dis/500.0f;
+			fDelayOutput = fDelay;
+			layer->delayPlayShift(index,fDelay);
+
+			slotChangeShowState();
+		}
+	}
+
+	if(bShowShortcut)
+		GET_UI(ShortCutUi, WCT_ShorCutUi)->showUiUpSystemUi(true);
+
+}
+
+void SystemUi::showCurBtn()
+{
+	SystemUiLoaderLayer *layer = getUiNodeByTag<SystemUiLoaderLayer>(WCT_SystemUi);
+	if(layer)
+		layer->showCurBtn();
+}
+
+CCNode* SystemUi::getBtnNode( int pos )
+{
+	SystemUiLoaderLayer *layer = getUiNodeByTag<SystemUiLoaderLayer>(WCT_SystemUi);
+	if(layer != NULL)
+	{
+		return layer->getBtnNode(pos);
+	}
+
+	return NULL;
+}
+
+void SystemUi::setBtnHighLight( int tag )
+{
+	SystemUiLoaderLayer *layer = getUiNodeByTag<SystemUiLoaderLayer>(WCT_SystemUi);
+	if(layer != NULL)
+	{
+		layer->setBtnHighLight(tag);
+	}
+}
+
+void SystemUi::revokeBtnHighLight( int tag )
+{
+	SystemUiLoaderLayer *layer = getUiNodeByTag<SystemUiLoaderLayer>(WCT_SystemUi);
+	if(layer != NULL)
+	{
+		layer->revokeBtnHighLight(tag);
+	}
+
+}
+
+SystemUi::~SystemUi()
+{
+	UNREGISTER_EVENT(RoleHeadPressed,SystemUi,onHeadPressed);
+	UNREGISTER_EVENT(system_ui_hide,SystemUi,onGuildHelpPressed);
+	UNREGISTER_EVENT(clear_safe_verify_red_point,SystemUi,onSafeVerifyHighLight);
+}
+
+void SystemUi::onHeadPressed( RoleHeadPressed* evt )
+{
+	slotChangeShowState();
+}
+
+void SystemUi::onGuildHelpPressed(system_ui_hide* trans)
+{
+	if (_show)
+	{
+		slotChangeShowState();
+	}
+}
+void SystemUi::onSafeVerifyHighLight(clear_safe_verify_red_point* pEvt)
+{
+	SystemUiLoaderLayer *layer = getUiNodeByTag<SystemUiLoaderLayer>(WCT_SystemUi);
+	if(layer != NULL)
+	{
+		return layer->revokeBtnHighLight(BT_Set);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler SystemUiLoaderLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+// 	CCB_SELECTORRESOLVER_CCMENUITEM_GLUE(this, "skillBtnPressed", SystemUiLoaderLayer::skillBtnPressed);
+// 	CCB_SELECTORRESOLVER_CCMENUITEM_GLUE(this, "packageBtnPressed", SystemUiLoaderLayer::packageBtnPressed);
+// 	CCB_SELECTORRESOLVER_CCMENUITEM_GLUE(this, "onTaskBtnPressed", SystemUiLoaderLayer::onTaskBtnPressed);
+// 	CCB_SELECTORRESOLVER_CCMENUITEM_GLUE(this, "characterBtnPressed", SystemUiLoaderLayer::onCharacterBtnPressed);
+// 	CCB_SELECTORRESOLVER_CCMENUITEM_GLUE(this, "onSystemFriendBtnPressed", SystemUiLoaderLayer::onFriendBtnPressed);
+// 	//CCB_SELECTORRESOLVER_CCMENUITEM_GLUE(this, "onConsolidBtnPressed", SystemUiLoaderLayer::onConsolidBtnPressed);
+// 	CCB_SELECTORRESOLVER_CCMENUITEM_GLUE(this, "storeBtnPressed", SystemUiLoaderLayer::onStoreBtnPressed);
+// 	CCB_SELECTORRESOLVER_CCMENUITEM_GLUE(this, "onTianmingBtnPressed", SystemUiLoaderLayer::onTianmingBtnPressed);
+// 	CCB_SELECTORRESOLVER_CCMENUITEM_GLUE(this, "onRideBtnPressed", SystemUiLoaderLayer::onRideBtnPressed);
+// 	CCB_SELECTORRESOLVER_CCMENUITEM_GLUE(this, "onGuildBtnPressed", SystemUiLoaderLayer::onGuildBtnPressed);
+// 	CCB_SELECTORRESOLVER_CCMENUITEM_GLUE(this, "onSetBtnPressed", SystemUiLoaderLayer::onSetBtnPressed);
+// 	CCB_SELECTORRESOLVER_CCMENUITEM_GLUE(this, "onBibleBtnPressed", SystemUiLoaderLayer::onBibleBtnPressed);
+// 	CCB_SELECTORRESOLVER_CCMENUITEM_GLUE(this, "onMartialBtnPressed", SystemUiLoaderLayer::onMartialBtnPressed);
+// 	CCB_SELECTORRESOLVER_CCMENUITEM_GLUE(this, "onBBSBtnPressed", SystemUiLoaderLayer::onBBSBtnPrssed);
+
+
+
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler SystemUiLoaderLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "skillBtnPressed", SystemUiLoaderLayer::skillBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "packageBtnPressed", SystemUiLoaderLayer::packageBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onTaskBtnPressed", SystemUiLoaderLayer::onTaskBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "characterBtnPressed", SystemUiLoaderLayer::onCharacterBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSystemFriendBtnPressed", SystemUiLoaderLayer::onFriendBtnPressed);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onConsolidBtnPressed", SystemUiLoaderLayer::onConsolidBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "storeBtnPressed", SystemUiLoaderLayer::onStoreBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onTianmingBtnPressed", SystemUiLoaderLayer::onTianmingBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRideBtnPressed", SystemUiLoaderLayer::onRideBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGuildBtnPressed", SystemUiLoaderLayer::onGuildBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSetBtnPressed", SystemUiLoaderLayer::onSetBtnPressed);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBibleBtnPressed", SystemUiLoaderLayer::onBibleBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onMartialBtnPressed", SystemUiLoaderLayer::onMartialBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBBSBtnPressed", SystemUiLoaderLayer::onBBSBtnPrssed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onduanzaoBtnPressed", SystemUiLoaderLayer::onduanzaoBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onJiaoYiBtnPressed", SystemUiLoaderLayer::onJiaoYiBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLuZhiBtnPressed", SystemUiLoaderLayer::onLuZhiBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onMoHunBtnPressed", SystemUiLoaderLayer::onMoHunBtnPressed);
+	return NULL;
+}
+void SystemUiLoaderLayer::onduanzaoBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//gx add 2013.11.12 摆摊，交易，双修状态锁死
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return;
+	}
+
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	OPEN_UI(WCT_ForgingDecomUI);
+}
+
+//交易行 16.2.12
+void SystemUiLoaderLayer::onJiaoYiBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (NULL == ploc)
+		return ;
+
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	if(NumericalIniMgr::getInstance()->get_trading_open_level() > ploc->getLevel())
+	{
+		ToolTip::getInstance()->push(GET_STR(9395));
+		return;
+	}
+
+	ImmediateEquipUi::getInstance()->close();
+	ItemAutoUseDaojuTip::getInstace()->close();
+	//CLOSE_ALL_UI();
+	OPEN_UI(WCT_TradingUI);
+}
+
+bool SystemUiLoaderLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+
+void SystemUiLoaderLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	this->_recordBtn = dynamic_cast<CCControlButton*>(this->getChildByTag(10));
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+    LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+    unsigned int roleID = ploc->getId();
+    std::stringstream ss;
+    ss<<"set"<<"_"<<roleID;
+    bool isShowRecordBtn = ClientCfg::getInstance()->getInt(ss.str(), "showRecordBtn", 0);
+    if(_recordBtn)
+        _recordBtn->setVisible(isShowRecordBtn);
+#else
+    if(_recordBtn)
+        _recordBtn->setVisible(false);
+#endif
+
+	REGISTER_EVENT(QuestDataInited,SystemUiLoaderLayer,onEventQuestInited);
+}
+
+void SystemUiLoaderLayer::updateRecordBtn(){
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+    unsigned int roleID = ploc->getId();
+    std::stringstream ss;
+    ss<<"set"<<"_"<<roleID;
+    bool isShowRecordBtn = ClientCfg::getInstance()->getInt(ss.str(), "showRecordBtn", 0);
+    if(_recordBtn)
+        _recordBtn->setVisible(isShowRecordBtn);
+#endif
+}
+
+void SystemUiLoaderLayer::skillBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	//gx add 2013.11.12 摆摊，交易，双修状态锁死
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return;
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	OPEN_UI(WCT_SKILLUI);
+}
+
+void SystemUiLoaderLayer::packageBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	//WCT_PACKAGEUI=CCTransitionEaseScene::
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}  
+	
+	OPEN_UI(WCT_PACKAGEUI);
+
+	if (IS_UI_OPEN(WCT_MartialObtainUi))
+	{
+		GET_UI(Package,WCT_PACKAGEUI)->changePackageBtn(true);
+	}
+	//OPEN_UI(WCT_ShouChongUi);
+}
+
+void SystemUiLoaderLayer::onTaskBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	//GET_UI(SystemUi, WCT_SystemUi)->signalTaskBtnPressed.emit();
+}
+
+void SystemUiLoaderLayer::onCharacterBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	//gx add 2013.11.12 摆摊，交易，双修状态锁死
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return;
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	OPEN_UI(WCT_ROLEEQUIPUI);
+	GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPlayerId(RoleManager::getInstance()->getLocalPlayer()->getId());
+	//OPEN_UI(WCT_PACKAGEUI);
+}
+
+void SystemUiLoaderLayer::onFriendBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	//gx add 2013.11.12 摆摊，交易，双修状态锁死
+		LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+		if (!ploc)
+			return;
+		if (ploc->isInRoleStateAny(RA_ShuangXiu))
+		{
+			ToolTip::getInstance()->push(GET_STR(2101));
+			return;
+		}
+		else if (ploc->isInRoleStateAny(RA_Exchange))
+		{
+			ToolTip::getInstance()->push(GET_STR(7218));
+			return;
+		}
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+		OPEN_UI(WCT_FRIENDUI);
+}
+
+// void SystemUiLoaderLayer::onConsolidBtnPressed( CCObject* pObject)
+// 	//gx add 2013.11.12 摆摊，交易，双修状态锁死
+// 	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+// 	if (!ploc)
+// 		return;
+// 	if (ploc->isRoleInStaticState())
+// 		return;
+// 
+// 	OPEN_UI(WCT_STRENGTHENUI);
+// }
+
+void SystemUiLoaderLayer::onStoreBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	//gx add 2013.11.12 摆摊，交易，双修状态锁死
+	//LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	//if (!ploc)
+	//	return;
+	//if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	//{
+	//	ToolTip::getInstance()->push(GET_STR(2101));
+	//	return;
+	//}
+	//else if (ploc->isInRoleStateAny(RA_Exchange))
+	//{
+	//	ToolTip::getInstance()->push(GET_STR(7218));
+	//	return;
+	//}
+	//AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_14);
+	//OPEN_UI(WCT_STOREUI);
+	//static bool palyAudioFlag=false;
+	//palyAudioFlag=!palyAudioFlag;
+	//if (palyAudioFlag)
+	//{
+	//	AudioPlayer::getSigletonPtr()->playerSoundNpcEffect(SOUND_STORE1,false);
+	//}
+	//else
+	//{
+	//	AudioPlayer::getSigletonPtr()->playerSoundNpcEffect(SOUND_STORE2,false);
+	//}
+
+}
+
+void SystemUiLoaderLayer::onTianmingBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	//gx add 2013.11.12 摆摊，交易，双修状态锁死
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return;
+	}
+
+	if (RoleManager::getInstance()->getLocalPlayer()->getLevel() >= 38 )
+	{
+		OPEN_UI(WCT_TIANMING);
+	}
+	else
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["destiny_limit_lv_notice"], 1.0f);
+	}	
+}
+
+void SystemUiLoaderLayer::onGuildBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	//gx add 2013.11.12 摆摊，交易，双修状态锁死
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return;
+	}
+
+	int nOpenLevel = GetFunOpenLevel(EFOL_Guild);
+
+/*
+	if (RoleManager::getInstance()->getLocalPlayer()->getLevel() < 10)//gx modify 2013.10.9
+	{
+		//ToolTip::getInstance()->push("\xE7\xAD\x89\xE7\xBA\xA7\xE4\xB8\x8D\xE8\xB6\xB3\xEF\xBC\x8C\xE9\x9C\x80\xE8\xBE\xBE\xE5\x88\xB0\x33\x32\xE7\xBA\xA7\xE6\x89\x8D\xE8\x83\xBD\xE6\x89\x93\xE5\xBC\x80\xE8\xA1\x8C\xE4\xBC\x9A", 1.0f);
+		ToolTip::getInstance()->push(GET_STR(153));
+	}
+*/
+	//如果等级不够,则不可以创建公会
+	if( ploc->getLevel() < nOpenLevel )
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["guild_limit_lv_notice"]);
+		return;
+	}
+	else
+	{
+		if(RoleManager::getInstance()->getLocalPlayer()->getGuildID() == 0xffffffff)
+		{
+			AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+			OPEN_UI(WCT_GuildListUi);
+		}
+		else
+		{
+			AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+			OPEN_UI(WCT_GuildFrameUi);
+		} 
+   }	
+	//OPEN_UI(WCT_OffLineExpUi);
+	//OPEN_UI(WCT_CangJingGeUi);
+	//OPEN_UI(WCT_ARENAPKUI);
+	//OPEN_UI(WCT_ShouChongUi);
+	// OPEN_UI(WCT_SynthesisServerUi);
+	//OPEN_UI(WCT_InlayUi);
+	//OPEN_UI(WCT_ARENAMAINUI);
+	//OPEN_UI(WCT_CoreTreeUi);
+/*
+	NpcChatLuaMgr::getInstance()->doNPCScript(1);
+	OPEN_UI(WCT_NPCCHATUI);*/
+	//OPEN_UI(WCT_MAILREWARDUI);
+	//OPEN_UI(WCT_ARENAMAINUI);
+	//OPEN_UI(WCT_ServerActivityUi);
+}
+
+void SystemUiLoaderLayer::onSetBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	//gx add 2013.11.12 摆摊，交易，双修状态锁死
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return;
+	}
+
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	OPEN_UI(WCT_HookSetUi);
+
+
+	//GET_UI(Package,WCT_PACKAGEUI)->changePackageBtn(true);
+}
+
+void SystemUiLoaderLayer::onRideBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{	//gx add 2013.11.12 摆摊，交易，双修状态锁死
+ 	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+ 		return;
+	if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return;
+	}
+ 
+ 	//检查开放等级
+ 	//int nOpenLevel = GetFunOpenLevel(EFOL_Ride);
+ 	//if(RoleManager::getInstance()->getLocalPlayer()->getLevel() < nOpenLevel)
+	if (NewFuncGuider::get_singleton().isForceOpen(NewFuncGuider::eRide) == false)
+ 	{
+ 		ToolTip::getInstance()->push(GET_STR(2198));
+ 	}
+ 	else
+ 	{
+ 		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+ 		OPEN_UI(WCT_MountUi);
+ 	}
+}
+
+void SystemUiLoaderLayer::onLuZhiBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	if(!WzolJni::getInstance()->isSystemVersionOk()){
+		ToolTip::getInstance()->push(GET_STR(9530).c_str());
+		return;
+	}
+	CCControlButton *btn = dynamic_cast<CCControlButton*>(pSender);
+	bool isRecord = WzolJni::getInstance()->isRecording();
+	if(!isRecord){
+		ToolTip::getInstance()->push(GET_STR(9533).c_str());
+		WzolJni::getInstance()->startRecordScreen();
+		btn->setHighlighted(!isRecord);
+		CCLog("-----------startRecordScreen");
+	}else
+	{
+		WzolJni::getInstance()->stopRecordScreen();
+		CCLog("-----------stopRecordScreen");
+	}
+	btn->setTouchEnabled(false);
+#endif
+}
+
+// void SystemUiLoaderLayer::onBibleBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+// 	//gx add 2013.11.12 摆摊，交易，双修状态锁死;
+// 	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+// 	if (!ploc)
+// 		return;
+// 	if (ploc->isRoleInStaticState())
+// 		return;
+// 	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+// 	OPEN_UI(WCT_NewGuildBibleUi);
+// 
+// }
+
+ void SystemUiLoaderLayer::onMartialBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+ 	{//功法系统;
+ 	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+ 	if (!ploc)
+ 		return;
+	if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return;
+	}
+	//检查开放等级
+	int nOpenLevel = GetFunOpenLevel(EFOL_KungFu);
+	if (ploc->getLevel() < nOpenLevel)
+	{
+		ToolTip::getInstance()->push(GET_STR(2316));
+		return;
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+ 	OPEN_UI(WCT_WUXUEUI);
+	GET_UI(Package,WCT_PACKAGEUI)->changePackageBtn(true);
+ }
+
+
+cocos2d::CCRect SystemUiLoaderLayer::getBtnPos(int tag)
+{
+	//CCMenu *menu= dynamic_cast<CCMenu*>(getChildByTag(0));
+	CCNode *node = getChildByTag(tag);
+	if(node != NULL)
+	{
+		SetNodeTintTo(node);
+		CCPoint pt = node->convertToWorldSpace(ccp(0, 0));
+		CCSize size = node->getContentSize();
+		return CCRect(pt.x, node->getPositionY() - (size.height / 2), size.width, size.height);
+	}
+
+	return CCRect();
+}
+
+void SystemUiLoaderLayer::onBBSBtnPrssed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+#ifndef WIN32 
+	//接入论坛;
+#endif
+}
+
+cocos2d::CCPoint SystemUiLoaderLayer::getBagBtnPos()
+{
+	if (IS_UI_OPEN(WCT_SystemUi))
+	{
+	//CCMenu *menu= dynamic_cast<CCMenu*>(getChildByTag(0));
+		CCNode *node = getChildByTag(SystemUi::BT_Package);
+		if(node != NULL)
+		{
+			CCSize size = node->getContentSize();
+			return ccp(node->getPositionX() + size.width * 0.5f,node->getPositionY());
+		}
+	}
+	return CCPoint();
+}
+
+void SystemUiLoaderLayer::delayPlayShift( size_t pos, float fDelay )
+{
+	muPosCache = pos;
+	if (fDelay ==0)
+	{
+		playShift(pos);
+	}
+	else
+	{
+
+		this->schedule(schedule_selector(SystemUiLoaderLayer::doPlayShift),0,0,fDelay);
+	}
+}
+
+void SystemUiLoaderLayer::doPlayShift( float )
+{
+	this->unschedule(schedule_selector(SystemUiLoaderLayer::doPlayShift));
+
+	playShift(muPosCache);
+}
+
+CCNode* SystemUiLoaderLayer::getBtnNode( int pos )
+{
+	CCNode *node = getChildByTag(pos);
+	return node;
+}
+
+void SystemUiLoaderLayer::onEventQuestInited( QuestDataInited * pEvent )
+{
+	initWithData();
+}
+
+void SystemUiLoaderLayer::onEnter()
+{
+	CCLayer::onEnter();
+
+	QuestDataInited evt;
+	SEND_EVENT(&evt);
+}
+
+void SystemUiLoaderLayer::onExit()
+{
+	CCLayer::onExit();
+
+	UNREGISTER_EVENT(QuestDataInited,SystemUiLoaderLayer,onEventQuestInited);
+}
+
+void SystemUiLoaderLayer::initWithData()
+{
+	std::vector<size_t>  invisibleList;
+	NewFuncGuider::get_singleton().getInvisibleLowerBtns(invisibleList);
+
+	int invisibleIndex = 0;//add by lw 16.2.12
+	std::vector<CCNode*> nodes;
+	for (size_t i = 0; i <= SystemUi::BT_Set ; ++i)
+	{
+// 		if (i == SystemUi::BT_Forge || i == SystemUi::BT_Ride || SystemUi::BT_Martial )
+// 		{
+// 			continue;
+// 		}
+		CCNode *node = getChildByTag(i);
+
+		if (node)
+		{
+			nodes.push_back(node);
+
+			BOOST_AUTO(finder,boost::find(invisibleList,invisibleIndex));
+			node->setVisible(finder==invisibleList.end());
+			++invisibleIndex;
+			//add lw 16.2.12 交易行 放置在行会与设置中间
+			if(i == SystemUi::BT_Guild){
+				CCNode* nodeTemp = getChildByTag(SystemUi::BT_JiaoyiHang);
+				if(nodeTemp){
+					nodes.push_back(nodeTemp);
+
+					BOOST_AUTO(finder,boost::find(invisibleList,invisibleIndex));
+					nodeTemp->setVisible(finder==invisibleList.end());
+					++invisibleIndex;
+				}
+			}
+			//add end
+		}
+	}
+
+	setupNodes(nodes,AlignComponent::ead_horizontal);
+}
+
+void SystemUiLoaderLayer::setBtnHighLight(int tag)
+{
+	switch(tag)
+	{
+	case SystemUi::BT_Skill:
+		{
+			CCControlButton *skillBtn = dynamic_cast<CCControlButton*>(getChildByTag(SystemUi::BT_Skill));
+			if (skillBtn)
+			{
+				if (!World::getInstance()->isHighLight(skillBtn, WT_CCCONTROLBUTTON, WCT_SystemUi))
+				{
+					World::getInstance()->SetHighLight(skillBtn, WT_CCCONTROLBUTTON, WCT_SystemUi, 0, true, 40, 35);
+				}
+			}
+		}
+		break;
+	case SystemUi::BT_Forge:
+		{
+			CCControlButton *forgeBtn = dynamic_cast<CCControlButton*>(getChildByTag(SystemUi::BT_Forge));
+			if (forgeBtn)
+			{
+				if (!World::getInstance()->isHighLight(forgeBtn, WT_CCCONTROLBUTTON, WCT_SystemUi))
+				{
+					World::getInstance()->SetHighLight(forgeBtn, WT_CCCONTROLBUTTON, WCT_SystemUi, 0, true, 40, 35);
+				}
+			}
+		}
+		break;
+	case SystemUi::BT_Guild:
+		{
+			CCControlButton *guildBtn = dynamic_cast<CCControlButton*>(getChildByTag(SystemUi::BT_Guild));
+			if (guildBtn)
+			{
+				if (!World::getInstance()->isHighLight(guildBtn, WT_CCCONTROLBUTTON, WCT_SystemUi))
+				{
+					World::getInstance()->SetHighLight(guildBtn, WT_CCCONTROLBUTTON, WCT_SystemUi, 0, true, 40, 35);
+				}
+			}
+		}
+		break;
+	case SystemUi::BT_Set:
+		{
+			CCControlButton *setBtn = dynamic_cast<CCControlButton*>(getChildByTag(SystemUi::BT_Set));
+			if (setBtn)
+			{
+				if (!World::getInstance()->isHighLight(setBtn, WT_CCCONTROLBUTTON, WCT_SystemUi))
+				{
+					World::getInstance()->SetHighLight(setBtn, WT_CCCONTROLBUTTON, WCT_SystemUi, 0, true, 40, 35);
+				}
+			}
+		}
+		break;
+	case SystemUi::BT_JiaoyiHang:
+		{
+			LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+			if (NULL == ploc)
+				return;
+			if(NumericalIniMgr::getInstance()->get_trading_open_level() > ploc->getLevel())
+				return;
+			CCControlButton* jiaoyihangBtn = dynamic_cast<CCControlButton*>(getChildByTag(SystemUi::BT_JiaoyiHang));
+			if (jiaoyihangBtn){
+				if (!World::getInstance()->isHighLight(jiaoyihangBtn, WT_CCCONTROLBUTTON, WCT_SystemUi)){
+					World::getInstance()->SetHighLight(jiaoyihangBtn, WT_CCCONTROLBUTTON, WCT_SystemUi, 0, true, 40, 35);
+				}
+			}
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+void SystemUiLoaderLayer::revokeBtnHighLight( int tag )
+{
+	switch(tag)
+	{
+	case SystemUi::BT_Skill:
+		{
+			CCControlButton *skillBtn = dynamic_cast<CCControlButton*>(getChildByTag(SystemUi::BT_Skill));
+			if (skillBtn)
+			{
+				if (World::getInstance()->isHighLight(skillBtn, WT_CCCONTROLBUTTON, WCT_SystemUi))
+				{
+					World::getInstance()->SetHighLight(skillBtn, WT_CCCONTROLBUTTON, WCT_SystemUi, 0, false);
+				}
+			}
+		}
+		break;
+	case SystemUi::BT_Set:
+		{
+			CCControlButton *setBtn = dynamic_cast<CCControlButton*>(getChildByTag(SystemUi::BT_Set));
+			if (setBtn)
+			{
+				if (World::getInstance()->isHighLight(setBtn, WT_CCCONTROLBUTTON, WCT_SystemUi))
+				{
+					World::getInstance()->SetHighLight(setBtn, WT_CCCONTROLBUTTON, WCT_SystemUi, 0, false);
+				}
+			}
+		}
+		break;
+	case SystemUi::BT_Forge:
+		{
+			CCControlButton *forgeBtn = dynamic_cast<CCControlButton*>(getChildByTag(SystemUi::BT_Forge));
+			if (forgeBtn)
+			{
+				if (World::getInstance()->isHighLight(forgeBtn, WT_CCCONTROLBUTTON, WCT_SystemUi))
+				{
+					World::getInstance()->SetHighLight(forgeBtn, WT_CCCONTROLBUTTON, WCT_SystemUi, 0, false);
+				}
+			}
+		}
+		break;
+	case SystemUi::BT_Guild:
+		{
+			CCControlButton *guildBtn = dynamic_cast<CCControlButton*>(getChildByTag(SystemUi::BT_Guild));
+			if (guildBtn)
+			{
+				if (World::getInstance()->isHighLight(guildBtn, WT_CCCONTROLBUTTON, WCT_SystemUi))
+				{
+					World::getInstance()->SetHighLight(guildBtn, WT_CCCONTROLBUTTON, WCT_SystemUi, 0, false);
+				}
+			}
+		}
+		break;
+	case SystemUi::BT_JiaoyiHang:
+		{
+			CCControlButton* jiaoyihangBtn = dynamic_cast<CCControlButton*>(getChildByTag(SystemUi::BT_JiaoyiHang));
+			if (jiaoyihangBtn){
+				if (World::getInstance()->isHighLight(jiaoyihangBtn, WT_CCCONTROLBUTTON, WCT_SystemUi)){
+					World::getInstance()->SetHighLight(jiaoyihangBtn, WT_CCCONTROLBUTTON, WCT_SystemUi, 0, false);
+				}
+			}
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+void SystemUiLoaderLayer::setRecordBtnState(bool isRecord)
+{
+	ShortCutUiLayer *layer = getUiNodeByTag<ShortCutUiLayer>(WCT_ShorCutUi);
+	if(layer)
+		layer->setRecordNodeState(isRecord);
+	if(_recordBtn)
+		_recordBtn->setHighlighted(isRecord);
+	_recordBtn->setTouchEnabled(true);
+	if(isRecord){
+		ToolTip::getInstance()->push(GET_STR(9531).c_str());
+		std::string lastMusicName = AudioPlayer::getSigletonPtr()->getLastMusicName();
+		std::string musicDir = CFGReader::instance()->get_profile_string("Audio", "Background", "");
+		std::string filePath = musicDir + lastMusicName + ".mp3";
+		SimpleAudioEngine::sharedEngine()->playBackgroundMusic(filePath.c_str(), true);
+		GET_UI(SystemUi, WCT_SystemUi)->slotChangeShowState();
+	}
+}
+
+void SystemUiLoaderLayer::onMoHunBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return;
+	}
+
+	if (NewFuncGuider::get_singleton().isForceOpen(NewFuncGuider::eGongFa) == false)
+	{
+		ToolTip::getInstance()->push(GET_STR(2316));
+		return;
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	OPEN_UI(WCT_WUXUEUI);
+}

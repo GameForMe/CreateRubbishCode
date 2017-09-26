@@ -1,0 +1,618 @@
+#include "SkillAnimManager.h"
+#include "SkillManager.h"
+#include "RoleManager.h"
+#include "DBMgr.h"
+#include "AnimationCache.h"
+#include "SinSkillEffect.h"
+#include "OctSkillEffect.h"
+#include "AudioPlayer.h"
+#include "MagicShield.h"
+#include "DBMgr.h"
+#include "AssaultSkillEffect.h"
+#include "LocalPlayer.h"
+#include "MessageDispatcher.h"
+#include "AttackAction.h"
+#include "TeamMgr.h"
+#include "CommonClient.h"
+
+SkillAnimManager* SkillAnimManager::getInstance()
+{
+	static SkillAnimManager instance;
+	return &instance;
+}
+
+//预加载技能特效
+void SkillAnimManager::preLoadAnims(unsigned int skillId)
+{
+	st_skill_proto const* skillProte = getSkillInfoFromDB(skillId);
+	if (!skillProte)
+	{
+		return;
+	}
+	if(skillProte->animFile.empty() || skillProte->animFile.find_first_not_of(" ") != 0)
+		return;
+
+	unsigned int lpRoleId = RoleManager::getInstance()->getLocalPlayer()->getId();
+	SkillEffect *skill = findSkillAnim(lpRoleId, skillId);
+	if(skill == NULL)
+	{
+		if(skillProte->type != ST_SPECIAL)
+		{
+			if(skillProte->dirType == DT_SIN)
+			{
+				skill = new SinSkillEffect;
+			}
+			else if(skillProte->dirType == DT_OCT)
+			{
+				skill = new OctSkillEffect;
+			}
+
+			if(skill != NULL)
+			{
+				if(skill->initSkill(skillId, *skillProte))
+				{
+					skill->setPriority(ELN_LPEft);
+					skill->addToMap();
+					addSkillEffectToSkillMap(lpRoleId, skillId, skill);
+				}
+				else
+				{
+					delete skill;
+					skill = NULL;
+				}
+			}
+		}
+		else
+		{
+			//逐个判断特殊效果
+			if(MagicShield::accept(skillId))
+			{//魔法盾
+				skill = new MagicShield;
+			}
+			else if(AssaultSkillEffect::accept(skillId))
+			{//野蛮冲撞
+				skill = new AssaultSkillEffect;
+			}
+			if(skill != NULL)
+			{
+				if(skill->initSkill(skillId, *skillProte))
+				{
+					skill->setPriority(ELN_LPEft);
+					skill->addToMap();
+					addSkillEffectToSkillMap(lpRoleId, skillId, skill);
+				}
+				else
+				{
+					delete skill;
+					skill = NULL;
+				}
+			}
+		}
+	}
+}
+
+void SkillAnimManager::useAnims( unsigned int skillId, unsigned int srcRoleId, unsigned int targetRoleId, const CCPoint& pt,bool continueRun /*= false*/ )
+{
+	RoleManager* roleMgr = RoleManager::getInstance();
+
+	bool bFireWall = skillId / 100 == 10202;
+	if(bFireWall)
+		RoleActionMgr::GetInstance()->AddSkillWall(srcRoleId, skillId, targetRoleId);
+
+	unsigned int  dwLpID = roleMgr->getLocalPlayer()->getId();
+	bool bLpSkillEft = srcRoleId == dwLpID;
+
+	if(roleMgr->isHideOtherEffect() && !bLpSkillEft)
+		return;
+
+	bool isTeammate = TeamMgr::getInstance()->is_teammate(srcRoleId);
+
+	const st_skill_proto* skillProte = getSkillInfoFromDB(skillId);
+	if (!skillProte)
+	{
+		return;
+	}
+	if(skillProte->animFile.empty() || skillProte->animFile.find_first_not_of(" ") != 0)
+		return;
+
+	SkillEffect *skill = findSkillAnim(srcRoleId, skillId);
+	if(skill == NULL)
+	{
+		if(skillProte->type != ST_SPECIAL)
+		{
+			if(skillProte->dirType == DT_SIN)
+			{
+				skill = new SinSkillEffect;
+			}
+			else if(skillProte->dirType == DT_OCT)
+			{
+				skill = new OctSkillEffect;
+			}
+
+			if(skill != NULL)
+			{
+				if(skill->initSkill(skillId, *skillProte))
+				{
+					if(bLpSkillEft)
+						skill->setPriority(ELN_LPEft);
+					else if (isTeammate)
+						skill->setPriority(ELN_TeamateEft);
+					else if (bFireWall)
+						skill->setPriority(ELN_Firewall);
+
+					skill->addToMap();
+
+					addSkillEffectToSkillMap(srcRoleId, skillId, skill);
+				}
+				else
+				{
+					delete skill;
+					skill = NULL;
+				}
+			}
+		}
+		else
+		{
+			//逐个判断特殊效果
+			if(MagicShield::accept(skillId))
+			{//魔法盾
+				skill = new MagicShield;
+			}
+			else if(AssaultSkillEffect::accept(skillId))
+			{//野蛮冲撞
+				skill = new AssaultSkillEffect;
+			}
+			if(skill != NULL)
+			{
+				if(skill->initSkill(skillId, *skillProte))
+				{
+					if(bLpSkillEft)
+						skill->setPriority(ELN_LPEft);
+					else if (isTeammate)
+						skill->setPriority(ELN_TeamateEft);
+					else if (bFireWall)
+						skill->setPriority(ELN_Firewall);
+
+					skill->addToMap();
+
+					addSkillEffectToSkillMap(srcRoleId, skillId, skill);
+				}
+				else
+				{
+					delete skill;
+					skill = NULL;
+				}
+			}
+		}
+	}
+
+	if(skill != NULL)
+	{
+		if (!continueRun)
+			AudioPlayer::getSigletonPtr()->playerEffect(skillProte->musicEffectName);
+		if(skillProte->type == ST_SELF || skillProte->type == ST_SELFLOOP)
+		{
+			if(continueRun)
+				skill->continueRun(srcRoleId);
+			else
+				skill->run(srcRoleId);
+		}
+		else if(skillProte->type == ST_TARGET || skillProte->type == ST_TARGETLOOP)
+		{
+			if (!pt.equals(CCPointZero))
+				skill->setPosition(pt);
+			if(continueRun)
+				skill->continueRun(targetRoleId);
+			else
+				skill->run(targetRoleId);
+		}
+		else
+		{
+			//此处需要特殊判断
+			if(continueRun)
+				skill->continueRun(srcRoleId);
+			else
+				skill->run(srcRoleId);
+		}
+	}
+
+	Role *role = RoleManager::getInstance()->findRole(targetRoleId);
+	if (role)
+	{
+		if (role->getAttribute(RA_DEAD)==1)
+		{
+			if (IS_PLAYER(targetRoleId))
+				return;
+			role->runDeadAni();
+		}
+	}
+}
+
+void SkillAnimManager::useBuffer( unsigned int bufferId, unsigned int srcRoleId, unsigned int targetRoleId )
+{
+	if(RoleManager::getInstance()->isHideOtherEffect() && srcRoleId != RoleManager::getInstance()->getLocalPlayer()->getId())
+		return;
+
+	int skillId = converBufferIdToSkillId(bufferId);
+
+	if(skillId > 0)
+		useAnims(skillId, srcRoleId, targetRoleId,CCPointZero);
+}
+
+void SkillAnimManager::stopAnims( unsigned int roleId, unsigned int skillId )
+{
+	SkillEffect *skill = findSkillAnim(roleId, skillId);
+	if(skill != NULL)
+		skill->stop();
+}
+
+void SkillAnimManager::stopBuffer( unsigned int roleId, unsigned int bufferId )
+{
+	int skillid = converBufferIdToSkillId(bufferId);
+
+	if(skillid > 0)
+		stopAnims(roleId, skillid);
+}
+
+st_skill_proto const* SkillAnimManager::getSkillInfoFromDB( unsigned int skillId )
+{
+	return SkillManager::getInstance()->get_skill_proto(skillId);
+//	auto iter = _skillInfoMap.find(skillId);
+//	if(iter == _skillInfoMap.end())
+//	{
+// 		c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM SkillData WHERE ID = ?1");
+// 		cmd->set_integer32(1 , skillId);
+// 		c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 
+// 		SkillInfo skillInfo;
+// 		while(table->retrieve_row())
+// 		{
+// 			unsigned int idx = table->get_index("EffectFile");
+// 			skillInfo.animFile = table->get_text(idx);
+// 			idx = table->get_index("EffectType");
+// 			skillInfo.effectPos = (eSkillEffectPos)table->get_integer32(idx);
+// 			idx = table->get_index("DirType");
+// 			skillInfo.dirType = (eDirType)table->get_integer32(idx);
+// 			idx = table->get_index("MusicEffect");
+// 			skillInfo.musicEffectName = table->get_text(idx);
+// 			idx = table->get_index("BeginEffect");
+// 			std::string tmp = table->get_text(idx);
+// 			skillInfo.begin_effect = (tmp =="0") ? "":table->get_text(idx);
+// 			_skillInfoMap[skillId] = skillInfo;
+// 		}
+// 
+// 		c_db_manager::getSingleton()->destroy_table(table);
+// 		c_db_manager::getSingleton()->end_operation(cmd);
+		//CC_ASSERT(false);
+		//return &_skillInfoMap[skillId];
+//		return NULL;
+//	}
+//	else
+//	{
+//		return &iter->second;
+//	}
+}
+
+void SkillAnimManager::removeAnims( SkillEffect *skillEffect )//未用到
+{
+	//unhit
+	CC_ASSERT(skillEffect != NULL);
+	skillEffect->removeFromMap();
+	_fadeOutSkillList.push_back(skillEffect);
+
+	for(SkillMap::iterator iter = _skillMap.begin(); iter != _skillMap.end(); ++ iter)
+	{
+		SkillEffectMap effectMap = iter->second;
+		unsigned int id = INVALID_ID;
+		for(SkillEffectMap::iterator iter2 = effectMap.begin(); iter2 != effectMap.end(); ++ iter2)
+		{
+			SkillEffect *skill = iter2->second;
+			if(skill == skillEffect)
+			{
+				id = iter2->first;
+				break;
+			}
+		}
+
+		if(id != INVALID_ID)
+		{
+			effectMap.erase(id);
+			_skillMap[iter->first] = effectMap;
+			break;
+		}
+	}
+}
+void SkillAnimManager::ClearOldSkillEffect(unsigned int roleid,unsigned int SkillTypeId)
+{
+	for(SkillMap::iterator iter = _skillMap.begin(); iter != _skillMap.end(); ++ iter)
+	{
+		if(iter->first == roleid)
+		{
+			SkillEffectMap &effectMap = iter->second;
+			for(SkillEffectMap::iterator iter2 = effectMap.begin(); iter2 != effectMap.end();)
+			{
+				unsigned int uSkillTypeId = SkillManager::getInstance()->getSkillTypeId(iter2->first);
+				if(uSkillTypeId == SkillTypeId)
+				{
+					iter2->second->stop();
+					delete iter2->second;
+					effectMap.erase(iter2++);
+
+				}
+				else
+				{
+					iter2++;
+				}
+
+			}
+		}
+		
+	}
+	
+
+}
+void SkillAnimManager::clearAll()
+{
+	for(SkillMap::iterator iter = _skillMap.begin(); iter != _skillMap.end(); ++ iter)
+	{
+		SkillEffectMap &effectMap = iter->second;
+		for(SkillEffectMap::iterator iter2 = effectMap.begin(); iter2 != effectMap.end(); ++ iter2)
+		{
+			iter2->second->stop();
+			delete iter2->second;
+		}
+		effectMap.clear();
+	}
+	_skillMap.clear();
+	//移出起手特效
+	//if (RoleManager::getInstance()->getLocalPlayer())
+	//	RoleManager::getInstance()->getLocalPlayer()->removePlayerSkillUpEffect();
+}
+
+void SkillAnimManager::update( float dt )
+{
+	//std::vector<unsigned int> removeList;
+	//一帧移除一个
+	for(SkillMap::iterator iter = _skillMap.begin(); iter != _skillMap.end(); ++ iter)
+	{
+		Role *role = RoleManager::getInstance()->findRole(iter->first);
+		if(role == NULL)
+		{
+			//removeList.push_back(iter->first);
+			
+			removeRoleSkillEffect(iter->first);
+
+			break;
+		}
+	}
+
+
+// 	std::vector<unsigned int>::iterator begin = removeList.begin();
+// 	if (begin != removeList.end())
+// 	{
+// 		removeRoleSkillEffect(*begin);
+// 	}
+	
+//  	for(std::vector<unsigned int>::iterator iter = removeList.begin(); iter != removeList.end(); ++ iter)
+//  	{
+//  		removeRoleSkillEffect(*iter);
+//  	}
+// 	removeList.clear();
+
+	for(SkillMap::const_iterator iter = _skillMap.begin(); iter != _skillMap.end(); ++ iter)
+	{
+		SkillEffectMap const& effectMap = iter->second;
+		//unsigned int id = INVALID_ID;
+		for(SkillEffectMap::const_iterator iter2 = effectMap.begin(); iter2 != effectMap.end(); ++ iter2)
+		{
+			SkillEffect*skill = iter2->second;
+			skill->update(dt);
+		}
+	}
+}
+
+void SkillAnimManager::addSkillEffectToSkillMap( unsigned int roleId, unsigned int skillId, SkillEffect *skillEffect )
+{
+
+	ClearOldSkillEffect(roleId,SkillManager::getInstance()->getSkillTypeId(skillId));
+	SkillEffectMap effectMap;
+	SkillMap::iterator iter = _skillMap.find(roleId);
+	if(iter != _skillMap.end())
+	{
+		effectMap = iter->second;
+	}
+
+	effectMap[skillId] = skillEffect;
+	_skillMap[roleId] = effectMap;
+}
+
+void SkillAnimManager::removeSkillEffectFromSkillMap( unsigned int roleId, unsigned int skillId )//未用到
+{
+	//unhit
+	SkillMap::iterator iter = _skillMap.find(roleId);
+	if(iter != _skillMap.end())
+	{
+		SkillEffectMap effectMap = iter->second;
+		effectMap.erase(skillId);
+		_skillMap[roleId] = effectMap;
+	}
+}
+
+SkillEffect* SkillAnimManager::findSkillAnim( unsigned int roleId, unsigned int skillId )
+{
+	SkillMap::iterator iter = _skillMap.find(roleId);
+	if(iter != _skillMap.end())
+	{
+		SkillEffectMap effectMap = iter->second;
+		SkillEffectMap::iterator iter2 = effectMap.find(skillId);
+		if(iter2 != effectMap.end())
+			return iter2->second;
+	}
+
+	return NULL;
+}
+
+void SkillAnimManager::removeRoleSkillEffect( unsigned int roleId )
+{
+	SkillMap::iterator iter = _skillMap.find(roleId);
+	if(iter != _skillMap.end())
+	{
+		SkillEffectMap effectMap = iter->second;
+		for(SkillEffectMap::iterator iter2 = effectMap.begin(); iter2 != effectMap.end(); ++ iter2)
+		{
+			SkillEffect *skill = iter2->second;
+			skill->removeFromMap();
+			delete skill;
+		}
+		_skillMap.erase(iter);
+	}
+}
+
+bool SkillAnimManager::isSkillStoped( unsigned int skillId, unsigned int roleId )
+{
+	SkillEffect *skillEffect = findSkillAnim(roleId, skillId);
+	if(skillEffect == NULL)
+		return true;
+
+	return skillEffect->isStoped();
+}
+
+void SkillAnimManager::continueBufferAnims( unsigned int bufferId, unsigned int srcRoleId, unsigned int targetRoleId )
+{
+	int skillId = converBufferIdToSkillId(bufferId);
+
+	if(skillId > 0)
+		useAnims(skillId, srcRoleId, targetRoleId, CCPointZero,true);
+}
+
+int SkillAnimManager::converBufferIdToSkillId( int bufferId )
+{
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Buffer WHERE BufferId = ?1");
+// 	cmd->set_integer32(1 , bufferId);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 
+// 	int skillid = -1;
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("SkillId");
+// 		skillid = table->get_integer32(idx);
+// 	}
+// 
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	st_buf_proto const* buff_proto = get_buff_proto(bufferId);
+	if (buff_proto)
+	{
+		return buff_proto->skill_id;
+	}
+
+	return INVALID_ID;
+}
+
+void SkillAnimManager::removeAllRemoteRoleSkill()
+{
+	unsigned int lpId = RoleManager::getInstance()->getLocalPlayer()->getId();
+	std::vector<unsigned int> removeList;
+	for(SkillMap::iterator iter = _skillMap.begin(); iter != _skillMap.end(); ++ iter)
+	{
+		Role *role = RoleManager::getInstance()->findRole(iter->first);
+		if(role == NULL || role->getId() != lpId)
+		{
+			removeList.push_back(iter->first);
+		}
+	}
+
+	for(std::vector<unsigned int>::iterator iter = removeList.begin(); iter != removeList.end(); ++ iter)
+	{
+		removeRoleSkillEffect(*iter);
+	}
+	removeList.clear();
+}
+
+//停止本地玩家的所有技能特效，不显示
+void SkillAnimManager::stopLocalPlayerAllSkillAnims()
+{
+	if (RoleManager::getInstance()->getLocalPlayer())
+	{
+		SkillMap::iterator iter = _skillMap.find(RoleManager::getInstance()->getLocalPlayer()->getId());
+		if(iter != _skillMap.end())
+		{
+			SkillEffectMap& effectMap = iter->second;
+			SkillEffectMap::iterator iter2 = effectMap.begin();
+			for ( ; iter2!=effectMap.end(); ++iter2)
+			{
+				iter2->second->stop();
+			}
+		}
+	}
+}
+
+void SkillAnimManager::setSkillEffectVisible( unsigned int roleId, unsigned int skillId,bool isShow )
+{
+	SkillMap::iterator iter = _skillMap.find(roleId);
+	if(iter != _skillMap.end())
+	{
+		SkillEffectMap effectMap = iter->second;
+		SkillEffectMap::iterator skillIter = effectMap.find(skillId);
+		if (skillIter != effectMap.end())
+		{
+			SkillEffect* skill = skillIter->second;
+			skill->setVisible(isShow);
+		}
+	}
+}
+
+bool SkillAnimManager::init_buff_proto()
+{
+	// 	unsigned int buff_id;
+	// 	SQL_START_WITH_DATA(Buffer, st_buf_proto, proto);
+	// 	SQL_EXTRA_INT(buff_id, BufferId);
+	// 	SQL_EXTRA_STRING(proto.buff_take_effect_sfx, effectId);
+	// 	SQL_EXTRA_STRING(proto.pic_name, effectName);
+	// 
+	// 	//if(proto.buff_take_effect_sfx != "0")
+	// 	_buff_proto.insert(std::make_pair(buff_id,proto));
+	// 	SQL_END;
+	f_data_set data_set;
+	std::list<std::string> fields;
+	bool ret =data_set.load("Config/db/Buffer.xml","BufferId",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(	fields.begin(),
+		fields.end(),
+		[&](std::string const& one)
+	{
+		st_buf_proto data;
+
+		unsigned int buff_id = data_set.get_int("BufferId",one.c_str());		
+		data.buff_take_effect_sfx = data_set.get_string("effectId",one.c_str(),"");
+		data.pic_name = data_set.get_string("effectName",one.c_str(),"");
+		data.skill_id = data_set.get_int("SkillId",one.c_str(),0);
+		data.show_tack = data_set.get_int("showTack",one.c_str(),0);
+		if (data.show_tack != 0)
+		{
+			m_buff_id_to_showtack.insert(std::make_pair(buff_id,data.show_tack));
+		}
+		_buff_proto[buff_id] = data;
+	});
+
+	return true;
+}
+
+st_buf_proto const* SkillAnimManager::get_buff_proto( unsigned int buff_id )
+{
+	auto iter  =_buff_proto.find(buff_id);
+	if (iter!= _buff_proto.end())
+	{
+		return &iter->second;
+	}
+
+	return NULL;
+}
+
+SkillAnimManager::SkillAnimManager()
+{
+	init_buff_proto();
+}
+

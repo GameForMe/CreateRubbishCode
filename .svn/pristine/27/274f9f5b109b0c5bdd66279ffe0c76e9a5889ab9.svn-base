@@ -1,0 +1,329 @@
+/****************************************************************************
+ Copyright (c) 2013 cocos2d-x.org
+ Copyright (c) Microsoft Open Technologies, Inc.
+
+ http://www.cocos2d-x.org
+ 
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+ 
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+ 
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE.
+ ****************************************************************************/
+
+#ifndef __ResUpdateManager__
+#define __ResUpdateManager__
+
+#include "cocos2d.h"
+#include "ExtensionMacros.h"
+
+#if (CC_TARGET_PLATFORM != CC_PLATFORM_WINRT) && (CC_TARGET_PLATFORM != CC_PLATFORM_WP8)
+#include <string>
+#include <curl/curl.h>
+#ifndef WIN32
+#include <pthread.h>
+#endif
+
+NS_CC_EXT_BEGIN
+
+#define KEY_OF_VERSION   "current-version-code"
+#define KEY_OF_DOWNLOADED_VERSION    "downloaded-version-code"
+#define TEMP_PACKAGE_FILE_NAME    "update-temp-package.zip"
+
+class ResUpdateManagerDelegateProtocol;
+
+/*
+ *  This class is used to auto update resources, such as pictures or scripts.
+ *  The updated package should be a zip file. And there should be a file named
+ *  version in the server, which contains version code.
+ *  @js NA
+ *  @lua NA
+ */
+class ResUpdateManager
+{
+public:
+    enum ErrorCode
+    {
+        // Error caused by creating a file to store downloaded data
+        kCreateFile,
+        /** Error caused by network
+         -- network unavaivable
+         -- timeout
+         -- ...
+         */
+        kNetwork,
+        /** There is not a new version
+         */
+        kNoNewVersion,
+        /** Error caused in uncompressing stage
+         -- can not open zip file
+         -- can not read file global information
+         -- can not read file information
+         -- can not create a directory
+         -- ...
+         */
+        kUncompress,
+		kBigVersionUpdate,
+        kUnkown,
+    };
+    
+    /* @brief Creates a ResUpdateManager with new package url, version code url and storage path.
+     *
+     * @param packageUrl URL of new package, the package should be a zip file.
+     * @param versionFileUrl URL of version file. It should contain version code of new package.
+     * @param storagePath The path to store downloaded resources.
+     */
+    ResUpdateManager(const char* user = NULL, const char* packageUrl = NULL, const char* versionFileUrl = NULL, const char* storagePath = NULL);
+    
+    virtual ~ResUpdateManager();
+    
+    /* @brief Check out if there is a new version resource.
+     *        You may use this method before updating, then let user determine whether
+     *        he wants to update resources.
+     */
+    virtual int checkUpdate();
+    
+    /* @brief Download new package if there is a new version, and uncompress downloaded zip file.
+     *        Ofcourse it will set search path that stores downloaded files.
+     */
+    virtual void update();
+    
+    /* @brief Gets url of package.
+     */
+    const char* getPackageUrl() const;
+    
+    /* @brief Sets package url.
+     */
+    void setPackageUrl(const char* packageUrl);
+    
+    /* @brief Gets version file url.
+     */
+    const char* getVersionFileUrl() const;
+    
+    /* @brief Gets version file url.
+     */
+    void setVersionFileUrl(const char* versionFileUrl);
+    
+    std::string getVersionDownloading();
+    /* @brief Gets current version code.
+     */
+    std::string getVersion();
+    
+    /* @brief Deletes recorded version code.
+     */
+    void deleteVersion();
+    
+    /* @brief Gets storage path.
+     */
+    const char* getStoragePath() const;
+    
+    /* @brief Sets storage path.
+     *
+     * @param storagePath The path to store downloaded resources.
+     * @warm The path should be a valid path.
+     */
+    void setStoragePath(const char* storagePath);
+    
+    /** @brief Sets delegate, the delegate will receive messages
+     */
+    void setDelegate(ResUpdateManagerDelegateProtocol *delegate);
+    
+    /** @brief Sets connection time out in seconds
+     */
+    void setConnectionTimeout(unsigned int timeout);
+    
+    /** @brief Gets connection time out in secondes
+     */
+    unsigned int getConnectionTimeout();
+	unsigned int getTotalCount();
+    
+    /* downloadAndUncompress is the entry of a new thread 
+     */
+#ifdef WIN32
+	friend unsigned long WINAPI ResUpdateManagerDownloadAndUncompress(void *data);
+#else
+	friend void* ResUpdateManagerDownloadAndUncompress(void *data);
+#endif
+
+    friend int ResUpdateManagerProgressFunc(void *, double, double, double, double);
+    
+	inline void lockData(){
+#ifdef WIN32
+		EnterCriticalSection(&_dataMutex);
+#else
+		pthread_mutex_lock(&_dataMutex);	
+#endif
+	}
+	inline void unlockData(){
+#ifdef WIN32
+		LeaveCriticalSection(&_dataMutex);
+#else
+		pthread_mutex_unlock(&_dataMutex);	
+#endif
+	}
+
+	inline void lockUpdateFlag(){
+#ifdef WIN32
+		EnterCriticalSection(&_updateMutex);
+#else
+		pthread_mutex_lock(&_updateMutex);	
+#endif
+	}
+	inline void unlockUpdateFlag(){
+#ifdef WIN32
+		LeaveCriticalSection(&_updateMutex);
+#else
+		pthread_mutex_unlock(&_updateMutex);	
+#endif
+	}
+
+protected:
+	bool firstUncompress();
+    bool downLoad();
+    void checkStoragePath();
+    bool uncompress(const char *file);
+    bool uncompress();
+    bool createDirectory(const char *path);
+    void setSearchPath();
+    void sendErrorMessage(ErrorCode code);
+    bool checkNeedDownload();
+    bool mergeAndRemoveDownloadFile();
+    bool mergeAndRemoveAfterZipUncompress();
+
+private:
+    typedef struct _Message
+    {
+    public:
+        _Message() : what(0), obj(NULL){}
+        unsigned int what; // message type
+        void* obj;
+    } Message;
+    
+    //class Helper : public cocos2d::CCObject
+    class Helper : public CCObject
+    {
+    public:
+        Helper();
+        ~Helper();
+        
+        virtual void update(float dt);
+        void sendMessage(Message *msg);
+		inline void lockMsgQue(){
+#ifdef WIN32
+		EnterCriticalSection(&_messageQueueMutex);
+#else
+		pthread_mutex_lock(&_messageQueueMutex);	
+#endif
+	}
+		inline void unlockMsgQue(){
+#ifdef WIN32
+		LeaveCriticalSection(&_messageQueueMutex);
+#else
+		pthread_mutex_unlock(&_messageQueueMutex);	
+#endif
+	}
+        
+    private:
+        void handleUpdateCompleted(Message *msg);
+        void handleOneDownloadBegin(Message *msg);
+        void handleOneUpdateSucceed(Message *msg);
+        void handleFirstUncompress(Message *msg);
+        //void handleDownLoadOK(Message *msg);
+        
+        std::list<Message*> *_messageQueue;
+#ifdef WIN32
+		CRITICAL_SECTION _messageQueueMutex;
+#else
+		pthread_mutex_t _messageQueueMutex;
+#endif
+    };
+    
+    
+    bool isUpdateing() { lockUpdateFlag(); bool bFlag = _bUpdateing; unlockUpdateFlag(); return bFlag; }
+    void setUpdateFlag(bool bFlag) {lockUpdateFlag(); _bUpdateing = bFlag; unlockUpdateFlag();}
+private:
+    std::string _userName;
+
+	//! The path to store downloaded resources.
+    std::string _storagePath;
+    
+    //! The version of downloaded resources.
+    std::string _version;
+    
+    std::string _versionCur;
+    
+    std::string _versionCurInFile;
+
+	std::string _packageUrl;
+    std::string _versionFileUrl;
+    
+    std::string _downloadedVersion;
+
+	std::string _rpzFileName;
+	std::string _rppFileName;
+
+	std::string _outFileName;
+	bool _bRpz;
+    
+    CURL *_curl;
+    Helper *_schedule;
+
+#ifndef WIN32
+    pthread_t *_tid;
+#endif
+
+    unsigned int _connectionTimeout;
+    
+    ResUpdateManagerDelegateProtocol *_delegate; // weak reference
+    
+    bool _bUpdateing;
+
+#ifdef WIN32
+	CRITICAL_SECTION _updateMutex;
+	CRITICAL_SECTION _dataMutex;
+#else
+	pthread_mutex_t _updateMutex;
+    pthread_mutex_t _dataMutex;
+#endif
+};
+
+class ResUpdateManagerDelegateProtocol
+{
+public:
+    /* @brief Call back function for error
+       @param errorCode Type of error
+     */
+    virtual void onError(ResUpdateManager::ErrorCode errorCode) {};
+    /** @brief Call back function for recording downloading percent
+        @param percent How much percent downloaded
+        @warn This call back function just for recording downloading percent.
+              ResUpdateManager will do some other thing after downloading, you should
+              write code in onSuccess() after downloading. 
+     */
+    virtual void onProgress(int percent,double totalToDownload,	double nowDownloaded) {};
+    /** @brief Call back function for success
+     */
+    virtual void onSuccess() {};
+    virtual void onFirstUncompress() {};
+    virtual void onOneUpdate() {};
+    virtual void onDownloadBegin() {};
+    virtual void onDownloadOK() {};
+    virtual void onDelTempData() {};
+    virtual void onUpdateType(int t) {};
+};
+
+NS_CC_EXT_END;
+#endif // CC_TARGET_PLATFORM != CC_PLATFORM_WINRT
+#endif /* defined(__ResUpdateManager__ */

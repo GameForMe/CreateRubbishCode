@@ -1,0 +1,1655 @@
+#include "ServerListUi.h"
+#include "UiLoader.h"
+#include "UiResourceMgr.h"
+#include "UiManager.h"
+#include "CfgReader.h"
+#include "UiTools.h"
+#include "Loading.h"
+#include "Login.h" 
+#include "ClientCfg.h"
+#include "ClientUpdate.h"
+#include "MessageBoxUi.h"
+#include "AnimationCache.h"
+#include "BSAnimate.h"
+#include "support/tinyxml2/tinyxml2.h"
+#include "StringMgr.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "LoginUi.h"
+//#include "UpdateUI.h"
+#include "Helper.h"
+#include "f_string_table.h"
+#include "f_string_util.h"
+#include "UIUtil.h"
+#include "f_util.h"
+
+const char* serverlistDownFileName = "serverlist.xml";
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+#include "wzolJni.h"
+#endif
+
+
+AreaListItem::AreaListItem()
+{
+	CCSprite *sprite = CCSprite::create();
+	sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_areabtnn"));
+	_node->setContentSize(sprite->getContentSize());
+	_node->setAnchorPoint(ccp(0.5,0.5));
+	sprite->setTag(NT_Back);
+	UIUtil::childNodeAlign(_node,sprite,eha_center,eva_center,CCPointZero);
+
+	CCSize size = sprite->getContentSize();
+
+	TTFConfig fc;
+	fc.fontFilePath = FT_FONTFACE;
+	fc.fontSize = 20;
+	fc.outlineSize = 1;
+
+	LabelFT* label  = LabelFT::createWithTTF(fc,"");
+	label->setTag(NT_Label);
+	label->setColor(ccc3(0xff, 0x00, 0x00));//修改服务器大区的文字颜色
+	UIUtil::childNodeAlign(sprite,label,eha_center,eva_center,CCPointZero);
+}
+
+AreaListItem::~AreaListItem()
+{
+
+}
+
+void AreaListItem::setData( const ServerZone::Zone &zone )
+{
+	_zone = zone;
+	LabelFT *label = getLabel();
+	CC_ASSERT(label != NULL);
+	label->setString(zone.name.c_str());
+
+}
+
+cocos2d::CCSize AreaListItem::getContentSize()
+{
+	return _node->getChildByTag(NT_Back)->getContentSize();
+}
+float AreaListItem::getItemHeight()
+{
+	return getContentSize().height;//vv 2014.9.24 修改服务器各区间距
+}
+
+void AreaListItem::onTouch( CCTouch *touck )
+{
+
+}
+
+void AreaListItem::onSelectChanged( bool select )
+{
+	CCSprite *sprite = dynamic_cast<CCSprite*>(_node->getChildByTag(NT_Back));
+	CC_ASSERT(sprite != NULL);
+	if(select)
+	{
+		sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_areabtnh"));
+
+		ServerListUi::getInstance()->setCurAreaName(_zone.name);
+
+		CCLog("------------- AreaListItem::onSelectChanged 1");
+		ServerListUi::getInstance()->updateDisplay();
+	}
+	else
+	{
+		sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_areabtnn"));
+	}
+}
+
+LabelFT * AreaListItem::getLabel()
+{
+	CCNode *node = _node->getChildByTag(NT_Back);
+	return dynamic_cast<LabelFT*>(node->getChildByTag(NT_Label));
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+ServerListItemFrame::ServerListItemFrame()
+	: _item(NULL)
+{
+	setAnchorPoint(ccp(0.f, 1.0f));
+}
+
+ServerListItemFrame::~ServerListItemFrame()
+{
+
+}
+
+bool ServerListItemFrame::init()
+{
+	if(!CCSprite::init())
+		return false;
+
+	return true;
+}
+
+void ServerListItemFrame::setState( int state )
+{
+	CCSprite *icon = dynamic_cast<CCSprite*>(getChildByTag(NT_Icon));
+	CCSprite *stateIcon = dynamic_cast<CCSprite*>(getChildByTag(NT_State));
+	
+	CC_ASSERT(icon != NULL && stateIcon != NULL);
+
+	if(state == ServerListItem::SS_Recommend) //空闲
+	{
+		icon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_statefine")); //绿豆
+		stateIcon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_commend"));
+	}
+	else if(state == ServerListItem::SS_New) //暂时没有用到
+	{
+		icon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_statebusy")); //黄豆
+		stateIcon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_new"));
+	}
+	else if(state == ServerListItem::SS_Fire) //爆满
+	{
+		icon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_statehot")); //红豆
+		stateIcon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_hot"));
+	}
+	else if (state == ServerListItem::SS_Preserve) //维护
+	{
+		icon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_statepreserve")); //灰豆
+		stateIcon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_preserve"));
+	}
+}
+
+void ServerListItemFrame::setServerName( const std::string &name )
+{
+	//CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_ServerName));
+	LabelFT *label = Helper::getLabelFTByParentAndTag(this,NT_ServerName);
+	if (label)
+	{
+		CC_ASSERT(label != NULL);
+		label->setString(name.c_str());
+	}
+}
+
+ void ServerListItemFrame::setServerNum( const std::string &num )
+ {
+	//CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_ServerNum));
+	LabelFT *label = Helper::getLabelFTByParentAndTag(this,NT_ServerNum);
+	if (label)
+	{
+ 		CC_ASSERT(label != NULL);
+ 		label->setString(num.c_str());
+	}
+ }
+
+ void ServerListItemFrame::setLastLogin( bool bLast )
+ {
+	 auto pNode = getChildByTag(NT_LastLogin);
+	 pNode->setVisible(bLast);
+ }
+
+ServerListItem::ServerListItem()
+	: _uiFrame(NULL)
+{
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("ServerListItemFrame", UiSpriteLoader<ServerListItemFrame>::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	_uiFrame = dynamic_cast<ServerListItemFrame*>(ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "serverListItem.ccbi").c_str()));
+	_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+	UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+	ccbReader->release();
+	if(_uiFrame != NULL)
+	{
+		_uiFrame->retain();
+		_uiFrame->_item = this;
+	}
+	CC_ASSERT(_uiFrame != NULL);
+}
+
+ServerListItem::~ServerListItem()
+{
+	_uiFrame->removeFromParent();
+	CC_SAFE_RELEASE(_uiFrame);
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+}
+
+void ServerListItem::addToParent( CCNode *node )
+{
+	CC_ASSERT(node != NULL && _uiFrame != NULL);
+	if(_uiFrame->getParent() != NULL)
+		return;
+
+	node->addChild(_uiFrame);
+}
+
+void ServerListItem::setData( const ServerZone::Server &server, bool bLastLogin )
+{
+	_data = server;
+	CC_ASSERT(_uiFrame != NULL);
+	_uiFrame->setServerName(server.name);
+
+	if (server.zoneName == "normal_zone")  // 非“曾经登录”中的服务器
+	{
+		_uiFrame->setServerNum(server.num); //显示几服 add by XSea 2014.10.22
+	}
+	else
+	{
+		_uiFrame->setServerNum(intToString(server.zoneIdx) + STRING_TABLE["Login_Zone"]); //显示实际所属大区的idx
+	}
+	
+	_uiFrame->setState(server.status);
+	_uiFrame->setLastLogin(bLastLogin);
+}
+
+void ServerListItem::setPosition( const CCPoint &pos )
+{
+	CC_ASSERT(_uiFrame != NULL);
+	_uiFrame->setPosition(pos);
+}
+
+bool ServerListItem::isTouchOn( CCTouch *pTouch )
+{
+	CC_ASSERT(_uiFrame != NULL);
+	if(isTouchOnNodeContent(_uiFrame, pTouch))
+		return true;
+
+	return false;
+}
+
+void ServerListItem::setSelect( bool select )
+{
+	if(select)
+	{
+		_uiFrame->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_servernamebtnh"));
+	}
+	else
+	{
+		_uiFrame->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_servernamebtnn"));
+	}
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+
+ServerListUi::ServerListUi()
+	: _isLoad(false)
+	, m_CurServerStatus(0)
+	, _hasUsedLoginServer(false)
+	, _recommandSetverAreaTag(0)
+	, m_areaBtnName1("")
+	, m_areaBtnName2("")
+	, m_usedLoginName1("")
+	, m_usedLoginName2("")
+#ifndef WIN32
+	, _update(false)
+#endif
+{
+
+}
+
+ServerListUi * ServerListUi::getInstance()
+{
+	static ServerListUi instance;
+	return &instance;
+}
+
+void ServerListUi::open()
+{
+	CCLOG("------------ ServerListUi open");
+
+	if(getUiLayer() != NULL)
+	{
+		CCScene *scene = UiMgr::getInstance()->getCurScene();
+		CCNode *node = scene->getChildByTag(WCT_ServerList);
+		if (node)
+		{
+			node->setZOrder(WZ_POPUI);
+			node->setVisible(true);
+		}
+		return;
+	}
+	LoginUi* parentUiLayer = Login::getInstance()->GetLoginUi();
+	if(parentUiLayer)
+	{
+		parentUiLayer->setCanClick(false);
+	}
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("ServerUiLayer", UiLayerLoader<ServerListUiLayer>::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode *node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "serverui.ccbi").c_str());
+	CC_ASSERT(node != NULL);
+	CCLOG("------------------- input serverlistui");
+	_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+	CCLOG("--------------------- _usedPlistFile");
+	UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+	ccbReader->release();
+	CCScene *scene = UiMgr::getInstance()->getCurScene();
+	scene->addChild(node, WZ_POPUI, WCT_ServerList);
+	CCLOG("----------------- yes,add serverlistui");
+
+#ifdef WIN32
+	CCLOG("----------------#ifdef WIN32 ServerListUi::open()");
+	praseServerList();
+#else
+	#ifdef _USE_SDK
+		if(WzolJni::getInstance()->serverListStatus() != 1)
+		{
+			CCLOG("--------------WzolJni::getInstance()->serverListStatus() != 1 ServerListUi::open()");
+			WzolJni::getInstance()->downloadServerList();
+			WaitLoading::getInstance()->start(false);
+			ClientUpdate::getInstance()->signalUpdate.connect(this, &ServerListUi::update);
+			_update = true;
+		}
+		else
+		{
+			CCLOG("--------------else WzolJni::getInstance()->serverListStatus() != 1 ServerListUi::open()");
+			praseServerList();
+		}
+	#else
+		CCLOG("--------------WzolJni::getInstance()->serverListStatus() Not Use SDK");
+		praseServerList();
+	#endif
+#endif
+}
+
+void ServerListUi::close()
+{
+	//ServerListUiLayer *uiLayer = getUiLayer();
+//	if(uiLayer != NULL)
+//		uiLayer->stopAnimation();
+
+	CCScene *scene = UiMgr::getInstance()->getCurScene();
+	if (scene &&  scene->getChildByTag(WCT_ServerList))
+	{
+		scene->removeChildByTag(WCT_ServerList);
+		UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	}
+#ifdef _USE_SDK
+	WaitLoading::getInstance()->stop();
+	ClientUpdate::getInstance()->signalUpdate.disconnect(this, &ServerListUi::update);
+	_update = false;
+#endif
+}
+
+void ServerListUi::praseServerList()
+{
+	CCLOG("--------- praseServerList:111111111111111111111");
+
+	if(!_isLoad)
+	{
+		CCLOG("--------- praseServerList:44444444444444444444444444444444444444");
+		std::string listFile = CCFileUtils::sharedFileUtils()->getWritablePath() + serverlistDownFileName;
+
+		tinyxml2::XMLDocument *doc = new tinyxml2::XMLDocument();
+		CCLOG("listFile:%s", listFile.c_str());
+		doc->LoadFile(listFile.c_str());
+		tinyxml2::XMLElement *rootEle = doc->RootElement();
+		tinyxml2::XMLElement *zoneEle = rootEle->FirstChildElement();
+ 		int zoneGongCeIdx = 1;
+ 		int zoneNeiCeIdx = 1;
+		while(zoneEle != NULL)
+		{
+			std::string eleName(zoneEle->Name());
+			if(eleName == std::string("zone"))
+			{
+				ServerZone zone;
+				zone.zone.name = zoneEle->Attribute("name");
+				zone.zone.version = zoneEle->Attribute("version");
+				zone.zone.ip = zoneEle->Attribute("ip");
+				zone.zone.port = zoneEle->IntAttribute("port");
+				zone.zone.serial = zoneEle->IntAttribute("serial");
+				zone.zone.IsShow = zoneEle->IntAttribute("show");
+				zone.zone.areaname = zoneEle->Attribute("areaname");
+				zone.zone.areatag = zoneEle->IntAttribute("areatag");
+ 				if (0 == zone.zone.areatag)
+ 				{
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+					string MyClientVersion = "";
+					WzolJni::getInstance()->callPlatformWithReturn(GET_APP_VER, "", MyClientVersion);
+					if (MyClientVersion == zone.zone.version)
+					{
+						zone.zone.zoneIdx = zoneGongCeIdx++;
+					}
+#else
+					zone.zone.zoneIdx = zoneGongCeIdx++;
+#endif
+ 				}
+ 				else
+ 				{
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+					string MyClientVersion = "";
+					WzolJni::getInstance()->callPlatformWithReturn(GET_APP_VER, "", MyClientVersion);
+					if (MyClientVersion == zone.zone.version)
+					{
+						zone.zone.zoneIdx = zoneNeiCeIdx++;
+					}
+#else
+					zone.zone.zoneIdx = zoneNeiCeIdx++;
+#endif
+ 				}
+				if (zone.zone.serial<0)
+					zone.zone.serial = -zone.zone.serial;
+
+				tinyxml2::XMLElement *serverEle = zoneEle->FirstChildElement();
+				while(serverEle != NULL)
+				{
+					ServerZone::Server server;
+					server.name = serverEle->Attribute("name");
+					server.num = serverEle->Attribute("num");
+					server.status = serverEle->IntAttribute("status");
+					server.serial = serverEle->IntAttribute("serial");
+					server.zoneName = "normal_zone";		// 表示属于普通大区，不属于“曾经登录”
+					server.zoneIdx = zone.zone.zoneIdx;
+					if (server.serial<0)
+						server.serial = -server.serial;
+					//gx add
+					server.nameDest = serverEle->Attribute("namedest");
+					server.meregeFlag = serverEle->IntAttribute("merge");
+					server.zonenameDest = serverEle->Attribute("zonenamedest");
+					if(zone.zone.IsShow == 0)
+					{
+						server.IsShow = 0;
+					}
+					else
+					{
+						server.IsShow = serverEle->IntAttribute("show");
+					}
+					server.version = serverEle->Attribute("version");
+					server.areaName = serverEle->Attribute("areaname");
+					server.areaTag = serverEle->IntAttribute("areatag");
+					//end
+					zone.serverList.push_back(server);
+					serverEle = serverEle->NextSiblingElement();
+				}
+
+				_zoneList.push_back(zone);
+			}
+			else if(eleName == std::string("recomment"))
+			{
+				_recommandAreaName = zoneEle->Attribute("zoneName");
+				_recommandServerName = zoneEle->Attribute("serverName");
+				_recommandServerNum = zoneEle->Attribute("serverNum");
+				std::string tmpState = zoneEle->Attribute("status");
+				_recommandServerState = std::atoi(tmpState.c_str());
+				_recommandSetverAreaTag = zoneEle->IntAttribute("areatag");
+			}
+			else if(eleName == std::string("tip"))
+			{
+				StringMgr::getInstance()->setTip(zoneEle->Attribute("text"));
+				CCLOG("praseServerList:tip =%s",zoneEle->Attribute("text"));
+			}
+			else if (eleName == std::string("buttonname"))
+			{
+				tinyxml2::XMLElement *btnEle = zoneEle->FirstChildElement();
+				while(btnEle != NULL)
+				{
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+					string MyClientVersion = "";
+					WzolJni::getInstance()->callPlatformWithReturn(GET_APP_VER, "", MyClientVersion);
+					std::vector<string> versionVector;
+					part_string(MyClientVersion.c_str(),versionVector,'.');
+					if (versionVector.size() != 4 )
+					{
+						safe_sprintf(MyClientVersion,"%s","0");
+					}
+					if (MyClientVersion == btnEle->Attribute("number"))
+					{
+						m_areaBtnName1 = btnEle->Attribute("areaname1");
+						m_areaBtnName2 = btnEle->Attribute("areaname2");
+						m_usedLoginName1 = btnEle->Attribute("usedlogin1");
+						m_usedLoginName2 = btnEle->Attribute("usedlogin2");
+					}
+#endif
+					btnEle = btnEle->NextSiblingElement();
+				}
+			}
+
+			zoneEle = zoneEle->NextSiblingElement();
+		}
+		delete doc;
+		_isLoad = true;
+		CCLOG("----------- praseServerList:555555555555555555555555555555555555");
+	}
+
+	updateUsedLoginSeversData();
+	
+	updateDisplay();
+
+	if (isFirstLogin == false)
+	{
+		std::string areaName = ClientCfg::getInstance()->getString("general", "area", "").c_str();
+		std::string serverName = ClientCfg::getInstance()->getString("general", "server", "").c_str();
+		setCurAreaName(areaName);
+		setCurServerName(serverName);
+		isFirstLogin = true;
+	}
+}
+
+std::list<ServerZone::Server> ServerListUi::getServerList( const std::string &zoneName )
+{
+	CCLOG("getServerList:%s", zoneName.c_str());
+	for(std::list<ServerZone>::iterator iter = _zoneList.begin(); iter != _zoneList.end(); ++iter)
+	{
+		const ServerZone &zone = *iter;
+		if(zone.zone.name == zoneName)
+		{
+			return zone.serverList;
+		}
+	}
+	return std::list<ServerZone::Server>();
+}
+ServerZone::Zone* ServerListUi::getZone( const std::string &zoneName )
+{
+	for(std::list<ServerZone>::iterator iter = _zoneList.begin(); iter != _zoneList.end(); ++iter)
+	{
+		ServerZone &zone = *iter;
+		if(zone.zone.name == zoneName)
+		{
+			return &zone.zone;
+		}
+	}
+	return NULL;
+}
+void ServerListUi::updateDisplay()
+{
+	CCLog("------------------- updateDisplay:111111111111111111111111111111111111111111");
+	ServerListUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateDisplay();
+	}
+}
+
+ServerListUiLayer * ServerListUi::getUiLayer()
+{
+	CCScene *scene = UiMgr::getInstance()->getCurScene();
+	return dynamic_cast<ServerListUiLayer*>(scene->getChildByTag(WCT_ServerList));
+}
+
+bool ServerListUi::getCurDataForGame( ServerZone::Zone &zone, ServerZone::Server &server )
+{
+	return getCurServerData(zone, server, _curAreaName, _curServerName);
+}
+
+bool ServerListUi::getCurDataForLogin( ServerZone::Zone &zone, ServerZone::Server &server )
+{
+	if (!getCurServerData(zone, server, _curAreaName, _curServerName))
+	{
+		return false;
+	}
+
+	if (server.meregeFlag == 1)
+	{
+		return getCurServerData(zone, server, server.zonenameDest.empty() ? zone.name : server.zonenameDest, server.nameDest);
+	}
+
+	return true;
+}
+
+bool ServerListUi::getCurServerData(ServerZone::Zone &zone, ServerZone::Server &server, const std::string& arenaName, const std::string& serverName)
+{
+	for(std::list<ServerZone>::iterator iter = _zoneList.begin(); iter != _zoneList.end(); ++iter)
+	{
+		const ServerZone &zonetmp = *iter;
+		if(zonetmp.zone.name == arenaName)
+		{
+			zone = zonetmp.zone;
+			if (zone.serial<0)
+				zone.serial = -zone.serial;
+			for(std::list<ServerZone::Server>::const_iterator iter2 = zonetmp.serverList.begin(); iter2 != zonetmp.serverList.end(); ++ iter2)
+			{
+				const ServerZone::Server &servertmp = *iter2;
+				if(servertmp.name == serverName)
+				{
+					server = servertmp;
+					if (server.serial<0)
+						server.serial = -server.serial;
+					return true;
+				}
+			}
+		}
+	}
+
+	for(std::list<ServerZone>::iterator iter = _zoneList.begin(); iter != _zoneList.end(); ++iter)
+	{
+		const ServerZone &zonetmp = *iter;
+		if(zonetmp.zone.name == _recommandAreaName)
+		{
+			zone = zonetmp.zone;
+			if (zone.serial<0)
+				zone.serial = -zone.serial;
+			for(std::list<ServerZone::Server>::const_iterator iter2 = zonetmp.serverList.begin(); iter2 != zonetmp.serverList.end(); ++ iter2)
+			{
+				const ServerZone::Server &servertmp = *iter2;
+				if(servertmp.name == _recommandServerName)
+				{
+					server = servertmp;
+					if (server.serial<0)
+						server.serial = -server.serial;
+					return true;
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
+void ServerListUi::updateUsedLoginSeversData()
+{
+	std::string usedLoginServers = ClientCfg::getInstance()->getString("general", "usedLoginServers", "").c_str();
+	std::vector<std::string> vecServers;
+	part_string(usedLoginServers.c_str() , vecServers , '+');
+
+	ServerZone serverZone;
+	ServerZone serverNeiCeZone;
+	_hasUsedLoginServer = false;
+	for (auto iter = vecServers.rbegin(); iter != vecServers.rend(); ++iter)
+	{
+		ServerZone::Zone zone;
+		ServerZone::Server server;
+		if (getServerZone((*iter) , zone , server ))
+		{
+			if ( 0 == zone.areatag )
+			{
+				// 因为曾经登陆过的服务器可能属于不同的大区，所以把大区名记录在ServerZone::Server结构体里。
+				server.zoneName = zone.name;
+				server.zoneIdx = zone.zoneIdx;		// 服务器实际所属大区的idx
+				server.areaName = zone.areaname;
+				server.areaTag = zone.areatag;
+				if (serverZone.zone.version.empty())
+					serverZone.zone.version = zone.version;
+
+				serverZone.serverList.push_back(server);
+				_hasUsedLoginServer = true;
+			}
+			else if ( 1 == zone.areatag )
+			{
+				server.zoneName = zone.name;
+				server.zoneIdx = zone.zoneIdx;		// 服务器实际所属大区的idx
+				server.areaName = zone.areaname;
+				server.areaTag = zone.areatag;
+				if (serverNeiCeZone.zone.version.empty())
+					serverNeiCeZone.zone.version = zone.version;
+
+				serverNeiCeZone.serverList.push_back(server);
+				_hasUsedLoginServer = true;
+			}
+		}
+	}
+
+	if (_zoneList.empty() )
+		return;
+
+	// 先抛弃旧的数据
+	while (_zoneList.front().zone.zoneIdx == 0)
+	{
+		_zoneList.pop_front();
+	}
+
+	if (_hasUsedLoginServer)
+	{
+		if (serverZone.serverList.size() != 0 )
+		{
+			serverZone.zone.zoneIdx = 0;
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+			serverZone.zone.name = ServerListUi::getInstance()->getUsedLoginName1();
+#else
+			serverZone.zone.name = STRING_TABLE["Login_UsedLogin_GongCe"];		// 曾经登录
+#endif
+			serverZone.zone.areatag = 0;
+			_zoneList.push_front(serverZone);
+		}
+		if (serverNeiCeZone.serverList.size() != 0 )
+		{
+			serverNeiCeZone.zone.zoneIdx = 0;
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+			serverNeiCeZone.zone.name = ServerListUi::getInstance()->getUsedLoginName2();
+#else
+			serverNeiCeZone.zone.name = STRING_TABLE["Login_UsedLogin_NeiCe"];
+#endif
+			serverNeiCeZone.zone.areatag = 1;
+			_zoneList.push_front(serverNeiCeZone);
+		}
+	}
+	else
+	{
+		ServerZone::Zone zone;
+		ServerZone::Server server;
+		if (getServerZoneByName(recommandAreaName(), recommandServerName(), zone, server))
+		{
+			server.zoneName = zone.name;
+			server.zoneIdx = zone.zoneIdx;
+			serverZone.serverList.push_back(server);
+
+			serverZone.zone.zoneIdx = 0;
+			serverZone.zone.name = STRING_TABLE["RecommentServer"];		// 推荐服务器
+			serverZone.zone.areatag = recommandServerAreaTag();
+			_zoneList.push_front(serverZone);
+		}
+		else
+		{
+			if (get_appropriate_recommond_server(zone,server))
+			{
+				server.zoneName = zone.name;
+				server.zoneIdx = zone.zoneIdx;
+				serverZone.serverList.push_back(server);
+
+				serverZone.zone.zoneIdx = 0;
+				serverZone.zone.name = STRING_TABLE["RecommentServer"];		// 推荐服务器
+				serverZone.zone.areatag = recommandServerAreaTag();
+				_zoneList.push_front(serverZone);
+			}
+		}
+
+	}
+
+}
+
+bool ServerListUi::getServerZone( const std::string & serverInfo , ServerZone::Zone & zone_out , ServerZone::Server & server_out)
+{
+	/*			serverInfo :
+	**			ip&port&servername
+	*/
+
+
+
+	std::vector<std::string> info;
+	part_string((serverInfo).c_str() ,info ,'&');
+	if (info.size() != 3)
+		return false;
+
+	for (auto iter1 = _zoneList.begin(); iter1 != _zoneList.end(); ++iter1)
+	{
+		const ServerZone::Zone & zone = (*iter1).zone;
+		if (info[0] == zone.ip && atoi(info[1].c_str()) == zone.port)
+		{
+			const std::list<ServerZone::Server> & serverList = (*iter1).serverList;
+			for (auto iter2 = serverList.begin(); iter2 != serverList.end(); ++iter2)
+			{
+				const ServerZone::Server & server = (*iter2);
+				if (info[2] == server.name)
+				{
+					zone_out = zone;
+					server_out = server;
+					return true;
+				}
+			}
+		}
+	}
+	
+	return false;
+
+}
+
+
+bool ServerListUi::getServerZoneByName( const std::string & zoneName, const std::string & serverName, ServerZone::Zone & zone_out, ServerZone::Server & server_out)
+{
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	string MyClientVersion = "";
+	WzolJni::getInstance()->callPlatformWithReturn(GET_APP_VER, "", MyClientVersion);
+
+	for (auto iter1 = _zoneList.begin(); iter1 != _zoneList.end(); ++iter1)
+	{
+		const ServerZone::Zone & tmpZone = (*iter1).zone;
+		if (tmpZone.version == MyClientVersion && tmpZone.name == zoneName)
+		{
+			const std::list<ServerZone::Server> & serverList = (*iter1).serverList;
+			for (auto iter2 = serverList.begin(); iter2 != serverList.end(); ++iter2)
+			{
+				const ServerZone::Server & tmpServer = (*iter2);
+				if (serverName == tmpServer.name)
+				{
+					zone_out = tmpZone;
+					server_out = tmpServer;
+					return true;
+				}
+			}
+		}
+	}
+
+#else
+	for (auto iter1 = _zoneList.begin(); iter1 != _zoneList.end(); ++iter1)
+	{
+		const ServerZone::Zone & tmpZone = (*iter1).zone;
+		if (tmpZone.name == zoneName)
+		{
+			const std::list<ServerZone::Server> & serverList = (*iter1).serverList;
+			for (auto iter2 = serverList.begin(); iter2 != serverList.end(); ++iter2)
+			{
+				const ServerZone::Server & tmpServer = (*iter2);
+				if (serverName == tmpServer.name)
+				{
+					zone_out = tmpZone;
+					server_out = tmpServer;
+					return true;
+				}
+			}
+		}
+	}
+#endif
+
+	return false;
+}
+
+bool ServerListUi::get_appropriate_recommond_server(ServerZone::Zone & zone_out, ServerZone::Server & server_out)
+{
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	string MyClientVersion = "";
+	WzolJni::getInstance()->callPlatformWithReturn(GET_APP_VER, "", MyClientVersion);
+
+	auto finder  =std::find_if(_zoneList.begin(),_zoneList.end(),[&](ServerZone const& one)->bool{
+		return one.zone.version == MyClientVersion;
+	});
+	if (finder  != _zoneList.end())
+	{
+		zone_out = (*finder).zone;
+
+		server_out = (*finder).serverList.front();
+		//重新设置推荐
+		_recommandAreaName = zone_out.name;
+		_recommandServerName = server_out.name;
+		_recommandServerNum = server_out.num;
+		_recommandServerState = server_out.status;
+		_recommandSetverAreaTag = server_out.areaTag;
+
+		return true;
+	}
+
+#endif
+	return false;
+}
+
+#ifdef _USE_SDK
+void ServerListUi::update( float dt )
+{		
+	if(!_update)
+		return;
+	int status = WzolJni::getInstance()->serverListStatus();
+	//CCLog("------------ update:22222222222222222222222222:%d", status);
+	CC_ASSERT(status != -1);
+	if(status != 0)
+	{
+		//断开不再执行更新;
+		WaitLoading::getInstance()->stop();
+		_update = false;
+		if(status == 1)
+		{//服务器列表下载成功
+			CCLog("--------------- update:33333333333333333: %d", status);
+			praseServerList();
+		}
+		else if(status == 2)
+		{//服务器列表下载失败
+			MessageBoxUi *messageBox = MessageBoxUi::createWithOneBtn(TEXT_UTF8_TISHI,
+				"\xE6\x9C\x8D\xE5\x8A\xA1\xE5\x99\xA8\xE5\x88\x97\xE8\xA1\xA8\xE5\x8A\xA0\xE8\xBD\xBD\xE5\xA4\xB1\xE8\xB4\xA5\xEF\xBC\x8C\xE8\xAF\xB7\xE9\x87\x8D\xE8\xAF\x95\xE3\x80\x82",
+				"\xE9\x87\x8D\xE8\xAF\x95");
+			CCScene *scene = UiMgr::getInstance()->getCurScene();
+			scene->addChild(messageBox, WCT_MessageBox);
+			messageBox->signalOkBtnPressed.connect(this, &ServerListUi::onRetryMessageBoxOk);
+			//CCLog("----------- update:444444444444444444444444444:%d", status);
+		}
+	}
+}
+
+void ServerListUi::onRetryMessageBoxOk()
+{
+	CCLog("--------------onRetryMessageBoxOk()");
+	WzolJni::getInstance()->downloadServerList();
+	WaitLoading::getInstance()->start(false);
+	ClientUpdate::getInstance()->signalUpdate.connect(this, &ServerListUi::update);
+	_update = true;
+}
+
+
+
+#endif
+
+//////////////////////////////////////////////////////////////////////////
+
+
+ServerListUiLayer::ServerListUiLayer()
+	: _frame(NULL)
+	, _areaList(NULL)
+	, _areaScrollView(NULL)
+	,_forwardUpSprite(NULL)
+	,_forwardDownSprite(NULL)
+//	,_forwardUpEffect(NULL)
+//	,_forwardDownEffect(NULL)
+	,_gongCeQuBtn(NULL)
+	,_neiCeQuBtn(NULL)
+	,_isSelectGongCe(false)
+	,_isSelectNeiCe(false)
+	, m_gongCeQuLabel(NULL)
+	, m_neiCeQuLabel(NULL)
+{
+
+}
+
+ServerListUiLayer::~ServerListUiLayer()
+{
+	clearServerList();
+
+	CC_SAFE_DELETE(_areaList);
+}
+
+cocos2d::SEL_MenuHandler ServerListUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCLog("---------- ServerListUiLayer::onResolveCCBCCMenuItemSelector:%s",pSelectorName);
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler ServerListUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCLog("---------- ServerListUiLayer::onResolveCCBCCControlSelector:%s",pSelectorName);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "ongongcequBtnPressed", ServerListUiLayer::onGongCeQuBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onneicequBtnPressed", ServerListUiLayer::onNeiCeQuBtn);
+	return NULL;
+}
+
+void ServerListUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(NT_Frame));
+	_areaContent = _frame->getChildByTag(NT_AreaContent);
+	_serverContent = _frame->getChildByTag(NT_ServerListContent);
+	_specialSprite = dynamic_cast<CCSprite*>(_frame->getChildByTag(NT_SpecialSprite));
+	_specialNode = dynamic_cast<CCSprite*>(_frame->getChildByTag(NT_RecommendServer));
+	_specialIcon = dynamic_cast<CCSprite*>(_specialNode->getChildByTag(2)); //上次登陆豆
+
+	CC_ASSERT(_specialSprite!= NULL && _specialNode!= NULL && _specialIcon != NULL);
+
+	CC_ASSERT(_frame != NULL && _areaContent != NULL && _serverContent != NULL);
+	_areaScrollView = createScrollViewWithContent(_areaContent);
+	CC_ASSERT(_areaScrollView != NULL);
+	_areaContent->addChild(_areaScrollView);
+	_areaList = new VerticalList<AreaListItem>;
+	_areaList->addToScrollView(_areaScrollView);
+	_areaList->setMinSize(_areaContent->getContentSize());
+
+	_serverScrollView = createScrollViewWithContent(_serverContent);
+	CC_ASSERT(_serverScrollView);
+	_serverContent->addChild(_serverScrollView);
+	_serverContent2 = CCNode::create();
+	_serverScrollView->setContainer(_serverContent2);
+	_serverScrollView->minContainerOffset();
+	_serverScrollView->setBounceable(true);
+	_serverScrollView->setDirection(kCCScrollViewDirectionVertical);
+//	_serverScrollView->setContentOffset(_serverScrollView->minContainerOffset());
+	_serverScrollView->setTouchEnabled(true);
+
+	_forwardUpSprite = dynamic_cast<CCNode*>(_frame->getChildByTag(5));
+	_forwardDownSprite = dynamic_cast<CCNode*>(_frame->getChildByTag(6)) ;
+	CC_ASSERT(_forwardUpSprite != NULL && _forwardDownSprite != NULL);
+
+	_gongCeQuBtn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(NT_GongCeQuBtn));
+	_neiCeQuBtn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(NT_NeiCeQuBtn));
+	m_gongCeQuLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_GongCeQuLab)));
+	m_neiCeQuLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_NeiCeQuLab)));
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_BaoManLab)));
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_KongXianLab)));
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_WeiHuLab)));
+
+	ServerListUi::getInstance()->setIsFirstLogin(false);
+
+	std::string areaName = ClientCfg::getInstance()->getString("general", "area", "").c_str();
+	std::string serverNum;
+	if ( ServerListUi::getInstance()->hasUsedLoginServer() )
+		serverNum = intToString(ServerListUi::getInstance()->getZoneList().front().serverList.front().zoneIdx) + STRING_TABLE["Login_Zone"];
+	std::string serverName = ClientCfg::getInstance()->getString("general", "server", "").c_str();
+	int serverState = std::atoi(ClientCfg::getInstance()->getString("general", "serverstate", "").c_str());
+	if( serverState > ServerListItem::SS_Preserve )
+		serverState = -1;
+	int serverAreaTag;
+	if((!areaName.empty()) && (!serverName.empty()) && (!serverNum.empty()) && (serverState >= 0))
+	{
+		serverAreaTag = ClientCfg::getInstance()->getInt("general", "areatag", 0);
+	}
+	else
+	{
+		serverAreaTag = ServerListUi::getInstance()->recommandServerAreaTag();
+	}
+	if ( 0 == serverAreaTag)
+	{
+		_isSelectGongCe = true;
+		_isSelectNeiCe = false;
+		_gongCeQuBtn->setSelected(_isSelectGongCe);
+		_gongCeQuBtn->setHighlighted(_isSelectGongCe);
+		_neiCeQuBtn->setSelected(_isSelectNeiCe);
+		_neiCeQuBtn->setHighlighted(_isSelectNeiCe);
+	}
+	else
+	{
+		_isSelectGongCe = false;
+		_isSelectNeiCe = true;
+		_gongCeQuBtn->setSelected(_isSelectGongCe);
+		_gongCeQuBtn->setHighlighted(_isSelectGongCe);
+		_neiCeQuBtn->setSelected(_isSelectNeiCe);
+		_neiCeQuBtn->setHighlighted(_isSelectNeiCe);
+	}
+#if ( CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS )
+	m_gongCeQuLabel->setString(ServerListUi::getInstance()->getAreaBtnName1());
+	m_neiCeQuLabel->setString(ServerListUi::getInstance()->getAreaBtnName2());
+#endif
+//	runAnimation();
+}
+
+//void ServerListUiLayer::runAnimation()
+//{
+// 	if (_forwardUpEffect == NULL)
+// 	{
+// 		AnimationCache::AnimateList anims;
+// 		AnimationCache::createDefList(1, anims);
+// 		AnimationCache::getInstance()->getSinEffect(0,"E1_49", anims);
+// 		BSAnimate *animste = anims[0];
+// 		_forwardUpEffect = CCSprite::create();
+// 		//_forwardUpEffect->setAnchorPoint(ccp(0.0f, 1.0f));
+// 		_forwardUpEffect->setPosition(this->getChildByTag(1)->getPosition());
+// 		_frame->addChild(_forwardUpEffect);
+// 		_forwardUpEffect->runAction(CCRepeatForever::create(animste));
+// 	}
+// 	if (_forwardDownEffect == NULL)
+// 	{
+// 		AnimationCache::AnimateList anims;
+// 		AnimationCache::createDefList(1, anims);
+// 		AnimationCache::getInstance()->getSinEffect(0,"E1_49", anims);
+// 		BSAnimate *animste2 = anims[0];
+// 		_forwardDownEffect = CCSprite::create();
+// 		//_forwardDownEffect->setAnchorPoint(ccp(0.0f, 0.0f));
+// 		_forwardDownEffect->setPosition(this->getChildByTag(2)->getPosition());
+// 		_frame->addChild(_forwardDownEffect);
+// 		_forwardDownEffect->setFlipY(true);
+// 		_forwardDownEffect->runAction(CCRepeatForever::create(animste2));
+// 	}
+
+//}
+
+//void ServerListUiLayer::stopAnimation()
+//{
+// 	if (_forwardUpEffect != NULL)
+// 	{
+// 		_forwardUpEffect->stopAllActions();
+// 		_forwardUpEffect->removeFromParent();
+// 		_forwardUpEffect = NULL;
+// 	}
+// 	if (_forwardDownEffect != NULL)
+// 	{
+// 		_forwardDownEffect->stopAllActions();
+// 		_forwardDownEffect->removeFromParent();
+// 		_forwardDownEffect = NULL;
+// 	}
+//}
+
+void ServerListUiLayer::updateDisplay()
+{
+	CCLog("---------- ServerListUiLayer updateDisplay:111111111111111111111111111111111111111111");
+	const std::list<ServerZone> &zoneList = ServerListUi::getInstance()->getZoneList();
+	if(zoneList.empty())
+		WaitLoading::getInstance()->start(true);
+	else
+		WaitLoading::getInstance()->stop();
+
+	//如果没有显示区域列表，则显示;
+	if (_areaList->getItemCount() == 0)
+	{
+		for(std::list<ServerZone>::const_iterator iter = zoneList.begin(); iter != zoneList.end(); ++iter) 
+		{
+#ifdef _USE_SDK
+			string MyClientVersion = "";
+			WzolJni::getInstance()->callPlatformWithReturn(GET_APP_VER, "", MyClientVersion);
+			if((*iter).zone.version != MyClientVersion)
+			{
+				CCLOG("V(%s)-CV(%s)", (*iter).zone.version.c_str(), MyClientVersion.c_str());
+				continue;
+			}
+#endif
+			if((*iter).zone.IsShow == 0)
+			{
+				CCLOG("(*iter).zone.IsShow=%d", (*iter).zone.IsShow);
+				continue;
+			}
+ 			if (_isSelectGongCe)
+ 			{
+ 				if (0 == (*iter).zone.areatag)
+ 				{
+					AreaListItem *item = new AreaListItem;
+					item->setData((*iter).zone);
+					_areaList->addItem(item);
+ 				}
+ 			}
+ 			if (_isSelectNeiCe)
+ 			{
+ 				if (1 == (*iter).zone.areatag)
+ 				{
+ 					AreaListItem *item = new AreaListItem;
+ 					item->setData((*iter).zone);
+ 					_areaList->addItem(item);
+ 				}
+ 			}
+		}
+	}
+	
+	_areaList->updateDisplay();
+	if(_areaList->getSelectItem() == NULL && !zoneList.empty())
+	{
+		_areaList->setSelectItem(0);
+	}
+
+	//删除原有的服务器列表
+	clearServerList();
+
+	if ( 0 == _areaList->getItemCount())
+	{
+		return;
+	}
+
+	//添加服务器列表
+	CCLOG("Select AreaName:%s", ServerListUi::getInstance()->curAreaName().c_str());
+	CCSize serverContentSize = _serverContent->getContentSize();
+	std::list<ServerZone::Server> serverList = ServerListUi::getInstance()->getServerList(ServerListUi::getInstance()->curAreaName());
+	float height = 0;
+	int ServerListCount = 0;
+	for(std::list<ServerZone::Server>::iterator iter = serverList.begin(); iter != serverList.end(); ++ iter)
+	{
+#ifdef _USE_SDK
+		string MyClientVersion = "";
+		WzolJni::getInstance()->callPlatformWithReturn(GET_APP_VER,"",MyClientVersion);
+		if((*iter).version == "")
+		{
+			ServerZone::Zone* curzone = ServerListUi::getInstance()->getZone(ServerListUi::getInstance()->curAreaName());
+			if(curzone != NULL)
+			{
+				if(curzone->version != MyClientVersion)
+				{
+					CCLOG("curzone->version(%s) != MyClientVersion(%s)", curzone->version.c_str(), MyClientVersion.c_str());
+					continue;
+				}
+			}
+			else
+			{
+				CCLOG("curzone == NULL 1");
+				continue;
+			}
+		}
+		else
+		{
+			if((*iter).version != MyClientVersion)
+			{
+				CCLOG("(*iter).version(%s) != MyClientVersion(%s)", (*iter).version.c_str(), MyClientVersion.c_str());
+				continue;
+			}
+		}
+
+#endif
+		if((*iter).IsShow)
+		{
+			ServerListCount++;
+		}
+		
+	}
+	if (ServerListCount % 2 == 0)
+	{
+		 height = (ServerListCount / 2 ) * SERVERLIST_SPACE_V + 20;
+	}
+	else
+	{
+		 height = (ServerListCount / 2 + 1 ) * SERVERLIST_SPACE_V + 20;
+	}
+	if(height < serverContentSize.height)
+		height = serverContentSize.height;
+	_serverContent2->setContentSize(CCSize(serverContentSize.width, height));
+	_serverScrollView->setContentSize(_serverContent2->getContentSize());
+
+	int index = 0;
+	float basePosX = 5.f;
+	for(std::list<ServerZone::Server>::iterator iter = serverList.begin(); iter != serverList.end(); ++ iter)
+	{
+#ifdef _USE_SDK
+		string MyClientVersion = "";
+		WzolJni::getInstance()->callPlatformWithReturn(GET_APP_VER,"",MyClientVersion);
+		if((*iter).version == "")
+		{
+			ServerZone::Zone* curzone = ServerListUi::getInstance()->getZone(ServerListUi::getInstance()->curAreaName());
+			if(curzone != NULL)
+			{
+				if(curzone->version != MyClientVersion)
+				{
+					CCLOG("curzone->version(%s) != MyClientVersion(%s)", curzone->version.c_str(), MyClientVersion.c_str());
+					continue;
+				}
+			}
+			else
+			{
+				CCLOG("curzone == NULL 2");
+				continue;
+			}
+		}
+		else
+		{
+			ServerZone::Zone* curzone = ServerListUi::getInstance()->getZone(ServerListUi::getInstance()->curAreaName());
+			if(curzone != NULL)
+			{
+				if(curzone->version != MyClientVersion)
+				{
+					CCLOG("curzone->version(%s) != MyClientVersion(%s)", curzone->version.c_str(), MyClientVersion.c_str());
+					continue;
+				}
+			}
+			else
+			{
+				CCLOG("curzone == NULL 3");
+				continue;
+			}
+			if((*iter).version != MyClientVersion)
+			{
+				CCLOG("(*iter).version(%s) != MyClientVersion(%s)", (*iter).version.c_str(), MyClientVersion.c_str());
+				continue;
+			}
+		}
+
+#endif
+		if((*iter).IsShow == 0)
+		{
+			continue;
+		}
+		ServerListItem *item = new ServerListItem;
+#if ( CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS )
+		bool bLastLogin = (0 == index) && ((ServerListUi::getInstance()->curAreaName() == ServerListUi::getInstance()->getUsedLoginName1()) || (ServerListUi::getInstance()->curAreaName() == ServerListUi::getInstance()->getUsedLoginName2()));
+#else
+		bool bLastLogin = (0 == index) && ((ServerListUi::getInstance()->curAreaName() == STRING_TABLE["Login_UsedLogin_GongCe"]) || (ServerListUi::getInstance()->curAreaName() == STRING_TABLE["Login_UsedLogin_NeiCe"]));
+#endif
+		if (_isSelectGongCe)
+		{
+			if ( 0 == (*iter).areaTag)
+			{
+				item->setData(*iter,bLastLogin);
+			}
+		}
+		if (_isSelectNeiCe)
+		{
+			if ( 1 == (*iter).areaTag)
+			{
+				item->setData(*iter,bLastLogin);
+			}
+		}
+//		item->setData(*iter,bLastLogin);
+		item->addToParent(_serverContent2);
+
+		float posX = basePosX + (index % 2) * SERVERLIST_SPACE_H;
+		float posY = height - (index / 2) * SERVERLIST_SPACE_V;
+		item->setPosition(ccp(posX, posY));
+
+		_serverList.push_back(item);
+
+		index ++;
+	}
+	resetScrollPosition();
+
+	//更新推荐服务器;
+// 	CCNode *recommandNode = _frame->getChildByTag(NT_RecommendServer);
+// 	CC_ASSERT(recommandNode != NULL);
+	//dynamic_cast<CCLabelTTF*>(recommandNode->getChildByTag(0))->setString(ServerListUi::getInstance()->recommandServerNum().c_str());
+	//dynamic_cast<CCLabelTTF*>(recommandNode->getChildByTag(1))->setString(ServerListUi::getInstance()->recommandServerName().c_str());
+// 	LabelFT *recommandNodeLabelNum = Helper::getLabelFTByParentAndTag(recommandNode,0);
+// 	if (recommandNodeLabelNum)
+// 	{
+// 		recommandNodeLabelNum->setString(ServerListUi::getInstance()->recommandServerNum().c_str());
+// 	}
+// 	LabelFT *recommandNodeLabelName = Helper::getLabelFTByParentAndTag(recommandNode,1);
+// 	if (recommandNodeLabelName)
+// 	{
+// 		recommandNodeLabelName->setString(ServerListUi::getInstance()->recommandServerName().c_str());
+// 	}
+	
+// 	//更新上次登录服务器;
+// 	CCNode *lastTimeNode = _frame->getChildByTag(NT_LastLoginServer);
+// 	CC_ASSERT(lastTimeNode != NULL);
+// 	dynamic_cast<CCLabelTTF*>(lastTimeNode->getChildByTag(0))->setString(ClientCfg::getInstance()->getString("general", "area", "").c_str());
+// 	dynamic_cast<CCLabelTTF*>(lastTimeNode->getChildByTag(1))->setString(ClientCfg::getInstance()->getString("general", "server", "").c_str());
+
+	//更新后的UI显示是：若上次登录过则显示上次登录，否则显示推荐服; 
+	std::string areaName = ClientCfg::getInstance()->getString("general", "area", "").c_str();
+
+	//std::string serverNum = ClientCfg::getInstance()->getString("general", "servernum", "").c_str(); //大区改为显示几服 add by XSea 2014.10.22
+	// 改为显示服务器所属大区的idx
+	std::string serverNum;
+	if ( ServerListUi::getInstance()->hasUsedLoginServer() )
+		serverNum = intToString(ServerListUi::getInstance()->getZoneList().front().serverList.front().zoneIdx) + STRING_TABLE["Login_Zone"];
+
+	std::string serverName = ClientCfg::getInstance()->getString("general", "server", "").c_str();
+	int serverState = std::atoi(ClientCfg::getInstance()->getString("general", "serverstate", "").c_str());
+	if( serverState > ServerListItem::SS_Preserve )
+		serverState = -1;
+	if((!areaName.empty()) && (!serverName.empty()) && (!serverNum.empty()) && (serverState >= 0))//说明上次登录过;
+	{
+		//UI 统一更新;
+		_specialSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_lastlogSprite"));
+		CCNode *recommandNode = _frame->getChildByTag(NT_RecommendServer);
+		CC_ASSERT(recommandNode != NULL);
+		//dynamic_cast<CCLabelTTF*>(recommandNode->getChildByTag(0))->setString(serverNum.c_str());
+		//dynamic_cast<CCLabelTTF*>(recommandNode->getChildByTag(1))->setString(serverName.c_str());
+		LabelFT *recommandNodeLabelNum = Helper::getLabelFTByParentAndTag(recommandNode,0);
+		if (recommandNodeLabelNum)
+		{
+			recommandNodeLabelNum->setString(serverNum.c_str());
+		}
+		LabelFT *recommandNodeLabelName = Helper::getLabelFTByParentAndTag(recommandNode,1);
+		if (recommandNodeLabelName)
+		{
+			recommandNodeLabelName->setString(serverName.c_str());
+		}
+		setState(serverState); //设置豆状态
+	}
+	else//未登录过则显示推荐服务器;
+	{
+		//UI 统一更新;
+		_specialSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_commendSprite"));
+		CCNode *recommandNode = _frame->getChildByTag(NT_RecommendServer);
+		CC_ASSERT(recommandNode != NULL);
+		//dynamic_cast<CCLabelTTF*>(recommandNode->getChildByTag(0))->setString(ServerListUi::getInstance()->recommandServerNum().c_str()); //add by XSea 2014.10.22 几服
+		//dynamic_cast<CCLabelTTF*>(recommandNode->getChildByTag(1))->setString(ServerListUi::getInstance()->recommandServerName().c_str());
+		LabelFT *recommandNodeLabelNum = Helper::getLabelFTByParentAndTag(recommandNode,0);
+		if (recommandNodeLabelNum)
+		{
+			recommandNodeLabelNum->setString(ServerListUi::getInstance()->recommandServerNum().c_str());
+		}
+		LabelFT *recommandNodeLabelName = Helper::getLabelFTByParentAndTag(recommandNode,1);
+		if (recommandNodeLabelName)
+		{
+			recommandNodeLabelName->setString(ServerListUi::getInstance()->recommandServerName().c_str());
+		}
+		setState(ServerListUi::getInstance()->recommandServerState()); //设置豆状态
+	}
+	//end by gx
+
+	CCLog("---------- ServerListUiLayer updateDisplay:222222222222222222222222222");
+}
+
+void ServerListUiLayer::clearZoneList()
+{
+	_areaList->clear();
+}
+
+void ServerListUiLayer::clearServerList()
+{
+	for(std::list<ServerListItem*>::iterator iter = _serverList.begin(); iter != _serverList.end(); ++ iter)
+	{
+		ServerListItem *item = *iter;
+		delete item;
+	}
+	_serverList.clear();
+}
+
+void ServerListUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void ServerListUiLayer::onExit()
+{
+	Login::getInstance()->setisFirstLogin(false);
+	LoginUi* parentUiLayer = Login::getInstance()->GetLoginUi();
+	if(parentUiLayer)
+	{
+		parentUiLayer->setCanClick(true);
+	}
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+void ServerListUiLayer::onGongCeQuBtn(cocos2d::CCObject* pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	if (_isSelectGongCe)
+	{
+		_gongCeQuBtn->setHighlighted(_isSelectGongCe);
+		return;
+	}
+	_isSelectGongCe = true;
+	_isSelectNeiCe = false;
+	_gongCeQuBtn->setSelected(_isSelectGongCe);
+	_gongCeQuBtn->setHighlighted(_isSelectGongCe);
+	_neiCeQuBtn->setSelected(_isSelectNeiCe);
+	_neiCeQuBtn->setHighlighted(_isSelectNeiCe);
+
+	clearZoneList();
+	updateDisplay();
+}
+
+void ServerListUiLayer::onNeiCeQuBtn(cocos2d::CCObject* pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	if (_isSelectNeiCe)
+	{
+		_neiCeQuBtn->setHighlighted(_isSelectNeiCe);
+		return;
+	}
+	_isSelectGongCe = false;
+	_isSelectNeiCe = true;
+	_gongCeQuBtn->setSelected(_isSelectGongCe);
+	_gongCeQuBtn->setHighlighted(_isSelectGongCe);
+	_neiCeQuBtn->setSelected(_isSelectNeiCe);
+	_neiCeQuBtn->setHighlighted(_isSelectNeiCe);
+
+	clearZoneList();
+	updateDisplay();
+}
+
+bool ServerListUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_areaContent, pTouch) || 
+		isTouchOnNodeContent(_serverContent, pTouch) ||
+		isTouchOnNodeContent(_frame->getChildByTag(NT_RecommendServer), pTouch) /*||*/
+		/*isTouchOnNodeContent(_frame->getChildByTag(NT_LastLoginServer), pTouch)*/)
+	{
+		_stPt = _frame->convertTouchToNodeSpace(pTouch);
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+		return true;
+	}
+	return false;
+}
+
+void ServerListUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint pt = _frame->convertTouchToNodeSpace(pTouch);
+	if(ccpDistance(pt, _stPt) < TOUCH_MOVE_DIS)
+	{
+		if(isTouchOnNodeContent(_areaContent, pTouch))
+		{
+			AreaListItem *item = _areaList->getSelectItem();
+			if(_areaList->onTouch(pTouch) == NULL)
+				_areaList->setSelectItem(item);
+		}
+		else if(isTouchOnNodeContent(_serverContent, pTouch))
+		{
+			ServerListItem *selectItem = NULL;
+
+			for(std::list<ServerListItem*>::iterator iter = _serverList.begin(); iter != _serverList.end(); ++ iter)
+			{
+				ServerListItem *item = *iter;
+				if(item->isTouchOn(pTouch))
+					selectItem = item;
+			}
+
+			if(selectItem != NULL)
+			{
+				_specialNode->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_specialbtnn"));
+				for(std::list<ServerListItem*>::iterator iter = _serverList.begin(); iter != _serverList.end(); ++ iter)
+				{
+					ServerListItem *item = *iter;
+					if(item == selectItem)
+						item->setSelect(true);
+					else
+						item->setSelect(false);
+				}
+
+				AreaListItem *areaItem = _areaList->getSelectItem();
+				CC_ASSERT(_areaList->getItemCount() != 0 && areaItem != NULL);
+				if (areaItem->getData().zoneIdx != 0)
+					ServerListUi::getInstance()->setCurAreaName(areaItem->getData().name); //设置当前大区
+				else // 选择的是"曾经登陆"
+					ServerListUi::getInstance()->setCurAreaName(selectItem->getData().zoneName); //设置当前大区
+
+				//这里需要考虑合服的影响
+				//if (1 == selectItem->getData().meregeFlag)
+				//{
+				//	ServerListUi::getInstance()->setCurServerName(selectItem->getData().nameDest); 
+				//	ServerListUi::getInstance()->setCurServerNum(selectItem->getData().num);
+				//	ServerListUi::getInstance()->setCurServerStatus(selectItem->getData().status);
+				//}
+				//else
+				{
+					ServerListUi::getInstance()->setCurServerName(selectItem->getData().name);
+					ServerListUi::getInstance()->setCurServerNum(selectItem->getData().num);
+					ServerListUi::getInstance()->setCurServerStatus(selectItem->getData().status);
+				}
+				//Login::getInstance()->onSeverSelect();
+				ServerListUi::getInstance()->close();
+
+
+				//...记录选择的服务器信息
+				ServerZone::Zone zone;
+				ServerZone::Server server;
+				ServerListUi::getInstance()->getCurDataForLogin(zone,server);
+#ifdef _USE_SDK
+				extern int g_zoneid;
+				extern std::string g_zonename;
+				extern std::string g_zonenum;
+				extern std::string g_areaName;
+
+				g_zonenum = server.num;
+				g_zonename = server.name;
+
+				g_areaName = zone.name;
+				g_zoneid = zone.serial;
+#endif
+				CCLOG("world:%s->%u", server.name.c_str(), f_util::get_crc(server.name.c_str()));
+			}
+		}
+		else if(isTouchOnNodeContent(_frame->getChildByTag(NT_RecommendServer), pTouch))
+		{//推荐服;
+			_specialNode->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_specialbtnh"));
+			//gx modify 这里统一处理推荐服与上次登录，但是对于上次登录需要考虑合服带来的影响 
+			std::string areaName = ClientCfg::getInstance()->getString("general", "area", "").c_str();
+			std::string serverNum = ClientCfg::getInstance()->getString("general", "servernum", "").c_str(); //大区改为显示几服 add by XSea 2014.10.22
+			std::string serverName = ClientCfg::getInstance()->getString("general", "server", "").c_str();
+			if((!serverNum.empty()) && (!serverName.empty()) && (!serverNum.empty()) )//若上次登录过
+			{
+				const std::list<ServerZone> &zoneList = ServerListUi::getInstance()->getZoneList();
+				for(std::list<ServerZone>::const_iterator iter = zoneList.begin(); iter != zoneList.end(); ++iter) 
+				{
+					if (iter->zone.name == areaName)//找到大区啦
+					{
+						std::list<ServerZone::Server> serverList = ServerListUi::getInstance()->getServerList(iter->zone.name);
+						for (std::list<ServerZone::Server>::const_iterator iter_server = serverList.begin();iter_server != serverList.end();++iter_server)
+						{
+							if (iter_server->name == serverName)//找到服务器啦
+							{
+#ifdef _USE_SDK
+
+								string MyClientVersion = "";
+								WzolJni::getInstance()->callPlatformWithReturn(GET_APP_VER,"",MyClientVersion);
+								if((*iter_server).version == "")
+								{
+									ServerZone::Zone* curzone = ServerListUi::getInstance()->getZone(iter->zone.name);
+									if(curzone != NULL)
+									{
+										if(curzone->version != MyClientVersion)
+										{
+											return;
+										}
+									}
+									else
+									{
+										return;
+									}
+								}
+								else
+								{
+									if((*iter_server).version != MyClientVersion)
+									{
+										return;
+									}
+								}
+
+#endif
+								//考虑上次登录的服务器是否需要考虑合服
+								//if (1 == iter_server->meregeFlag)
+								//{
+								//	ServerListUi::getInstance()->setCurAreaName(areaName);
+								//	ServerListUi::getInstance()->setCurServerName(iter_server->nameDest);
+								//	ServerListUi::getInstance()->setCurServerNum(serverNum);
+								//}
+								//else
+								{
+									ServerListUi::getInstance()->setCurAreaName(areaName);
+									ServerListUi::getInstance()->setCurServerName(serverName);
+									ServerListUi::getInstance()->setCurServerNum(serverNum);
+								}
+							}
+						}
+					}
+				}
+			}
+			else
+			{
+				ServerListUi::getInstance()->setCurAreaName(ServerListUi::getInstance()->recommandAreaName());
+				ServerListUi::getInstance()->setCurServerName(ServerListUi::getInstance()->recommandServerName());
+				ServerListUi::getInstance()->setCurServerNum(ServerListUi::getInstance()->recommandServerNum()); //add by XSea 2014.10.22 几服
+				ServerListUi::getInstance()->setCurServerStatus(ServerListUi::getInstance()->recommandServerState());
+			}	
+			//Login::getInstance()->onSeverSelect();
+			ServerListUi::getInstance()->close();
+
+			//...记录选择的服务器信息
+			ServerZone::Zone zone;
+			ServerZone::Server server;
+			ServerListUi::getInstance()->getCurDataForLogin(zone,server);
+#ifdef _USE_SDK
+				extern int g_zoneid;
+				extern std::string g_zonename;
+				extern std::string g_zonenum;
+				extern std::string g_areaName;
+				g_zonenum = server.num;
+				g_zonename = server.name;
+
+				g_areaName = zone.name;
+				g_zoneid = zone.serial;
+#endif
+				CCLOG("world:%s->%u", server.name.c_str(), f_util::get_crc(server.name.c_str()));
+		}
+// 		else if(isTouchOnNodeContent(_frame->getChildByTag(NT_LastLoginServer), pTouch))
+// 		{//最后一次登录;
+// 			std::string areaName = ClientCfg::getInstance()->getString("general", "area", "").c_str();
+// 			std::string serverName = ClientCfg::getInstance()->getString("general", "server", "").c_str();
+// 			if((!areaName.empty()) && (!serverName.empty()))
+// 			{
+// 				ServerListUi::getInstance()->setCurAreaName(areaName);
+// 				ServerListUi::getInstance()->setCurServerName(serverName);
+// 				Login::getInstance()->onSeverSelect();
+// 			}
+// 		}
+	}
+}
+
+void ServerListUiLayer::resetScrollPosition()
+{
+	if(_serverScrollView != NULL)
+	{
+		_serverScrollView->setContentOffset(_serverScrollView->minContainerOffset());
+	}
+}
+
+//设置豆状态
+void ServerListUiLayer::setState( int state )
+{
+	if(state == ServerListItem::SS_Recommend) //空闲
+	{
+		_specialIcon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_statefine")); //绿豆
+	}
+	else if(state == ServerListItem::SS_New) //暂时没有用到
+	{
+		_specialIcon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_statebusy")); //黄豆
+	}
+	else if(state == ServerListItem::SS_Fire) //爆满
+	{
+		_specialIcon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_statehot")); //红豆
+	}
+	else if (state == ServerListItem::SS_Preserve) //维护
+	{
+		_specialIcon->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("serverui_statepreserve")); //灰豆
+	}
+}

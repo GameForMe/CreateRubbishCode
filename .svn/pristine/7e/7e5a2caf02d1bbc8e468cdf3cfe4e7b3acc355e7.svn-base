@@ -1,0 +1,888 @@
+#include "Movie.h"
+#include "cocos2d.h"
+//#include "FileInputStream.h"
+//#include "LuaMgr.h"
+#include "world.h"
+#include "RoleInfoProto.h"
+#include "CfgReader.h"
+#include "RoleManager.h"
+#include "Role.h"
+#include "RoleInfoProto.h"
+#include "MapManager.h"
+#include "NPCChatUi.h"
+#include "LocalPlayer.h"
+#include "WorldPacket.h"
+#include "CommonMsgDefine.h"
+#include "TCPClient.h"
+#include "CCLuaEngine.h"
+#include "PlayerState.h"
+#include "Monster.h"
+#include "StringMgr.h"
+#include "DelayUi.h"
+#include "CrossSceneUI.h"
+#include "NPCChatMgr.h"
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+#include "wzolJni.h"
+#endif
+
+const unsigned int MIN_MOVIE_CREATURE_ID = 2900000000;
+static unsigned int dwCreateID = MIN_MOVIE_CREATURE_ID;
+bool  g_bIsWaitingMsgByMovie = false;
+CMovie::CMovie()
+	:m_bIsInPlaying(false)
+	,_bQuickEnd(false)
+	,_waitForReplaceScene(false)
+{
+	//读取Lua文件
+	std::string filename = CFGReader::instance()->get_profile_string("Scheme" , "Script" , "Script/");
+	std::stringstream ss;
+	ss<<filename<<"movie.lua"<<'\0';
+
+	CCString* file_content = CCString::createWithContentsOfFile(ss.str().c_str(),true);
+	//FileInputStream script(ss.str().c_str(),EM_SMALL,true);
+	//size_t sz = script.getSize();
+	//char* mem = (char*)malloc(sz + 1);
+	//script.readBlock(mem , sz);
+	//mem[sz]  = 0;
+
+	//修改加载方式
+	CCLuaEngine* pEngine = CCLuaEngine::defaultEngine();
+	pEngine->executeString(file_content->getCString());
+	//free(mem);
+
+	//m_bIsPlay = false;
+	//m_bIsPlayEnd = false;
+	m_fCDTick = 0;
+}
+
+CMovie::~CMovie()
+{
+	ClearList();
+	m_completedFubenVector.clear();
+}
+
+void CMovie::ClearList()
+{
+// 	MovieList::iterator IT = m_MovieList.begin();
+// 	while(IT != m_MovieList.end())
+// 	{
+// 		CMovieNode* pNode = *IT;
+// 		pNode->quickEnd();
+// 
+// 		CC_SAFE_DELETE(pNode);
+// 		++IT;
+// 	}
+
+//	m_MovieList.clear();
+
+	std::for_each(m_MovieList.begin(),m_MovieList.end(),[](CMovieNode* one)
+	{
+		one->quickEnd();
+		CC_SAFE_DELETE(one);
+	});
+
+	m_MovieList.clear();
+
+// 	IT = m_ForeverList.begin();
+// 	while(IT != m_ForeverList.end())
+// 	{
+// 		CMovieNode* pNode = *IT;
+// 		IT++;
+// 		CC_SAFE_DELETE(pNode);
+// 	}
+// 	m_ForeverList.clear();
+
+	cleanForeverList();
+
+	clearAllCreatureFromRoleMgr();
+}
+
+void CMovie::doNPCScript( int nIdx )
+{
+	_movieID = nIdx;
+	//ClearList();
+	CC_ASSERT(m_MovieList.empty());
+	CC_ASSERT(m_ForeverList.empty());
+
+	CCString* pStr = CCString::createWithFormat("%s%d", "PlayMovie_", nIdx);
+	//c_lua_manager::getInstance()->execute<void>(pStr->getCString());
+
+	CCLuaEngine* pEngine = CCLuaEngine::defaultEngine();
+	pEngine->executeGlobalFunction(pStr->getCString());
+
+	//开始播放动画
+	m_bIsInPlaying = true;
+	
+	gettimeofday(&tv , 0);
+	unsigned int dwTick = tv.tv_sec;
+	Play(dwTick);
+	//m_bIsPlayEnd = true;
+	//加载触摸屏蔽层
+	DelayUi::getInstace()->questOpen();
+}
+
+void CMovie::AddNode( CMovieNode* pNode )
+{
+	if(!pNode)
+	{
+		CC_ASSERT(pNode);
+		return;
+	}
+
+	m_MovieList.push_back(pNode);
+}
+
+template <typename T>
+void CMovie::DelNode(T* pNode)
+{
+	MovieList::iterator IT = m_ForeverList.begin();
+	while(IT != m_ForeverList.end())
+	{
+		T* pListNode = (T*)(*IT);
+		if(pListNode == pNode)
+		{
+			m_ForeverList.erase(IT);
+			CC_SAFE_DELETE(pListNode);
+			return;
+		}
+
+		IT++;
+	}
+}
+
+template <typename T>
+void CMovie::DelNodeByType(T* pNode)
+{
+	MovieList::iterator IT = m_ForeverList.begin();
+	while(IT != m_ForeverList.end())
+	{
+		T* pListNode = dynamic_cast<T*>(*IT);
+		if(pListNode != NULL)
+		{
+			m_ForeverList.erase(IT);
+			CC_SAFE_DELETE(pListNode);
+			IT = m_ForeverList.begin();
+			continue;
+		}
+		IT++;
+	}
+}
+
+void CMovie::update(unsigned int dt)
+{
+	if (!IsInPlaying())
+	{
+		return;
+	}
+
+	gettimeofday(&tv , 0);
+	unsigned int dwTick = tv.tv_sec;
+
+	PlayForeve(dwTick);
+	Play(dwTick);
+}
+
+void CMovie::Play(unsigned int dt)
+{
+	if(!dt || !CheckPlayMovie())
+		return;
+
+	if(dt < m_fCDTick)
+		return;
+	m_fCDTick = dt;
+
+	//[bing] 播放完毕
+	if(m_MovieList.size() == 0)
+	{
+		setPlayingEnd();
+		return;
+	}
+
+	CMovieNode* pNode = m_MovieList.front();
+	unsigned int fDelayTime = pNode->Play(m_fCDTick);
+
+	//[bing] 如果播放多次需要开关的不释放 丢入m_ForeverList列表内
+	if(pNode->PlayOnce())
+		CC_SAFE_DELETE(pNode);
+	else
+		m_ForeverList.push_back(pNode);
+	m_MovieList.pop_front();
+
+	//[bing] 递归Play播放 直到最后一个动画结束 如果需要延迟播放则等待
+	if(fDelayTime == 0)
+		Play( m_fCDTick );
+	else
+		m_fCDTick += (fDelayTime);
+}
+
+void CMovie::PlayForeve(unsigned int dt)
+{
+	MovieList::iterator IT = m_ForeverList.begin();
+	while(IT != m_ForeverList.end())
+	{
+		CMovieNode* pForeveNode = (*IT);
+		
+		if(pForeveNode->m_fCDTick < dt)
+		{
+			if(pForeveNode->m_LessPlayTimes == 0)
+			{
+				MovieList::iterator NowIT = IT++;
+				m_ForeverList.erase(NowIT);
+				CC_SAFE_DELETE(pForeveNode);
+				continue;
+			}
+
+			pForeveNode->Play(dt);
+		}
+
+		IT++;
+	}
+}
+
+bool CMovie::CheckPlayMovie()
+{
+	//[bing] 加一个NPCTalk阻塞 当对话框执行完毕后才继续执行
+	NPCChatUiLayer *ui = getUiNodeByTag<NPCChatUiLayer>(WCT_NPCCHATUI);
+	if(ui != NULL)
+	{
+		if(1 == _movieID)
+		{//...屏蔽开场动画 [2/13/2017 Catch_y]
+			ui->onSkipBtnPressed(NULL, 1);
+			if(CrossSceneUI::getInstance()->isOpen())
+			{
+				CrossSceneUI::getInstance()->close(false);
+			}
+			CrossSceneUI::getInstance()->open(0, false);
+			CrossSceneUI::getInstance()->closeWithDelay(3.0f);
+		}
+		return false;
+	}
+
+	return true;
+}
+
+void CMovie::setCompletedFuBenId( unsigned int id )
+{
+	m_completedFubenVector.push_back(id);
+}
+
+bool CMovie::isComeletedInstance(unsigned instanceID)
+{
+	CompleteFuBenVector::iterator iter = m_completedFubenVector.begin();
+	for (;iter != m_completedFubenVector.end();++iter)
+	{
+		if (instanceID == *iter)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void CMovie::clearCompletedFuBenVector()
+{
+	m_completedFubenVector.clear();
+}
+
+void CMovie::skipSprogMovie()
+{
+	/*
+	for (MovieList::iterator iter = m_ForeverList.begin();iter != m_ForeverList.end();++iter)
+	{
+		CC_SAFE_DELETE(*iter);
+	}
+	m_ForeverList.clear();
+
+	int size = m_MovieList.size();
+	int num = 1;
+	for (MovieList::iterator iter2 = m_MovieList.begin();iter2 != m_MovieList.end();++num)
+	{
+		if (num >= size)
+			break;
+		CMovieNode* movieNode = *iter2;
+		if (movieNode)
+		{
+			//向服务器发消息的节点不移除
+			CSendGSMovieStateNode* sendMovieNode = dynamic_cast<CSendGSMovieStateNode*>(movieNode);
+			if (sendMovieNode)
+			{
+				continue;
+			}
+		}
+		CC_SAFE_DELETE(*iter2);
+		m_MovieList.erase(iter2++);
+	}
+	*/
+
+	setPlayingEnd();
+
+	ClearList();
+
+	//xueyu todo:LOG_FLASHSKIP
+}
+
+void CMovie::setPlayingEnd()
+{
+	m_bIsInPlaying = false;
+	m_fCDTick = 0;
+	DelayUi::getInstace()->questClose();
+
+	_waitForReplaceScene = (_movieID==1 ||_movieID==2 || _movieID==3 )?true:false;
+	cleanForeverList();
+}
+
+void CMovie::cleanForeverList()
+{
+	std::for_each(m_ForeverList.begin(),m_ForeverList.end(),[](CMovieNode* one){
+		CC_SAFE_DELETE(one);
+	});
+
+	m_ForeverList.clear();
+
+}
+
+void CMovie::addToCreatureList( unsigned int id )
+{
+	CC_ASSERT(std::find(creatureIDS.begin(),creatureIDS.end(),id) == creatureIDS.end());
+	creatureIDS.push_back(id);
+}
+
+void CMovie::removeFromCreatureList( unsigned int id )
+{
+	std::vector<unsigned int>::iterator iter  = std::find(creatureIDS.begin(),creatureIDS.end(),id);
+	CC_ASSERT(iter != creatureIDS.end());
+
+	RoleManager::getInstance()->freeRole(*iter);
+}
+
+void CMovie::clearAllCreatureFromRoleMgr()
+{
+	std::for_each(creatureIDS.begin(),creatureIDS.end(),[](unsigned int id){
+		RoleManager::getInstance()->freeRole(id);
+	});
+
+	creatureIDS.clear();
+}
+
+//-----------------------------------------------------------------------------
+void MLog(const char* pLog)
+{
+	CMovieLogNode* pNode = new CMovieLogNode(pLog);
+	CMovie::GetInstance().AddNode(pNode);
+}
+
+
+void MMoviePlay(int nIdx)
+{
+	CMovie::GetInstance().doNPCScript(nIdx);
+}
+
+void MCallFunc( const char* pFuncName )
+{
+	CCallFuncNode* pNode = new CCallFuncNode(pFuncName);
+	CMovie::GetInstance().AddNode(pNode);
+}
+
+void MC2GMovieState( int nNum )
+{
+	CSendGSMovieStateNode* pNode = new CSendGSMovieStateNode(nNum);
+	CMovie::GetInstance().AddNode(pNode);
+}
+
+void Msleep(unsigned int fDTime)
+{
+	CDelayTimeNode* pNode = new CDelayTimeNode(fDTime);
+	CMovie::GetInstance().AddNode(pNode);
+}
+
+unsigned int Mcreatenpc(unsigned int dwTypeID, unsigned int fX, unsigned int fY, long facefX, long facefY, int nSpeed)
+{
+	CCreatureCreateNode* pNode = new CCreatureCreateNode(dwTypeID, fX, fY, facefX, facefY, nSpeed);
+	if(!pNode)
+		return 0;
+	else
+	{
+		CMovie::GetInstance().AddNode(pNode);
+		return pNode->GetID();
+	}
+}
+
+void Mmoverole(unsigned int dwID, unsigned int fX, unsigned int fY)
+{
+	CRoleMoveNode* pNode = new CRoleMoveNode(dwID, fX, fY);
+	CMovie::GetInstance().AddNode(pNode);
+}
+
+void MroleChat(unsigned int textID,unsigned int npcID){
+	CRoleChatNode *pNode = new CRoleChatNode(textID,npcID);
+	CMovie::GetInstance().AddNode(pNode);
+}
+
+void Museskill(unsigned int dwSrcID, unsigned int dwTargetID, unsigned int dwSkillID, unsigned int fDelayTime)
+{
+	CRoleUseSkillNode* pNode = new CRoleUseSkillNode(dwSrcID, dwTargetID, dwSkillID, fDelayTime);
+	CMovie::GetInstance().AddNode(pNode);
+}
+
+void Mstopuseskill(unsigned int dwSrcID)
+{
+	CStopUseSkillNode* pNode = new CStopUseSkillNode(dwSrcID);
+	CMovie::GetInstance().AddNode(pNode);
+}
+
+void Mroledie( unsigned int dwID )
+{
+	CRoleDieNode* pNode = new CRoleDieNode( dwID );
+	CMovie::GetInstance().AddNode(pNode);
+}
+
+//移动摄像机到某点
+void Mmovecamera( unsigned int fX, unsigned int fY, unsigned int fSpeed )
+{
+	CMoveCameraNode* pNode = new CMoveCameraNode(fX, fY, fSpeed);
+	CMovie::GetInstance().AddNode(pNode);
+}
+
+//摄像机跟随某对象
+void Mcameraattachrole( unsigned int dwID )
+{
+	CAttachCameraNode* pNode = new CAttachCameraNode(dwID);
+	CMovie::GetInstance().AddNode(pNode);
+}
+
+//解除摄像机跟随
+void Mcameradetachrole()
+{
+	CDetachCameraNode* pNode = new CDetachCameraNode();
+	CMovie::GetInstance().AddNode(pNode);
+}
+
+//主界面按钮显示隐藏
+void Mvisiblemain(bool bSet)
+{
+	CVisiblemain* pNode = new CVisiblemain(bSet);
+	CMovie::GetInstance().AddNode(pNode);
+}
+
+//得到role属性
+int MGetRoleAttr(int nIdx)
+{
+	LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+	if(!pLP)
+		return -1;
+
+	return (int)pLP->getAttribute((eRoleAttribute)nIdx);
+}
+
+//画面变灰渐隐
+void Mfadeoutscene( float fDT, int nType )
+{
+	CFadeoutScene* pNode = new CFadeoutScene(fDT, nType);
+	CMovie::GetInstance().AddNode(pNode);
+}
+
+/* CDelayTimeNode */
+CDelayTimeNode::CDelayTimeNode( unsigned int fDTime )
+{
+	CC_ASSERT(fDTime != 0);
+	m_fDTime = fDTime;
+}
+
+unsigned int CDelayTimeNode::Play(unsigned int uTick)
+{
+	CMovieNode::Play(uTick);
+	return m_fDTime;
+}
+
+/* CMovieLogNode */
+CMovieLogNode::CMovieLogNode(const char* pstrText)
+{
+	strText = pstrText;
+}
+
+unsigned int CMovieLogNode::Play(unsigned int uTick)
+{
+	CCLOG("%s", strText.c_str());
+	CMovieNode::Play(uTick);
+	return 0;
+}
+
+/* CCallFuncNode */
+CCallFuncNode::CCallFuncNode(const char* pFuncName)
+{
+	strFuncName = pFuncName;
+}
+
+unsigned int CCallFuncNode::Play(unsigned int uTick)
+{
+	//c_lua_manager::getInstance()->execute<void>(strFuncName.c_str());
+	CCLuaEngine* pEngine = CCLuaEngine::defaultEngine();
+	pEngine->executeGlobalFunction(strFuncName.c_str());
+
+	OPEN_UI(WCT_NPCCHATUI);
+
+	CMovieNode::Play(uTick);
+	return 0;
+}
+
+/* CCreatureCreateNode */
+CCreatureCreateNode::CCreatureCreateNode(unsigned int dwTypeID, unsigned int fX, unsigned int fY, long facefX, long facefY, int nSpeed)
+{
+	m_dwID = dwCreateID++;
+	m_dwTypeID = dwTypeID;
+	m_fX = fX;
+	m_fY = fY;
+	m_facefX = facefX;
+	m_facefY = facefY;
+	m_nSpeed = nSpeed;
+}
+
+unsigned int CCreatureCreateNode::Play(unsigned int uTick)
+{
+	tagRemoteCreatureData CreatureData;
+	memset(&CreatureData,0,sizeof(tagRemoteCreatureData));
+	CreatureData.dwID = m_dwID;
+	CreatureData.dw_data_id = m_dwTypeID;
+	CreatureData.eCreType = ECT_Monster;
+	CreatureData.fPos[0] = m_fX;
+	CreatureData.fPos[2] = m_fY;
+	CreatureData.fFaceTo[0] = m_facefX;
+	CreatureData.fFaceTo[2] = m_facefY;
+	CreatureData.nAtt[ERRA_HP] = CreatureData.nAtt[ERRA_MaxHP] = 1;
+	CreatureData.nAtt[ERRA_MP] = CreatureData.nAtt[ERRA_MaxMP] = 1;
+	CreatureData.nAtt[ERRA_Speed_XZ] = m_nSpeed;
+	CreatureData.nAtt[ERRA_Shape] = 10000;
+	 
+	World::getInstance()->MovieAddCreatureState( &CreatureData );
+
+	CMovieNode::Play(uTick);
+
+	CMovie::GetInstance().addToCreatureList(m_dwID);
+
+
+	return 0;
+}
+
+/*
+void CCreatureCreateNode::quickEnd()
+{
+	//if(_bPlayed)
+	//	World::getInstance()->MovieRemoveCreature(m_dwID);
+}
+*/
+
+/* CRoleMoveNode */
+CRoleMoveNode::CRoleMoveNode(unsigned int dwID, unsigned int fX, unsigned int fY)
+{
+	m_dwID = dwID;
+	m_fX = fX;
+	m_fY = fY;
+}
+
+unsigned int CRoleMoveNode::Play(unsigned int uTick)
+{
+	Role* pRole = RoleManager::getInstance()->findRole(m_dwID);
+	if(!pRole)
+		return 0;
+
+	//移动
+	CCPoint dest(m_fX, m_fY);
+	pRole->addWayPoint(dest);
+	pRole->stateMachine()->ChangeState(RoleStateRunTo::getInstance());
+
+	CMovieNode::Play(uTick);
+
+	return 0;
+}
+
+/*
+void CRoleMoveNode::quickEnd()
+{
+// 	if (_bPlayed)
+// 	{
+// 		Role* pRole = RoleManager::getInstance()->findRole(m_dwID);
+// 		if(!pRole)
+// 			return;
+// 
+// 		pRole->stateMachine()->ChangeState(RoleStateStand::getInstance());
+// 	}
+}
+*/
+
+CRoleChatNode::CRoleChatNode(unsigned int textID,unsigned int npcID){
+	m_textID = textID;
+	m_npcID = npcID;
+}
+
+unsigned int CRoleChatNode::Play(unsigned int uTick){
+	Monster *npc =dynamic_cast<Monster*>( RoleManager::getInstance()->findRole(m_npcID));
+	if(!npc)
+		return 0;
+	npc->luaUpdateMonsterChat(GET_STR(m_textID));
+
+	CMovieNode::Play(uTick);
+
+	return 0;
+}
+
+/*
+void CRoleChatNode::quickEnd()
+{
+
+}
+*/
+
+/* CRoleUseSkillNode */
+CRoleUseSkillNode::CRoleUseSkillNode( unsigned int dwSrcID, unsigned int dwTargetID, unsigned int dwSkillID, unsigned int fDelayTime )
+{
+	m_dwID = dwSrcID;
+	m_dwTargetID = dwTargetID;
+	m_dwSkillID = dwSkillID;
+	m_fDelayTime = fDelayTime;
+
+	m_fCDTick = 0;
+	m_LessPlayTimes = 1;
+}
+
+unsigned int CRoleUseSkillNode::Play(unsigned int uTick)
+{
+	m_fCDTick = uTick + m_fDelayTime;
+
+	NET_SIS_skill cmd;
+	cmd.dwSkillID = m_dwSkillID;
+	cmd.dwSrcRoleID = m_dwID;
+	cmd.dwTarRoleID = m_dwTargetID;
+	World::getInstance()->onSkill(&cmd);
+
+	CMovieNode::Play(uTick);
+
+	return 0;
+}
+
+/* CRoleDieNode */
+CStopUseSkillNode::CStopUseSkillNode(unsigned int dwSrcID)
+{
+	m_dwID = dwSrcID;
+}
+
+unsigned int CStopUseSkillNode::Play(unsigned int uTick)
+{
+	std::list<CMovieNode*>& ForeverList = CMovie::GetInstance().GetForeverList();
+	std::list<CMovieNode*>::iterator IT = ForeverList.begin();
+	while(IT != ForeverList.end())
+	{
+		CRoleUseSkillNode* pNode = dynamic_cast<CRoleUseSkillNode*>(*IT);
+		if(pNode && pNode->GetSrcID() == m_dwID)
+		{
+			CC_SAFE_DELETE(pNode);
+			ForeverList.erase(IT);
+			IT = ForeverList.begin();
+			continue;
+		}
+
+		IT++;
+	}
+
+	CMovieNode::Play(uTick);
+
+	return 0;
+}
+
+/* CRoleDieNode */
+CRoleDieNode::CRoleDieNode( unsigned int dwID )
+{
+	m_dwID = dwID;
+}
+
+unsigned int CRoleDieNode::Play(unsigned int uTick)
+{
+	NET_SIS_role_dead msg;
+	msg.dw_role_id = m_dwID;
+	World::getInstance()->onRoleDead(&msg);
+	
+	CMovieNode::Play(uTick);
+
+	CMovie::GetInstance().removeFromCreatureList(m_dwID);
+
+	return 0;
+}
+
+/* CMoveCameraNode */
+CMoveCameraNode::CMoveCameraNode( unsigned int fX, unsigned int fY, unsigned int fSpeed )
+{
+	m_fX = fX;
+	m_fY = fY;
+	m_fSpeed = fSpeed;
+}
+
+unsigned int CMoveCameraNode::Play(unsigned int uTick)
+{
+	MapManager::getInstance()->SetCameraPos(m_fX, m_fY, m_fSpeed);
+
+	CMovieNode::Play(uTick);
+
+	return 0;
+}
+
+/* CAttachCameraNode */
+CAttachCameraNode::CAttachCameraNode( unsigned int dwID )
+{
+	m_dwID = dwID;
+	m_fCDTick = 0;
+	m_LessPlayTimes = 1;
+}
+
+unsigned int CAttachCameraNode::Play(unsigned int uTick)
+{
+	m_fCDTick = 0;	//每帧都在刷
+
+	//[bing] 跟踪绑定目标
+	Role* pRole = RoleManager::getInstance()->findRole(m_dwID);
+	if(!pRole)
+		return 0;
+	MapManager::getInstance()->SetCameraPos( pRole->getPosition().x, pRole->getPosition().y, 0.0f );
+
+	CMovieNode::Play(uTick);
+	return 0;
+}
+
+/* CDetachCameraNode */
+unsigned int CDetachCameraNode::Play(unsigned int uTick)
+{
+	//[bing] 把这一类型的Node全干掉
+	CAttachCameraNode ClassNode(0);
+	CMovie::GetInstance().DelNodeByType(&ClassNode);
+
+	CMovieNode::Play(uTick);
+
+	return 0;
+}
+
+/* CVisiblemain */
+CVisiblemain::CVisiblemain(bool bSet)
+{
+	m_bSet = bSet;
+}
+
+unsigned int CVisiblemain::Play(unsigned int uTick)
+{
+	World::getInstance()->SetVisibleControlUI(m_bSet);
+
+	CMovieNode::Play(uTick);
+
+	return 0;
+}
+
+/* CSendGSMovieStateNode */
+CSendGSMovieStateNode::CSendGSMovieStateNode( int nNum )
+{
+	m_nNum = nNum;
+}
+
+int const quickEndOffset = 10000;
+
+void sendMovieState(int step,bool quickEnd)
+{
+#ifdef _USE_SDK
+	WzolJni *jni = WzolJni::getInstance();
+	if (jni->getIsFirstCreate())
+	{
+		string params;
+		int f = LOG_FLASHSKIP;
+		if (quickEnd == false)
+		{
+			f = LOG_FLASHEND;
+		}
+		jni->logToServer(f, params);
+	}
+#endif
+	WorldPacket C2GMsg(NET_C2G_MOVIE_STATE);
+	int nSendStep =quickEnd? step+quickEndOffset:step;
+	C2GMsg << nSendStep ;
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2GMsg.contents(), NP_INSIGNIFICANT, false);
+
+	if ( step==1 )
+	{
+		g_bIsWaitingMsgByMovie = true;
+		CrossSceneUI::getInstance()->open(0);
+		//CrossSceneUI::getInstance()->setPec(10);
+	}
+}
+
+unsigned int CSendGSMovieStateNode::Play(unsigned int uTick)
+{
+// 	WorldPacket C2GMsg(NET_C2G_MOVIE_STATE);
+// 	C2GMsg << m_nNum;
+// 	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2GMsg.contents(), NP_INSIGNIFICANT, false);
+// 
+// 	if ( m_nNum==1 )
+// 	{
+// 		g_bIsWaitingMsgByMovie = true;
+// 		CrossSceneUI::getInstance()->open(3);
+// 		CrossSceneUI::getInstance()->setPec(10);
+// 	}
+	sendMovieState(m_nNum,false);
+
+	CMovieNode::Play(uTick);
+
+	return 0;
+}
+
+void CSendGSMovieStateNode::quickEnd()
+{
+	if (!_bPlayed)
+	{
+		sendMovieState(m_nNum,true);
+	}
+}
+
+/* CFadeoutScene */
+CFadeoutScene::CFadeoutScene( float fDT, int nType )
+{
+	pColorLayer = NULL;
+	m_fDT = fDT;
+	m_fCDTick = 0;
+	m_LessPlayTimes = 0;
+	m_nType = nType;
+}
+
+unsigned int CFadeoutScene::Play(unsigned int uTick)
+{
+	m_fCDTick = uTick + m_fDT;
+
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	CCLayerColor* pLC = dynamic_cast<CCLayerColor*>(World::getInstance()->getScene()->getChildByTag(WCT_BLACKSCENE));
+	if(pLC)
+	{
+		pLC->stopAllActions();
+		pLC->removeFromParentAndCleanup(true);
+		//pLC->removeFromParent();
+	}
+
+	if(m_nType == 0)
+		pLC= CCLayerColor::create(ccc4(0, 0, 0, 0), winSize.width, winSize.height);
+	else
+		pLC= CCLayerColor::create(ccc4(0, 0, 0, 255), winSize.width, winSize.height);
+	pColorLayer = (CCNode*)pLC;
+
+	World::getInstance()->getScene()->addChild(pLC, WZ_POPUI, WCT_BLACKSCENE);
+	//World::getInstance()->SetRoleHeadTouch();
+	CCActionInterval* FadeIn;
+	if(m_nType == 0)
+		FadeIn = CCFadeIn::create(m_fDT);
+	else
+		FadeIn = CCFadeOut::create(m_fDT);	
+	pLC->runAction(FadeIn);
+
+	CMovieNode::Play(uTick);
+
+	return (unsigned int)m_fDT;
+}
+
+CFadeoutScene::~CFadeoutScene()
+{
+	//pColorLayer->stopAllActions();
+	//pColorLayer->removeFromParentAndCleanup(true);
+	//pColorLayer = NULL;
+}

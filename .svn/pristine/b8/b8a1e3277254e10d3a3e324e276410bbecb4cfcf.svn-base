@@ -1,0 +1,179 @@
+#ifndef WAITREPQUEUE_H__
+#define WAITREPQUEUE_H__
+
+#include <vector>
+#include <boost/shared_ptr.hpp>
+#include "BaseDefine.h"
+#include "ServerTime.h"
+#include <string>
+using namespace std;
+
+struct stParamTag
+{
+	string			strName;
+	unsigned int		dwID;
+	unsigned int     dwID2;
+	bool					bMale;
+	int					nClass;
+	int					nLv;
+	int					n32_Rating;
+
+	stParamTag():dwID(INVALID),dwID2(INVALID)
+	{
+
+	}
+};
+
+class RespItem 
+{
+public:
+	enum
+	{
+		EApply=0,
+		EInvitation,
+		EApplyFormTeammate,
+		EWarApply,
+		EWarLeave,
+		ENull,
+	};
+	
+	RespItem():mnType(ENull)
+	{
+
+	}
+
+	RespItem(int type,stParamTag const& param):mnType(type),mParam(param)
+	{
+		//REG_NAME_CB(this,&RespItem::onNameBack);
+		tTime =  ServerTime::getInstance()->cal_current_server_dword_time();
+	}
+
+	~RespItem()
+	{
+		//UNREG_NAME_CB(this,&RespItem::onNameBack);
+	}
+
+public:
+	virtual void OK()=0;
+	virtual void Cancel()=0;
+
+	virtual string getContext()=0;
+
+	int getType()const{return mnType;}
+
+	stParamTag			mParam;
+
+	tagDWORDTime	tTime;
+private:
+	int mnType;
+};
+
+class Apply :public RespItem
+{
+public:
+	Apply(stParamTag const&  param)
+		:RespItem(EApply,param)
+	{
+
+	}
+public:
+	virtual void OK();//NET_SIC_apply_join_team_reply
+	virtual void Cancel();
+
+	virtual string getContext();
+
+};
+
+class Invitation:public RespItem
+{
+public:
+	Invitation(stParamTag const& param)
+		:RespItem(EInvitation,param)
+	{
+
+	} 
+public:
+	virtual void OK();//NET_SIC_invite_reply
+	virtual void Cancel();
+	virtual string getContext();
+
+};
+
+class ApplyFromTeammate:public RespItem
+{
+public:
+	ApplyFromTeammate(stParamTag const& param)
+		:RespItem(EApplyFormTeammate,param)
+	{
+	} 
+public:
+	virtual void OK();//NET_SIS_member_invite_join_team_to_leader
+	virtual void Cancel();
+	virtual string getContext();
+
+};
+
+// 战队申请加入
+class WarApplyAdd :public RespItem
+{
+public:
+	WarApplyAdd(stParamTag const&  param)
+		:RespItem(EWarApply,param)
+	{
+
+	}
+public:
+	virtual void OK();
+	virtual void Cancel();
+
+	virtual string getContext();
+
+};
+
+// 战队离开
+class WarLeaveLeave :public RespItem
+{
+public:
+	WarLeaveLeave(stParamTag const&  param)
+		:RespItem(EWarLeave,param)
+	{
+
+	}
+public:
+	virtual void OK();
+	virtual void Cancel();
+
+	virtual string getContext();
+
+};
+
+class WaitRespQueue
+{
+public:
+	typedef vector<boost::shared_ptr<RespItem> >   RespQueue;
+public:
+	WaitRespQueue();
+	~WaitRespQueue();
+
+	void clear();
+
+	void add(int type,stParamTag& param);
+
+	void removeByType(int type);
+	void remove(boost::shared_ptr<RespItem>const& itemPtr);
+
+	void onGetName(unsigned int id,string const& name);
+
+	boost::shared_ptr<RespItem> const& getLast()const{assert(!mQueue.empty());return mQueue.back();}
+
+	RespQueue const& getQueue()const{return mQueue;}
+
+	void update(float fdt);
+private:
+	float					mfAcce;
+	RespQueue		mQueue;
+	RespQueue		mNameReqQueue;
+};
+
+
+#endif // WAITREPQUEUE_H__

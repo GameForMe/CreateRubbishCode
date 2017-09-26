@@ -1,0 +1,1257 @@
+#include "NewStallUI.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "ItemNode.h"
+#include "item.h"
+#include "UiTools.h"
+#include "PackageManager.h"
+#include "ItemMarixLayer.h"
+#include "CommonMsgDefine.h"
+#include "WorldPacket.h"
+#include "TCPClient.h"
+#include "ToolTip.h"
+#include "MessageBoxUi.h"
+#include "ItemTip.h"
+#include "EquipTipUi.h"
+#include "InputMessageBox.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "PackageUi.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "Auto_ActionMgr.h"
+#include "StringMgr.h"
+#include "DBMgr.h"
+#include "f_string_table.h"
+//////////////////////////////////////////////////////////////////////////
+
+//[bing] 贩卖总价上限判断20E
+#define MAX_YUANBAO 2000000000
+
+NewStallUi::NewStallUi()
+{
+
+}
+
+NewStallUi::~NewStallUi()
+{
+
+}
+
+CCNode* NewStallUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["StallUiLayer"] = UiLayerLoader<NewStallUiLayer>::loader();
+	nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+	CCNode* pNode = readUiFromCCBI("stall", nodeLoaders, _loadSpriteSheet);
+
+	return pNode;
+}
+
+void NewStallUi::AddStallItem(f_item* pItem)
+{
+	//因为服务器不会发送摆摊物品的额外信息 这些只是客户自己去记录 所以不需要在这里对管理器操作
+
+	NewStallUiLayer *uiLayer = getUiNodeByTag<NewStallUiLayer>(WCT_NEW_STALLUI);
+	if(uiLayer != NULL)
+	{
+		uiLayer->AddStallItem(pItem);
+	}
+}
+
+void NewStallUi::DelStallItem(int nIdx, bool IsBuy)
+{
+	//不管页面存在与否都应该删除管理器内资料
+	if(!IsBuy)
+		NewStallMgr::GetInstance().DelItem((unsigned char)nIdx, true);
+	NewStallUiLayer *uiLayer = getUiNodeByTag<NewStallUiLayer>(WCT_NEW_STALLUI);
+	if(uiLayer != NULL)
+	{
+		if(IsBuy)
+			uiLayer->DelBuyStallItem(nIdx);
+		uiLayer->UpdateStallItem();
+	}
+}
+
+void NewStallUi::UpdateStallItem()
+{
+	NewStallUiLayer *uiLayer = getUiNodeByTag<NewStallUiLayer>(WCT_NEW_STALLUI);
+	if(uiLayer != NULL)
+	{
+		uiLayer->UpdateStallItem();
+	}
+}
+
+void NewStallUi::UpdateOnPerStall()
+{
+	NewStallUiLayer *uiLayer = getUiNodeByTag<NewStallUiLayer>(WCT_NEW_STALLUI);
+	if(uiLayer != NULL)
+	{
+		uiLayer->OnPerStall();
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler NewStallUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler NewStallUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onClose1BtnPressed", NewStallUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBaiTanBtnPressed", NewStallUiLayer::onBaiBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onShouTanBtnPressed", NewStallUiLayer::onShouBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBuyBtnPressed", NewStallUiLayer::onMaiBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHelpBtnPressed", NewStallUiLayer::onHelpBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", NewStallUiLayer::onOkBtnPressed);
+	return NULL;
+}
+
+void NewStallUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_eState = ESS_PERSTALL;
+	m_cBuySelect = -1;
+	m_dwStallRoleId = 0;
+	//add by vvv 2014.11.11
+	_descframe = dynamic_cast<FrameSprite*>(getChildByTag(10));
+	_descframe->retain();
+	_descframe->removeFromParent();
+	
+	m_MainFrame = (CCSprite*)getChildByTag(0);
+	for(int i = 0; i < 10; ++i)
+	{
+		m_pItem[i] = ItemNode::create();
+		m_pItem[i]->setPosition( m_MainFrame->getChildByTag(i)->getPosition() );
+		m_pItem[i]->setTag(i);
+		m_MainFrame->addChild(m_pItem[i]);
+		m_MainFrame->removeChild(m_MainFrame->getChildByTag(i), true);
+
+		m_pLabel[i] = (CCLabelTTF*)m_MainFrame->getChildByTag(i + 10);
+		//m_pLabel[i]->setString("");
+	}
+
+	m_pAllPriceLabel = (CCLabelTTF*)m_MainFrame->getChildByTag(20);
+	//m_pAllPriceLabel->setString("0");
+
+	m_pShouBtn = (CCControlButton*)m_MainFrame->getChildByTag(21);
+	m_pBaiBtn = (CCControlButton*)m_MainFrame->getChildByTag(22);
+	m_pMaiBtn = (CCControlButton*)m_MainFrame->getChildByTag(23);
+
+	m_pShouBtn->setVisible(false);
+	m_pBaiBtn->setVisible(false);
+	m_pMaiBtn->setVisible(false);
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 2, true);
+}
+
+void NewStallUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	DropDragDelegate::getInstance()->addDropLayer(this);
+}
+
+void NewStallUiLayer::onExit()
+{
+	for(int i = 0; i < 10; ++i)
+	{
+		if(NewStallMgr::GetInstance().getButItem(i).getPData() == NULL)
+			continue;
+
+		if(NewStallMgr::GetInstance().getButItem(i).getType() == 0)
+		{
+			f_item* pItemInfo = (f_item*)NewStallMgr::GetInstance().getButItem(i).getPData();
+			CC_SAFE_DELETE(pItemInfo);
+		}
+		else
+		{
+			f_equipment* pItemInfo = (f_equipment*)NewStallMgr::GetInstance().getButItem(i).getPData();
+			CC_SAFE_DELETE(pItemInfo);
+		}
+	}
+
+	//关联界面也关闭
+	CLOSE_UI(WCT_STALL_EXCHANGE_UI);
+	
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+	CC_SAFE_RELEASE(_descframe);
+	DropDragDelegate::getInstance()->removeDropLayer(this);
+}
+
+short NewStallUiLayer::getItemBegin( CCTouch &touch, eGetResult &result )
+{
+	result = GR_ERROR;
+
+	ItemNode* pNode = GetItem(touch);
+	if(!pNode)
+		return -1;
+	if(pNode->GetDataId() == -1)
+		return -1;
+
+	result = GR_SUCCESS;
+	return -1;
+}
+//add by vvv 2014.11.11
+void NewStallUiLayer::onOkBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CC_ASSERT(_descframe != NULL);
+	_descframe->setTouchEnable(false);
+	_descframe->removeFromParent();
+}
+void NewStallUiLayer::onHelpBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CC_ASSERT(_descframe != NULL);
+	if(_descframe->getParent() == NULL)
+	{
+		_descframe->setVisible(true);
+		_descframe->setTouchPriority(-1);
+		setAllChildernButtonPriority(_descframe,-1);
+		_descframe->setTouchEnable(true);
+		World::getInstance()->getScene()->addChild(_descframe,WZ_POPUI);
+	}
+}
+
+short NewStallUiLayer::getItemEnd( CCTouch &touch, eGetResult &result, EItemConType src, short itemIndex )
+{
+	result = GR_SUCCESS;
+
+	//不是准备摆摊状态不允许拖上东西
+	if(m_eState != ESS_PERSTALL)
+		return -1;
+
+	ItemNode* pNode = GetItem(touch);
+	if(!pNode)
+		return -1;
+
+	LocalPlayer *localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if( !localPlayer )
+		return -1;
+	//检查开放等级
+	int nOpenLevel = GetFunOpenLevel(EFOL_Stall);
+	if( localPlayer->getLevel() < nOpenLevel )
+	{
+		ToolTip::getInstance()->push(GET_STR(9352).c_str());
+		return -1;
+	}
+
+	f_item* pStallItem = PackageManager::getInstance()->getItem(EICT_Bag, (short)itemIndex);
+	if (pStallItem != NULL)
+	{
+		//检查绑定状态
+		if( pStallItem->is_item_binded() )
+		{
+			ToolTip::getInstance()->push(/*"\xE8\xAF\xA5\xE7\x89\xA9\xE5\x93\x81\xE7\xBB\x91\xE5\xAE\x9A\xE4\xB8\x8D\xE8\x83\xBD\xE6\x91\x86\xE6\x91\x8A\xE5\x87\xBA\xE5\x94\xAE"*/STRING_TABLE["need_not_binded"]);
+			return -1;
+		}
+	}
+
+/*
+	int _tempStackNumber = 0;
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM PakageData WHERE TypeId = ?1");
+	cmd->set_integer32(1 , pStallItem->get_data()->dw_data_id);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("StackNumber");
+		_tempStackNumber = table->get_integer32(idx);
+	}
+
+	//检查上限
+	if( pStallItem->get_data()->GetNum() > _tempStackNumber)
+	{
+		return -1;
+	}*/
+	if(m_cBuySelect != -1)
+		m_pItem[m_cBuySelect]->setSelect(false);
+	m_pItem[pNode->getTag()]->setSelect(true);
+	m_cBuySelect = pNode->getTag();
+
+	return pNode->getTag();
+}
+
+bool NewStallUiLayer::onClicked( CCTouch &touch )
+{
+	if(m_cBuySelect != -1)
+		m_pItem[m_cBuySelect]->setSelect(false);
+
+	m_cBuySelect = -1;
+
+	ItemNode* pNode = GetItem(touch);
+	if(pNode)
+	{
+		if(m_eState == ESS_PERSTALL || m_eState == ESS_NOWSTALL)
+		{
+			f_item* pStallItem = PackageManager::getInstance()->getItem(EICT_StallItem, (short)pNode->getTag());
+			if(!pStallItem)
+				return true;
+
+			pNode->setSelect(true);
+			m_cBuySelect = pNode->getTag();
+
+			OPEN_UI(WCT_STALL_EXCHANGE_UI);
+			NewStallChangeUiLayer* pLayer = getUiNodeByTag<NewStallChangeUiLayer>(WCT_STALL_EXCHANGE_UI);
+			if(pLayer)
+			{
+				pLayer->SetItemData(pStallItem, m_eState);
+			}
+		}
+		else
+		{
+			//购买物品弹出所选物品tips
+			if(NewStallMgr::GetInstance().getButItem(pNode->getTag()).getPData() == NULL)
+				return true;
+
+			//有物品才选中 并且打开tips
+			m_cBuySelect = pNode->getTag();
+			m_pItem[m_cBuySelect]->setSelect(false);
+
+			if(NewStallMgr::GetInstance().getButItem(pNode->getTag()).getType() == 0)
+			{
+				ItemTip::getInstace()->open();
+				ItemTip::getInstace()->setPosition(ccp(pNode->getPositionX() - 262, pNode->getPositionY()));
+				ItemTip::getInstace()->setData((f_item*)(NewStallMgr::GetInstance().getButItem(pNode->getTag()).getPData()));
+			}
+			else
+			{
+				//打开装备tips
+				EquipTipUiLayer *ui = EquipTipUi::create();
+				short posIndex = 0;
+				ui->showUi(ccp(pNode->getPositionX() - 262, pNode->getPositionY()), (f_equipment*)(NewStallMgr::GetInstance().getButItem(pNode->getTag()).getPData()));
+				ui->setAllButtonOff();
+				const EquipTypeData* t_data = PackageManager::getInstance()->getEquipTypeDataPointer(((f_equipment*)(NewStallMgr::GetInstance().getButItem(pNode->getTag()).getPData()))->get_item_type_id());
+				if (t_data != NULL)
+				{
+					posIndex = t_data->posIndex;
+				}
+//已完成 				c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 				cmd->set_integer32(1 , ((f_equipment*)(NewStallMgr::GetInstance().getButItem(pNode->getTag()).getPData()))->get_item_type_id());
+// 				c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 				while(table->retrieve_row())
+// 				{
+// 					unsigned int idx = table->get_index("PosIndex");
+// 					posIndex = table->get_integer32(idx);
+// 				}
+// 				c_db_manager::getSingleton()->destroy_table(table);
+// 				c_db_manager::getSingleton()->end_operation(cmd);
+
+				ui->setIndex(posIndex);
+			}
+		}
+
+		return true;
+	}
+
+	return false;
+}
+
+bool NewStallUiLayer::onDoubleClicked( CCTouch &touch )
+{
+	return false;
+}
+
+ItemNode* NewStallUiLayer::GetItem(CCTouch &touch)
+{
+	for(int i = 0; i < 10; ++i)
+	{
+		CCPoint framePoint = m_pItem[i]->convertTouchToNodeSpace(&touch);
+		const CCSize &frameSize = m_pItem[i]->getContentSize();
+		CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+		if(frameRect.containsPoint(framePoint))
+		{
+			AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+			return m_pItem[i];
+		}
+	}
+
+	return NULL;
+}
+
+void NewStallUiLayer::OnPerStall()	//准备摆摊
+{
+	m_eState = ESS_PERSTALL;
+
+	m_pShouBtn->setVisible(false);
+	m_pBaiBtn->setVisible(true);
+	m_pMaiBtn->setVisible(false);
+
+	NewStallMgr::GetInstance().UpdateData();
+	UpdateStallItem();
+}
+
+void NewStallUiLayer::OnStall()		//已经摆摊修改
+{
+	m_eState = ESS_NOWSTALL;
+
+	m_pShouBtn->setVisible(true);
+	m_pBaiBtn->setVisible(false);
+	m_pMaiBtn->setVisible(false);
+
+	NewStallMgr::GetInstance().UpdateData();
+	UpdateStallItem();
+}
+
+void NewStallUiLayer::OnBuy(s_net_cmd* cmd)		//购买
+{
+	clearui();
+
+	m_eState = ESS_BUYSTALL;
+
+	m_pShouBtn->setVisible(false);
+	m_pBaiBtn->setVisible(false);
+	m_pMaiBtn->setVisible(true);
+
+	//服务器发给客户端查看摊位信息  摊主ID(DWORD) + Count(INT) + << type(BYTE 0 = Item,1 = Equip) + 物品结构(struct) + 价格(INT32) + 栏位索引(INT16)>>
+	int nNum = 0;
+	unsigned char byItemType = 0;
+	//f_item* stallitem = NULL;
+	//f_equipment* stallequip = NULL;
+	int nTotle = 0;
+	signed short index = 0;
+	WorldPacket G2C_Msg((const void*)cmd);
+	G2C_Msg >> m_dwStallRoleId;
+	G2C_Msg >> nNum;
+
+	for(int i = 0; i < nNum; ++i)
+	{
+		G2C_Msg >> byItemType;
+		if(byItemType == 0)
+		{
+			tagItem tmptagItem;
+			G2C_Msg >> tmptagItem;
+			if (tmptagItem.dw_data_id <= 0)
+			{
+				continue;
+			}
+			G2C_Msg >> nTotle;
+			G2C_Msg >> index;
+			f_item* stallitem = new f_item(tmptagItem);
+			NewStallMgr::GetInstance().getButItem(i).setType(0);
+			NewStallMgr::GetInstance().getButItem(i).setPData((void*)stallitem);
+			NewStallMgr::GetInstance().getButItem(i).setYuanBao(nTotle);
+		}
+		else
+		{
+			tagEquip tmptagEquip;
+			G2C_Msg >> tmptagEquip;
+			if (tmptagEquip.dw_data_id <= 0)
+			{
+				continue;
+			}
+			G2C_Msg >> nTotle;
+			G2C_Msg >> index;
+			f_equipment* stallequip = new f_equipment(tmptagEquip);
+			NewStallMgr::GetInstance().getButItem(i).setType(1);
+			NewStallMgr::GetInstance().getButItem(i).setPData((void*)stallequip);
+			NewStallMgr::GetInstance().getButItem(i).setYuanBao(nTotle);
+		}
+	}
+
+	UpdateStallItem();
+}
+
+void NewStallUiLayer::OnBuyConfrim()
+{
+	if(m_cBuySelect == -1)
+	{
+		//先选择一个要购买的物品
+		return;
+	}
+	//判断一下身上元宝是不是不足
+	if(PackageManager::getInstance()->getYuanBao() < NewStallMgr::GetInstance().getButItem(m_cBuySelect).getYuanBao())
+	{
+		//ToolTip::getInstance()->push("\xE5\x85\x83\xE5\xAE\x9D\xE4\xB8\x8D\xE8\xB6\xB3\xE4\xB8\x8D\xE8\x83\xBD\xE8\xB4\xAD\xE4\xB9\xB0");	//元宝不足不能购买
+		//MessageBoxUi *messageBox = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(7024).c_str(), TEXT_UTF8_RECHARGE, TEXT_UTF8_QUXIAO);//充值，取消
+		//messageBox->signalOkBtnPressed.connect(this, &NewStallUiLayer::noticeRecharge);
+		//World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+		return;
+	}
+	//再判断一下背包是不是没有空格了
+	if(PackageManager::getInstance()->getBlankSpace(EICT_Bag) == -1)
+	{
+		ToolTip::getInstance()->push("\xE5\x8C\x85\xE8\xA3\xB9\xE5\xB7\xB2\xE6\xBB\xA1\xE8\xAF\xB7\xE5\x85\x88\xE6\xB8\x85\xE7\x90\x86\xE5\x8C\x85\xE8\xA3\xB9");	//包裹已满请先清理包裹
+		return;
+	}
+
+	if(m_dwStallRoleId == 0)
+	{
+		//这应该不会出现
+		CCAssert(0, "没有贩卖的角色!");
+		return;
+	}
+
+	//客户端请求购买物品 摊主ID(DWORD) + 摆摊栏位IDX(INT)
+	WorldPacket sendmsg(NET_C2G_REQUEST_STALL_BUY);
+	sendmsg << m_dwStallRoleId;
+	sendmsg << (int)m_cBuySelect;
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)sendmsg.contents(), NP_NORMAL, false);
+}
+void NewStallUiLayer::noticeRecharge()
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+}
+void NewStallUiLayer::OnBaitanConfrim(bool isOk, std::string str)
+{
+	LocalPlayer *localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if( !localPlayer )
+		return;
+	//检查开放等级
+	int nOpenLevel = GetFunOpenLevel(EFOL_Stall);
+	if( localPlayer->getLevel() < nOpenLevel )
+	{
+		ToolTip::getInstance()->push(GET_STR(9352).c_str());
+		return;
+	}
+	if(isOk)
+	{
+		wchar_t name[10];
+		memset(name, 0, sizeof(wchar_t) * 10);
+		Utf8ToUtf16(str.c_str(), name, 10, 0);
+
+		//给服务器发送摆摊  摊位名称(TCHAR 10)
+		WorldPacket sendmsg(NET_C2G_REQUEST_STALL_START);
+		sendmsg << name;
+		TCP_CLIENT->send_net_cmd((const s_net_cmd*)sendmsg.contents(), NP_NORMAL, false);
+	}
+}
+
+void NewStallUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_NEW_STALLUI);
+}
+
+void NewStallUiLayer::onShouBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if(m_eState != ESS_NOWSTALL)
+		return;
+
+	//[bing] 客户端请求收摊
+	WorldPacket sendmsg(NET_C2G_REQUEST_STALL_END);
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)sendmsg.contents(), NP_NORMAL, false);
+}
+
+void NewStallUiLayer::onBaiBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_11);
+	LocalPlayer *localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if( !localPlayer )
+		return;
+	//检查开放等级
+	int nOpenLevel = GetFunOpenLevel(EFOL_Stall);
+	if( localPlayer->getLevel() < nOpenLevel )
+	{
+		ToolTip::getInstance()->push(GET_STR(9352).c_str());
+		return;
+	}
+
+	if(m_eState != ESS_PERSTALL)
+		return;
+
+	//[bing] 检查一下 如果发现都没有东西摆就不要摆摊了 给提示
+	bool bFind = false;
+	for(int i = 0; i < 10; ++i)
+	{
+		S_StallItem* pStallItem = NewStallMgr::GetInstance().GetStallItem(i);
+		if(pStallItem)
+		{
+			//如果该物品没有设置兑换物品 给提示先设置兑换物
+			if(pStallItem->dwAllPrice == 0)
+			{
+				//请先设置兑换物
+				ToolTip::getInstance()->push("\xE8\xAF\xB7\xE5\x85\x88\xE8\xAE\xBE\xE7\xBD\xAE\xE5\x85\x91\xE6\x8D\xA2\xE7\x89\xA9");
+				return;
+			}
+
+			bFind = true;
+			break;
+		}
+	}
+
+	if(!bFind)
+	{
+		//[bing] 请设置摆摊物品
+		ToolTip::getInstance()->push("\xE8\xAF\xB7\xE8\xAE\xBE\xE7\xBD\xAE\xE6\x91\x86\xE6\x91\x8A\xE7\x89\xA9\xE5\x93\x81");
+		return;
+	}
+	//若玩家在挂机中，则摆摊会停止挂机
+	if (AutoActionMgr::getInstance()->Get_Auto_Action())
+	{
+		AutoActionMgr::getInstance()->Set_Auto_Action(false);
+	}
+	//若玩家正在双修状态中，则不允许摆摊
+	if (localPlayer->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(187));
+		return;
+	}
+	//若玩家处于骑乘状态，应该下马
+	if (localPlayer->getAttribute(RA_RideState))
+	{
+		RoleManager::getInstance()->sendUnRideMsg();
+	}
+
+	//弹出input框 输入摊位名称后方可摆摊
+	InputMessageBox::getInstace()->open();
+	//InputMessageBox::getInstace()->setNumOnly(false, 10);
+
+	CCString* pStr = CCString::createWithFormat("%s\xE7\x9A\x84\xE6\x91\x8A\xE4\xBD\x8D", RoleManager::getInstance()->getLocalPlayer()->getNameUtf8().c_str());		//xxx的摊位
+	InputMessageBox::getInstace()->setDefaultText(pStr->getCString());
+	InputMessageBox::getInstace()->setMessage(GET_STR(2386).c_str());//摊位名称
+	InputMessageBox::getInstace()->getBtnSignal()->connect(this, &NewStallUiLayer::OnBaitanConfrim);
+}
+
+void NewStallUiLayer::onMaiBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if(m_eState != ESS_BUYSTALL)
+		return;
+
+	if(m_cBuySelect == -1)
+	{
+		//请选择要购买的物品
+		ToolTip::getInstance()->push("\xE8\xAF\xB7\xE9\x80\x89\xE6\x8B\xA9\xE8\xA6\x81\xE8\xB4\xAD\xE4\xB9\xB0\xE7\x9A\x84\xE7\x89\xA9\xE5\x93\x81");
+		return;
+	}
+
+	//得到要购买的物品 ps:其他购买者是看不到刷新的 所以没关系 f_item一定会存在
+	f_item* pSelItem = (f_item*)NewStallMgr::GetInstance().getButItem(m_cBuySelect).getPData();
+	if(!pSelItem)
+	{
+		CCAssert(0, "购买摊位物品时所选的物品不存在");
+		return;
+	}
+
+	//std::stringstream buystring;
+	//buystring<<"\xE8\xB4\xAD\xE4\xB9\xB0["<<pSelItem->GetItemName()<<"]\xE9\x9C\x80\xE8\xA6\x81\xE8\x8A\xB1\xE8\xB4\xB9\xE5\x85\x83\xE5\xAE\x9D " << m_buyitemArray[m_cBuySelect].dwSellYuanBao << '\0';//!奖励经验;
+	//购买[xxx]需要花费元宝 x
+	std::string strItemName = pSelItem->GetItemName();
+	CCString* pStr = CCString::createWithFormat("\xE8\xB4\xAD\xE4\xB9\xB0[%s]\xE9\x9C\x80\xE8\xA6\x81\xE8\x8A\xB1\xE8\xB4\xB9\xE5\x85\x83\xE5\xAE\x9D %d"
+		,strItemName.c_str()
+		,NewStallMgr::GetInstance().getButItem(m_cBuySelect).getYuanBao());
+
+	MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn("", pStr->getCString(), "\xE8\xB4\xAD\xE4\xB9\xB0", "\xE5\x8F\x96\xE6\xB6\x88");	//购买 取消
+	msgUi->signalOkBtnPressed.connect(this, &NewStallUiLayer::OnBuyConfrim);
+	World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+}
+
+void NewStallUiLayer::AddStallItem( f_item* pItem )
+{
+	if(!pItem)
+		return;
+
+	//当界面打开时 现在是准备摆摊 摆摊容器新增物品时一定上架物品
+	if(m_eState == ESS_PERSTALL)
+	{
+		//创建摆摊界面3
+		OPEN_UI(WCT_STALL_EXCHANGE_UI);
+		NewStallChangeUiLayer* pLayer = getUiNodeByTag<NewStallChangeUiLayer>(WCT_STALL_EXCHANGE_UI);
+		if(pLayer)
+		{
+			pLayer->SetItemData(pItem, ESS_PERSTALL);
+		}
+	}
+}
+
+void NewStallUiLayer::UpdateStallItem()
+{
+	if(m_eState == ESS_BUYSTALL)
+	{
+		for(int i = 0; i < 10; ++i)
+		{
+			if(NewStallMgr::GetInstance().getButItem(i).getPData() != NULL)
+			{
+				m_pItem[i]->setDataId(((f_item*)NewStallMgr::GetInstance().getButItem(i).getPData())->get_item_type_id());
+				m_pItem[i]->setNum( ((f_item*)NewStallMgr::GetInstance().getButItem(i).getPData())->get_item_number() );
+				//m_pItem[i]->SetShowNum( true );
+				CCString* pricestr = CCString::createWithFormat("%d", NewStallMgr::GetInstance().getButItem(i).getYuanBao());
+				m_pLabel[i]->setString(pricestr->getCString());
+			}
+			else
+			{
+				m_pItem[i]->setBlock();
+				m_pLabel[i]->setString("");
+			}
+		}
+	}
+	else
+	{
+		for(int i = 0; i < 10; ++i)
+		{
+			f_item* pItem = PackageManager::getInstance()->getItem(EICT_StallItem, (short)i);
+			if(pItem)
+			{
+				m_pItem[i]->setDataId(pItem->get_item_type_id());
+				m_pItem[i]->setNum(pItem->get_item_number());
+				S_StallItem* pStallItem = NewStallMgr::GetInstance().GetStallItem(i);
+				if(pStallItem)
+				{
+					CCString* pricestr = CCString::createWithFormat("%d", pStallItem->dwAllPrice);
+					m_pLabel[i]->setString(pricestr->getCString());
+				}
+				else
+					m_pLabel[i]->setString("");
+			}
+			else
+			{
+				m_pItem[i]->setBlock();
+				m_pLabel[i]->setString("");
+			}
+		}
+
+		CCString* allpricestr = CCString::createWithFormat("%d", NewStallMgr::GetInstance().GetTotlePrice());
+		m_pAllPriceLabel->setString(allpricestr->getCString());
+	}
+}
+
+void NewStallUiLayer::clearui()
+{
+	for(int i = 0; i < 10; ++i)
+	{
+		m_pItem[i]->setBlock();
+		m_pLabel[i]->setString("");
+	}
+
+	m_pAllPriceLabel->setString("0");
+}
+
+void NewStallUiLayer::DelBuyStallItem(int nIdx)
+{
+	//只删除买的容器
+	if(m_eState != ESS_BUYSTALL)
+		return;
+
+	if(nIdx >= 10 || nIdx < 0)
+	{
+		CCString* pStr = CCString::createWithFormat("购买者删除物品时索引错误%d", nIdx);
+		CCAssert(0, pStr->getCString());
+		return;
+	}
+
+	if(m_cBuySelect != -1)
+		m_pItem[m_cBuySelect]->setSelect(false);
+
+	m_cBuySelect = -1;
+	if(NewStallMgr::GetInstance().getButItem(nIdx).getType() == 0)
+	{
+		f_item* pItemInfo = (f_item*)NewStallMgr::GetInstance().getButItem(nIdx).getPData();
+		CC_SAFE_DELETE(pItemInfo);
+	}
+	else
+	{
+		f_equipment* pItemInfo = (f_equipment*)NewStallMgr::GetInstance().getButItem(nIdx).getPData();
+		CC_SAFE_DELETE(pItemInfo);
+	}
+	memset(&NewStallMgr::GetInstance().getButItem(nIdx),0,sizeof(NewStallMgr::GetInstance().getButItem(nIdx)));
+	//ZeroMemory(&m_buyitemArray[nIdx], sizeof(m_buyitemArray[nIdx]));
+}
+
+bool NewStallUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint framePoint = m_MainFrame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = m_MainFrame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		return true;
+	}
+	return false;
+}
+
+/* 摆摊3级界面 */
+
+//////////////////////////////////////////////////////////////////////////
+
+NewStallChangeUi::NewStallChangeUi()
+{
+
+}
+
+NewStallChangeUi::~NewStallChangeUi()
+{
+
+}
+
+CCNode* NewStallChangeUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["StallFrameUiLayer"] = UiLayerLoader<NewStallChangeUiLayer>::loader();
+	CCNode* pNode = readUiFromCCBI("stallframe", nodeLoaders, _loadSpriteSheet);
+
+	return pNode;
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler NewStallChangeUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler NewStallChangeUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "jianBtn", NewStallChangeUiLayer::onjianBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "jiaBtn", NewStallChangeUiLayer::onjiaBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSureBtnPressed", NewStallChangeUiLayer::onSureBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChedanBtnPressed", NewStallChangeUiLayer::onChedanBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", NewStallChangeUiLayer::onCloseBtnPressed);
+
+	return NULL;
+}
+
+void NewStallChangeUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+
+	m_pStallMgr = &NewStallMgr::GetInstance();
+	m_uIdx = -1;
+	m_dwAllPrice = 0;
+	m_nUseCount = 0;
+	m_pStallItem = NULL;
+	m_eState = ESS_PERSTALL;
+	m_MainFrame = (CCSprite*)getChildByTag(0);
+
+	m_pLayer = (CCLayer*)m_MainFrame->getChildByTag(0);			//0 主矩阵
+	map<unsigned int, unsigned int>& ExChangeItemMap = NewStallMgr::GetInstance().GetExChangeItemMap();
+	size_t ExChangeNum = ExChangeItemMap.size();
+	ExChangeNum = ExChangeNum % 5 == 0 ? ExChangeNum / 5 : ExChangeNum / 5 + 1;
+	CreateItemMarix(m_pLayer, 5, ExChangeNum, 11, 8, (unsigned short)ExChangeItemMap.size());
+
+	int nIdx = 0;
+	map<unsigned int, unsigned int>::iterator IT = ExChangeItemMap.begin();
+	while(IT != ExChangeItemMap.end())
+	{
+		ItemNode* pItemNode = GetItemMarixNodeByIdx((CCNode*)m_pLayer, nIdx++);
+		if(pItemNode)
+		{
+			pItemNode->setDataId(IT->first);
+			pItemNode->SetShowNum(true);
+		}
+		IT++;
+	}
+
+	m_pItemNode = ItemNode::create();		//1 物品
+	m_pItemNode->setPosition(m_MainFrame->getChildByTag(1)->getPosition());
+	m_MainFrame->getChildByTag(1)->setVisible(false);
+	m_MainFrame->addChild(m_pItemNode);
+
+	m_pTotlePriceLabel = (CCLabelTTF*)m_MainFrame->getChildByTag(2);	//2 总价
+	m_pTotlePriceLabel->setString("0");
+
+	m_pItemNameLabel = (CCLabelTTF*)m_MainFrame->getChildByTag(3);	//3 物品名称
+	m_pItemNameLabel->setString("");
+
+	m_pItemNumLabel = (CCLabelTTF*)m_MainFrame->getChildByTag(4);	//4 物品数量
+	m_pItemNumLabel->setString("0");
+
+	m_pAddNumLabel = (CCLabelTTF*)m_MainFrame->getChildByTag(5);	//5 增加数量
+	m_pAddNumLabel->setString("0");
+
+	m_pConfrimBtn = (CCControlButton*)m_MainFrame->getChildByTag(6); //6 确定
+	m_pCancelBtn = (CCControlButton*)m_MainFrame->getChildByTag(7); //7 撤单
+
+	m_pJianBtn = (CCControlButton*)m_MainFrame->getChildByTag(8);
+	m_pJiaBtn = (CCControlButton*)m_MainFrame->getChildByTag(9);
+
+	SetAllOpacity(m_MainFrame, 1);
+}
+
+void NewStallChangeUiLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+
+bool NewStallChangeUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	CCPoint framePoint = m_MainFrame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = m_MainFrame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		m_pAddNumLabel->setString("0");
+
+		ItemNode* pPerItemNode = NULL;
+		int nIdx = 0;
+		map<unsigned int, unsigned int>& ExChangeItemMap = NewStallMgr::GetInstance().GetExChangeItemMap();
+		map<unsigned int, unsigned int>::iterator IT = ExChangeItemMap.begin();
+		while(IT != ExChangeItemMap.end())
+		{
+			ItemNode* pItemNode = GetItemMarixNodeByIdx((CCNode*)m_pLayer, nIdx);
+			if(pItemNode)
+			{
+				CCPoint framePoint2 = pItemNode->convertTouchToNodeSpace(pTouch);
+				const CCSize &frameSize2 = pItemNode->getContentSize();
+				CCRect frameRect2(0.0f, 0.0f, frameSize2.width, frameSize2.height);
+				if(frameRect2.containsPoint(framePoint2))
+				{
+					if(m_uIdx != nIdx)
+					{
+						if(m_uIdx != -1 && (pPerItemNode = GetItemMarixNodeByIdx((CCNode*)m_pLayer, m_uIdx)) != NULL)
+							pPerItemNode->setSelect(false);
+
+						pItemNode->setSelect(true);
+					}
+					m_uIdx = nIdx;
+
+					CCString* pStr = CCString::createWithFormat("%d", pItemNode->getNum());
+					m_pAddNumLabel->setString(pStr->getCString());
+
+					return true;
+				}
+			}
+			nIdx++;
+			IT++;
+		}
+
+		if(m_uIdx != -1 && (pPerItemNode = GetItemMarixNodeByIdx((CCNode*)m_pLayer, m_uIdx)) != NULL)
+			pPerItemNode->setSelect(false);
+
+		m_uIdx = -1;
+		return true;
+	}
+
+	m_uIdx = -1;
+	return false;
+}
+
+void NewStallChangeUiLayer::SetItemData( f_item* pfitem, E_STALL_STATE eState )
+{
+	m_eState = eState;
+
+	switch(m_eState)
+	{
+		case ESS_PERSTALL:
+			{
+				m_pCancelBtn->setVisible(false);
+				m_pConfrimBtn->setVisible(true);
+				m_pJiaBtn->setVisible(true);
+				m_pJianBtn->setVisible(true);
+				break;
+			}
+		case ESS_NOWSTALL:
+			{
+				m_pCancelBtn->setVisible(true);
+				m_pConfrimBtn->setVisible(false);
+				//m_pJiaBtn->setVisible(false);
+				//m_pJianBtn->setVisible(false);
+				break;
+			}
+	}
+
+	//设置已兑换物总价
+	m_dwAllPrice = m_pStallMgr->GetTotlePrice();
+	//设置已兑换物占用的格数
+	m_nUseCount = m_pStallMgr->GetExChangedUseCount();
+
+	const ItemTypeData& itemdata = PackageManager::getInstance()->getItemTypeData(pfitem->get_item_type_id());
+	m_pItemNameLabel->setString(itemdata.name.c_str());
+	CCString* pstr = CCString::createWithFormat("%d", pfitem->get_data()->GetNum());
+	m_pItemNumLabel->setString(pstr->getCString());
+	m_pItemNode->setDataId(pfitem->get_item_type_id());
+	m_pStallItem = pfitem;
+
+	//设置额外数据
+	S_StallItem* pStallItem = m_pStallMgr->GetStallItem(pfitem->get_pos());
+	if(pStallItem)
+	{	
+		pstr = CCString::createWithFormat("%d", pStallItem->dwAllPrice);
+		m_pTotlePriceLabel->setString(pstr->getCString());
+		map<unsigned int, unsigned int>& ExChangeItemMap = NewStallMgr::GetInstance().GetExChangeItemMap();
+		def_stallitem::iterator IT = pStallItem->ExChangeItemMap.begin();
+		while(IT != pStallItem->ExChangeItemMap.end())
+		{
+			//因为记的是Typeid 所以要循环找一下... 本来想用idx的 但是怎么用都会很麻烦 还是用typeid吧
+			for(size_t i = 0; i < ExChangeItemMap.size(); ++i)
+			{
+				if(GetItemMarixNodeByIdx((CCNode*)m_pLayer, i)->GetDataId() == IT->first)
+				{
+					GetItemMarixNodeByIdx((CCNode*)m_pLayer, i)->setNum(IT->second);
+					break;
+				}
+			}
+
+			IT++;
+		}
+	}
+}
+
+void NewStallChangeUiLayer::onjianBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	if(m_eState != ESS_PERSTALL)
+	{
+		ToolTip::getInstance()->push("\xE6\x91\x86\xE6\x91\x8A\xE4\xB8\xAD\xE4\xB8\x8D\xE5\x8F\xAF\xE6\x89\xA7\xE8\xA1\x8C\xE8\xAF\xA5\xE6\x93\x8D\xE4\xBD\x9C"); //摆摊中不可执行该操作
+		return;
+	}
+
+	if(m_uIdx == -1)
+	{
+		ToolTip::getInstance()->push("\xE8\xAF\xB7\xE5\x85\x88\xE9\x80\x89\xE6\x8B\xA9\xE8\xA6\x81\xE5\x85\x91\xE6\x8D\xA2\xE7\x9A\x84\xE7\x89\xA9\xE5\x93\x81"); //请先选择要兑换的物品
+		return;
+	}
+
+	ItemNode* pItemNode = GetItemMarixNodeByIdx((CCNode*)m_pLayer, m_uIdx);
+	if(pItemNode->getNum() > 0)
+	{
+		pItemNode->setNum(pItemNode->getNum() - 1);
+
+		CCString* pStr = CCString::createWithFormat("%d", pItemNode->getNum());
+		m_pAddNumLabel->setString(pStr->getCString());
+
+		//更新UI
+		map<unsigned int, unsigned int>::iterator IT = m_pStallMgr->GetExChangeItemMap().find(pItemNode->GetDataId());
+		if(IT != m_pStallMgr->GetExChangeItemMap().end())
+		{
+			m_dwAllPrice -= IT->second;
+		}
+		pStr = CCString::createWithFormat("%d", getItemStallPiece());
+		m_pTotlePriceLabel->setString(pStr->getCString());
+
+		//表示一个类型清0了
+		if(pItemNode->getNum() == 0)
+		{
+			m_nUseCount--;
+		}
+		if (MIsEquipment(pItemNode->GetDataId()))
+		{
+			if (m_nUseCount > 0)
+			{
+				m_nUseCount--;
+			}
+		}
+	}
+}
+
+void NewStallChangeUiLayer::onjiaBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	
+	if(m_eState != ESS_PERSTALL)
+	{
+		ToolTip::getInstance()->push("\xE6\x91\x86\xE6\x91\x8A\xE4\xB8\xAD\xE4\xB8\x8D\xE5\x8F\xAF\xE6\x89\xA7\xE8\xA1\x8C\xE8\xAF\xA5\xE6\x93\x8D\xE4\xBD\x9C"); //摆摊中不可执行该操作
+		return;
+	}
+
+	if(m_uIdx == -1)
+	{
+		ToolTip::getInstance()->push("\xE8\xAF\xB7\xE5\x85\x88\xE9\x80\x89\xE6\x8B\xA9\xE8\xA6\x81\xE5\x85\x91\xE6\x8D\xA2\xE7\x9A\x84\xE7\x89\xA9\xE5\x93\x81"); //请先选择要兑换的物品
+		return;
+	}
+
+	//这里需要判断金钱上限 以及背包格子
+	//更新UI
+	ItemNode* pItemNode = GetItemMarixNodeByIdx((CCNode*)m_pLayer, m_uIdx);
+	
+	int _tempStackNumber = 0;
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM PackageData WHERE TypeId = ?1");
+	cmd->set_integer32(1 , pItemNode->GetDataId());
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("StackNumber");
+		_tempStackNumber = table->get_integer32(idx);
+	}
+
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	if( pItemNode->getNum() + 1 > _tempStackNumber)
+	{
+		ToolTip::getInstance()->push("\xE6\x89\x80\xE6\x8D\xA2\xE7\x89\xA9\xE5\x93\x81\xE5\xA0\x86\xE5\x8F\xA0\xE6\x95\xB0\xE5\xB7\xB2\xE8\xBE\xBE\xE4\xB8\x8A\xE9\x99\x90"); //所换物品堆叠数已达上限
+		return;
+	}
+
+	unsigned int tmpAddValue = 0;
+	map<unsigned int, unsigned int>::iterator IT = m_pStallMgr->GetExChangeItemMap().find(pItemNode->GetDataId());
+	if(IT != m_pStallMgr->GetExChangeItemMap().end())
+	{
+		tmpAddValue = IT->second;
+		//检查上限
+	}
+
+	//超上限了
+	if(m_pStallMgr->GetTotlePrice() + m_dwAllPrice + tmpAddValue > MAX_YUANBAO)
+	{
+		//所选兑换物总价超20亿上限
+		ToolTip::getInstance()->push("\xE6\x89\x80\xE9\x80\x89\xE5\x85\x91\xE6\x8D\xA2\xE7\x89\xA9\xE6\x80\xBB\xE4\xBB\xB7\xE8\xB6\x85\xE8\xBF\x87\x32\x30\xE4\xBA\xBF\xE4\xB8\x8A\xE9\x99\x90");
+		return;
+	}
+	
+	//表示一个新类型 所以要累加1了
+	if(pItemNode->getNum() == 0)
+	{
+		if(m_nUseCount + 1 > PackageManager::getInstance()->getBlankCount(EICT_Bag))
+		{
+			//背包空间不足以兑换该物品
+			ToolTip::getInstance()->push("\xE8\x83\x8C\xE5\x8C\x85\xE7\xA9\xBA\xE9\x97\xB4\xE4\xB8\x8D\xE8\xB6\xB3\xE4\xBB\xA5\xE5\x85\x91\xE6\x8D\xA2\xE8\xAF\xA5\xE7\x89\xA9\xE5\x93\x81");
+			return;
+		}
+
+		m_nUseCount++;
+	}
+	else
+	{
+		if (MIsEquipment(pItemNode->GetDataId()))
+		{
+			m_nUseCount++;
+		}
+	}
+
+	pItemNode->setNum(pItemNode->getNum() + 1);
+
+	CCString* pStr = CCString::createWithFormat("%d", pItemNode->getNum());
+	m_pAddNumLabel->setString(pStr->getCString());
+
+	m_dwAllPrice += tmpAddValue;
+	//更新UI
+	pStr = CCString::createWithFormat("%d", getItemStallPiece());
+	m_pTotlePriceLabel->setString(pStr->getCString());
+}
+
+unsigned int NewStallChangeUiLayer::getItemStallPiece()
+{
+	unsigned int tmpPrice = 0;
+	std::map<unsigned int, short> tmpMap;
+	int nIdx = 0;
+	map<unsigned int, unsigned int>& ExChangeItemMap = NewStallMgr::GetInstance().GetExChangeItemMap();
+	map<unsigned int, unsigned int>::iterator IT = ExChangeItemMap.begin();
+	while(IT != ExChangeItemMap.end())
+	{
+		ItemNode* pItemNode = GetItemMarixNodeByIdx((CCNode*)m_pLayer, nIdx);
+		if(pItemNode->getNum())
+		{
+			tmpMap[IT->first] = pItemNode->getNum();
+		}
+		nIdx++;
+		IT++;
+	}
+
+	std::map<unsigned int, short>::iterator iter = tmpMap.begin();
+	while(iter != tmpMap.end())
+	{
+		tmpPrice += ExChangeItemMap[iter->first] * iter->second;
+		++iter;
+	}
+	return tmpPrice;
+}
+
+void NewStallChangeUiLayer::onSureBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	if(m_eState != ESS_PERSTALL)
+		return;
+
+	if(m_pStallItem == NULL)
+		return;
+
+	//超上限了
+	if(m_pStallMgr->GetTotlePrice() + m_dwAllPrice > MAX_YUANBAO)
+	{
+		//所选兑换物总价超20亿上限
+		ToolTip::getInstance()->push("\xE6\x89\x80\xE9\x80\x89\xE5\x85\x91\xE6\x8D\xA2\xE7\x89\xA9\xE6\x80\xBB\xE4\xBB\xB7\xE8\xB6\x85\xE8\xBF\x87\x32\x30\xE4\xBA\xBF\xE4\xB8\x8A\xE9\x99\x90");
+		return;
+	}
+	
+	if(m_nUseCount > PackageManager::getInstance()->getBlankCount(EICT_Bag))
+	{
+		//背包空间不足以兑换该物品
+		ToolTip::getInstance()->push("\xE8\x83\x8C\xE5\x8C\x85\xE7\xA9\xBA\xE9\x97\xB4\xE4\xB8\x8D\xE8\xB6\xB3\xE4\xBB\xA5\xE5\x85\x91\xE6\x8D\xA2\xE8\xAF\xA5\xE7\x89\xA9\xE5\x93\x81");
+		return;
+	}
+
+	std::map<unsigned int, short> tmpMap;
+	int nIdx = 0;
+	map<unsigned int, unsigned int>& ExChangeItemMap = NewStallMgr::GetInstance().GetExChangeItemMap();
+	map<unsigned int, unsigned int>::iterator IT = ExChangeItemMap.begin();
+	while(IT != ExChangeItemMap.end())
+	{
+		ItemNode* pItemNode = GetItemMarixNodeByIdx((CCNode*)m_pLayer, nIdx);
+		if(pItemNode->getNum())
+		{
+			tmpMap[IT->first] = pItemNode->getNum();
+		}
+		nIdx++;
+		IT++;
+	}
+
+	if(tmpMap.size() == 0)
+	{
+		//一个兑换物都没有 不要上架给提示
+		ToolTip::getInstance()->push("\xE8\xAF\xB7\xE8\xAE\xBE\xE7\xBD\xAE\xE5\x85\x91\xE6\x8D\xA2\xE7\x89\xA9");	//请设置兑换物
+		return;
+	}
+
+	S_StallItem* pStallItem = new S_StallItem();
+
+	//摆摊栏位IDX(INT) + 兑换物品数量(INT) + << ItemID(DWORD) + Count(INT16) >>
+	//#define NET_C2G_CONFIRM_STALL_ITEM "NET_C2G_CONFIRM_STALL_ITEM" //客户端请求确认摆摊物品
+	WorldPacket sendmsg(NET_C2G_CONFIRM_STALL_ITEM);
+	sendmsg << (int)m_pStallItem->get_pos();
+	sendmsg << (int)tmpMap.size();
+
+	std::map<unsigned int, short>::iterator tmpIT = tmpMap.begin();
+	while(tmpIT != tmpMap.end())
+	{
+		pStallItem->ExChangeItemMap[tmpIT->first] = tmpIT->second;
+
+		sendmsg << (unsigned int)tmpIT->first;
+		sendmsg << (short)tmpIT->second;
+		tmpIT++;
+	}
+
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)sendmsg.contents(), NP_NORMAL, false);
+
+	//加入摆摊管理器
+	m_pStallMgr->AddItem(m_pStallItem->get_pos(), pStallItem, true);
+	
+	CLOSE_UI(WCT_STALL_EXCHANGE_UI);
+	OPEN_UI(WCT_PACKAGEUI);
+	//刷新购买界面
+	GET_UI(NewStallUi, WCT_NEW_STALLUI)->UpdateStallItem();
+	GET_UI(NewStallUi, WCT_NEW_STALLUI)->UpdateOnPerStall();
+}
+
+void NewStallChangeUiLayer::onChedanBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_11);
+	if(m_eState != ESS_NOWSTALL)
+		return;
+
+	if(m_pStallItem == NULL)
+	{
+		//贩卖的物品没有? 虽然可能出现在打开该页面时东西被买走了 如果被别人买走了 该界面会关闭
+		CCAssert(0, "摆摊物品下架时下架物品不存在");
+		return;
+	}
+
+	//先看看包裹内有没有空
+	int nFreePos = PackageManager::getInstance()->getBlankSpace(EICT_Bag);
+	if(nFreePos == -1)
+	{
+		//没有位置了
+		ToolTip::getInstance()->push("\xE5\x8C\x85\xE8\xA3\xB9\xE5\xB7\xB2\xE6\xBB\xA1\xE8\xAF\xB7\xE5\x85\x88\xE6\xB8\x85\xE7\x90\x86\xE5\x8C\x85\xE8\xA3\xB9");	//包裹已满请先清理包裹
+		return;
+	}
+	
+	//摆摊栏位IDX(INT) NET_C2G_REQUEST_STALL_DOWN //客户端请求摆摊下架
+	WorldPacket sendmsg(NET_C2G_REQUEST_STALL_DOWN);
+	sendmsg << (int)m_pStallItem->get_pos();
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)sendmsg.contents(), NP_NORMAL, false);
+
+	//移动
+	PackageManager::getInstance()->changeItemPosition(EICT_StallItem, EICT_Bag, (short)m_pStallItem->get_pos(), (short)nFreePos);
+
+	CLOSE_UI(WCT_STALL_EXCHANGE_UI);
+}
+
+void NewStallChangeUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_STALL_EXCHANGE_UI);
+}

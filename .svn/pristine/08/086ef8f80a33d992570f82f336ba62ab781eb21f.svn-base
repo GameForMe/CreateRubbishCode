@@ -1,0 +1,289 @@
+#include "cocos2d.h"
+#include "TCPClient.h"
+#include "BaseDefine.h"
+#include "DBMgr.h"
+#include "VIPMgr.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "QuestMgr.h"
+#include "WorldPacket.h"
+VIPMgr::VIPMgr():m_dwVIPExp(0),m_nVIPLevel(0)
+{
+
+}
+VIPMgr::~VIPMgr()
+{
+
+}
+void VIPMgr::Init()
+{
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_vip_level" , this , &VIPMgr::SetVIPLevel);
+	TCP_CLIENT->register_net_cmd("NET_SIS_unset_vip_level" , this , &VIPMgr::UnSetVIPLevel);
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM VIPData");
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		vip_proto tmp;
+		unsigned int idx = table->get_index("VipLevel");
+		tmp.vip_level = table->get_integer32(idx);
+
+		idx = table->get_index("NeedYuanBao");
+		tmp.needyuanbao = table->get_integer32(idx);
+
+		idx = table->get_index("SaoDang");
+		tmp.saodang_add = table->get_integer32(idx);
+
+		/*idx = table->get_index("PT_LingWu");
+		tmp.pt_lingwu_add = table->get_integer32(idx);*/
+
+		idx = table->get_index("KS_LingWu");
+		tmp.ks_lingwu_add = table->get_integer32(idx);
+
+		idx = table->get_index("ShuangXiu");
+		tmp.shuangxiu_add = table->get_integer32(idx);
+
+		idx = table->get_index("JunXu");
+		tmp.junxu_add = table->get_integer32(idx);
+
+		idx = table->get_index("TiLiMax");
+		tmp.max_tili_add = table->get_integer32(idx);
+
+		idx = table->get_index("TiLiTimes");
+		tmp.times_tili_add = table->get_integer32(idx);
+
+		idx = table->get_index("YinJiu");
+		tmp.yinjiu_add = table->get_integer32(idx);
+
+		idx = table->get_index("ShangXiang");
+		tmp.shangxiang_add = table->get_integer32(idx);
+
+		idx = table->get_index("Treasure");
+		tmp.treasure_add = table->get_integer32(idx);
+
+		idx = table->get_index("DaGuaiExp");
+		tmp.daguaiexp_add = table->get_double(idx);
+
+		idx = table->get_index("JingYanFB");
+		tmp.jingyanfb_add = table->get_double(idx);
+
+		idx = table->get_index("JinQianFB");
+		tmp.jinqianfb_add = table->get_double(idx);
+
+		idx = table->get_index("Openfuction");
+		tmp.openStr = table->get_text(idx);
+
+		m_VIP_Info.insert(std::make_pair(tmp.vip_level,tmp));	
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	return;
+}
+void VIPMgr::Destroy()
+{
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_vip_level" , this , &VIPMgr::SetVIPLevel);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_unset_vip_level" , this , &VIPMgr::UnSetVIPLevel);
+	m_VIP_Info.clear();
+	return;
+}
+
+VIPMgr* VIPMgr::getInstance()
+{
+	static VIPMgr mgr;
+	return &mgr;
+}
+
+int VIPMgr::GetVipDataByIndex( int vip_level,EVIPVType eType )
+{
+	VIP_Map::iterator iter = m_VIP_Info.find(vip_level);
+	if (iter == m_VIP_Info.end())
+		return 0;
+	switch (eType)
+	{
+// 	case COMPRACTICE_ADD:// 双修
+// 		return iter->second.compractice_add;
+// 		break;
+// 	case XIULUOSHILIAN_ADD:// 修罗试炼
+// 		return iter->second.xiuluoshilian_add;
+// 		break;
+// 	case MOWUSHOULIE_ADD:// 魔物狩猎
+// 		return iter->second.mowushoulie_add;
+// 		break;
+// 	case HANGHUISHAOXIANG_ADD:// 行会烧香
+// 		return iter->second.hanghuishaoxiang_add;
+// 		break;
+// 	case WINE_ADD:// 饮酒
+// 		return iter->second.wine_add;
+// 		break;
+// 	case TIANMING_ADD:// 天命问运
+// 		return iter->second.tianming_add;
+// 		break;
+// 	case YANHUOTUMO_ADD:// 焰火屠魔
+// 		return iter->second.yanhuotumo_add;
+// 		break;
+	case NEEDYUANBAO:	//需要元宝
+		return iter->second.needyuanbao;
+		break;
+	case SAODANG:		//扫荡
+		return iter->second.saodang_add;
+		break;
+	//case PTLINGWU:		//普通领悟
+	//	return iter->second.pt_lingwu_add;
+	//	break;
+	case  KSLINGWU:		//快速领悟
+		return iter->second.ks_lingwu_add;
+		break;
+	case  SHUANGXIU:	//双修
+		return iter->second.shuangxiu_add;
+		break;;
+	case  JUNXU:		//军需
+		return iter->second.junxu_add;
+		break;
+	case TILIMAX:		//最大体力
+		return iter->second.max_tili_add;
+		break;
+	case TILITIMES:		//体力购买次数
+		return iter->second.times_tili_add;
+		break;
+	case YINJIU:		//饮酒
+		return iter->second.yinjiu_add;
+		break;
+	case SHANGXIANG:	//上香
+		return iter->second.shangxiang_add;
+		break;
+	case TREASURE:	//上香
+		return iter->second.treasure_add;
+		break;
+	case DAGUAIEXP:		//打怪经验
+		return iter->second.daguaiexp_add;
+		break;
+	case JINGYANFB:		//经验副本
+		return iter->second.jingyanfb_add;
+		break;
+	case JINQIANFB:		//金钱副本
+		return iter->second.jinqianfb_add;
+		break;
+	}
+	return 0;
+}
+
+std::string VIPMgr::GetVipStrByIndex( int vip_level,EVIPVType eType )
+{
+	VIP_Map::iterator iter = m_VIP_Info.find(vip_level);
+	if (iter == m_VIP_Info.end())
+		return 0;
+	switch (eType)
+	{
+	case OPEN:		//金钱副本
+		return iter->second.openStr;
+		break;
+	}
+	return NULL;
+}
+
+unsigned int VIPMgr::SetVIPLevel( s_net_cmd *cmd )
+{
+	NET_SIS_get_vip_level* msg = (NET_SIS_get_vip_level*)cmd;
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return 0;
+	if (ploc->getId() != msg->dw_role_id)
+		return 0;
+	bool isShowRoleName = RoleManager::getInstance()->getIsShowSelfRoleName();
+	ploc->setVIPLevel(msg->vip_level, isShowRoleName);				//【ji：】
+	ploc->setVIPExp(msg->dw_VIPExp);				//【ji：】
+	ploc->setLocVIPLevel(msg->vip_level);			//【ji：】
+	m_dwVIPExp = msg->dw_VIPExp;
+	m_nVIPLevel = msg->vip_level;
+	//获取VIP后，应该重新刷新一下每日任务信息
+//	QuestMgr::getInstance()->setEveryANum(GET_VIP_DETAIL(ploc->getVIPLevel(),XIULUOSHILIAN_ADD));			//【Ji：】
+//	QuestMgr::getInstance()->setEveryBNum(GET_VIP_DETAIL(ploc->getVIPLevel(),MOWUSHOULIE_ADD));				//【Ji：】
+	//QuestMgr::getInstance()->queryValidEveryQuestA(ploc->getLevel());
+	QuestMgr::getInstance()->queryValidEveryQuest(ploc->getLevel(), false);
+	return 0;
+}
+
+unsigned int VIPMgr::UnSetVIPLevel( s_net_cmd *cmd )
+{
+	NET_SIS_unset_vip_level* msg = (NET_SIS_unset_vip_level*)cmd;
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return 0;
+	if (ploc->getId() != msg->dw_role_id)
+		return 0;
+	ploc->setVIPLevel(0);
+	return 0;
+}
+
+unsigned int VIPMgr::getVIPExperience()
+{
+	return m_dwVIPExp;
+}
+
+int VIPMgr::getVIPLv()
+{
+	return m_nVIPLevel;
+}
+
+unsigned int VIPMgr::SetVIPData( s_net_cmd *cmd )
+{
+	int fubenSaodangTimes = 0;//副本免费扫荡次数(INT)
+	unsigned int skillPointTop = 0;//技能点领悟上限(DWORD)
+	int quickSkillPoint = 0;//技能快速领悟次数(INT)
+	int shuangxiuTimes = 0;//双修次数(INT)
+	int junxuRenwuTimes = 0;//每日任务次数(军需)(INT) 
+	int tiliTop = 0;//体力上限(INT)
+	int buyTiliTop = 0;//购买体力次数上限(INT)
+	int drinkTop = 0;//饮酒次数(INT)
+	int prayTop = 0;//上香次数(INT)
+	float expFactor = 0;//打怪附加经验系数(float)
+	float expFubenFactor = 0;//经验副本附加系数(float)
+	float moneyFubenFactor = 0;//金钱副本附加系数(float)
+	int treasure = 0;//神秘宝箱总次数
+	int biQiTasksCount=0;//每日比奇任务次数
+	int huanTasksTotalNumber; //每日环任务总数
+	WorldPacket Msg((const void*)cmd);
+	Msg >> fubenSaodangTimes;
+	Msg >> skillPointTop;
+	Msg >> quickSkillPoint;
+	Msg >> shuangxiuTimes;
+	Msg >> junxuRenwuTimes;
+	Msg >> tiliTop;
+	Msg >> buyTiliTop;
+	Msg >> drinkTop;
+	Msg >> prayTop;
+	Msg >> expFactor;
+	Msg >> expFubenFactor;
+	Msg >> moneyFubenFactor;
+	Msg >> treasure;
+	Msg >> biQiTasksCount;
+	Msg >> huanTasksTotalNumber;
+	localVipData.fubenSaodangTimes = fubenSaodangTimes;
+	localVipData.skillPointTop = skillPointTop;
+	localVipData.quickSkillPoint = quickSkillPoint;
+	localVipData.shuangxiuTimes = shuangxiuTimes;
+	localVipData.junxuRenwuTimes = junxuRenwuTimes;
+	localVipData.tiliTop = tiliTop;
+	localVipData.buyTiliTop = buyTiliTop;
+	localVipData.drinkTop = drinkTop;
+	localVipData.prayTop = prayTop;
+	localVipData.expFactor = expFactor;
+	localVipData.expFubenFactor = expFubenFactor;
+	localVipData.moneyFubenFactor = moneyFubenFactor;
+	localVipData.treasure = treasure;
+	localVipData.BiQiTasksCount = biQiTasksCount;
+	localVipData.HuanTasksTotalNumber = huanTasksTotalNumber;
+	return 0;
+}
+
+vip_proto* VIPMgr::getVipLevelData( int vipLevel )
+{
+	VIP_Map::iterator iter = m_VIP_Info.find(vipLevel);
+	if (iter == m_VIP_Info.end())
+		return NULL;
+	else
+	{
+		return &(iter->second);
+	}
+}
+

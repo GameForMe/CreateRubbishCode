@@ -1,0 +1,636 @@
+/*
+-----------------------------------------------------------------------------
+This source file is part of OGRE
+    (Object-oriented Graphics Rendering Engine)
+For the latest info, see http://www.ogre3d.org/
+
+Copyright (c) 2000-2012 Torus Knot Software Ltd
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+-----------------------------------------------------------------------------
+*/
+/*
+
+    Although the code is original, many of the ideas for the profiler were borrowed from 
+"Real-Time In-Game Profiling" by Steve Rabin which can be found in Game Programming
+Gems 1.
+
+    This code can easily be adapted to your own non-Ogre project. The only code that is 
+Ogre-dependent is in the visualization/logging routines and the use of the Timer class.
+
+    Enjoy!
+
+*/
+
+#include "cc_profiler.h"
+#include "cc_timer.h"
+
+namespace profile_util {
+
+    //-----------------------------------------------------------------------
+    // PROFILE DEFINITIONS
+    //-----------------------------------------------------------------------
+	cc_profiler* cc_profiler::msSingleton = 0;
+    cc_profiler* cc_profiler::getSingletonPtr(void)
+    {
+        return msSingleton;
+    }
+    cc_profiler& cc_profiler::getSingleton(void)
+    {  
+        CC_ASSERT( msSingleton );  return ( *msSingleton );  
+    }
+    //-----------------------------------------------------------------------
+    cc_profile::cc_profile(const String& profileName, uint32 groupID) 
+		: mName(profileName)
+		, mGroupID(groupID)
+	{
+        cc_profiler::getSingleton().beginProfile(profileName, groupID);
+    }
+    //-----------------------------------------------------------------------
+    cc_profile::~cc_profile()
+    {
+        cc_profiler::getSingleton().endProfile(mName, mGroupID);
+    }
+    //-----------------------------------------------------------------------
+
+
+    //-----------------------------------------------------------------------
+    // PROFILER DEFINITIONS
+    //-----------------------------------------------------------------------
+    cc_profiler::cc_profiler() 
+        : mCurrent(&mRoot)
+        , mLast(NULL)
+        , mRoot()
+        , mInitialized(false)
+		, mUpdateDisplayFrequency(1)
+		, mCurrentFrame(0)
+		, mTimer(0)
+		, mTotalFrameTime(0)
+		, mEnabled(false)
+		, mNewEnableState(false)
+		, mProfileMask(0xFFFFFFFF)
+		, mMaxTotalFrameTime(0)
+		, mAverageFrameTime(0)
+		, mResetExtents(false)
+		, mLogger(NULL)
+	{
+		mRoot.hierarchicalLvl = 0 - 1;
+
+		CC_ASSERT( !msSingleton );
+		msSingleton = this;
+    }
+	//-----------------------------------------------------------------------
+	cc_profile_instance::cc_profile_instance(void)
+		: parent(NULL)
+        , frameNumber(0)
+		, accum(0)
+		, hierarchicalLvl(0)
+	{
+		history.numCallsThisFrame = 0;
+		history.totalTimePercent = 0;
+		history.totalTimeMillisecs = 0;
+		history.totalCalls = 0;
+		history.maxTimePercent = 0;
+		history.maxTimeMillisecs = 0;
+		history.minTimePercent = 1;
+		history.minTimeMillisecs = 100000;
+		history.currentTimePercent = 0;
+		history.currentTimeMillisecs = 0;
+
+		frame.frameTime = 0;
+		frame.calls = 0;
+	}
+	cc_profile_instance::~cc_profile_instance(void)
+	{                                        
+		for(ProfileChildren::iterator it = children.begin(); it != children.end(); ++it)
+		{
+			cc_profile_instance* instance = it->second;
+			delete instance;
+		}
+		children.clear();
+	}
+    //-----------------------------------------------------------------------
+    cc_profiler::~cc_profiler()
+    {
+		if (!mRoot.children.empty()) 
+		{
+            // log the results of our profiling before we quit
+            logResults();
+        }
+
+        // clear all our lists
+        mDisabledProfiles.clear();
+
+		assert( msSingleton );  
+		msSingleton = 0;
+    }
+    //-----------------------------------------------------------------------
+    void cc_profiler::setTimer(cc_timer* t)
+    {
+        mTimer = t;
+    }
+    //-----------------------------------------------------------------------
+    cc_timer* cc_profiler::getTimer()
+    {
+        assert(mTimer && "Timer not set!");
+        return mTimer;
+    }
+    //-----------------------------------------------------------------------
+    void cc_profiler::setEnabled(bool enabled) 
+	{
+        if (!mInitialized && enabled) 
+		{
+            for( TProfileSessionListener::iterator i = mListeners.begin(); i != mListeners.end(); ++i )
+                (*i)->initializeSession();
+
+            mInitialized = true;
+        }
+        else
+        {
+			for( TProfileSessionListener::iterator i = mListeners.begin(); i != mListeners.end(); ++i )
+                (*i)->finializeSession();
+
+            mInitialized = false;
+			mEnabled = false;
+        }
+        // We store this enable/disable request until the frame ends
+        // (don't want to screw up any open profiles!)
+        mNewEnableState = enabled;
+    }
+    //-----------------------------------------------------------------------
+    bool cc_profiler::getEnabled() const
+    {
+        return mEnabled;
+    }
+	//-----------------------------------------------------------------------
+    void cc_profiler::changeEnableState() 
+	{
+		for( TProfileSessionListener::iterator i = mListeners.begin(); i != mListeners.end(); ++i )
+			(*i)->changeEnableState(mNewEnableState);
+
+        mEnabled = mNewEnableState;
+    }
+    //-----------------------------------------------------------------------
+    void cc_profiler::disableProfile(const String& profileName)
+	{
+        // even if we are in the middle of this profile, endProfile() will still end it.
+        mDisabledProfiles.insert(profileName);
+    }
+    //-----------------------------------------------------------------------
+    void cc_profiler::enableProfile(const String& profileName) 
+	{
+		mDisabledProfiles.erase(profileName);
+    }
+    //-----------------------------------------------------------------------
+    void cc_profiler::beginProfile(const String& profileName, uint32 groupID) 
+	{
+		// regardless of whether or not we are enabled, we need the application's root profile (ie the first profile started each frame)
+		// we need this so bogus profiles don't show up when users enable profiling mid frame
+		// so we check
+
+		// if the profiler is enabled
+		if (!mEnabled) 
+			return;
+
+		// mask groups
+		if ((groupID & mProfileMask) == 0)
+			return;
+
+		// we only process this profile if isn't disabled
+		if (mDisabledProfiles.find(profileName) != mDisabledProfiles.end()) 
+			return;
+
+		// empty string is reserved for the root
+		// not really fatal anymore, however one shouldn't name one's profile as an empty string anyway.
+		assert ((profileName != "") && ("cc_profile name can't be an empty string"));
+
+		// this would be an internal error.
+		assert (mCurrent);
+
+		// need a timer to profile!
+		assert (mTimer && "Timer not set!");
+
+		cc_profile_instance*& instance = mCurrent->children[profileName];
+		if(instance)
+		{	// found existing child.
+
+			// Sanity check.
+			assert(instance->name == profileName);
+
+			if(instance->frameNumber != mCurrentFrame)
+			{	// new frame, reset stats
+				instance->frame.calls = 0;
+				instance->frame.frameTime = 0;
+				instance->frameNumber = mCurrentFrame;
+			}
+		}
+		else
+		{	// new child!
+			instance = new cc_profile_instance();
+			instance->name = profileName;
+			instance->parent = mCurrent;
+			instance->hierarchicalLvl = mCurrent->hierarchicalLvl + 1;
+		}
+
+		instance->frameNumber = mCurrentFrame;
+
+		mCurrent = instance;
+
+		// we do this at the very end of the function to get the most
+		// accurate timing results
+		mCurrent->currTime = mTimer->get_microseconds();
+    }
+    //-----------------------------------------------------------------------
+    void cc_profiler::endProfile(const String& profileName, uint32 groupID) 
+	{
+		if(!mEnabled) 
+		{
+			// if the profiler received a request to be enabled or disabled
+			if(mNewEnableState != mEnabled) 
+			{	// note mNewEnableState == true to reach this.
+				changeEnableState();
+
+				// NOTE we will be in an 'error' state until the next begin. ie endProfile will likely get invoked using a profileName that was never started.
+				// even then, we can't be sure that the next beginProfile will be the true start of a new frame
+			}
+
+			return;
+		}
+		else
+		{
+			if(mNewEnableState != mEnabled) 
+			{	// note mNewEnableState == false to reach this.
+				changeEnableState();
+
+				// unwind the hierarchy, should be easy enough
+				mCurrent = &mRoot;
+				mLast = NULL;
+			}
+
+			if(&mRoot == mCurrent && mLast)
+			{	// profiler was enabled this frame, but the first subsequent beginProfile was NOT the beinging of a new frame as we had hoped.
+				// we have a bogus cc_profile_instance in our hierarchy, we will need to remove it, then update the overlays so as not to confuse ze user
+
+				// we could use mRoot.children.find() instead of this, except we'd be compairing strings instead of a pointer.
+				// the string way could be faster, but i don't believe it would.
+				ProfileChildren::iterator it = mRoot.children.begin(), endit = mRoot.children.end();
+				for(;it != endit; ++it)
+				{
+					if(mLast == it->second)
+					{
+						mRoot.children.erase(it);
+						break;
+					}
+				}
+
+				// with mLast == NULL we won't reach this code, in case this isn't the end of the top level profile
+				cc_profile_instance* last = mLast;
+				mLast = NULL;
+				delete last;
+
+				processFrameStats();
+				displayResults();
+			}
+		}
+
+		if(&mRoot == mCurrent)
+			return;
+
+		// mask groups
+		if ((groupID & mProfileMask) == 0)
+			return;
+
+		// need a timer to profile!
+		assert (mTimer && "Timer not set!");
+
+		// get the end time of this profile
+		// we do this as close the beginning of this function as possible
+		// to get more accurate timing results
+		const uint32 endTime = mTimer->get_microseconds();
+
+		// empty string is reserved for designating an empty parent
+		assert ((profileName != "") && ("cc_profile name can't be an empty string"));
+
+		// we only process this profile if isn't disabled
+		// we check the current instance name against the provided profileName as a guard against disabling a profile name /after/ said profile began
+		if(mCurrent->name != profileName && mDisabledProfiles.find(profileName) != mDisabledProfiles.end()) 
+			return;
+
+		// calculate the elapsed time of this profile
+		const uint32 timeElapsed = endTime - mCurrent->currTime;
+
+		// update parent's accumulator if it isn't the root
+		if (&mRoot != mCurrent->parent) 
+		{
+			// add this profile's time to the parent's accumlator
+			mCurrent->parent->accum += timeElapsed;
+		}
+
+		mCurrent->frame.frameTime += timeElapsed;
+		++mCurrent->frame.calls;
+
+		mLast = mCurrent;
+		mCurrent = mCurrent->parent;
+
+		if (&mRoot == mCurrent) 
+		{
+			// the stack is empty and all the profiles have been completed
+			// we have reached the end of the frame so process the frame statistics
+
+			// we know that the time elapsed of the main loop is the total time the frame took
+			mTotalFrameTime = timeElapsed;
+
+			if(timeElapsed > mMaxTotalFrameTime)
+				mMaxTotalFrameTime = timeElapsed;
+
+			// we got all the information we need, so process the profiles
+			// for this frame
+			processFrameStats();
+
+			// we display everything to the screen
+			displayResults();
+		}
+	}
+    //-----------------------------------------------------------------------
+	void cc_profiler::beginGPUEvent(const String& event)
+    {
+        //Root::getSingleton().getRenderSystem()->beginProfileEvent(event);
+    }
+	//-----------------------------------------------------------------------
+    void cc_profiler::endGPUEvent(const String& event)
+    {
+        //Root::getSingleton().getRenderSystem()->endProfileEvent();
+    }
+	//-----------------------------------------------------------------------
+    void cc_profiler::markGPUEvent(const String& event)
+    {
+        //Root::getSingleton().getRenderSystem()->markProfileEvent(event);
+    }
+	//-----------------------------------------------------------------------
+	void cc_profiler::processFrameStats(cc_profile_instance* instance, Real& maxFrameTime)
+	{
+		// calculate what percentage of frame time this profile took
+		const Real framePercentage = (Real) instance->frame.frameTime / (Real) mTotalFrameTime;
+
+		const Real frameTimeMillisecs = (Real) instance->frame.frameTime / 1000.0f;
+
+		// update the profile stats
+		instance->history.currentTimePercent = framePercentage;
+		instance->history.currentTimeMillisecs = frameTimeMillisecs;
+		if(mResetExtents)
+		{
+			instance->history.totalTimePercent = framePercentage;
+			instance->history.totalTimeMillisecs = frameTimeMillisecs;
+			instance->history.totalCalls = 1;
+		}
+		else
+		{
+			instance->history.totalTimePercent += framePercentage;
+			instance->history.totalTimeMillisecs += frameTimeMillisecs;
+			instance->history.totalCalls++;
+		}
+		instance->history.numCallsThisFrame = instance->frame.calls;
+
+		// if we find a new minimum for this profile, update it
+		if (frameTimeMillisecs < instance->history.minTimeMillisecs || mResetExtents)
+		{
+			instance->history.minTimePercent = framePercentage;
+			instance->history.minTimeMillisecs = frameTimeMillisecs;
+		}
+
+		// if we find a new maximum for this profile, update it
+		if (frameTimeMillisecs > instance->history.maxTimeMillisecs || mResetExtents)
+		{
+			instance->history.maxTimePercent = framePercentage;
+			instance->history.maxTimeMillisecs = frameTimeMillisecs;
+		}
+
+		if(instance->frame.frameTime > maxFrameTime)
+			maxFrameTime = (Real)instance->frame.frameTime;
+
+		ProfileChildren::iterator it = instance->children.begin(), endit = instance->children.end();
+		for(;it != endit; ++it)
+		{
+			cc_profile_instance* child = it->second;
+
+			// we set the number of times each profile was called per frame to 0
+			// because not all profiles are called every frame
+			child->history.numCallsThisFrame = 0;
+
+			if(child->frame.calls > 0)
+			{
+				processFrameStats(child, maxFrameTime);
+			}
+		}
+	}
+	//-----------------------------------------------------------------------
+	void cc_profiler::processFrameStats(void) 
+	{
+		Real maxFrameTime = 0;
+
+		ProfileChildren::iterator it = mRoot.children.begin(), endit = mRoot.children.end();
+		for(;it != endit; ++it)
+		{
+			cc_profile_instance* child = it->second;
+
+			// we set the number of times each profile was called per frame to 0
+			// because not all profiles are called every frame
+			child->history.numCallsThisFrame = 0;
+
+			if(child->frame.calls > 0)
+			{
+				processFrameStats(child, maxFrameTime);
+			}
+		}
+
+		// Calculate whether the extents are now so out of date they need regenerating
+		if (mCurrentFrame == 0)
+			mAverageFrameTime = maxFrameTime;
+		else
+			mAverageFrameTime = (mAverageFrameTime + maxFrameTime) * 0.5f;
+
+		if ((Real)mMaxTotalFrameTime > mAverageFrameTime * 4)
+		{
+			mResetExtents = true;
+			mMaxTotalFrameTime = (uint32)mAverageFrameTime;
+		}
+		else
+			mResetExtents = false;
+	}
+	//-----------------------------------------------------------------------
+    void cc_profiler::displayResults() 
+	{
+		// if its time to update the display
+		if (!(mCurrentFrame % mUpdateDisplayFrequency)) 
+		{
+			// ensure the root won't be culled
+			mRoot.frame.calls = 1;
+
+			for( TProfileSessionListener::iterator i = mListeners.begin(); i != mListeners.end(); ++i )
+				(*i)->displayResults(mRoot, mMaxTotalFrameTime);
+		}
+		++mCurrentFrame;
+    }
+    //-----------------------------------------------------------------------
+    bool cc_profiler::watchForMax(const String& profileName) 
+	{
+		assert ((profileName != "") && ("cc_profile name can't be an empty string"));
+
+		return mRoot.watchForMax(profileName);
+    }
+	//-----------------------------------------------------------------------
+	bool cc_profile_instance::watchForMax(const String& profileName) 
+	{
+        ProfileChildren::iterator it = children.begin(), endit = children.end();
+		for(;it != endit; ++it)
+		{
+			cc_profile_instance* child = it->second;
+			if( (child->name == profileName && child->watchForMax()) || child->watchForMax(profileName))
+				return true;
+		}
+		return false;
+    }
+    //-----------------------------------------------------------------------
+    bool cc_profiler::watchForMin(const String& profileName) 
+	{
+		assert ((profileName != "") && ("cc_profile name can't be an empty string"));
+		return mRoot.watchForMin(profileName);
+    }
+	//-----------------------------------------------------------------------
+    bool cc_profile_instance::watchForMin(const String& profileName) 
+	{
+		ProfileChildren::iterator it = children.begin(), endit = children.end();
+		for(;it != endit; ++it)
+		{
+			cc_profile_instance* child = it->second;
+			if( (child->name == profileName && child->watchForMin()) || child->watchForMin(profileName))
+				return true;
+		}
+		return false;
+    }
+    //-----------------------------------------------------------------------
+    bool cc_profiler::watchForLimit(const String& profileName, Real limit, bool greaterThan) 
+	{
+        assert ((profileName != "") && ("cc_profile name can't be an empty string"));
+		return mRoot.watchForLimit(profileName, limit, greaterThan);
+    }
+	//-----------------------------------------------------------------------
+    bool cc_profile_instance::watchForLimit(const String& profileName, Real limit, bool greaterThan) 
+	{
+        ProfileChildren::iterator it = children.begin(), endit = children.end();
+		for(;it != endit; ++it)
+		{
+			cc_profile_instance* child = it->second;
+			if( (child->name == profileName && child->watchForLimit(limit, greaterThan)) || child->watchForLimit(profileName, limit, greaterThan))
+				return true;
+		}
+		return false;
+    }
+    //-----------------------------------------------------------------------
+    void cc_profiler::logResults() 
+	{
+		if ( !mLogger )
+			return;
+
+        mLogger->logMessage("----------------------cc_profiler Results----------------------");
+
+		for(ProfileChildren::iterator it = mRoot.children.begin(); it != mRoot.children.end(); ++it)
+		{
+			it->second->logResults(mLogger);
+		}
+
+        mLogger->logMessage("------------------------------------------------------------");
+    }
+	//-----------------------------------------------------------------------
+	void cc_profile_instance::logResults(cc_profile_logger* l) 
+	{
+		// create an indent that represents the hierarchical order of the profile
+		String indent = "";
+		for (uint i = 0; i < hierarchicalLvl; ++i) 
+		{
+			indent = indent + "\t";
+		}
+
+		char tmp[512] = {0};
+		//sprintf( tmp, "%sName %s | Min %.2f | Max %.2f | Avg %.2f", indent.c_str(), name.c_str(), history.minTimePercent, history.maxTimePercent, history.totalTimePercent / history.totalCalls );
+		//sprintf(tmp,"%s :%d microsec %d calls",name.c_str(),frame.frameTime,frame.calls);
+		sprintf(tmp,"%s :%d microsec max",name.c_str(),history.maxTimeMillisecs/*,frame.calls*/);
+		l->logMessage(tmp);
+		//l->logMessage(indent + "Name " + name + 
+		//				" | Min " + StringConverter::toString(history.minTimePercent) + 
+		//				" | Max " + StringConverter::toString(history.maxTimePercent) + 
+		//				" | Avg "+ StringConverter::toString(history.totalTimePercent / history.totalCalls));   
+
+		for(ProfileChildren::iterator it = children.begin(); it != children.end(); ++it)
+		{
+			it->second->logResults(l);
+		}
+	}
+    //-----------------------------------------------------------------------
+    void cc_profiler::reset() 
+	{
+        mRoot.reset();
+        mMaxTotalFrameTime = 0;
+    }
+	//-----------------------------------------------------------------------
+	void cc_profile_instance::reset(void)
+	{
+		history.currentTimePercent = history.maxTimePercent = history.totalTimePercent = 0;
+		history.currentTimeMillisecs = history.maxTimeMillisecs = history.totalTimeMillisecs = 0;
+		history.numCallsThisFrame = history.totalCalls = 0;
+
+		history.minTimePercent = 1;
+		history.minTimeMillisecs = 100000;
+		for(ProfileChildren::iterator it = children.begin(); it != children.end(); ++it)
+		{
+			it->second->reset();
+		}
+	}
+    //-----------------------------------------------------------------------
+    void cc_profiler::setUpdateDisplayFrequency(uint freq)
+    {
+        mUpdateDisplayFrequency = freq;
+    }
+    //-----------------------------------------------------------------------
+    uint cc_profiler::getUpdateDisplayFrequency() const
+    {
+        return mUpdateDisplayFrequency;
+    }
+    //-----------------------------------------------------------------------
+	void cc_profiler::addListener(cc_profile_session_listener* listener)
+	{
+		mListeners.push_back(listener);
+	}
+    //-----------------------------------------------------------------------
+	void cc_profiler::removeListener(cc_profile_session_listener* listener)
+	{
+        mListeners.erase(std::find(mListeners.begin(), mListeners.end(), listener));
+	}
+
+	void cc_profiler::setLogger( cc_profile_logger* l )
+	{
+		mLogger = l;
+	}
+
+	cc_profile_logger* cc_profiler::getLogger()
+	{
+		return mLogger;
+	}
+	//-----------------------------------------------------------------------
+}

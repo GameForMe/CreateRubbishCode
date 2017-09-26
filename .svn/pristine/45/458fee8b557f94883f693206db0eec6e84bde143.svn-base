@@ -1,0 +1,325 @@
+#include "LevelEquipUi.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "ArenaMainMgr.h"
+#include "WorldPacket.h"
+#include "TCPClient.h"
+#include "CommonMsgDefine.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "CfgReader.h"
+#include "UiResourceMgr.h"
+#include "NumericalIniMgr.h"
+#include "Helper.h"
+#include "CommonMsgDefine.h"
+#include "TCPClient.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "f_string_table.h"
+//////////////////////////////////////////////////////////////////////////
+
+LevelEquipUi::LevelEquipUi()
+{
+
+}
+
+LevelEquipUi::~LevelEquipUi()
+{
+
+}
+
+CCNode* LevelEquipUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["LevelEquipUiLayer"] = UiLayerLoader<LevelEquipUiLayer>::loader();
+	CCNode* pNode = readUiFromCCBI("taozhuanglibao", nodeLoaders, _loadSpriteSheet);
+
+	return pNode;
+}
+
+void LevelEquipUi::updateTime(int hours,int min,int sec)
+{
+	LevelEquipUiLayer *ui=getUiNodeByTag<LevelEquipUiLayer>(WCT_LevelEquipUi);
+	if (ui)
+	{
+		ui->updateTime(hours,min,sec);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler LevelEquipUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler LevelEquipUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", LevelEquipUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"ongoumaiBtnPressed",LevelEquipUiLayer::buyAllBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"oncanrenjujueBtnPressed",LevelEquipUiLayer::RefuseBtnPressed);
+	return NULL;
+}
+
+bool LevelEquipUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	return true;
+}
+
+void LevelEquipUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_frame=dynamic_cast<CCSprite*>(getChildByTag(TTF_FRAME));
+	_timeTTF=Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(3)->getChildByTag(1)));
+	for(int i=ITEM_BEGIN;i<ITEM_END;i++)
+	{
+		ItemNode* _itemNode = ItemNode::create();
+		_itemNode->retain();
+		_itemNode->setAnchorPoint(ccp(0,0));
+		_itemNode->setClickable(true);
+		_itemNode->setPosition(_frame->getChildByTag(i)->getPosition());
+		_itemNode->setTag(ITEM_TAG+i);
+		_frame->addChild(_itemNode);                                                                       
+		_itemNode->hideItemOpBtn();
+	}
+	_origPrice = CCLabelBMFont::create();
+	_origPrice->setFntFile("Art/Scene/fontNum.fnt");
+	_frame->addChild(_origPrice,0);
+	_frame->getChildByTag(TTF_Tiao)->setZOrder(_origPrice->getZOrder()+1);
+	_origPrice->setPosition(_frame->getChildByTag(TTF_OrigPrice)->getPosition());
+	_origPrice->setScale(0.7);
+	_newPrice=CCLabelBMFont::create();
+	_newPrice->setFntFile("Art/Scene/fontNum.fnt");
+	_frame->addChild(_newPrice);
+	_newPrice->setPosition(_frame->getChildByTag(TTF_NewPrice)->getPosition());
+	_newPrice->setScale(0.7);
+	_buyPrice=CCLabelBMFont::create();
+	_buyPrice->setFntFile("Art/Scene/fontNum.fnt");
+	_frame->addChild(_buyPrice);
+	_buyPrice->setPosition(_frame->getChildByTag(TTF_BuyPrice)->getPosition());
+	_buyPrice->setScale(0.5);
+	updateItem();
+	setAllChildernButtonPriority(this, -1);
+}
+std::string LevelEquipUiLayer::getItemName(unsigned int itemId)
+{
+	std::string itemName = "";
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM PackageData WHERE typeId = ?1");
+	cmd->set_integer32(1 , itemId);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("Name");
+		itemName = table->get_text(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	return itemName;
+
+}
+void LevelEquipUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void LevelEquipUiLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&LevelEquipUiLayer::update),this);
+	CCLayer::onExit();
+}
+
+void LevelEquipUiLayer::updateItem()
+{
+	std::vector<INT32> levelequipId=LevelEquipMgr::getInstance()->getLevelEquipId();
+	int i=0;
+	std::vector<INT32>::iterator itAuto = levelequipId.begin();
+	for(;itAuto != levelequipId.end();itAuto++)
+	{
+		ItemNode* _itemNode=dynamic_cast<ItemNode*>(_frame->getChildByTag(TTF_NAME+i));
+		if (_itemNode)
+		{
+			_itemNode->setDataId((*itAuto));
+			_itemNode->runAnimation("E1_201");
+		}
+		LabelFT* ttf =  Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(11+i)));
+		if (ttf)
+			ttf->setString(getItemName((*itAuto)).c_str());
+		i++;
+	}
+	CCString* origPriceStr=CCString::createWithFormat("%d",LevelEquipMgr::getInstance()->getOrigPrice());
+	CCString* newPriceStr=CCString::createWithFormat("%d",LevelEquipMgr::getInstance()->getNewPrice());
+	_origPrice->setString(origPriceStr->getCString());
+	_newPrice->setString(newPriceStr->getCString());
+	_buyPrice->setString(newPriceStr->getCString());
+}
+
+void LevelEquipUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_LevelEquipUi);
+}
+
+void LevelEquipUiLayer::RefuseBtnPressed( cocos2d::CCObject * psender,cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_LevelEquipUi);
+}
+
+void LevelEquipUiLayer::buyAllBtnPressed( cocos2d::CCObject * psender,cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	LevelEquipMgr::getInstance()->sendBuyMsg();
+}
+
+void LevelEquipUiLayer::updateTime( int hours,int min,int sec )
+{
+	if(_timeTTF)//dhl
+	{
+		CCString* tmStr = CCString::createWithFormat("%02d:%02d:%02d", hours, min,sec);
+		_timeTTF->setString(tmStr->getCString());
+	}
+}
+
+
+LevelEquipMgr::LevelEquipMgr()
+	:_originalPrice(0)
+	,_levelequipId(NULL)
+	,_newPrice(0)
+	,_time(0)
+	,m_nHour(0)
+	,m_nMin(0)
+	,m_nSec(0)
+{
+
+}
+
+LevelEquipMgr::~LevelEquipMgr()
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&LevelEquipUiLayer::update),this);
+}
+
+LevelEquipMgr* LevelEquipMgr::getInstance()
+{
+	static LevelEquipMgr instance;
+	return &instance;
+}
+void LevelEquipMgr::init()
+{
+	TCP_CLIENT->register_net_cmd(NET_S2C_Level30_Promote_Equip,this,&LevelEquipMgr::onServerResult);
+	TCP_CLIENT->register_net_cmd(NET_S2C_Buy_Level30_Promote_Equip_RST,this,&LevelEquipMgr::onBuyResult);
+}
+void LevelEquipMgr::sendBuyMsg()
+{
+	WorldPacket C2G_Msg(NET_C2S_Buy_Level30_Promote_Equip);//组装消息头 
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+}
+
+unsigned int LevelEquipMgr::onServerResult( s_net_cmd* cmd )
+{
+	WorldPacket Msg((const void*)cmd);
+	INT32 count = 0;
+	Msg >> count;
+	_levelequipId.clear();
+	INT32 itemId=0;
+	for (int i = 0;i < count;++i)
+	{
+		Msg >> itemId;
+		_levelequipId.push_back(itemId);
+	}
+	Msg>>_originalPrice;
+	Msg>>_newPrice;
+	Msg>>_time;
+	m_nHour = _time / 3600;
+	m_nMin = (_time%3600)/ 60;
+	m_nSec = _time%3600 % 60;
+
+	this->stopUpdate();
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&LevelEquipMgr::update), this, 1.0f, false);
+	return 0;
+}
+
+std::vector<INT32> LevelEquipMgr::getLevelEquipId()
+{
+	return _levelequipId;
+}
+
+void LevelEquipMgr::update( float dt )
+{
+	if (m_nSec>0)
+	{
+		--m_nSec;
+	}
+	else
+	{
+		--m_nMin;
+		m_nSec=59;
+		if (m_nMin<0)
+		{
+			--m_nHour;
+			m_nMin=59;
+		}
+	}
+
+	GET_UI(LevelEquipUi,WCT_LevelEquipUi)->updateTime(m_nHour,m_nMin,m_nSec);
+	World::getInstance()->UpdateLevelTime(m_nHour,m_nMin,m_nSec);
+	if (m_nHour==0&&m_nMin==0&&m_nSec==0)
+	{
+		this->stopUpdate();
+	}
+}
+
+void LevelEquipMgr::Destroy()
+{
+	TCP_CLIENT->unregister_net_cmd(NET_S2C_Level30_Promote_Equip,this,&LevelEquipMgr::onServerResult);
+	TCP_CLIENT->unregister_net_cmd(NET_S2C_Buy_Level30_Promote_Equip_RST,this,&LevelEquipMgr::onBuyResult);
+}
+
+unsigned int LevelEquipMgr::onBuyResult( s_net_cmd* cmd )
+{
+	WorldPacket Msg((const void*)cmd);
+	INT32 result = 0;
+	Msg >> result;
+	switch (result)
+	{
+	case BPEE_Success:
+		ToolTip::getInstance()->push(GET_STR(7102));
+		CLOSE_UI(WCT_LevelEquipUi);
+		LevelEquipMgr::getInstance()->setExcesstime(0);
+		LevelEquipMgr::getInstance()->stopUpdate();
+		break;;
+	case BPEE_YuanBaoNotEnough:
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+		break;
+	case BPEE_RoleClassError:
+		ToolTip::getInstance()->push(STRING_TABLE["BPEE_Success"]);
+		break;
+	case BPEE_BagSize:
+		ToolTip::getInstance()->push(GET_STR(161));
+		break;
+	case BPEE_Timeout:
+		ToolTip::getInstance()->push(STRING_TABLE["LevelEquip_Timeout"]);
+		break;
+	case BPEE_AlreadyBuy:
+		ToolTip::getInstance()->push(STRING_TABLE["LevelEquip_Arleybuy"]);
+		break;
+	case BPEE_LevelLimit:
+		ToolTip::getInstance()->push(STRING_TABLE["LevelEquip_levelLimit"]);
+		break;
+	default:
+		break;
+	}
+	return 0;
+}
+
+void LevelEquipMgr::stopUpdate()
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&LevelEquipUiLayer::update),this);
+}
+
+void LevelEquipMgr::clearInfo()
+{
+	_levelequipId.clear();
+	this->setExcesstime(0);
+	this->stopUpdate();
+}
+

@@ -1,0 +1,145 @@
+#include "UiTools.h"
+#include "Signals.h"
+#include "CfgReader.h"
+#include "TCPClient.h" 
+#include "TradingUI.h"
+#include "ItemDefine.h"
+#include "ListControl.h"
+#include "LocalPlayer.h"
+#include "TradingProto.h"
+#include "CommonClient.h"
+#include "PackageManager.h"
+#include "TradingBuyRightItemList.h"
+
+cocos2d::CCSprite* TradingBuyRightItemList::m_pItemOldSelect = NULL;
+TradingBuyRightItemList::TradingBuyRightItemList()
+	:m_pItemName(NULL)
+	,m_pItemCCNode(NULL) 
+	,m_pItemSelect(NULL)
+	,m_pItemIcon(NULL)
+	,m_pControlButton(NULL)
+	,m_pNewItemName(NULL)
+{
+
+}
+
+TradingBuyRightItemList::~TradingBuyRightItemList()
+{
+
+}
+
+cocos2d::extension::SEL_CCControlHandler TradingBuyRightItemList::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingBuyRightItemList,OnRightItemClick);
+	return NULL;
+}
+
+bool TradingBuyRightItemList::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,m_pItemCCNode)
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_pItemName)
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_pItemSelect)
+	return false;
+}
+
+void TradingBuyRightItemList::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_pNewItemName = Helper::replaceLabelTTFWithLabelFTAndRemove(m_pItemName);
+	CC_ASSERT(NULL != m_pNewItemName);
+}
+
+void TradingBuyRightItemList::OnRightItemClick( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	TradingUILayer * p_ui = getUiNodeByTag<TradingUILayer>(WCT_TradingUI);
+	if(NULL == p_ui)
+		return ;
+
+	if(p_ui->GetBuyRightTouchMove())
+		return;
+
+	if(m_pItemOldSelect != m_pItemSelect)
+	{
+		if(NULL != m_pItemSelect)
+			m_pItemSelect->setVisible(true);
+
+		if(NULL != m_pItemOldSelect)
+			m_pItemOldSelect->setVisible(false);
+	}
+
+	m_pItemOldSelect = m_pItemSelect;
+
+	if(!TradingMgr::getInstance()->m_bTowClassClick || TradingMgr::getInstance()->m_nTowClassId != m_sInfo.towclassId)
+	{
+	
+		if(TradingMgr::getInstance()->m_nTowClassId == m_sInfo.towclassId)
+			TradingMgr::getInstance()->m_bTowClassClick = true;
+		else
+
+			TradingMgr::getInstance()->m_bTowClassClick = false;
+		
+		p_ui->m_ScrollViewIndex = 0;
+		p_ui->m_LastScrollViewIndex = 0;
+		TradingMgr::getInstance()->m_bLevelClick = false;
+		TradingMgr::getInstance()->m_bProfessionClick = false;
+		TradingMgr::getInstance()->m_bOneClassClick = false;
+
+		TradingMgr::getInstance()->m_nTowClassId	 = m_sInfo.towclassId;
+	}
+
+	if(TradingMgr::getInstance()->m_bTradingLoadDataIsReceive)
+	{
+		if(!TradingMgr::getInstance()->m_bTradingSearch)
+		{
+			const std::string strMsg = TradingMgr::getInstance()->GetTradingMsgString();	
+			TradingMgr::getInstance()->GetLoadTradingBuyDataByMsg(strMsg);
+		}
+		else
+			TradingMgr::getInstance()->GetLoadSearchTradingBuyDataByMsg();
+	}
+
+	TradingMgr::getInstance()->m_bTradingSearch = false;
+}
+
+void TradingBuyRightItemList::refreshData(const TowclassInfo info)
+{
+	CC_ASSERT(NULL != m_pItemCCNode);
+
+	 m_sInfo = info;
+	
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "ICON", "");
+	std::string FileName = uiDir + info.towclassIcon + ".png";
+	CCSpriteFrame* Frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(FileName.c_str());
+	if(NULL == Frame)
+	{
+		CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addImage(FileName.c_str());
+		Frame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(Frame,FileName.c_str());
+	}
+
+	if(NULL == m_pItemIcon )
+		m_pItemIcon = CCSprite::create();
+
+	m_pItemIcon = CCSprite::createWithSpriteFrame(Frame);
+	m_pItemIcon->setAnchorPoint(ccp(0.5,0.5));
+	m_pItemIcon->setPosition(ccp(m_pItemCCNode->getContentSize().width /2,m_pItemCCNode->getContentSize().height /2));
+	m_pItemIcon->setDisplayFrame(Frame);
+	m_pItemCCNode->addChild(m_pItemIcon);
+
+	m_pNewItemName->setString(info.towclassName.c_str());
+}
+
+TradingBuyRightItemList* TradingBuyRightItemList::createItem( const char* szFile,CCObject*pOwner,UiInterface* holder )
+{
+	CCNodeLoaderLibrary* lib  = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string strFullPath  = CFGReader::instance()->get_ui_ccbi_filepath(szFile);
+	CCNode* node = reader->readNodeGraphFromFile(strFullPath.c_str(),pOwner);
+	TradingBuyRightItemList* item = dynamic_cast<TradingBuyRightItemList*>(node);
+
+	if (holder)
+		holder->mergeSheet(reader->getLoadedSpriteSheet());
+
+	return item;
+}

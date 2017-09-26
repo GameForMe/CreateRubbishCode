@@ -1,0 +1,213 @@
+#include "CCDragButton.h"
+#include "UiResourceMgr.h"
+#include "CfgReader.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "ChatMgr.h"
+
+using namespace std;
+using namespace gui;
+
+CCDragButton* CCDragButton::create(CCScale9Sprite* sprite)
+{
+	CCDragButton *pRet = new CCDragButton();
+	pRet->init();
+	pRet->initWithBackgroundSprite(sprite);
+	pRet->autorelease();
+	return pRet;
+}
+
+
+bool CCDragButton::init(){
+	
+	return true;
+}
+
+bool CCDragButton::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if ( !isVisible() || !isRunning() || !hasVisibleParents())
+	{
+		return false;
+	}	
+	beganTouchPiont = pTouch->getLocationInView();
+	beganTouchPiont = CCDirector:: sharedDirector()->convertToGL(beganTouchPiont);
+	return CCControlButton::ccTouchBegan(pTouch,pEvent);
+}
+
+void CCDragButton::ccTouchMoved(CCTouch *pTouch, CCEvent *pEvent)
+{    
+	CCControlButton::ccTouchMoved(pTouch,pEvent);
+	CCPoint touchPoint = pTouch->getLocationInView();
+	touchPoint = CCDirector:: sharedDirector()->convertToGL(touchPoint);
+	if(ccpDistance(beganTouchPiont, touchPoint) > 5){
+		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+		CCSize buttonSize = getContentSize();
+		if(touchPoint.x > winSize.width-buttonSize.width || touchPoint.x < buttonSize.width || touchPoint.y < buttonSize.height || touchPoint.y > winSize.height-buttonSize.height  ){
+
+		}else{
+			this->setPosition(touchPoint);
+		}
+	}
+}
+void CCDragButton::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+	CCControlButton::ccTouchEnded(pTouch,pEvent);
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	CCPoint touchPoint = pTouch->getLocationInView();
+	touchPoint = CCDirector:: sharedDirector()->convertToGL(touchPoint);
+	if(ccpDistance(beganTouchPiont, touchPoint) < 5){
+		CCScene *scene = UiMgr::getInstance()->getCurScene();
+		BrowItemFrame *browitemframe =dynamic_cast<BrowItemFrame*>(scene->getChildByTag(WCT_BrowUi));
+		if(browitemframe != NULL){
+			browitemframe->removeFromParent();
+			browitemframe = NULL;
+		}
+		BrowItem::getInstance()->open();
+		scene->addChild(BrowItem::getInstance()->getUIGotoFrame(),20,WCT_BrowUi);
+		CCPoint buttonPosition = getPosition();
+		if(buttonPosition.y < winSize.height/2 ){
+			if(buttonPosition.x < winSize.width/2){
+				BrowItem::getInstance()->setGoPosition(ccp(getPosition().x,getPosition().y ));
+			}else{
+				BrowItem::getInstance()->setGoPosition(ccp(getPosition().x-300 ,getPosition().y ));
+			}
+		}else{
+			if(buttonPosition.x < winSize.width/2){
+				BrowItem::getInstance()->setGoPosition(ccp(getPosition().x,getPosition().y -120 ));
+			}else{
+ 				BrowItem::getInstance()->setGoPosition(ccp(getPosition().x-300 ,getPosition().y -120 ));
+			}
+		}
+	}
+	
+}
+
+void CCDragButton::ccTouchCancelled(CCTouch *pTouch, CCEvent *pEvent)
+{
+	CCControlButton::ccTouchCancelled(pTouch,pEvent);
+}
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+BrowItem * BrowItem::getInstance()
+{
+	static BrowItem instance;
+	return &instance;
+}
+
+BrowItem::BrowItem(){
+	
+}
+
+BrowItem::~BrowItem(){
+	if(_uiGoteFrame != NULL)
+	{
+		_uiGoteFrame->release();
+		_uiGoteFrame = NULL;
+	}
+
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+}
+
+void BrowItem::open(){
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary1 = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary1->registerCCNodeLoader("GongfaTipSprite", BrowItemLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader1 = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary1);
+	_uiGoteFrame = dynamic_cast<BrowItemFrame*>(ccbReader1->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "brow.ccbi").c_str()));
+	_usedPlistFile = ccbReader1->getLoadedSpriteSheet();
+	UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+	ccbReader1->release();
+	if(_uiGoteFrame != NULL)
+	{
+		_uiGoteFrame->retain();
+		_uiGoteFrame->_item = this;
+	}
+}
+
+void BrowItem::setGoPosition(const CCPoint &pos){
+	if(_uiGoteFrame != NULL)
+	{
+		_uiGoteFrame->setPosition(pos);
+	}
+}
+
+cocos2d::SEL_MenuHandler BrowItemFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler BrowItemFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "brow_closed", BrowItemFrame::oncloseBtnPressed);
+
+	return NULL;
+}
+
+void BrowItemFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	buttonVector.clear();
+	for (int i= 1;i< BROWNUMBER +1;i++)
+	{
+		CCControlButton *smile = dynamic_cast<CCControlButton*>(getChildByTag(i));
+		smile->addTargetWithActionForControlEvents(this, SEL_CCControlHandler(&BrowItemFrame::onBrowBtnPressed), CCControlEventTouchUpInside);
+		buttonVector.push_back(smile);
+	}
+	
+}
+
+void BrowItemFrame::oncloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent){
+	CCScene *scene = UiMgr::getInstance()->getCurScene();
+	BrowItemFrame *browitemframe =dynamic_cast<BrowItemFrame*>(scene->getChildByTag(WCT_BrowUi));
+	browitemframe->removeFromParent();
+	browitemframe = NULL;
+}
+
+void BrowItemFrame::onBrowBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent){
+	CCControlButton *widget = dynamic_cast<CCControlButton*>(pSender);
+	int tag = widget->getTag();
+	ChatMgr::getInstance()->sendChatEmotcion(tag);
+}
+
+bool BrowItemFrame::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (isTouchOnNodeContent(this,pTouch))
+	{
+		CCScene *scene = UiMgr::getInstance()->getCurScene();
+		scene->convertTouchToNodeSpace(pTouch);
+		return true;
+	}else{
+		CCScene *scene = UiMgr::getInstance()->getCurScene();
+		BrowItemFrame *browitemframe =dynamic_cast<BrowItemFrame*>(scene->getChildByTag(WCT_BrowUi));
+		browitemframe->removeFromParent();
+		browitemframe = NULL;
+	}
+	return false;
+}
+
+void BrowItemFrame::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+
+}
+
+void BrowItemFrame::onEnter()
+{
+	setAllChildernButtonPriority(this, -1);
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+	CCSprite::onEnter();
+}
+
+void BrowItemFrame::onExit()
+{
+	CCSprite::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+
+
+
+

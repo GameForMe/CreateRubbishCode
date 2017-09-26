@@ -1,0 +1,1385 @@
+#include "EquipUpStarUi.h"
+#include "EquipUpStarUIMgr.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "PackageManager.h"
+#include "TCPClient.h"
+#include "DBMgr.h"
+#include "CommonMsgDefine.h"
+#include "WorldPacket.h"
+#include "ToolTip.h"
+#include "CFGReader.h"
+#include <ctime>
+#include "tools.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "EquipFusionManager.h"
+#include "NumericalIniMgr.h"
+#include "UiResourceMgr.h"
+#include "EquipLevelUpNoticeMgr.h"
+
+//////////////////////////////////////////////////////////////////////////
+
+EquipUpStarUi::EquipUpStarUi()
+{
+	
+}
+
+EquipUpStarUi::~EquipUpStarUi()
+{
+
+}
+
+CCNode* EquipUpStarUi::openUi()
+{
+	showUi(true);
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["EquipUpStarUILayer"] = UiLayerLoader<EquipUpStarUiLayer>::loader();
+	nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+	CCNode* pNode = readUiFromCCBI("EquipUpStarUI", nodeLoaders, _loadSpriteSheet);
+
+	return pNode;
+}
+
+void EquipUpStarUi::updateEquipData()
+{
+	EquipUpStarUiLayer *ui = getUiNodeByTag<EquipUpStarUiLayer>(WCT_EQUIPUPSTARUI);
+	if(ui != NULL)
+	{
+		ui->SetEquipUpStarData();
+	}
+}
+
+void EquipUpStarUi::updateNextData()
+{
+	EquipUpStarUiLayer *ui = getUiNodeByTag<EquipUpStarUiLayer>(WCT_EQUIPUPSTARUI);
+	if(ui != NULL)
+	{
+		ui->clearNextEquipData();
+	}
+}
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler EquipUpStarUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler EquipUpStarUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", EquipUpStarUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onUpStarBtnPressed", EquipUpStarUiLayer::onUpStarBtnPressed);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onUpStarDescPressed", EquipUpStarUiLayer::onUpStarDescPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onAutoInPutBtnPressed", EquipUpStarUiLayer::onAutoInPutBtnPressed);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onKnowBtnPressed", EquipUpStarUiLayer::onKnowBtnPressed);
+
+
+	return NULL;
+}
+
+void EquipUpStarUiLayer::onCloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_EQUIPUPSTARUI);
+}
+
+void EquipUpStarUiLayer::onAutoInPutBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )//一键放入前三个装备
+{
+	const std::map<short, f_item*>& upStarEquipData = 
+		EquipUpStarUIMgr::getInstance()->getEquipUpStarItemMap(false);
+	std::map<short, f_item*>::const_iterator iter = upStarEquipData.begin();
+	f_equipment* eq = EquipUpStarUIMgr::getInstance()->getEquipment();
+	if (!eq)
+		return;
+	int starNum=eq->get_equip()->nStarLv+1;
+	if (upStarEquipData.size() < (size_t)starNum)
+	{//所需装备数量不足3个
+		CCString *str=CCString::createWithFormat("%s%d%s","\xE9\x9C\x80\xE8\xA6\x81",starNum,"\xE4\xBB\xB6\xE8\xA3\x85\xE5\xA4\x87");
+		ToolTip::getInstance()->push(str->getCString());//暂时填写一个1，之后与策划确定弹出提示的id
+		return;
+	}
+
+	EquipUpStarUIMgr::getInstance()->clearSelect(3);
+	for (int i = 0;i < starNum;++i)
+	{
+		EquipUpStarUIMgr::getInstance()->addSelect(i,iter->second->get_item_id());
+		iter++;
+	}
+	updateUI();
+}
+
+void EquipUpStarUiLayer::updateHideAllShengXinControl()
+{
+	CCNode * node =_frame->getChildByTag(1);
+	node->setVisible(false);
+
+	node = _frame->getChildByTag(2);
+	node->setVisible(false);	
+	node = _frame->getChildByTag(5);
+	node->setVisible(false);
+	node = _frame->getChildByTag(6);
+	node->setVisible(false);
+	node = _frame->getChildByTag(50);
+	node->setVisible(false);
+	node = _frame->getChildByTag(51);
+	node->setVisible(false);
+	node = _frame->getChildByTag(90);
+	node->setVisible(false);
+	node = _frame->getChildByTag(91);
+	node->setVisible(false);
+	node = _frame->getChildByTag(92);
+	node->setVisible(false);
+	node = _frame->getChildByTag(93);
+	node->setVisible(false);
+	node = _frame->getChildByTag(94);
+	node->setVisible(false);
+	node = _frame->getChildByTag(95);
+	node->setVisible(false);
+	node = _frame->getChildByTag(96);
+	node->setVisible(false);
+	node = _frame->getChildByTag(97);
+	node->setVisible(false);
+	node = _frame->getChildByTag(688);
+	node->setVisible(false);
+	node = _frame->getChildByTag(100);
+	node->setVisible(false);
+	node = _frame->getChildByTag(999);
+	node->setVisible(true);	
+}
+
+void EquipUpStarUiLayer::onUpStarBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	f_equipment* eq = EquipUpStarUIMgr::getInstance()->getEquipment();
+	if (!eq)
+		return;
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_17);
+	this->setButtonClickable(false);
+	int size = EquipUpStarUIMgr::getInstance()->getSelectSize();
+	int starLevel=eq->m_equipex.nStarLv+1;
+	if (size<starLevel)
+	//if (size < MAX_STAR_NUM)
+	{//升星所需装备不足
+		ToolTip::getInstance()->push("\xE5\x8D\x87\xE6\x98\x9F\xE6\x89\x80\xE9\x9C\x80\xE8\xA3\x85\xE5\xA4\x87\xE4\xB8\x8D\xE8\xB6\xB3");
+		this->setButtonClickable(true);
+		return;
+	}
+	if (eq->get_equip()->nStarLv >= MAX_STARUP_LEVEL)
+	{
+		this->setButtonClickable(true);
+		ToolTip::getInstance()->push("\xE8\xAF\xA5\xE8\xA3\x85\xE5\xA4\x87\xE6\x98\x9F\xE7\xBA\xA7\xE5\xB7\xB2\xE8\xBE\xBE\xE4\xB8\x8A\xE9\x99\x90");
+		updateHideAllShengXinControl();
+		return;
+	}
+
+	WorldPacket C2G_Msg(NET_C2G_PROC_EQUIP_STAR_LEVEL_UP);//组装消息头 
+	C2G_Msg << eq->get_item_id();
+	const EquipUpStarUIMgr::UpStarSelectedList& list = \
+		EquipUpStarUIMgr::getInstance()->getSelectList();
+	EquipUpStarUIMgr::UpStarSelectedList::const_iterator i,iend = list.end();
+	for (i = list.begin(); i!=iend;++i)
+	{
+		INT64 id = i->first;
+		C2G_Msg << id;
+	}
+
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_IDLE, false);//发送
+	EquipUpStarUIMgr::getInstance()->clearItemMap();
+}
+
+void EquipUpStarUiLayer::updateData()
+{
+	if (!itemLayer)
+	{
+		itemLayer = ItemMarixLayer::create(_itemFrame->getContentSize().width,_itemFrame->getContentSize().height,4,20,4,8);
+		_itemFrame->addChild(itemLayer);
+		itemLayer->setPositionX(20.0f);
+		itemLayer->signalCallEndItem.connect(this, &EquipUpStarUiLayer::onDropEndItem);
+		itemLayer->signalClickItem.connect(this, &EquipUpStarUiLayer::onItemMarixClick);
+		itemLayer->InsertTargetNodeMap((CCNode*)equip_1);
+		itemLayer->InsertTargetNodeMap((CCNode*)equip_2);
+		itemLayer->InsertTargetNodeMap((CCNode*)equip_3);
+	}
+	EquipUpStarUIMgr::getInstance()->updateSelect();
+	std::map<short, f_item*>& upStarEquipData = 
+		EquipUpStarUIMgr::getInstance()->getEquipUpStarItemMap(true);
+	itemLayer->SetItemMap(&upStarEquipData);
+	itemLayer->setConType(EICT_UpStar);
+	std::map<short, f_item*>::iterator iter =  upStarEquipData.begin();
+	while(iter != upStarEquipData.end())
+	{
+		itemLayer->SetItemID(iter->first,iter->second->get_item_type_id());
+		++iter;
+	}
+}
+
+void EquipUpStarUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	EquipUpStarUIMgr::getInstance()->\
+		send_NET_C2G_REQUEST_EQUIP_STAR_LEVEL_UP();
+	_descframe = NULL;
+	_upstarAcNode = NULL;
+	_fightNumAcNode = NULL;
+	_needUpENode = NULL;
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(0));
+	itemLayer = NULL;
+	bgsprite=dynamic_cast<CCSprite*>(_frame->getChildByTag(89));
+	CCRotateBy* rotateto = CCRotateBy::create(10, 360);
+	bgsprite->runAction(CCRepeatForever::create(rotateto));
+
+	_itemFrame = dynamic_cast<CCLayer*>(_frame->getChildByTag(ITEMFRAME));
+//	equipMaster = dynamic_cast<CCSprite*>(_frame->getChildByTag(EQUIPMASTER));//升级装备
+	_needUpENode = ItemNode::create();
+	_needUpENode->setPosition(_frame->getChildByTag(EQUIPMASTER)->getPosition());
+	_frame->addChild(_needUpENode);
+	_frame->getChildByTag(EQUIPMASTER)->removeFromParent();
+	equip_1 = ItemNode::create();
+	equip_1->setPosition(_frame->getChildByTag(EQUIP_1)->getPosition());
+	_frame->addChild(equip_1, _frame->getChildByTag(EQUIP_1)->getZOrder(), 0);
+	_frame->getChildByTag(EQUIP_1)->removeFromParent();
+	equipList[0] = equip_1;
+// 	equip_1 = dynamic_cast<CCSprite*>(_frame->getChildByTag(EQUIP_1));//辅助装备1
+// 	equip_1->setTag(0);
+	equip_2 = ItemNode::create();
+	equip_2->setPosition(_frame->getChildByTag(EQUIP_2)->getPosition());
+	_frame->addChild(equip_2, _frame->getChildByTag(EQUIP_2)->getZOrder(), 1);
+	_frame->getChildByTag(EQUIP_2)->removeFromParent();
+	equipList[1] = equip_2;
+// 	equip_2 = dynamic_cast<CCSprite*>(_frame->getChildByTag(EQUIP_2));//辅助装备2
+// 	equip_2->setTag(1);
+	equip_3 = ItemNode::create();
+	CCPoint point1=_frame->getChildByTag(EQUIP_3)->getPosition();
+	equip_3->setPosition(_frame->getChildByTag(EQUIP_3)->getPosition());
+	_frame->addChild(equip_3, _frame->getChildByTag(EQUIP_3)->getZOrder(), 2);
+	_frame->getChildByTag(EQUIP_3)->removeFromParent();
+	equipList[2] = equip_3;
+// 	equip_3 = dynamic_cast<CCSprite*>(_frame->getChildByTag(EQUIP_3));//辅助装备3
+// 	equip_3->setTag(2);
+	equipItem = dynamic_cast<CCSprite*>(_frame->getChildByTag(EQUIPUPSTARITEM));//升星道具
+	equipItemIndex = (CCLabelTTF*)(_frame->getChildByTag(EQUIPITEMINDEX));//升星道具数量
+	equipItemIndex->setZOrder(6);
+	coin = (CCLabelTTF*)(_frame->getChildByTag(COIN));//需要金币
+	equipName = (CCLabelTTF*)(_frame->getChildByTag(EQUIPUPSTARNAME));//装备名字
+	upStarSuccessRate = (CCLabelTTF*)(_frame->getChildByTag(UPSTARSUCCESSRATE));//升星的成功率
+	aboveEquipName = (CCLabelTTF*)(_frame->getChildByTag(ABOVEEQUIPNAME));//上面的装备名称
+	//左边一套装备
+	fightPower_1 = (CCLabelTTF*)(_frame->getChildByTag(FIGHTPOWER_1));//战斗力  add by vvv 2014.10.27
+	fightPower_1->setVisible(false);
+	_fightNumBLabel = CCLabelBMFont::create();
+	_fightNumBLabel->setFntFile("Art/Scene/fontNum.fnt");
+	_fightNumBLabel->setPosition(_frame->getChildByTag(FIGHTPOWER_1)->getPosition());
+	_fightNumBLabel->setAnchorPoint(ccp(0.0f, 0.5f));
+	_fightNumBLabel->setScale(0.5f);
+	_frame->addChild(_fightNumBLabel, RZN_EFFECT+1);
+	_fightNumBLabel->setTag(FightNumValue);
+
+	star_1_1 = dynamic_cast<CCSprite*>(_frame->getChildByTag(STAR_1_1));//星星
+	star_2_1 = dynamic_cast<CCSprite*>(_frame->getChildByTag(STAR_2_1));
+	star_3_1 = dynamic_cast<CCSprite*>(_frame->getChildByTag(STAR_3_1));
+	attrData_1_1 = (CCLabelTTF*)(_frame->getChildByTag(ATTRDATA_1_1));//基础属性
+	attrData_2_1 = (CCLabelTTF*)(_frame->getChildByTag(ATTRDATA_2_1));
+	attrData_3_1 = (CCLabelTTF*)(_frame->getChildByTag(ATTRDATA_3_1));
+	attrData_4_1 = (CCLabelTTF*)(_frame->getChildByTag(ATTRDATA_4_1));
+	attrData_5_1 = (CCLabelTTF*)(_frame->getChildByTag(ATTRDATA_5_1));
+	attrData_6_1 = (CCLabelTTF*)(_frame->getChildByTag(ATTRDATA_6_1));
+	//右边一套装备
+	fightPower_2 = (CCLabelTTF*)(_frame->getChildByTag(FIGHTPOWER_2));//战斗力
+	star_1_2 = dynamic_cast<CCSprite*>(_frame->getChildByTag(STAR_1_2));//星星
+	star_2_2 = dynamic_cast<CCSprite*>(_frame->getChildByTag(STAR_2_2));
+	star_3_2 = dynamic_cast<CCSprite*>(_frame->getChildByTag(STAR_3_2));
+	attrData_1_2 = (CCLabelTTF*)(_frame->getChildByTag(ATTRDATA_1_2));//基础属性
+	attrData_2_2 = (CCLabelTTF*)(_frame->getChildByTag(ATTRDATA_2_2));
+	attrData_3_2 = (CCLabelTTF*)(_frame->getChildByTag(ATTRDATA_3_2));
+	attrData_4_2 = (CCLabelTTF*)(_frame->getChildByTag(ATTRDATA_4_2));
+	attrData_5_2 = (CCLabelTTF*)(_frame->getChildByTag(ATTRDATA_5_2));
+	attrData_6_2 = (CCLabelTTF*)(_frame->getChildByTag(ATTRDATA_6_2));
+
+	_descframe = dynamic_cast<FrameSprite*>(getChildByTag(20));
+	_descframe->retain();
+	_descframe->removeFromParent();
+	//初始化星星
+	star_1_1->setVisible(false);//星星
+	star_2_1->setVisible(false);
+	star_3_1->setVisible(false);
+	star_1_2->setVisible(false);//星星
+	star_2_2->setVisible(false);
+	star_3_2->setVisible(false);
+
+	//初始化文字
+	attrData_1_1->setString(" ");
+	attrData_2_1->setString(" ");
+	attrData_3_1->setString(" ");
+	attrData_4_1->setString(" ");
+	attrData_5_1->setString(" ");
+	attrData_6_1->setString(" ");
+
+	attrData_1_2->setString(" ");
+	attrData_2_2->setString(" ");
+	attrData_3_2->setString(" ");
+	attrData_4_2->setString(" ");
+	attrData_5_2->setString(" ");
+	attrData_6_2->setString(" ");
+
+	//设置星魂的icon
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM PackageData WHERE TypeId = ?1");
+	int xinghunId = 1003222;//星魂暂时写死
+	int xinghunIconId = 0;
+	cmd->set_integer32(1 ,xinghunId);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("Icon");
+		xinghunIconId = table->get_integer32(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	std::string filePath = CCString::createWithFormat("%s%d%s","Art/ICON/",xinghunIconId,".png")->getCString();
+	equipItem->initWithFile(filePath.c_str());
+	equipItem->setZOrder(5);
+	//战斗力特效
+	
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+	std::string sSEFightFire = sSEDir + "E1_50.plist";
+	std::string sSEUpstar = sSEDir + "E1_133.plist";
+	std::string suseUp=sSEDir + "E1_132.plist";
+	_plist.insert(sSEUpstar);
+	_plist.insert(sSEFightFire);
+	_plist.insert(suseUp);
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEFightFire.c_str());
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEUpstar.c_str());
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(suseUp.c_str());
+	_fightNumAcNode = this->getFightNumSuperEffect();
+	_frame->addChild(_fightNumAcNode, RZN_EFFECT);
+	_fightNumAcNode->setPosition(_frame->getChildByTag(EUST_FightNumSE1)->getPosition());
+	_fightNumAcNode->BeginAction(0.07f, true);
+	_fightNumAcNode->setScale(0.5f);
+	_frame->getChildByTag(EUST_FightNumSP1)->setZOrder(RZN_EFFECT+1);
+	fightPower_1->setZOrder(RZN_EFFECT+1);
+	bigstar=(CCSprite*)_frame->getChildByTag(BIGStart);
+	bigstarPosition=bigstar->getPosition();
+	_upstarAcNode = this->getUpStarSuperEffect();
+	_upstarAcNode->setPosition(ccp(bigstar->getPositionX()+88,bigstar->getPositionY()+33));
+	_frame->addChild(_upstarAcNode, RZN_EFFECT);
+	_useUpEquipAcNode1=this->getUseUpEquipEffect();
+	_useUpEquipAcNode1->setPosition(equip_1->getPosition());
+	_frame->addChild(_useUpEquipAcNode1,RZN_EFFECT);
+	_useUpEquipAcNode2=this->getUseUpEquipEffect();
+	_useUpEquipAcNode2->setPosition(equip_2->getPosition());
+	_frame->addChild(_useUpEquipAcNode2,RZN_EFFECT);
+	_useUpEquipAcNode3=this->getUseUpEquipEffect();
+	//CCPoint point=_frame->getChildByTag(EQUIP_3)->getPosition();
+	_useUpEquipAcNode3->setPosition(equip_3->getPosition());
+	_frame->addChild(_useUpEquipAcNode3,RZN_EFFECT);
+	equipNum=(CCLabelTTF*)(CCLabelTTF*)(_frame->getChildByTag(EQUIPNum));
+	updateData();
+	//this->scheduleOnce(schedule_selector(EquipUpStarUiLayer::onUpstarCalback), 0.5f);
+	
+	isFinishEffect = true;
+	CCLabelTTF *huoquBtn=(CCLabelTTF*)(_frame->getChildByTag(91));
+	huoquBtn->setZOrder(10);
+	SetEquipUpStarData();
+	UpdateEquipNum();
+	f_equipment* equip = EquipUpStarUIMgr::getInstance()->getEquipment();
+	if (!equip)
+		return;
+	SetEquipUpStarData(1,equip->m_equipex.nStarLv);
+}
+
+void EquipUpStarUiLayer::clearNextEquipData()
+{
+	star_1_2->setVisible(false);//星星
+	star_2_2->setVisible(false);
+	star_3_2->setVisible(false);
+
+	attrData_1_2->setString(" ");
+	attrData_2_2->setString(" ");
+	attrData_3_2->setString(" ");
+	attrData_4_2->setString(" ");
+	attrData_5_2->setString(" ");
+	attrData_6_2->setString(" ");
+
+	fightPower_2->setString(" ");
+}
+
+void EquipUpStarUiLayer::onItemMarixClick( short nIdx)
+{
+	f_item* item = EquipUpStarUIMgr::getInstance()->getItemByIDX(nIdx);
+	bool is = false;
+	if (item)
+	{
+		is = EquipUpStarUIMgr::getInstance()->removeSelect(item->get_item_id());
+	}
+
+	if (is)
+		updateUI();
+}
+
+void EquipUpStarUiLayer::onDropEndItem( CCNode* pNode, short nIdx )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_13);
+	ItemNode* temp = (ItemNode*)pNode;
+	f_item* item = EquipUpStarUIMgr::getInstance()->getItemByUID(temp->getItemID());
+	if (item)
+	{
+		EquipUpStarUIMgr::getInstance()->removeSelect(item->get_item_id());
+	}
+	bool isSucc = false;
+	item = EquipUpStarUIMgr::getInstance()->getItemByIDX(nIdx);
+	if (item)
+	{
+		isSucc = EquipUpStarUIMgr::getInstance()->addSelect(temp->getTag(),item->get_item_id());
+	}
+
+	if (isSucc)
+	{
+		updateUI();
+	}
+
+	return;
+}
+
+
+bool EquipUpStarUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if ( !isVisible() || !isRunning() || !hasVisibleParents() )
+	{
+		return false;
+	}
+	if (!isFinishEffect)
+	{
+		return true;
+	}
+
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		CCPoint framePoint2 = itemLayer->convertTouchToNodeSpace(pTouch);
+		const CCSize &frameSize2 = itemLayer->getContentSize();
+		CCRect frameRect2(0.0f, 0.0f, frameSize2.width, frameSize2.height);
+		if (frameRect2.containsPoint(framePoint2))
+		{
+			return false;
+		}
+		CCPoint stuffPoint = equipItem->convertTouchToNodeSpace(pTouch);
+		CCRect stuff1(0.0f,0.0f,equipItem->getContentSize().width,equipItem->getContentSize().height);
+		if (stuff1.containsPoint(stuffPoint))
+		{
+			AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+			//_stuffIndex = 1;
+			EquipLevelupNoticeUiMgr::getInstance()->setTouchIndex(0);//EUUT_Stuff1是从1开始的
+			EquipLevelupNoticeUiMgr::getInstance()->setNoticeDataItemId(1003222);
+			EquipLevelupNoticeUiMgr::getInstance()->setNoticeDataItemYuanbao(100);
+			EquipLevelupNoticeUiMgr::getInstance()->setOpenUiId(WCT_EQUIPUPSTARUI);
+			EquipLevelupNoticeUiMgr::getInstance()->setGotoBtnShow(true);
+			OPEN_UI(WCT_EQUIPLEVELUPNOTICEUI);
+			//CLOSE_UI(WCT_EquipLevelUpUi);
+			return true;
+		}
+		return true;
+	}
+	return true;
+}
+
+void EquipUpStarUiLayer::SetEquipUpStarData(int nodeId,int starLv)
+{
+	if (nodeId == 1)
+	{
+		switch(starLv)
+		{
+		case 0:
+			star_1_1->setVisible(false);//星星
+			star_2_1->setVisible(false);
+			star_3_1->setVisible(false);
+			break;
+		case 1:
+			star_1_1->setVisible(true);//星星
+			star_2_1->setVisible(false);
+			star_3_1->setVisible(false);
+			break;
+		case 2:
+			star_1_1->setVisible(true);//星星
+			star_2_1->setVisible(true);
+			star_3_1->setVisible(false);
+			break;
+		case 3:
+			star_1_1->setVisible(true);//星星
+			star_2_1->setVisible(true);
+			star_3_1->setVisible(true);
+			break;
+		}
+	}else{
+		switch(starLv)
+		{
+		case 0:
+			star_1_2->setVisible(false);//星星
+			star_2_2->setVisible(false);
+			star_3_2->setVisible(false);
+			break;
+		case 1:
+			star_1_2->setVisible(true);//星星
+			star_2_2->setVisible(false);
+			star_3_2->setVisible(false);
+			break;
+		case 2:
+			star_1_2->setVisible(true);//星星
+			star_2_2->setVisible(true);
+			star_3_2->setVisible(false);
+			break;
+		case 3:
+			star_1_2->setVisible(true);//星星
+			star_2_2->setVisible(true);
+			star_3_2->setVisible(true);
+			break;
+		default:
+			star_1_2->setVisible(true);//星星
+			star_2_2->setVisible(true);
+			star_3_2->setVisible(true);
+			break;
+		}
+	}
+}
+
+void EquipUpStarUiLayer::addBaseAttr(const char *attrName, int v1, int v2/* = -1*/, const char *split/* = "-"*/)
+{
+
+//	if(strlen(attrName) > 0)
+	//{
+		EquipTipUiAttrItem *item = createAttrItem(attrName, v1, v2, split);
+		_baseAttr.push_back(item);
+		//item->addToParent(_contentLayer);
+	//}
+}
+
+EquipTipUiAttrItem* EquipUpStarUiLayer::createAttrItem(const char *attrName, int v1, int v2 /*= -1*/, const char *split/* = "-"*/)
+{
+	CCString *str = NULL;
+	if(v2 < 0)
+	{
+		tempBaseAttr[tempBaseAttrIndex] = CCString::createWithFormat("%s %d", attrName, v1);
+		str = CCString::createWithFormat("%s %d", attrName, v1);
+	}else{
+		tempBaseAttr[tempBaseAttrIndex] = CCString::createWithFormat("%s %d %s %d", attrName, v1, split, v2);
+		str = CCString::createWithFormat("%s %d %s %d", attrName, v1, split, v2);
+	}
+	++tempBaseAttrIndex;
+	EquipTipUiAttrItem *item = new EquipTipUiAttrItem;
+	item->setString(str->getCString());
+	return item;
+}
+
+void EquipUpStarUiLayer::addBaseAttr_2(const char *attrName, int v1, int v2/* = -1*/, const char *split/* = "-"*/)
+{
+
+	//	if(strlen(attrName) > 0)
+	//{
+	EquipTipUiAttrItem *item = createAttrItem_2(attrName, v1, v2, split);
+	_baseAttr.push_back(item);
+	//item->addToParent(_contentLayer);
+	//}
+}
+
+EquipTipUiAttrItem* EquipUpStarUiLayer::createAttrItem_2(const char *attrName, int v1, int v2 /*= -1*/, const char *split/* = "-"*/)
+{
+	CCString *str = NULL;
+	if(v2 < 0)
+	{
+		tempNextBaseAttr[tempBaseAttrIndex] = CCString::createWithFormat("%s %d", attrName, v1);
+		str = CCString::createWithFormat("%s %d", attrName, v1);
+	}else{
+		tempNextBaseAttr[tempBaseAttrIndex] = CCString::createWithFormat("%s %d %s %d", attrName, v1, split, v2);
+		str = CCString::createWithFormat("%s %d %s %d", attrName, v1, split, v2);
+	}
+	++tempBaseAttrIndex;
+	EquipTipUiAttrItem *item = new EquipTipUiAttrItem;
+	item->setString(str->getCString());
+	return item;
+}
+
+void EquipUpStarUiLayer::SetEquipUpStarData()
+{
+	f_equipment* equip = EquipUpStarUIMgr::getInstance()->getEquipment();
+	if (!equip)
+		return;
+
+	int tempEquipLv = EquipFusionManager::getInstance()->getCurEquipLevel(equip->get_item_type_id());
+
+	unsigned int chenggonglv = NumericalIniMgr::getInstance()->GetEquipStarLevelUpRate(tempEquipLv, equip->get_star_num());//升星成功率
+	upStarSuccessRate->setString(CCString::createWithFormat("%d%s",chenggonglv,"%")->getCString());
+
+	coin->setString( CCString::createWithFormat("%lld", NumericalIniMgr::getInstance()->GetEquipStarLevelUpMoney(tempEquipLv))->getCString() );//更新所需金币
+	int xingHun = PackageManager::getInstance()->getItemNumber(EICT_Bag,STAR_UP_NEED_ITEM_ID);
+	//int needxinghun = NumericalIniMgr::getInstance()->GetEquipStarLevelUpItemNum(tempEquipLv, equip->get_star_num()); //所需星魂数
+	EquipLevelupNoticeUiMgr::getInstance()->setNeedItemNum(0,NumericalIniMgr::getInstance()->GetEquipStarLevelUpItemNum(tempEquipLv, equip->get_star_num()) - xingHun > 0 ? NumericalIniMgr::getInstance()->GetEquipStarLevelUpItemNum(tempEquipLv, equip->get_star_num()) - xingHun : 0);//设置星魂购买界面的数量
+	//int num=NumericalIniMgr::getInstance()->GetEquipStarLevelUpItemNum(tempEquipLv, equip->get_star_num());
+	if (xingHun<NumericalIniMgr::getInstance()->GetEquipStarLevelUpItemNum(tempEquipLv, equip->get_star_num()))
+	{
+		equipItemIndex->setColor(ccc3(255,0,0));
+	}
+	else
+	{
+		equipItemIndex->setColor(ccc3(0,255,0));
+	}
+	equipItemIndex->setString(CCString::createWithFormat("%d%s%d",xingHun,"/",NumericalIniMgr::getInstance()->GetEquipStarLevelUpItemNum(tempEquipLv, equip->get_star_num()))->getCString());
+	if (!IS_VALID_PTR(equip))
+		return;
+	initUpStarAttrNameStr();
+	_needUpENode->initWithItem((f_item*)equip);
+	//加载装备名字
+	equipName->setString(getEquipName(equip->get_item_type_id()).c_str());
+	aboveEquipName->setString(equipName->getString());
+	//加载星星
+	//SetEquipUpStarData(1,equip->m_equipex.nStarLv);
+	//加载装备战斗力
+	fightPower_1->setString(CCString::createWithFormat("%d",equip->m_equipex.nRating)->getCString());
+
+	CCString* fightPower = CCString::createWithFormat("%d", equip->m_equipex.nRating);
+	//	((CCLabelTTF*)getChildByTag(14))->setString(strZhandouli->getCString());
+	_fightNumBLabel->setString(fightPower->getCString());
+	//加载基本属性
+	tagRoleAttEffect tempTagRoleAttEffect;
+	//int attrIndex = 1;
+
+	typedef std::map<ERoleAttribute, int> TempAttrMap;
+	typedef std::vector<ERoleAttribute> TempAttrVector;
+
+	TempAttrMap baseAttr;
+	TempAttrMap indentifyAttr;
+
+	TempAttrVector baseAttrVector;
+	TempAttrVector indentifyAttrVector;
+
+	tempBaseAttrIndex = 0;
+	for(int i = 0; i < MAX_BASE_ATT; i ++)
+	{//基础属性;
+		ERoleAttribute attr = equip->m_equipex.EquipAttitionalAtt[i].eRoleAtt;
+
+		if(attr != ERA_Null)
+		{
+			if(attr != ERA_Luck)
+			{
+				baseAttr[attr] = equip->m_equipex.EquipAttitionalAtt[i].nValue + getConsolidateAtt(equip->m_equipex.EquipAttitionalAtt[i].nValue, EquipUpStarUIMgr::getInstance()->getEquipment()->get_equip_consolidate_level());
+				baseAttrVector.push_back(attr);
+			}
+		}
+	}
+
+	for(TempAttrVector::iterator iter = baseAttrVector.begin(); iter != baseAttrVector.end(); ++ iter)
+	{
+		int iterValue = baseAttr[*iter];
+		if(iterValue == -1)
+			continue;
+		if (*iter == ERA_AttA_Start)
+		{
+			continue;
+		}
+		switch(*iter)
+		{
+		case ERA_ExAttackMin:
+			{
+				int v1 = iterValue;
+				int v2 = baseAttr[ERA_ExAttackMax];
+				baseAttr[ERA_ExAttackMax] = -1;
+				addBaseAttr(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExAttackMax:
+			{
+				int v2 = iterValue;
+				int v1 = baseAttr[ERA_ExAttackMin];
+				baseAttr[ERA_ExAttackMin] = -1;
+				addBaseAttr(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InAttackMin:
+			{
+				int v1 = iterValue;
+				int v2 = baseAttr[ERA_InAttackMax];
+				baseAttr[ERA_InAttackMax] = -1;
+				addBaseAttr(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InAttackMax:
+			{
+				int v2 = iterValue;
+				int v1 = baseAttr[ERA_InAttackMin];
+				baseAttr[ERA_InAttackMin] = -1;
+				addBaseAttr(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ArmorEx:
+			{
+				int v1 = iterValue;
+				int v2 = baseAttr[ERA_ArmorIn];
+				baseAttr[ERA_ArmorIn] = -1;
+				addBaseAttr(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ArmorIn:
+			{
+				int v2 = iterValue;
+				int v1 = baseAttr[ERA_ArmorEx];
+				baseAttr[ERA_ArmorEx] = -1;
+				addBaseAttr(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExMaxDefense:
+			{
+				int v2 = iterValue;
+				int v1 = baseAttr[ERA_ExMinDefense];
+				baseAttr[ERA_ExMinDefense] = -1;
+				addBaseAttr(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExMinDefense:
+			{
+				int v1 = iterValue;
+				int v2 = baseAttr[ERA_ExMaxDefense];
+				baseAttr[ERA_ExMaxDefense] = -1;
+				addBaseAttr(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InMaxDefense:
+			{
+				int v2 = iterValue;
+				int v1 = baseAttr[ERA_InMinDefense];
+				baseAttr[ERA_InMinDefense] = -1;
+				addBaseAttr(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InMinDefense:
+			{
+				int v1 = iterValue;
+				int v2 = baseAttr[ERA_InMaxDefense];
+				baseAttr[ERA_InMaxDefense] = -1;
+				addBaseAttr(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		default:
+			addBaseAttr(_upStarBaseAttrNameStr[*iter].c_str(), iterValue);
+			break;
+		}
+	}
+	for (int x = 0;x < tempBaseAttrIndex;x ++)
+	{
+		switch(x + 1)
+		{
+		case 1:
+			attrData_1_1->setString(tempBaseAttr[x]->getCString());
+			break;
+		case 2:
+			attrData_2_1->setString(tempBaseAttr[x]->getCString());
+			break;
+		case 3:
+			attrData_3_1->setString(tempBaseAttr[x]->getCString());
+			break;
+		case 4:
+			attrData_4_1->setString(tempBaseAttr[x]->getCString());
+			break;
+		case 5:
+			attrData_5_1->setString(tempBaseAttr[x]->getCString());
+			break;
+		case 6:
+			attrData_6_1->setString(tempBaseAttr[x]->getCString());
+			break;
+		}
+	}
+	//--------------------------------------------------------------------------------------------------------------------------------------------
+	//--------------------------------------------------------------------------------------------------------------------------------------------
+	TempAttrMap baseAttr_2;
+	TempAttrMap indentifyAttr_2;
+
+	TempAttrVector baseAttrVector_2;
+	TempAttrVector indentifyAttrVector_2;
+	tempBaseAttrIndex = 0;
+	if (EquipUpStarUIMgr::getInstance()->getEquipNext() != NULL)
+	{
+		//加载右边的装备数据
+		if (EquipUpStarUIMgr::getInstance()->getEquipNext()->isSuccess == 0)
+		{
+			//加载星星
+			SetEquipUpStarData(2,equip->m_equipex.nStarLv + 1);
+			//设置所需金币数和需要星魂数
+			if (equip->m_equipex.nStarLv >= MAX_STARUP_LEVEL)
+			{
+				coin->setString("0");
+				equipItemIndex->setString(" ");
+			}
+			//加载装备战斗力
+			fightPower_2->setString(CCString::createWithFormat("%d",EquipUpStarUIMgr::getInstance()->getEquipNext()->frghtLi)->getCString());
+			//attrIndex = 1;
+			//int tempIndex = 0;
+			//=================================================================================================================================
+			for (int y = 0;y < EquipUpStarUIMgr::getInstance()->getEquipNext()->attrIndex;y++)
+			{
+				ERoleAttribute attr = (ERoleAttribute)EquipUpStarUIMgr::getInstance()->getEquipNext()->TypeAndData[y].attrType;
+
+				if(attr != ERA_Null)
+				{
+					if(attr != ERA_Luck)
+					{
+						//add by XSea 2014.10.29 服务器发来的属性就是计算完强化等级的 所以这里不再去计算了
+						baseAttr_2[attr] = EquipUpStarUIMgr::getInstance()->getEquipNext()->TypeAndData[y].attrData; // + getConsolidateAtt(EquipUpStarUIMgr::getInstance()->getEquipNext()->TypeAndData[y].attrData, EquipUpStarUIMgr::getInstance()->getEquipment()->get_equip_consolidate_level())
+						baseAttrVector_2.push_back(attr);
+					}
+				}
+			}
+
+			for(TempAttrVector::iterator iter = baseAttrVector_2.begin(); iter != baseAttrVector_2.end(); ++ iter)
+			{
+				int iterValue_2 = baseAttr_2[*iter];
+				if(iterValue_2 == -1)
+					continue;
+
+				switch(*iter)
+				{
+				case ERA_ExAttackMin:
+					{
+						int v1 = iterValue_2;
+						int v2 = baseAttr_2[ERA_ExAttackMax];
+						baseAttr_2[ERA_ExAttackMax] = -1;
+						addBaseAttr_2(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_ExAttackMax:
+					{
+						int v2 = iterValue_2;
+						int v1 = baseAttr_2[ERA_ExAttackMin];
+						baseAttr_2[ERA_ExAttackMin] = -1;
+						addBaseAttr_2(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_InAttackMin:
+					{
+						int v1 = iterValue_2;
+						int v2 = baseAttr_2[ERA_InAttackMax];
+						baseAttr_2[ERA_InAttackMax] = -1;
+						addBaseAttr_2(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_InAttackMax:
+					{
+						int v2 = iterValue_2;
+						int v1 = baseAttr_2[ERA_InAttackMin];
+						baseAttr_2[ERA_InAttackMin] = -1;
+						addBaseAttr_2(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_ArmorEx:
+					{
+						int v1 = iterValue_2;
+						int v2 = baseAttr_2[ERA_ArmorIn];
+						baseAttr_2[ERA_ArmorIn] = -1;
+						addBaseAttr_2(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_ArmorIn:
+					{
+						int v2 = iterValue_2;
+						int v1 = baseAttr_2[ERA_ArmorEx];
+						baseAttr_2[ERA_ArmorEx] = -1;
+						addBaseAttr_2(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_ExMaxDefense:
+					{
+						int v2 = iterValue_2;
+						int v1 = baseAttr_2[ERA_ExMinDefense];
+						baseAttr_2[ERA_ExMinDefense] = -1;
+						addBaseAttr_2(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_ExMinDefense:
+					{
+						int v1 = iterValue_2;
+						int v2 = baseAttr_2[ERA_ExMaxDefense];
+						baseAttr_2[ERA_ExMaxDefense] = -1;
+						addBaseAttr_2(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_InMaxDefense:
+					{
+						int v2 = iterValue_2;
+						int v1 = baseAttr_2[ERA_InMinDefense];
+						baseAttr_2[ERA_InMinDefense] = -1;
+						addBaseAttr_2(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_InMinDefense:
+					{
+						int v1 = iterValue_2;
+						int v2 = baseAttr_2[ERA_InMaxDefense];
+						baseAttr_2[ERA_InMaxDefense] = -1;
+						addBaseAttr_2(_upStarBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				default:
+					addBaseAttr_2(_upStarBaseAttrNameStr[*iter].c_str(), iterValue_2);
+					break;
+				}
+			}
+			//=================================================================================================================================
+			if (tempBaseAttrIndex > 0)
+			{
+				attrData_1_2->setString(tempNextBaseAttr[tempBaseAttrIndex - 1]->getCString());//只显示一个属性
+			}
+			
+		}
+	}
+}
+
+std::string EquipUpStarUiLayer::getEquipAttToString(ERoleAttribute eRoleAtt,std::string eValue)
+{//拼接当前装备的基础属性文字
+	return CCString::createWithFormat("%s %s",_upStarBaseAttrNameStr[eRoleAtt].c_str(),eValue.c_str())->getCString();
+}
+
+std::string EquipUpStarUiLayer::getNextEquipAttToString(ERoleAttribute eRoleAtt,int eValue)
+{//拼接下一等级装备的基础属性文字
+	return CCString::createWithFormat("%s %d",_upStarBaseAttrNameStr[eRoleAtt].c_str(),eValue)->getCString();
+}
+
+std::string EquipUpStarUiLayer::getEquipName(unsigned int equipId)
+{ 
+	std::string equipItemName = "";
+//已完成 	c_sql_command* cmd = NULL;
+// 	c_sql_table* table = NULL;
+
+// 	cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 	cmd->set_integer32(1 , equipId);
+// 	table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("Name");
+// 		equipItemName = table->get_text(idx);
+// 	}
+// 
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+	const EquipTypeData* t_data = PackageManager::getInstance()->getEquipTypeDataPointer(equipId);
+	if (t_data != NULL)
+	{
+		equipItemName = t_data->name;
+	}
+
+	return equipItemName;
+}
+
+void EquipUpStarUiLayer::initUpStarAttrNameStr()
+{
+	_upStarBaseAttrNameStr[ERA_MaxHP] = "\xE7\x94\x9F\xE5\x91\xBD\xEF\xBC\x9A";
+	_upStarBaseAttrNameStr[ERA_MaxMP] = "\xE9\xAD\x94\xE5\x8A\x9B\xEF\xBC\x9A";
+	_upStarBaseAttrNameStr[ERA_ExAttackMin] = "\xE7\x89\xA9\xE6\x94\xBB\xEF\xBC\x9A";
+	_upStarBaseAttrNameStr[ERA_ExAttackMax] = "\xE7\x89\xA9\xE6\x94\xBB\xEF\xBC\x9A";
+	_upStarBaseAttrNameStr[ERA_InAttackMin] = "\xE9\xAD\x94\xE6\x94\xBB\xEF\xBC\x9A";
+	_upStarBaseAttrNameStr[ERA_InAttackMax] = "\xE9\xAD\x94\xE6\x94\xBB\xEF\xBC\x9A";
+	_upStarBaseAttrNameStr[ERA_ArmorIn] = "\xE9\x81\x93\xE6\x94\xBB\xEF\xBC\x9A";
+	_upStarBaseAttrNameStr[ERA_ArmorEx] = "\xE9\x81\x93\xE6\x94\xBB\xEF\xBC\x9A";
+	_upStarBaseAttrNameStr[ERA_ExMinDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xEF\xBC\x9A";
+	_upStarBaseAttrNameStr[ERA_ExMaxDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xEF\xBC\x9A";
+	_upStarBaseAttrNameStr[ERA_InMinDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xEF\xBC\x9A";
+	_upStarBaseAttrNameStr[ERA_InMaxDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xEF\xBC\x9A";
+	_upStarBaseAttrNameStr[ERA_HitRate] = "\xE5\x91\xBD\xE4\xB8\xAD\xEF\xBC\x9A";
+	_upStarBaseAttrNameStr[ERA_Dodge] = "\xE9\x97\xAA\xE9\x81\xBF\xEF\xBC\x9A";
+	_upStarBaseAttrNameStr[ERA_Crit_Rate] = "\xE6\x9A\xB4\xE5\x87\xBB\xEF\xBC\x9A";
+	_upStarBaseAttrNameStr[ERA_UnCrit_Amount] = "\xE5\x85\x8D\xE7\x88\x86\xEF\xBC\x9A";
+	_upStarBaseAttrNameStr[ERA_UnCrit_Rate] = "\xE5\x85\x8D\xE6\x9A\xB4\xEF\xBC\x9A";
+}
+
+void EquipUpStarUiLayer::onExit()
+{
+	//EquipUpStarUIMgr::getInstance()->un_register_net_cmd();
+	EquipUpStarUIMgr::getInstance()->clearItemMap();
+	while(!_baseAttr.empty())
+	{
+		CC_SAFE_DELETE(_baseAttr.front());
+		_baseAttr.pop_front();
+	}
+	
+	TCP_CLIENT->unregister_net_cmd(NET_G2C_PROC_EQUIP_STAR_LEVEL_UP_RESULT,this,&EquipUpStarUiLayer::updataEquipUpStarData);
+	//CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+	if (_descframe)
+		CC_SAFE_RELEASE(_descframe);
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+}
+
+void EquipUpStarUiLayer::onEnter()
+{
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+	TCP_CLIENT->register_net_cmd(NET_G2C_PROC_EQUIP_STAR_LEVEL_UP_RESULT,this,&EquipUpStarUiLayer::updataEquipUpStarData);
+}
+
+unsigned int EquipUpStarUiLayer::updataEquipUpStarData(s_net_cmd* cmd)
+{//结果(DWORD)[0=成功 + SrcEquipID(INT64), 1=失败, 其他=错误编号] 
+	WorldPacket Msg((const void*)cmd);
+	INT64 equipId;
+	DWORD su;
+	//upStarEquipAttr attr[MAX_ADDITIONAL_EFFECT];
+	EquipUpStarUIMgr::getInstance()->removeEquipNext();
+	Msg >> su;
+	EquipUpStarUIMgr::getInstance()->getEquipNext()->isSuccess = su;
+	if (EquipUpStarUIMgr::getInstance()->getEquipNext()->isSuccess == 0)
+	{
+		Msg >> equipId;
+		f_equipment *equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(equipId));
+		if (!equip)
+			return 0;
+		EquipUpStarUIMgr::getInstance()->setEquipment(equip);
+
+		WorldPacket C2G_Msg(NET_C2G_REQUEST_EQUIP_STAR_LEVEL_UP);//组装消息头
+		C2G_Msg << equip->get_item_id();
+		TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_IDLE, false);//发送
+		nstartLv=equip->m_equipex.nStarLv;
+		EquipUpStarUIMgr::getInstance()->clearSelect(nstartLv);
+		//更新备选装备数据
+		//this->playUpstarSE();
+		this->playUseUpEffect(nstartLv);
+	}else{
+
+		switch( EquipUpStarUIMgr::getInstance()->getEquipNext()->isSuccess )
+		{
+		case 1: //升星失败,装备没有发生任何变化
+			{
+				ToolTip::getInstance()->push("\xE5\x8D\x87\xE6\x98\x9F\xE5\xA4\xB1\xE8\xB4\xA5\xEF\xBC\x8C\xE8\xA3\x85\xE5\xA4\x87\xE6\xB2\xA1\xE6\x9C\x89\xE5\x8F\x91\xE7\x94\x9F\xE4\xBB\xBB\xE4\xBD\x95\xE5\x8F\x98\xE5\x8C\x96");
+				f_equipment* equip = EquipUpStarUIMgr::getInstance()->getEquipment();
+				if (!equip)
+					return 0;
+				int tempEquipLv = EquipFusionManager::getInstance()->getCurEquipLevel(equip->get_item_type_id());
+				//unsigned int chenggonglv = NumericalIniMgr::getInstance()->GetEquipStarLevelUpRate(tempEquipLv, equip->get_star_num());//升星成功率
+				int xingHun = PackageManager::getInstance()->getItemNumber(EICT_Bag,STAR_UP_NEED_ITEM_ID);
+				//int needxinghun = NumericalIniMgr::getInstance()->GetEquipStarLevelUpItemNum(tempEquipLv, equip->get_star_num()); //所需星魂数
+				EquipLevelupNoticeUiMgr::getInstance()->setNeedItemNum(0,NumericalIniMgr::getInstance()->GetEquipStarLevelUpItemNum(tempEquipLv, equip->get_star_num()) - xingHun > 0 ? NumericalIniMgr::getInstance()->GetEquipStarLevelUpItemNum(tempEquipLv, equip->get_star_num()) - xingHun : 0);//设置星魂购买界面的数量
+			}
+			break;
+		case E_Role_Star_Lv_Up_Equip_Not_Exist: //原装备不存在
+			ToolTip::getInstance()->push("\xE5\x8E\x9F\xE8\xA3\x85\xE5\xA4\x87\xE4\xB8\x8D\xE5\xAD\x98\xE5\x9C\xA8");
+			break;
+		case E_Role_Star_Lv_Up_Equip1_Not_Exist: //材料装备1不存在
+			ToolTip::getInstance()->push("\xE6\x9D\x90\xE6\x96\x99\xE8\xA3\x85\xE5\xA4\x87\x31\xE4\xB8\x8D\xE5\xAD\x98\xE5\x9C\xA8");
+			break;
+		case E_Role_Star_Lv_Up_Equip2_Not_Exist: //材料装备2不存在
+			ToolTip::getInstance()->push("\xE6\x9D\x90\xE6\x96\x99\xE8\xA3\x85\xE5\xA4\x87\x32\xE4\xB8\x8D\xE5\xAD\x98\xE5\x9C\xA8");
+			break;
+		case E_Role_Star_Lv_Up_Equip3_Not_Exist: //材料装备3不存在
+			ToolTip::getInstance()->push("\xE6\x9D\x90\xE6\x96\x99\xE8\xA3\x85\xE5\xA4\x87\x33\xE4\xB8\x8D\xE5\xAD\x98\xE5\x9C\xA8");
+			break;
+		case E_Role_Star_Lv_Up_Equip_SuitID_Error: //非套装不可升星
+			ToolTip::getInstance()->push("\xE9\x9D\x9E\xE5\xA5\x97\xE8\xA3\x85\xE4\xB8\x8D\xE5\x8F\xAF\xE5\x8D\x87\xE6\x98\x9F");
+			break;
+		case E_Role_Star_Lv_Up_Equip1_SuitID_Error: //材料1非相同套装不可升星
+			ToolTip::getInstance()->push("\xE6\x9D\x90\xE6\x96\x99\x31\xE9\x9D\x9E\xE7\x9B\xB8\xE5\x90\x8C\xE5\xA5\x97\xE8\xA3\x85\xE4\xB8\x8D\xE5\x8F\xAF\xE5\x8D\x87\xE6\x98\x9F");
+			break;
+		case E_Role_Star_Lv_Up_Equip2_SuitID_Error: //材料2非相同套装不可升星
+			ToolTip::getInstance()->push("\xE6\x9D\x90\xE6\x96\x99\x32\xE9\x9D\x9E\xE7\x9B\xB8\xE5\x90\x8C\xE5\xA5\x97\xE8\xA3\x85\xE4\xB8\x8D\xE5\x8F\xAF\xE5\x8D\x87\xE6\x98\x9F");
+			break;
+		case E_Role_Star_Lv_Up_Equip3_SuitID_Error: //材料3非相同套装不可升星
+			ToolTip::getInstance()->push("\xE6\x9D\x90\xE6\x96\x99\x33\xE9\x9D\x9E\xE7\x9B\xB8\xE5\x90\x8C\xE5\xA5\x97\xE8\xA3\x85\xE4\xB8\x8D\xE5\x8F\xAF\xE5\x8D\x87\xE6\x98\x9F");
+			break;
+		case E_Role_Star_Lv_Up_Equip1_Pos_Error: //材料1非相同位置不可升星
+			ToolTip::getInstance()->push("\xE6\x9D\x90\xE6\x96\x99\x31\xE9\x9D\x9E\xE7\x9B\xB8\xE5\x90\x8C\xE4\xBD\x8D\xE7\xBD\xAE\xE4\xB8\x8D\xE5\x8F\xAF\xE5\x8D\x87\xE6\x98\x9F");
+			break;
+		case E_Role_Star_Lv_Up_Equip2_Pos_Error: //材料2非相同位置不可升星
+			ToolTip::getInstance()->push("\xE6\x9D\x90\xE6\x96\x99\x32\xE9\x9D\x9E\xE7\x9B\xB8\xE5\x90\x8C\xE4\xBD\x8D\xE7\xBD\xAE\xE4\xB8\x8D\xE5\x8F\xAF\xE5\x8D\x87\xE6\x98\x9F");
+			break;
+		case E_Role_Star_Lv_Up_Equip3_Pos_Error: //材料3非相同位置不可升星
+			ToolTip::getInstance()->push("\xE6\x9D\x90\xE6\x96\x99\x33\xE9\x9D\x9E\xE7\x9B\xB8\xE5\x90\x8C\xE4\xBD\x8D\xE7\xBD\xAE\xE4\xB8\x8D\xE5\x8F\xAF\xE5\x8D\x87\xE6\x98\x9F");
+			break;
+		case E_Role_Star_Lv_Up_NeedItem_Not_Exist: //所需星魂不存在
+			ToolTip::getInstance()->push("\xE6\x89\x80\xE9\x9C\x80\xE6\x98\x9F\xE9\xAD\x82\xE4\xB8\x8D\xE5\xAD\x98\xE5\x9C\xA8");
+			break;
+		case E_Role_Star_Lv_Up_NeedItem_Not_Enough: //所需星魂不足
+			ToolTip::getInstance()->push("\xE6\x89\x80\xE9\x9C\x80\xE6\x98\x9F\xE9\xAD\x82\xE4\xB8\x8D\xE8\xB6\xB3");
+			break;
+		case E_Role_Star_Lv_Up_Silver_Not_Enough: //所需金币不足
+			ToolTip::getInstance()->push("\xE6\x89\x80\xE9\x9C\x80\xE9\x87\x91\xE5\xB8\x81\xE4\xB8\x8D\xE8\xB6\xB3");
+			break;
+		case E_Role_Star_Lv_Up_Equip_MAXAttr: //原装备基础属性已满
+			ToolTip::getInstance()->push("\xE5\x8E\x9F\xE8\xA3\x85\xE5\xA4\x87\xE5\x9F\xBA\xE7\xA1\x80\xE5\xB1\x9E\xE6\x80\xA7\xE5\xB7\xB2\xE6\xBB\xA1");
+			break;
+		case E_Role_Star_Lv_Up_Equip_Error: //原装备不可当做材料
+			ToolTip::getInstance()->push("\xE5\x8E\x9F\xE8\xA3\x85\xE5\xA4\x87\xE4\xB8\x8D\xE5\x8F\xAF\xE5\xBD\x93\xE5\x81\x9A\xE6\x9D\x90\xE6\x96\x99");
+			break;
+		case E_Role_Star_Lv_Up_Equip_Stuff_Error: //材料装备不能为同一件
+			ToolTip::getInstance()->push("\xE6\x9D\x90\xE6\x96\x99\xE8\xA3\x85\xE5\xA4\x87\xE4\xB8\x8D\xE8\x83\xBD\xE4\xB8\xBA\xE5\x90\x8C\xE4\xB8\x80\xE4\xBB\xB6");
+			break;
+		}
+		this->setButtonClickable(true);
+		f_equipment* equip = EquipUpStarUIMgr::getInstance()->getEquipment();
+		int tempEquipLv = EquipFusionManager::getInstance()->getCurEquipLevel(equip->get_item_type_id());
+		int xingHun = PackageManager::getInstance()->getItemNumber(EICT_Bag,STAR_UP_NEED_ITEM_ID);
+		if (xingHun<NumericalIniMgr::getInstance()->GetEquipStarLevelUpItemNum(tempEquipLv, equip->get_star_num()))
+		{
+			equipItemIndex->setColor(ccc3(255,0,0));
+		}
+		else
+		{
+			equipItemIndex->setColor(ccc3(0,255,0));
+		}
+		equipItemIndex->setString(CCString::createWithFormat("%d%s%d",xingHun,"/",NumericalIniMgr::getInstance()->GetEquipStarLevelUpItemNum(tempEquipLv, equip->get_star_num()))->getCString());
+	}
+	return 0;
+}
+void EquipUpStarUiLayer::onUpStarDescPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CC_ASSERT(_descframe != NULL);
+	if(_descframe->getParent() == NULL)
+	{
+		_descframe->setVisible(true);
+		_descframe->setTouchPriority(-1);
+		setAllChildernButtonPriority(_descframe,-1);
+		_descframe->setTouchEnable(true);
+		World::getInstance()->getScene()->addChild(_descframe,WZ_POPUI);
+	}
+}
+void EquipUpStarUiLayer::onKnowBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CC_ASSERT(_descframe != NULL);
+	_descframe->setTouchEnable(false);
+	_descframe->removeFromParent();
+}
+
+GameActionNode* EquipUpStarUiLayer::getFightNumSuperEffect()
+{
+	GameActionNode* fireSEAcNode = GameActionNode::create();
+// 	for (int i=1; i<99; ++i)
+// 	{
+// 		CCString* fireStr = CCString::createWithFormat("%s%02d", "E1_50", i);
+// 		if(!fireSEAcNode->AddTexture(fireStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+	fireSEAcNode->InitTextureWithSpriteFrame("E1_50");
+	return fireSEAcNode;
+}
+
+GameActionNode* EquipUpStarUiLayer::getUpStarSuperEffect()
+{
+	GameActionNode* upstarSEAcNode = GameActionNode::create();
+// 	for (int i=1; i<99; ++i)
+// 	{
+// 		CCString* fireStr = CCString::createWithFormat("%s%02d", "E1_133", i);
+// 		if(!upstarSEAcNode->AddTexture(fireStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+	upstarSEAcNode->InitTextureWithSpriteFrame("E1_133");
+	return upstarSEAcNode;
+}
+
+void EquipUpStarUiLayer::playUpstarSE()
+{
+	/*isFinishEffect = false;
+	_upstarAcNode->playAnimOnce(0.12f, false);*/
+	CCActionInterval* scaleto = CCScaleTo::create(0.15, 1);
+	bigstar->setScale(0.3);
+	bigstar->setVisible(true);
+	bigstar->runAction(scaleto);
+	this->scheduleOnce(schedule_selector(EquipUpStarUiLayer::onUpstarCalback), 1.0f);
+}
+
+void EquipUpStarUiLayer::onUpstarCalback( float dt )
+{
+	isFinishEffect = false;
+	f_equipment* equip = EquipUpStarUIMgr::getInstance()->getEquipment();
+	if (!equip)
+		return;
+	int starNum=equip->m_equipex.nStarLv;
+	if (starNum==1)
+	{
+	  _upstarAcNode->setPosition(ccp(bigstar->getPositionX()+24,bigstar->getPositionY()+32));
+	}
+	else if (starNum==2)
+	{
+		_upstarAcNode->setPosition(ccp(bigstar->getPositionX()+55,bigstar->getPositionY()+32));
+	}
+	else if (starNum==3)
+	{
+		_upstarAcNode->setPosition(ccp(bigstar->getPositionX()+88,bigstar->getPositionY()+32));
+	}
+	_upstarAcNode->playAnimOnce(0.12f, false);
+	this->scheduleOnce(schedule_selector(EquipUpStarUiLayer::playEffectUpdateUi), 0.1f);
+}
+
+void EquipUpStarUiLayer::onUpstarCalbackImpl(float dt)
+{
+	f_equipment* equip = EquipUpStarUIMgr::getInstance()->getEquipment();
+	if (!equip)
+		return;
+	/*int starNum=equip->m_equipex.nStarLv;
+	updateData();
+	SetEquipUpStarData();
+	setButtonClickable(true);
+	updateUI();
+	UpdateEquipNum();*/
+	SetEquipUpStarData(1,equip->m_equipex.nStarLv);
+	isFinishEffect = true;
+}
+
+void EquipUpStarUiLayer::setButtonClickable( bool canClick )
+{
+	CCArray* inElemets = _frame->getChildren();
+	int inElementCount = _frame->getChildrenCount();
+	for(int i = 0; i < inElementCount; ++i)
+	{
+		CCControlButton* foundBtn = dynamic_cast<CCControlButton*>(inElemets->objectAtIndex(i));
+		if(foundBtn != NULL)
+			foundBtn->setEnabled(canClick);
+	}
+}
+
+void EquipUpStarUiLayer::updateOne(f_item* item, short idx)
+{
+	if (idx >= MAX_STAR_NUM)
+		return;
+
+	if (item)
+	{
+		item->unlock();
+		equipList[idx]->initWithItem(item);
+		item->lock();
+		equipList[idx]->setItemID(item->get_item_id());
+	}
+	else
+	{
+		equipList[idx]->setBlank();
+		equipList[idx]->setItemID(0);
+	}
+}
+
+void EquipUpStarUiLayer::updateUI()
+{
+	const EquipUpStarUIMgr::UpStarSelectedList& list = \
+		EquipUpStarUIMgr::getInstance()->getSelectList();
+	if (list.size() > MAX_STAR_NUM)
+		return;
+	EquipUpStarUIMgr::UpStarSelectedList::const_iterator i ,
+		iend = list.end();
+	std::map<short,INT64> tempMap;
+	for (i = list.begin();i != iend;++i)
+	{
+		tempMap.insert(std::map<short,INT64>::value_type(i->second,i->first));
+	}
+
+	for (int idx = 0; idx < MAX_STAR_NUM; ++idx)
+	{
+		f_item* item = 0;
+		std::map<short,INT64>::iterator it = tempMap.find(idx);
+		if (it != tempMap.end())
+		{	
+			item = PackageManager::getInstance()->getItem(EICT_Bag,it->second);
+		}
+		updateOne(item,idx);
+	}
+	itemLayer->RefreshData();
+}
+
+void EquipUpStarUiLayer::UpdateEquipNum()
+{
+	f_equipment* eq = EquipUpStarUIMgr::getInstance()->getEquipment();
+	if (!eq)
+		return;
+	int starNum=eq->get_equip()->nStarLv+1;
+	if (starNum<=3)
+	{
+	CCString *str=CCString::createWithFormat("%s%d%s","\xE9\x9C\x80\xE8\xA6\x81",starNum,"\xE4\xBB\xB6\xE8\xA3\x85\xE5\xA4\x87");
+	equipNum->setString(str->getCString());
+	}
+	else
+	{
+		equipNum->setString(GET_STR(7213).c_str());
+	}
+}
+
+GameActionNode* EquipUpStarUiLayer::getUseUpEquipEffect()
+{
+	GameActionNode* fireSEAcNode = GameActionNode::create();
+// 	for (int i=1; i<99; ++i)
+// 	{
+// 		CCString* fireStr = CCString::createWithFormat("%s%02d", "E1_132", i);
+// 		if(!fireSEAcNode->AddTexture(fireStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+	fireSEAcNode->InitTextureWithSpriteFrame("E1_132");
+	return fireSEAcNode;
+}
+
+void EquipUpStarUiLayer::playUseUpEffect( int star )
+{
+	bigstar->setPosition(bigstarPosition);
+	switch(star)
+	{
+	case 1:
+		if(_useUpEquipAcNode1->GetActionState())
+			_useUpEquipAcNode1->StopAction();
+		_useUpEquipAcNode1->playAnimOnce(0.12f, false);
+		break;
+	case 2:
+		if(_useUpEquipAcNode1->GetActionState())
+			_useUpEquipAcNode1->StopAction();
+		_useUpEquipAcNode1->playAnimOnce(0.12f, false);
+		if(_useUpEquipAcNode2->GetActionState())
+			_useUpEquipAcNode2->StopAction();
+		_useUpEquipAcNode2->playAnimOnce(0.12f, false);
+		break;
+	case 3:
+		if(_useUpEquipAcNode1->GetActionState())
+			_useUpEquipAcNode1->StopAction();
+		_useUpEquipAcNode1->playAnimOnce(0.12f, false);
+		if(_useUpEquipAcNode2->GetActionState())
+			_useUpEquipAcNode2->StopAction();
+		_useUpEquipAcNode2->playAnimOnce(0.12f, false);
+		if(_useUpEquipAcNode3->GetActionState())
+			_useUpEquipAcNode3->StopAction();
+		_useUpEquipAcNode3->playAnimOnce(0.12f, false);
+		break;
+	default:
+		break;
+	}
+	this->scheduleOnce(schedule_selector(EquipUpStarUiLayer::playDelayStarEffect), 1.0f);
+}
+
+void EquipUpStarUiLayer::playEffectUpdateUi( float dt )
+{
+	//bigstar->setVisible(false);
+	f_equipment* equip = EquipUpStarUIMgr::getInstance()->getEquipment();
+	if (!equip)
+		return;
+	int starNum=equip->m_equipex.nStarLv;
+	CCPoint point;
+	if (starNum==1)
+	{
+		point=ccp(200,160);
+	}
+	else{
+		point=ccp(260,160);
+	}
+	CCMoveTo *moveto=CCMoveTo::create(0.05,point);
+	CCScaleTo *scaleto = CCScaleTo::create(0.05, 0);
+	CCSequence* action = CCSequence::create(moveto, scaleto ,NULL);
+	bigstar->runAction(action);
+	/*EquipUpStarUiLayer *ui = getUiNodeByTag<EquipUpStarUiLayer>(WCT_EQUIPUPSTARUI);
+	if(ui != NULL)
+	{
+		ui->onUpstarCalbackImpl();
+	}*/
+	this->scheduleOnce(schedule_selector(EquipUpStarUiLayer::onUpstarCalbackImpl), 0.3f);
+}
+
+void EquipUpStarUiLayer::playDelayStarEffect( float dt )
+{
+	updateData();
+	SetEquipUpStarData();
+	setButtonClickable(true);
+	updateUI();
+	UpdateEquipNum();
+	playUpstarSE();
+	if (nstartLv >= 3)
+	{
+		updateHideAllShengXinControl();
+	}	
+}

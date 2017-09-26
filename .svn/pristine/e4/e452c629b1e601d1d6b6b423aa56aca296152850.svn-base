@@ -1,0 +1,193 @@
+/**
+ *	@file		ZZZManorTipsUI.cpp
+ *	@author		shenyaoyan
+ *	@date		2016/05/13
+ *	@version	
+ *	@brief		主宰者庄园钥匙的tips界面
+ */
+
+#include "ZZZManorTipsUI.h"
+#include "World.h"
+#include "ZZZTitleTipsUI.h"
+#include "ItemNode.h"
+#include "PackageManager.h"
+#include "CommonClient.h"
+
+ZZZManorTipsUI::ZZZManorTipsUI()
+	: m_spriteFrame(NULL)
+	, m_titleShow(NULL)
+	, m_titlePro(NULL)
+	, m_show(NULL)
+	, m_pro(NULL)
+{
+
+}
+
+ZZZManorTipsUI::~ZZZManorTipsUI()
+{
+
+}
+
+bool ZZZManorTipsUI::onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode)
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*, m_spriteFrame);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*, m_titlePro);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*, m_titleShow);
+	return f_btn_func_component::onAssignCCBMemberVariable(pTarget,pMemberVariableName,pNode);
+}
+
+
+SEL_CCControlHandler ZZZManorTipsUI::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onusedBtnPressed", ZZZManorTipsUI::onUsedBtnPressed);
+	return f_btn_func_component::onResolveCCBCCControlSelector(pTarget,pSelectorName);
+}
+
+void ZZZManorTipsUI::onNodeLoaded(CCNode * pNode, CCNodeLoader * pNodeLoader)
+{
+	CC_ASSERT(m_spriteFrame);
+	this->setContentSize(m_spriteFrame->getContentSize());
+	this->setAnchorPoint(m_spriteFrame->getAnchorPoint());
+
+	m_show = Helper::replaceLabelTTFWithLabelFTAndRemove(m_titleShow);
+	m_pro = Helper::replaceLabelTTFWithLabelFTAndRemove(m_titlePro);
+
+	set_close_fn(std::bind(&ZZZManorTipsUI::close,this));
+}
+
+ZZZManorTipsUI* ZZZManorTipsUI::getInstance()
+{
+	static ZZZManorTipsUI instance;
+	return &instance;
+}
+
+void ZZZManorTipsUI::onEnter()
+{
+	setTouchPriority(-1);
+	setTouchEnabled(true);
+	setAllChildernButtonPriority(m_spriteFrame,-1);
+	CCLayer::onEnter();
+}
+
+void ZZZManorTipsUI::onExit()
+{
+	CCLayer::onExit();
+}
+
+bool ZZZManorTipsUI::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (isTouchOnNodeContent(this,pTouch))
+	{
+		return true;
+	}
+	close();
+	return false;
+}
+
+void ZZZManorTipsUI::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+	
+}
+
+ZZZManorTipsUI* ZZZManorTipsUI::open()
+{
+	CCScene* scene = World::getInstance()->getScene();
+	if (scene)
+	{
+		CCNodeLoaderLibrary* ccNodeLoaderLibrary = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+		CCBReader* ccbReader = new CCBReader(ccNodeLoaderLibrary);
+		std::string fileName = CFGReader::instance()->get_profile_string("Art","UI","")+"zhuzaizhezhuangyuan.ccbi";
+		CCNode* node = ccbReader->readNodeGraphFromFile(fileName.c_str());
+		ccbReader->release();
+		if (node != NULL)
+		{
+			scene->addChild(node,WZ_POPUI, WCT_ZZZ_ITEM_TIPS_UI);
+		}
+		ZZZManorTipsUI* tipsUI = dynamic_cast<ZZZManorTipsUI*>(node);
+		return tipsUI;
+	}
+	return NULL;
+}
+
+void ZZZManorTipsUI::close()
+{
+	CCScene* scene = World::getInstance()->getScene();
+	if (scene)
+	{
+		scene->removeChildByTag(WCT_ZZZ_ITEM_TIPS_UI);
+	}
+}
+
+void ZZZManorTipsUI::setData(int index)
+{
+	m_idx = (short)index;
+
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM ItemTipData WHERE id = ?");
+	cmd->set_integer32(1 , ZZZMANOR);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("desc");
+		std::string descStr = table->get_text(idx);
+		m_show->setString(descStr.c_str());
+		idx = table->get_index("sdesc");
+		std::string proStr = table->get_text(idx);
+		m_pro->setString(proStr.c_str());
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+}
+
+void ZZZManorTipsUI::setPlace(const CCPoint& point)
+{
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+
+	bool putLeft = false;
+	bool putBottom = false;
+	if(point.x > winSize.width / 2.0f)
+		putLeft = true;
+	if(point.y > winSize.height / 2.0f)
+		putBottom = true;
+
+	CCSize uiSize = this->getContentSize();
+
+	float posX = 0;
+	float posY = 0;
+	if(putLeft)
+	{
+		posX = point.x - uiSize.width - ITEMNODE_CONTENTWIDTH / 2.0f;
+		if(posX < 0.f)
+			posX = 0.f;
+	}
+	else
+	{
+		posX =abs(point.x) + ITEMNODE_CONTENTWIDTH / 2.0f;//vv 2014.10.6 修改物品tips显示位置
+		if(posX + uiSize.width > winSize.width)
+			posX = winSize.width - uiSize.width;
+	}
+
+	if(putBottom)
+	{
+		posY = point.y + ITEMNODE_CONTENTHEIGHT / 2.0f - uiSize.height;
+		if(posY < 0.f)
+			posY = 0.f;
+	}
+	else
+	{
+		posY = point.y - ITEMNODE_CONTENTHEIGHT / 2.0f;
+		if(posY + uiSize.height > winSize.height)
+			posY = winSize.height - uiSize.height;
+	}
+	this->setPosition(ccp(posX, posY));
+}
+
+void ZZZManorTipsUI::setButtonVisible(bool isShow)
+{
+	set_btn_type(isShow?eUseBtn:eHideAll);
+}
+
+void ZZZManorTipsUI::onUsedBtnPressed(CCObject* pSender, CCControlEvent pCCControlEvent)
+{
+	PackageManager::getInstance()->useBagItem((short)m_idx);
+	close();
+}

@@ -1,0 +1,308 @@
+/**
+*	@file		BFBattleResultUi.cpp
+*	@author		zhangyajie
+*	@date		2016/05/05
+*	@version	
+*	@brief		血战到底玩家列表UI
+*/
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "f_string_util.h"
+#include "CfgReader.h"
+#include "UiManager.h"
+#include "BloodFightMgr.h"
+#include "CommonClient.h"
+#include "GameEventDefine.h"
+#include "f_string_table.h"
+#include "ListControl.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "NameMgr2.h"
+#include "PackageManager.h"
+#include "BFBattlePlayerListUi.h"
+
+BFBattlePlayerListUi::BFBattlePlayerListUi()
+{
+
+}
+BFBattlePlayerListUi::~BFBattlePlayerListUi()
+{
+
+}
+
+void BFBattlePlayerListUi::onEnter()
+{
+	CCNode::onEnter();
+	REGISTER_EVENT(bf_refresh_playerlist,BFBattlePlayerListUi,on_event_refresh_player_list);
+	REGISTER_EVENT(bf_refresh_player_att,BFBattlePlayerListUi,on_event_refresh_player_list_hp);
+	REG_NAME_CB(this,&BFBattlePlayerListUi::onReceiveRoleName);
+}
+
+void BFBattlePlayerListUi::onExit()
+{
+	UNREGISTER_EVENT(bf_refresh_playerlist,BFBattlePlayerListUi,on_event_refresh_player_list);
+	UNREGISTER_EVENT(bf_refresh_player_att,BFBattlePlayerListUi,on_event_refresh_player_list_hp);
+	UNREG_NAME_CB(this,&BFBattlePlayerListUi::onReceiveRoleName);
+	CCNode::onExit();
+}
+
+SEL_MenuHandler BFBattlePlayerListUi::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+SEL_CCControlHandler BFBattlePlayerListUi::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+bool BFBattlePlayerListUi::onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode)
+{
+	string str;
+	for ( int i = 0 ; i < BF_MAX_PLAYER_NUM ; i++)
+	{
+		safe_sprintf(str,"m_pNodePlayer%d",i+1);
+		CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,str.c_str(),CCNode*,m_pPlayerItemNode[i]);
+	}
+	return false;
+}
+
+void BFBattlePlayerListUi::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	for ( int i = 0 ; i < BF_MAX_PLAYER_NUM ; i++)
+	{
+		m_arrPlayerItem[i].m_pNameft = Helper::getLabelFTByParentAndTag(m_pPlayerItemNode[i], BFPlayer_TTF_Name);
+		m_arrPlayerItem[i].m_pNameft->setString(STRING_TABLE["73"]);
+		m_arrPlayerItem[i].m_pClass = dynamic_cast<CCSprite*>( m_pPlayerItemNode[i]->getChildByTag(BFPlayer_Node_Class));
+		m_arrPlayerItem[i].m_pClass->setVisible(false);
+		m_arrPlayerItem[i].m_pDead = dynamic_cast<CCSprite*>( m_pPlayerItemNode[i]->getChildByTag(BFPlayer_Node_Dead));
+		m_arrPlayerItem[i].m_pDead->setVisible(false);
+		m_arrPlayerItem[i].m_pHpBg = dynamic_cast<CCSprite*>( m_pPlayerItemNode[i]->getChildByTag(BFPlayer_Node_HpBg));
+		m_arrPlayerItem[i].m_pHpBg->setVisible(false);
+		CCSprite* t_hpPro = dynamic_cast<CCSprite*>( m_pPlayerItemNode[i]->getChildByTag(BFPlayer_Node_HpBar));
+		m_arrPlayerItem[i].m_pHpBar = initHProgressBar(t_hpPro);
+		m_pPlayerItemNode[i]->addChild(m_arrPlayerItem[i].m_pHpBar);
+	}
+}
+
+BFBattlePlayerListUi* BFBattlePlayerListUi::create_item()
+{
+	CCNodeLoaderLibrary* lib  = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string strFullPath = CFGReader::instance()->get_ui_ccbi_filepath("xuezhanvsitem");
+	CCNode* node = reader->readNodeGraphFromFile(strFullPath.c_str());
+	BFBattlePlayerListUi* item = dynamic_cast<BFBattlePlayerListUi*>(node);
+	CC_ASSERT(item);
+	return item;
+}
+
+//初始化玩家信息
+void BFBattlePlayerListUi::initPlayerInfo()
+{
+	BFBattleRoleDataMap& pMapData = BloodFightMgr::getInstance()->getBattleRoleData();
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	BFBattleRoleDataMap::iterator iter = pMapData.find(player->getId());
+	CC_ASSERT(iter != pMapData.end());
+	if (iter != pMapData.end())
+	{
+		pushPlayerInfoToList(iter->second,0);
+		m_pFriendIDMap[0] = iter->second.dwRoleID;
+	}
+	iter = pMapData.begin();
+	while(iter != pMapData.end())
+	{
+		if (iter->first == player->getId())
+		{
+			iter++;
+			continue;
+		}
+		if (iter->second.m_bIsFriend)
+		{
+			pushPlayerInfoToList(iter->second,m_pFriendIDMap.size());
+			m_pFriendIDMap[m_pFriendIDMap.size()] = iter->second.dwRoleID;
+		}
+		else
+		{
+			pushPlayerInfoToList(iter->second,m_pEmemyIDMap.size() + BF_MAX_PLAYER_NUM / 2);
+			m_pEmemyIDMap[m_pEmemyIDMap.size() + BF_MAX_PLAYER_NUM / 2 ] = iter->second.dwRoleID;
+		}
+		iter++;
+	}
+}
+
+CCProgressTimer* BFBattlePlayerListUi::initHProgressBar(CCSprite* sprite)
+{
+	CCProgressTimer *progress = CCProgressTimer::create(sprite);
+	sprite->setVisible(false);
+	progress->setType(kCCProgressTimerTypeBar);
+	progress->setMidpoint(ccp(0.0, 0.0));
+	progress->setBarChangeRate(ccp(1.0, 0.0));
+	progress->setPercentage(0.0f);
+	progress->setPosition(sprite->getPosition());
+	progress->setAnchorPoint(sprite->getAnchorPoint());
+	return progress;
+}
+
+void BFBattlePlayerListUi::on_event_refresh_player_list( bf_refresh_playerlist* evt )
+{
+	BFBattleRoleDataMap& pMapData = BloodFightMgr::getInstance()->getBattleRoleData();
+	BFBattleRoleDataMap::iterator iter = pMapData.find(evt->roleID);
+	if (iter == pMapData.end())
+		return;
+	if (evt->isFriend)
+	{
+		pushPlayerInfoToList(iter->second,m_pFriendIDMap.size());
+		m_pFriendIDMap[m_pFriendIDMap.size()] = iter->second.dwRoleID;
+	}
+	else
+	{
+		pushPlayerInfoToList(iter->second,m_pEmemyIDMap.size() + BF_MAX_PLAYER_NUM / 2);
+		m_pEmemyIDMap[m_pEmemyIDMap.size() + BF_MAX_PLAYER_NUM / 2] = iter->second.dwRoleID;
+	}
+}
+
+void BFBattlePlayerListUi::pushPlayerInfoToList(BFBattleRoleData pData,int pIndex)
+{
+	CC_ASSERT(pIndex < BF_MAX_PLAYER_NUM);
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	string str = "";
+	int tempIndex = pIndex;
+	if (pData.dwRoleID == player->getId())
+	{
+		str = player->getNameUtf8();
+	}
+	else
+	{
+		str = STRING_TABLE["BF_Player_Hide_Name"];
+		if (pData.m_bIsFriend)
+		{
+			NameMgr2::getInstance()->queryName(pData.dwRoleID,str);
+		}
+	}
+	m_arrPlayerItem[tempIndex].m_pNameft->setString(str.c_str());
+	m_arrPlayerItem[tempIndex].m_pDead->setVisible(false);
+	m_arrPlayerItem[tempIndex].m_pHpBg->setVisible(true);
+	m_arrPlayerItem[tempIndex].m_pHpBar->setPercentage(pData.dwHp * 100.0f / pData.dwMaxHp);
+	str = pData.dwClass == EV_Warrior ? BF_VS_ZHAN_HEAD_PNG :  pData.dwClass == EV_Mage ? BF_VS_FA_HEAD_PNG : BF_VS_DAO_HEAD_PNG;
+	CCSpriteFrame* normalSprite = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str.c_str());
+	m_arrPlayerItem[tempIndex].m_pClass->setDisplayFrame(normalSprite);
+	m_arrPlayerItem[tempIndex].m_pClass->setVisible(true);
+}
+
+void BFBattlePlayerListUi::onReceiveRoleName( unsigned int roleid , const std::string& name )
+{
+	map<int ,int>::iterator iter = m_pFriendIDMap.begin();
+	while(iter != m_pFriendIDMap.end())
+	{
+		if (iter->second == roleid)
+		{
+			m_arrPlayerItem[iter->first].m_pNameft->setString(name.c_str());
+			return;
+		}
+		iter++;
+	}
+	iter = m_pEmemyIDMap.begin();
+	while(iter != m_pEmemyIDMap.end())
+	{
+		if (iter->second == roleid)
+		{
+			if (m_arrPlayerItem[iter->first].m_pDead->isVisible())
+			{
+				m_arrPlayerItem[iter->first].m_pNameft->setString(name.c_str());
+			}
+			return;
+		}
+		iter++;
+	}
+}
+
+void BFBattlePlayerListUi::on_event_refresh_player_list_hp( bf_refresh_player_att* evt )
+{
+
+	BFBattleRoleDataMap& pMapData = BloodFightMgr::getInstance()->getBattleRoleData();
+	BFBattleRoleDataMap::iterator dataiter = pMapData.find(evt->roleID);
+	if (dataiter == pMapData.end())
+		return;
+	map<int ,int>::iterator iter = m_pFriendIDMap.begin();
+	while(iter != m_pFriendIDMap.end())
+	{
+		if (iter->second == evt->roleID)
+		{
+			if (evt->isDead || evt->isLeave)
+			{
+				m_arrPlayerItem[iter->first].m_pHpBar->setPercentage(0.0f);
+				m_arrPlayerItem[iter->first].m_pDead->setVisible(true);
+				m_arrPlayerItem[iter->first].m_pNameft->setTextColor(Helper::converColor3B_2_4B(ccc3(0xff,0xff,0xff)));
+				string str;
+				if (NameMgr2::getInstance()->queryName(evt->roleID,str))
+				{
+					m_arrPlayerItem[iter->first].m_pNameft->setString(str.c_str());
+				}
+			}
+// 			else if (evt->isLeave || evt->isDead)
+// 			{
+// 				m_arrPlayerItem[iter->first].m_pHpBar->setPercentage(0.0f);
+// 				m_arrPlayerItem->m_pNameft->setString(STRING_TABLE["73"]);
+// 				m_arrPlayerItem[iter->first].m_pDead->setVisible(false);
+// 				m_arrPlayerItem[iter->first].m_pClass->setVisible(false);
+// 				m_arrPlayerItem[iter->first].m_pHpBg->setVisible(false);
+// 			}
+			else
+			{
+				if (evt->attType == ERRA_MaxHP)
+				{
+					dataiter->second.dwMaxHp = evt->hp;
+				}
+				else if (evt->attType == ERRA_HP)
+				{
+					dataiter->second.dwHp = evt->hp;
+				}
+				m_arrPlayerItem[iter->first].m_pHpBar->setPercentage(dataiter->second.dwHp  * 100.f/ dataiter->second.dwMaxHp);
+			}
+			return;
+		}
+		iter++;
+	}
+
+	iter = m_pEmemyIDMap.begin();
+	while(iter != m_pEmemyIDMap.end())
+	{
+		if (iter->second == evt->roleID)
+		{
+			if (evt->isDead || evt->isLeave)
+			{
+				m_arrPlayerItem[iter->first].m_pHpBar->setPercentage(0.0f);
+				m_arrPlayerItem[iter->first].m_pDead->setVisible(true);
+				m_arrPlayerItem[iter->first].m_pNameft->setTextColor(Helper::converColor3B_2_4B(ccc3(0xff,0xff,0xff)));
+				string str;
+				if (NameMgr2::getInstance()->queryName(evt->roleID,str))
+				{
+					m_arrPlayerItem[iter->first].m_pNameft->setString(str.c_str());
+				}
+			}
+// 			else if (evt->isLeave)
+// 			{
+// 				m_arrPlayerItem[iter->first].m_pHpBar->setPercentage(0.0f);
+// 				m_arrPlayerItem->m_pNameft->setString(STRING_TABLE["73"]);
+// 				m_arrPlayerItem[iter->first].m_pDead->setVisible(false);
+// 				m_arrPlayerItem[iter->first].m_pClass->setVisible(false);
+// 				m_arrPlayerItem[iter->first].m_pHpBg->setVisible(false);
+// 			}
+			else
+			{
+				if (evt->attType == ERRA_MaxHP)
+				{
+					dataiter->second.dwMaxHp = evt->hp;
+				}
+				else if (evt->attType == ERRA_HP)
+				{
+					dataiter->second.dwHp = evt->hp;
+				}
+				m_arrPlayerItem[iter->first].m_pHpBar->setPercentage(dataiter->second.dwHp  * 100.f/ dataiter->second.dwMaxHp);
+			}
+			return;
+		}
+		iter++;
+	}
+}

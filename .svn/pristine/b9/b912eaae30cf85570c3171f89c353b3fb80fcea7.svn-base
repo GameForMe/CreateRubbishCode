@@ -1,0 +1,351 @@
+/**
+*	@file		BFBattleResultUi.cpp
+*	@author		zhangyajie
+*	@date		2016/05/05
+*	@version	
+*	@brief		血战到底扎战斗结果UI
+*/
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "f_string_util.h"
+#include "CfgReader.h"
+#include "UiManager.h"
+#include "BloodFightMgr.h"
+#include "CommonClient.h"
+#include "CmdAdapter.h"
+#include "GameEventDefine.h"
+#include "f_string_table.h"
+#include "TCPClient.h"
+#include "WorldPacket.h"
+#include "ListControl.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "CommonMsgDefine.h"
+#include "PackageManager.h"
+#include "BFBattleResultUi.h"
+
+BFBattleResultUi::BFBattleResultUi()
+{
+
+}
+
+BFBattleResultUi::~BFBattleResultUi()
+{
+
+}
+
+CCNode * BFBattleResultUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["BFBattleResultUiLayer"] = UiLayerLoader<BFBattleResultUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("xuezhanjieguo", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+// void BFBattleResultUi::setRankShowType(e_BFRankShowType pType)
+// {
+// 	BFPointsRankUiLayer* pUi = getUiLayer();
+// 	pUi->setRankShowType(pType);
+// }
+
+BFBattleResultUiLayer * BFBattleResultUi::getUiLayer()
+{
+	return getUiNodeByTag<BFBattleResultUiLayer>(WCT_BF_BattleResult_UI);
+}
+void BFBattleResultUi::refreshUiByResult(s_net_cmd *cmd)
+{
+	BFBattleResultUiLayer* pLayer = getUiNodeByTag<BFBattleResultUiLayer>(WCT_BF_BattleResult_UI);
+	if (pLayer)
+	{
+		pLayer->refreshUiByResult(cmd);
+	}
+}
+
+void BFBattleResultUi::refreshUiByBFResult(s_net_cmd *cmd)
+{
+	BFBattleResultUiLayer* pLayer = getUiNodeByTag<BFBattleResultUiLayer>(WCT_BF_BattleResult_UI);
+	if (pLayer)
+	{
+		pLayer->refreshUiByBFResult(cmd);
+	}
+}
+
+
+
+BFBattleResultUiLayer::BFBattleResultUiLayer()
+	:m_pNodeMain(NULL)
+	,m_pNodeWin(NULL)
+	,m_pNodeDead(NULL)
+	,m_pNodeTied(NULL)
+	,m_pNodeResult(NULL)
+	,m_pNodeWinner(NULL)//赢家的模块
+	,m_ftResultScore(NULL)
+	,m_ftKillScore(NULL)
+	,m_ftSerialScore(NULL)
+	,m_ftKillSerialScore(NULL)
+	,m_ftDeadDes(NULL)
+	,m_ftTiedDes(NULL)
+	,m_ftWinNum(NULL)
+	,m_fShowTime(0.0f)
+{
+
+}
+
+BFBattleResultUiLayer::~BFBattleResultUiLayer()
+{
+
+}
+
+cocos2d::extension::SEL_CCControlHandler BFBattleResultUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::SEL_MenuHandler BFBattleResultUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+
+	return NULL;
+}
+
+bool BFBattleResultUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,m_pNodeMain);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,m_pNodeWin);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,m_pNodeDead);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,m_pNodeTied);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,m_pNodeResult);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,m_pNodeWinner);
+
+	return false;
+}
+
+void BFBattleResultUiLayer::onEnter()
+{
+	//REGISTER_EVENT(receive_battle_info_event,FMBBattleUiLayer,recive_battle_info);
+	NormalLayer::onEnter();
+	this->scheduleUpdate();
+	this->setTouchPriority(-1);
+}
+
+void BFBattleResultUiLayer::onExit()
+{
+	//UNREGISTER_EVENT(receive_battle_info_event,FMBBattleUiLayer,recive_battle_info);
+	NormalLayer::onExit();
+	this->unscheduleUpdate();
+}
+void BFBattleResultUiLayer::update(float delta)
+{
+ 	if (m_fShowTime <= BF_SHOW_TIME_MIN)
+ 	{
+ 		m_fShowTime += delta;
+ 	}
+}
+
+void BFBattleResultUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_ftResultScore		=	Helper::getLabelFTByParentAndTag(m_pNodeMain, 1);
+	m_ftKillScore		=	Helper::getLabelFTByParentAndTag(m_pNodeMain, 2);
+	m_ftSerialScore		=	Helper::getLabelFTByParentAndTag(m_pNodeMain, 3);
+	m_ftKillSerialScore =	Helper::getLabelFTByParentAndTag(m_pNodeMain, 4);
+	m_ftDeadDes			=	Helper::getLabelFTByParentAndTag(m_pNodeMain, 5);
+	m_ftTiedDes			=	Helper::getLabelFTByParentAndTag(m_pNodeMain, 6);
+	m_ftWinNum			=	Helper::getLabelFTByParentAndTag(m_pNodeWinner,1);
+	m_ftResultDes		=	Helper::getLabelFTByParentAndTag(m_pNodeMain, 11);
+}
+
+bool BFBattleResultUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	//消息改为 显示完成后服务器强制传送 逻辑屏蔽
+ 	if (m_fShowTime >= BF_SHOW_TIME_MIN && m_pResultType == BF_Result_Result)
+ 	{
+ 		CLOSE_UI(WCT_BF_BattleResult_UI);
+ 	}
+	return true;
+}
+
+// void BFBattleResultUiLayer::refreshUiByResultType(e_BFBattleResultType pType)
+// {
+// 
+// 	if (pType == BF_Result_Null)
+// 		return;
+// 	m_pNodeWin->setVisible(BF_Result_Win == pType);
+// 	m_pNodeDead->setVisible(BF_Result_Dead == pType);
+// 	m_pNodeTied->setVisible(BF_Result_Tied == pType);
+// 	m_pNodeResult->setVisible(BF_Result_Result == pType);
+// 	m_ftDeadDes->setVisible(BF_Result_Dead == pType);
+// 	m_ftTiedDes->setVisible(BF_Result_Tied == pType);
+// }
+
+void BFBattleResultUiLayer::refreshUiByResult(s_net_cmd *cmd)
+{
+	NET_S2C_Xzdd_Battle_Score* msg = (NET_S2C_Xzdd_Battle_Score*)cmd;
+	CC_ASSERT(msg);
+	e_BFBattleResultType pType =(e_BFBattleResultType)msg->nRet;
+	m_pResultType = pType;
+
+	switch(m_pResultType)
+	{
+	case BF_Result_Win:
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(CHAllENGSUCCESS);
+		break;
+	case BF_Result_Tied:
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(MYSTERYBOXSUCCESS);
+		break;
+	case BF_Result_Result:
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_26);
+		break;
+	case BF_Result_Dead:
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(CHALLENGFAIL);
+		break;
+	}
+
+	CCSprite* t_pMain = dynamic_cast<CCSprite*>(m_pNodeMain);
+	if (t_pMain == NULL)
+		return;
+
+	if (pType == BF_Result_Dead)
+	{
+		CCSpriteFrame *normalSprite = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("xuezhanjieguo_frame1");
+		t_pMain->setDisplayFrame(normalSprite);
+		CCSprite* t_pTextBg = NULL;
+		
+		for (int i = 7; i < 11; i++)
+		{
+			t_pTextBg = dynamic_cast<CCSprite*>(t_pMain->getChildByTag(i));
+			if (t_pTextBg)
+			{
+				normalSprite = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("xuezhanjieguo_jifendishibai");
+				t_pTextBg->setDisplayFrame(normalSprite);
+			}
+		}
+	}
+
+	//配置显示信息
+	m_pNodeWin->setVisible(BF_Result_Win == pType);
+	m_pNodeWinner->setVisible(BF_Result_Win == pType);
+	m_pNodeDead->setVisible(BF_Result_Dead == pType);
+	m_pNodeTied->setVisible(BF_Result_Tied == pType);
+	m_pNodeResult->setVisible(BF_Result_Result == pType);
+	m_ftDeadDes->setVisible(BF_Result_Result != pType);
+	m_ftDeadDes->setString(BF_Result_Dead == pType ? STRING_TABLE["BF_Result_Dead_Hp_Des"] : STRING_TABLE["BF_Result_Tied_Win_Hp_Des"]);
+
+	m_ftTiedDes->setVisible(BF_Result_Tied == pType);
+	m_ftResultDes->setVisible(BF_Result_Result == m_pResultType);
+	initWinAnimation();
+	string str;
+	safe_sprintf(str,"%d",msg->nScore);
+	m_ftResultScore->setString(str.c_str());
+	safe_sprintf(str,"%d",msg->dwKillScore);
+	m_ftKillScore->setString(str.c_str());
+	safe_sprintf(str,"%d",msg->dwSerialWinScore);
+	m_ftSerialScore->setString(str.c_str());
+	safe_sprintf(str,"%d",msg->dwEndScore);
+	m_ftKillSerialScore->setString(str.c_str());
+	safe_sprintf(str,"%d",msg->dwSerialWin);
+	m_ftWinNum->setString(str.c_str());
+	
+}
+
+void BFBattleResultUiLayer::refreshUiByBFResult(s_net_cmd *cmd)
+{
+	NET_S2C_Xzdd_Total_Score* msg = (NET_S2C_Xzdd_Total_Score*)cmd;
+	CC_ASSERT(msg);
+	m_pResultType = BF_Result_Result;
+
+	CCSprite* t_pMain = dynamic_cast<CCSprite*>(m_pNodeMain);
+	if (t_pMain == NULL)
+		return;
+	switch(m_pResultType)
+	{
+	case BF_Result_Win:
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(CHAllENGSUCCESS);
+		break;
+	case BF_Result_Tied:
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(MYSTERYBOXSUCCESS);
+		break;
+	case BF_Result_Result:
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_26);
+		break;
+	case BF_Result_Dead:
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(CHALLENGFAIL);
+		break;
+	}
+	 
+	//配置显示信息
+	m_pNodeWin->setVisible(BF_Result_Win == m_pResultType);
+	m_pNodeWinner->setVisible(BF_Result_Win == m_pResultType);
+	m_pNodeDead->setVisible(BF_Result_Dead == m_pResultType);
+	m_pNodeTied->setVisible(BF_Result_Tied == m_pResultType);
+	m_pNodeResult->setVisible(BF_Result_Result == m_pResultType);
+	m_ftDeadDes->setVisible(BF_Result_Dead == m_pResultType);
+	m_ftTiedDes->setVisible(BF_Result_Tied == m_pResultType);
+	m_ftResultDes->setVisible(BF_Result_Result == m_pResultType);
+	initWinAnimation();
+
+	CCSprite* t_pNode = dynamic_cast<CCSprite*>(t_pMain->getChildByTag(BF_Node_Line1Des));
+	CCSpriteFrame *normalSprite = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("xuezhanjieguo_xuezhanjifen");
+	t_pNode->setDisplayFrame(normalSprite);
+	t_pNode = dynamic_cast<CCSprite*>(t_pMain->getChildByTag(BF_Node_Line2Des));
+	normalSprite = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("xuezhanjieguo_zuizhongpaiming");
+	t_pNode->setDisplayFrame(normalSprite);
+	t_pNode = dynamic_cast<CCSprite*>(t_pMain->getChildByTag(BF_Node_Line3Des));
+	normalSprite = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("xuezhanjieguo_zuigaoliansheng");
+	t_pNode->setDisplayFrame(normalSprite);
+	t_pNode = dynamic_cast<CCSprite*>(t_pMain->getChildByTag(BF_Node_Line4Des));
+	t_pNode->setVisible(false);
+
+	string str;
+	safe_sprintf(str,"%d",msg->dwScore);
+	m_ftResultScore->setString(str.c_str());
+	safe_sprintf(str,"%d",msg->dwRanking);
+	m_ftKillScore->setString(str.c_str());
+	safe_sprintf(str,"%d",msg->dwMaxSerialWin);
+	m_ftSerialScore->setString(str.c_str());
+
+	t_pMain->getChildByTag(BF_Node_Line4Bg)->setVisible(false);
+
+	m_ftKillSerialScore->setVisible(false);
+	m_ftWinNum->setVisible(false);
+}
+
+void BFBattleResultUiLayer::initWinAnimation()
+{
+	if (m_pResultType == BF_Result_Null)
+		return;
+	CCSprite* t_pSprite[4];
+	CCActionInterval* t_pActionBy[4];
+	CCFadeIn* t_pFadeIn[4];
+	if (m_pResultType != BF_Result_Dead)
+	{
+		CCNode* t_pNode = m_pResultType == BF_Result_Win ? m_pNodeWin : m_pResultType == BF_Result_Tied ? m_pNodeTied : m_pNodeResult; 
+		
+		for (int i = 0 ; i < 4 ; i++)
+		{
+			t_pSprite[i] = dynamic_cast<CCSprite*>(t_pNode->getChildByTag(i + 1));
+			t_pSprite[i]->setVisible(false);
+			t_pSprite[i]->setScale(8.0f);//挑
+			t_pActionBy[i] = CCScaleBy::create(0.3f,0.125f);
+			t_pFadeIn[i] = CCFadeIn::create(0.3f);
+			t_pSprite[i]->runAction(CCSequence::create(CCDelayTime::create(0.5f + i * .2f),CCCallFuncO::create(this,callfuncO_selector(BFBattleResultUiLayer::onChangeNodeVisible),t_pSprite[i]),CCSpawn::create(t_pActionBy[i],t_pFadeIn[i],NULL),NULL));//挑
+		}
+	}
+	else
+	{
+		CCNode* t_pNode = m_pNodeDead; 
+		for (int i = 0 ; i < 4 ; i++)
+		{
+			t_pSprite[i] = dynamic_cast<CCSprite*>(t_pNode->getChildByTag(i + 1));
+			t_pSprite[i]->setVisible(false);
+			t_pSprite[i]->setPositionY(t_pSprite[i]->getPositionY() + 100);
+			t_pActionBy[i] = CCMoveTo::create(0.3f,ccp(t_pSprite[i]->getPositionX(),t_pSprite[i]->getPositionY() - 100));
+			t_pFadeIn[i] = CCFadeIn::create(0.3f);
+			t_pSprite[i]->runAction(CCSequence::create(CCDelayTime::create(0.5f + i * .2f),CCCallFuncO::create(this,callfuncO_selector(BFBattleResultUiLayer::onChangeNodeVisible),t_pSprite[i]),CCSpawn::create(t_pActionBy[i],t_pFadeIn[i],NULL),NULL));//挑
+		}
+	}
+	
+}
+
+void BFBattleResultUiLayer::onChangeNodeVisible(CCObject* sprite)
+{
+	dynamic_cast<CCSprite*>(sprite)->setVisible(true);
+}

@@ -1,0 +1,201 @@
+#include "DeathUi.h"
+#include "UiLoader.h"
+#include "TCPClient.h"
+#include "UiManager.h"
+#include "ToolTip.h"
+#include "f_string_table.h"
+#include "FMBattleMgr.h"
+#include "f_string_util.h"
+#include "PackageManager.h"
+CCNode * DeathUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["FengMoBangPvpDieUiLayer"] = UiNodeLoader<DeathUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("fengmobangdie", nodeLoaders, _loadSpriteSheet);
+	CC_ASSERT(uiNode != NULL);
+	return uiNode;
+}
+
+void DeathUi::updateData( unsigned int id )
+{
+	DeathUiLayer * uilayer=getUiNodeByTag<DeathUiLayer>(WCT_DeathUi);
+	if(uilayer)
+		uilayer->updateData(id);
+}
+
+
+///////////
+DeathUiLayer::DeathUiLayer():
+m_leftLifeLabel(NULL),
+m_cdTimeLabel(NULL),
+m_autoLeftTimeLabel(NULL)
+{
+
+}
+
+void DeathUiLayer::onNodeLoaded( cocos2d::CCNode *pNode, cocos2d::extension::CCNodeLoader *pNodeLoader )
+{
+	_frame=dynamic_cast<CCSprite*>(getChildByTag(0));
+	m_name = (CCLabelTTF*)_frame->getChildByTag(0);
+
+	m_leftLifeLabel= dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(4));
+	m_cdTimeLabel= dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(6));
+	m_autoLeftTimeLabel= dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(8));
+
+	m_fuhuoBtn= (CCControlButton*)_frame->getChildByTag(11);
+	m_fuhuoBtn->setGray();
+	showCDTime(true);
+//	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void DeathUiLayer::showCDTime(bool _show)
+{
+	m_cdTimeShow=_show;
+	for (int i=5;i<9;i++)
+	{
+		CCLabelTTF * label= (CCLabelTTF*)_frame->getChildByTag(i);
+		label->setVisible(false);
+	}
+	if(_show)
+	{
+		for (int i=5;i<=7;i++)
+		{
+			CCLabelTTF * label= (CCLabelTTF*)_frame->getChildByTag(i);
+			label->setVisible(true);
+		}
+	}
+	else
+	{
+		for (int i=8;i<=9;i++)
+		{
+			CCLabelTTF * label= (CCLabelTTF*)_frame->getChildByTag(i);
+			label->setVisible(true);
+		}
+	}
+}
+
+void DeathUiLayer::updateData( unsigned int id )
+{
+	Role* role = RoleManager::getInstance()->findRole(id);
+	if (role && role->getCreatureType() == CT_PLAYER)
+	{
+		Player* player = dynamic_cast<Player*>(role);
+		if (player)
+		{
+			if(m_name)
+				m_name->setString(player->getNameUtf8().c_str());
+		}
+	}
+	schedule(SEL_SCHEDULE(&DeathUiLayer::updateTime),1.0);
+	m_leftCDTime=20;
+	m_leftReviveTime=10;
+
+	string str;
+	safe_sprintf(str,"%d",(int)m_leftCDTime);
+	if(m_cdTimeLabel)
+		m_cdTimeLabel->setString(str.c_str());
+
+	safe_sprintf(str,"%d",FMBattleMgr::getInstance()->m_leftLifeNum);
+	if(m_leftLifeLabel)
+		m_leftLifeLabel->setString(str.c_str());
+}
+
+void DeathUiLayer::updateTime( float dt )
+{
+
+	if(m_leftCDTime<=0)
+	{//自动复活
+		if(m_cdTimeShow)
+		{
+			m_fuhuoBtn->delGray();
+			showCDTime(false);
+		}
+			
+		m_leftReviveTime-=dt;
+		string str;
+		safe_sprintf(str,"%d",(int)m_leftReviveTime);
+		if(m_autoLeftTimeLabel)
+			m_autoLeftTimeLabel->setString(str.c_str());
+		if(m_leftReviveTime<=0)
+		{
+			unschedule(SEL_SCHEDULE(&DeathUiLayer::updateTime));
+			//原地复活
+			NET_SIC_role_revive cmd;
+			cmd.eType = ERRT_FreeLocus;
+			TCP_CLIENT->send_net_cmd(&cmd, NP_CRITICAL, false);
+			UiMgr::getInstance()->closeUi(WCT_DeathUi,false);
+		}
+	}
+	else
+	{//CD时间更新
+		m_leftCDTime-=dt;
+		string str;
+		safe_sprintf(str,"%d",(int)m_leftCDTime);
+		if(m_cdTimeLabel)
+			m_cdTimeLabel->setString(str.c_str());
+	}
+	
+}
+cocos2d::extension::SEL_CCControlHandler DeathUiLayer::onResolveCCBCCControlSelector( CCObject *pTarget, const char *pSelectorName )
+{
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onAnquanfuhuoBtnPressed", DeathUiLayer::onAnquanfuhuoBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onlijifuhuoBtnPressed", DeathUiLayer::onlijifuhuoBtnPressed);
+	return NULL;
+}
+
+
+bool DeathUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if ( !isVisible() || !isRunning() || !hasVisibleParents() )
+	{
+		return false;
+	}
+	return true;
+}
+
+void DeathUiLayer::onAnquanfuhuoBtnPressed( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CCLOG("onAnquanfuhuoPressedBtn");
+	if(m_cdTimeShow)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["FM_BattleTip3"]);
+		return;
+	}
+		
+	NET_SIC_role_revive cmd;
+	cmd.eType = ERRT_FreeLocus;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_CRITICAL, false);
+	UiMgr::getInstance()->closeUi(WCT_DeathUi,false);
+}
+
+void DeathUiLayer::onlijifuhuoBtnPressed( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CCLOG("onlijifuhuoPressedBtn");
+	CCLOG("onAnquanfuhuoPressedBtn");
+	NET_SIC_role_revive cmd;
+	cmd.eType = ERRT_Perfection;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_CRITICAL, false);
+	if(PackageManager::getInstance()->getYuanBao()>=10||PackageManager::getInstance()->getDiamond()>=10)//钱不够，不关闭
+		UiMgr::getInstance()->closeUi(WCT_DeathUi,false);
+}
+
+void DeathUiLayer::onEnter()
+{
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+}
+
+void DeathUiLayer::onExit()
+{
+	CCLayer::onExit();
+//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+
+
+
+
+
+

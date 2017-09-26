@@ -1,0 +1,502 @@
+#include "NumKeypad.h"
+#include "World.h"
+#include "UiResourceMgr.h"
+#include "CfgReader.h"
+#include "BaseDefine.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "BaseDefine.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+
+NumKeyPadLabelDelegate::NumKeyPadLabelDelegate( CCLabelTTF *label )
+{
+	CC_ASSERT(label != NULL);
+	_label = label;
+	label->retain();
+}
+
+NumKeyPadLabelDelegate::~NumKeyPadLabelDelegate()
+{
+	if(_label != NULL)
+	{
+		_label->release();
+		_label = NULL;
+	}
+}
+
+int NumKeyPadLabelDelegate::onAttach()
+{
+	if(_label != NULL)
+	{
+		std::string str = _label->getString();
+		std::string numStr = str.substr(_prefix.length(), str.length() - _suffix.length());
+		return atoi(numStr.c_str());
+	}
+	return 0;
+}
+
+void NumKeyPadLabelDelegate::onNumChange( int num)
+{
+	setLabelNum(num);
+}
+
+void NumKeyPadLabelDelegate::onFinished( int num, int srcNum )
+{
+	setLabelNum(num);
+}
+
+void NumKeyPadLabelDelegate::onCancel( int num )
+{
+	setLabelNum(num);
+}
+
+void NumKeyPadLabelDelegate::setLabelNum( int num )
+{
+	if(_label != NULL)
+	{
+		std::ostringstream str;
+		str << _prefix << num << _suffix;
+		_label->setString(str.str().c_str());
+	}
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+
+NumKeypad * NumKeypad::getInstance()
+{
+	static NumKeypad instance;
+	return &instance;
+}
+
+NumKeypad::NumKeypad()
+{
+
+}
+
+NumKeypad::~NumKeypad()
+{
+
+}
+
+void NumKeypad::open()
+{
+	if(isOpen())
+		return;
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+		ccNodeLoaderLibrary->registerCCNodeLoader("NumKeypadFrame", NumKeypadLoader::loader());
+		cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+		CCNode *node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "numkeypad.ccbi").c_str());
+		_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+		UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+		ccbReader->release();
+		if(node != NULL) {
+			scene->addChild(node, WZ_POPUI, WCT_NumKeypad);
+			CCSize size = CCDirector::sharedDirector()->getWinSize();
+			node->setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+		}
+	}
+}
+
+void NumKeypad::close()
+{
+
+	if(!isOpen())
+		return;
+
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		NumKeypadFrame *node = dynamic_cast<NumKeypadFrame*>(scene->getChildByTag(WCT_NumKeypad));
+		if (node)
+		{
+			//node->setDelegate(NULL,1); //第二个状态为是否移除
+			node->removeDelegate();
+			node->removeFromParent();
+			//scene->removeChildByTag(WCT_NumKeypad);
+		}
+	}
+
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+}
+
+bool NumKeypad::isOpen()
+{
+	return (getFrame() != NULL);
+}
+
+NumKeypadFrame * NumKeypad::getFrame()
+{
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		NumKeypadFrame *uiNode = dynamic_cast<NumKeypadFrame*>(scene->getChildByTag(WCT_NumKeypad));
+		if(uiNode != NULL)
+			return uiNode;
+	}
+	return NULL;
+}
+
+void NumKeypad::setPosition( const CCPoint &pos )
+{
+	NumKeypadFrame *frame = getFrame();
+	if(frame != NULL)
+	{
+		frame->setPosition(pos);
+	}
+}
+
+void NumKeypad::attachToDelegate( NumKeyPadDelegate *del )
+{
+	NumKeypadFrame *frame = getFrame();
+	if(frame != NULL)
+		frame->setDelegate(del);
+}
+
+void NumKeypad::setButtonImage(const std::string &normal, const std::string &high, const std::string &disable)
+{
+	NumKeypadFrame *frame = getFrame();
+	if(frame != NULL)
+		frame->setButtonImage(normal,high,disable);
+}
+
+void NumKeypad::setPositionByContent( CCNode *node )
+{
+	if(node == NULL)
+		return;
+
+	NumKeypadFrame *frame = getFrame();
+	if(frame != NULL)
+	{
+		CCSize nodeSize = node->getContentSize();
+		CCSize frameSize = frame->getContentSize();
+		CCPoint point = node->convertToWorldSpace(ccp(nodeSize.width + frameSize.width*0.5f/*/ 2.0f*/, nodeSize.height / 2.0f));
+
+		CCPoint dest = ccp(point.x /** 1.4f*/, point.y);
+		frame->setPosition(dest);
+	}
+}
+
+int NumKeypad::getCurNum()
+{
+	NumKeypadFrame *frame = getFrame();
+	if(frame != NULL)
+	{
+		return 	frame->getCurNum();
+	}
+
+	return 0;
+}
+
+void NumKeypad::setMaxNum( int num )
+{
+	NumKeypadFrame *frame = getFrame();
+	if(frame != NULL)
+	{
+		frame->setMaxNum(num);
+	}
+}
+
+void NumKeypad::setCurNum( int num )
+{
+	NumKeypadFrame *frame = getFrame();
+	if(frame != NULL)
+	{
+		frame->setCurNum(num);
+	}
+}
+
+void NumKeypad::setRecomNum( int num )
+{
+	NumKeypadFrame *frame = getFrame();
+	if(frame != NULL)
+	{
+		frame->setRecomNum(num);
+	}
+}
+
+void NumKeypad::setNumKeypadState(NumKeypadState state)
+{
+	NumKeypadFrame *frame = getFrame();
+	if(frame != NULL)
+	{
+		frame->setNumKeypadState(state);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+NumKeypadFrame::NumKeypadFrame()
+	: _delegate(NULL)
+	, _startNum(0)
+	, _isChange(false)
+	, _maxNum(-1)
+	, m_CurNum(0)
+	, _recomNum(0)
+	, m_OkButton(NULL)
+	, _isMaxClicked(false)
+	, m_State(NumKeypad::NumKeypadStateMax)
+{
+
+}
+
+NumKeypadFrame::~NumKeypadFrame()
+{
+	if (_delegate != NULL)
+	{
+		_delegate->onFinished(_curNum, _startNum);
+	}
+}
+
+cocos2d::SEL_MenuHandler NumKeypadFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler NumKeypadFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", NumKeypadFrame::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", NumKeypadFrame::onMaxBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCancelBtnPressed", NumKeypadFrame::onDeleteBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBtnPressed0", NumKeypadFrame::onBtnPressed0);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBtnPressed1", NumKeypadFrame::onBtnPressed1);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBtnPressed2", NumKeypadFrame::onBtnPressed2);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBtnPressed3", NumKeypadFrame::onBtnPressed3);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBtnPressed4", NumKeypadFrame::onBtnPressed4);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBtnPressed5", NumKeypadFrame::onBtnPressed5);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBtnPressed6", NumKeypadFrame::onBtnPressed6);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBtnPressed7", NumKeypadFrame::onBtnPressed7);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBtnPressed8", NumKeypadFrame::onBtnPressed8);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBtnPressed9", NumKeypadFrame::onBtnPressed9);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onDeleteBtnPressed", NumKeypadFrame::onDeleteBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onMaxBtnPressed", NumKeypadFrame::onMaxBtnPressed);
+	return NULL;
+}
+
+void NumKeypadFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -1, true);
+	m_OkButton = dynamic_cast<CCControlButton*>(getChildByTag(10));
+	setAllChildernButtonPriority(this, -1);
+}
+
+void NumKeypadFrame::setButtonImage(const std::string &normal, const std::string &high, const std::string &disable)
+{
+	setButtonSpriteFrame(m_OkButton,normal,high,disable); 
+}
+
+void NumKeypadFrame::onExit()
+{
+	CCSprite::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool NumKeypadFrame::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	return true;
+}
+
+void NumKeypadFrame::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	if(_delegate != NULL)
+		_delegate->onCancel(_startNum);
+
+	NumKeypad::getInstance()->close();
+}
+
+void NumKeypadFrame::onOkBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	if(_delegate != NULL && _isChange)
+	{
+		if (_isMaxClicked)
+		{
+			_curNum = _maxNum;
+		}
+		//_delegate->onFinished(_curNum, _startNum);
+	}
+
+	NumKeypad::getInstance()->close();
+}
+
+void NumKeypadFrame::onCancelBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if(_delegate != NULL)
+		_delegate->onCancel(_startNum);
+
+	NumKeypad::getInstance()->close();
+}
+
+void NumKeypadFrame::onBtnPressed0( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	insertNum(0);
+}
+
+void NumKeypadFrame::onBtnPressed1( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	insertNum(1);
+}
+
+void NumKeypadFrame::onBtnPressed2( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	insertNum(2);
+}
+
+void NumKeypadFrame::onBtnPressed3( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	insertNum(3);
+}
+
+void NumKeypadFrame::onBtnPressed4( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	insertNum(4);
+}
+
+void NumKeypadFrame::onBtnPressed5( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	insertNum(5);
+}
+
+void NumKeypadFrame::onBtnPressed6( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	insertNum(6);
+}
+
+void NumKeypadFrame::onBtnPressed7( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	insertNum(7);
+}
+
+void NumKeypadFrame::onBtnPressed8( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	insertNum(8);
+}
+
+void NumKeypadFrame::onBtnPressed9( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	insertNum(9);
+}
+
+void NumKeypadFrame::onMaxBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if(NumKeypad::NumKeypadStateRecom == m_State)
+	{
+		_curNum = _recomNum;
+		_delegate->onNumChange(_recomNum);
+	}
+	else
+	{
+		_curNum = _maxNum;
+		_isMaxClicked = true;
+		_delegate->onNumChange(_maxNum);
+	}	
+}
+
+void NumKeypadFrame::onDeleteBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	deleteNum();
+}
+
+void NumKeypadFrame::setDelegate( NumKeyPadDelegate *del)
+{
+	if(_delegate != NULL)
+	{
+		_delegate->onCancel(_startNum);
+	}
+
+	_delegate = del;
+	if(_delegate != NULL)
+	{
+		_startNum = _delegate->onAttach();
+		_curNum = 0;
+		_isChange = false;
+	}
+}
+
+void NumKeypadFrame::removeDelegate(bool cancel  /*false*/)
+{
+	CC_ASSERT(_delegate);
+	if (!cancel)
+		_delegate->onFinished(_curNum, _startNum);
+	else
+		_delegate->onCancel(_startNum);
+
+	_delegate = NULL;
+}
+
+void NumKeypadFrame::setCurNum(int num)
+{
+	_curNum = num;
+}
+
+void NumKeypadFrame::insertNum( int num )
+{
+	if(_delegate != NULL)
+	{
+		if(num == 0 && _curNum == 0 && _startNum == 0)
+		{
+			if(IS_UI_OPEN(WCT_TradingTipUI))
+			{
+				_isMaxClicked = false;
+				_isChange = true;
+				_delegate->onNumChange(num);
+			}
+
+			return;
+		}
+
+		_curNum = _curNum * 10 + num;
+		m_CurNum = _curNum;
+		if(_maxNum != -1 && _curNum > _maxNum)
+		{
+			_curNum = _maxNum;
+		}
+
+		if (_isMaxClicked)
+		{
+			_curNum = num;
+		}
+
+		_isMaxClicked = false;
+		_isChange = true;
+		_delegate->onNumChange(_curNum);
+	}
+}
+
+int NumKeypadFrame::getCurNum()
+{
+	return m_CurNum;
+}
+
+void NumKeypadFrame::deleteNum()
+{
+	if (_delegate != NULL)
+	{
+		if (_curNum == -1)
+			return;
+		/*if (_curNum == _maxNum)
+		{
+			_curNum = 0;  
+		}*/
+		_curNum = _curNum / 10 ;
+		_isChange = true;
+		_delegate->onNumChange(_curNum);
+	}
+}
+

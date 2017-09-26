@@ -1,0 +1,594 @@
+#include "BossPKUi.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "CfgReader.h"
+#include "BossPKMgr.h"
+#include "DBMgr.h"
+#include "InstanceProto.h"
+#include "TCPClient.h"
+#include "ItemTip.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "EquipTipUi.h"
+#include "LocalPlayer.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "PlayerState.h"
+#include "Helper.h"
+
+BossDropItem::BossDropItem(int itemID)								//BOSS掉落物品
+{
+	_nItemID = itemID;
+	_itemNode = ItemNode::create();
+	_itemNode->setDataId(_nItemID);
+	_itemNode->retain();
+	_itemNode->setClickable(true);
+	_itemNode->hideItemOpBtn();
+//	this->autorelease();
+}
+
+BossDropItem::~BossDropItem()
+{
+	_itemNode->removeFromParent();
+	CC_SAFE_RELEASE(_itemNode);
+}
+bool BossDropItem::isTouched(CCTouch* touch)
+{
+	return isTouchOnNodeContent(_itemNode, touch);
+}
+
+void BossDropItem::setPosition(CCPoint ccpoint)
+{
+	_itemNode->setPosition(ccpoint);
+}
+
+CCPoint BossDropItem::getDropItemPos()
+{
+	CCSize size = _itemNode->getContentSize();
+	return _itemNode->convertToWorldSpace(ccp(size.width/2.0f, size.height/2.0f));
+}
+
+void BossDropItem::addToParentBg( CCNode* node )
+{
+	CC_ASSERT(node != NULL && _itemNode != NULL);
+	node->addChild(_itemNode);
+}
+
+CCNode* BossPKUi::openUi()						//打开挑战BOSS界面
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["BossPKUiLayer"] = UiLayerLoader<BossPKUiLayer>::loader();
+	nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+	CCNode* pNode = readUiFromCCBI("bosspkui", nodeLoaders, _loadSpriteSheet);
+
+	return pNode;
+}
+
+
+BossPKUi::BossPKUi()
+{
+
+}
+
+BossPKUi::~BossPKUi()
+{
+	
+}
+
+// void BossPKUi::getBossCardData(int BosCount)
+// {
+// 	BossPKUiLayer* ui = getUiNodeByTag<BossPKUiLayer>(WCT_BOSSPKUI);
+// 	CC_ASSERT(ui != NULL);
+// 	ui->getBossCardMap(BosCount);
+// }
+
+BossPKUiLayer::~BossPKUiLayer()
+{
+}
+
+cocos2d::SEL_MenuHandler BossPKUiLayer::onResolveCCBCCMenuItemSelector( CCObject* pTarget, const char* pSelectorName )			//CCMenu事件绑定
+{
+	return NULL;
+}
+
+
+cocos2d::extension::SEL_CCControlHandler BossPKUiLayer::onResolveCCBCCControlSelector( CCObject* pTarget, const char* pSelectorName )		//CCControlBtton事件绑定
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", BossPKUiLayer::onCloseBtnPressed);				//关闭按钮
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLeftMovePressed", BossPKUiLayer::onLeftMovePressed);				//左移动箭头
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRightMovePressed", BossPKUiLayer::onRightMovePressed);				//右移动箭头
+	return NULL;
+}
+
+void BossPKUiLayer::onNodeLoaded( cocos2d::CCNode* pNode, cocos2d::extension::CCNodeLoader* pNodeLoader )			//界面载入
+{
+	//初始化数据
+	m_nBossIDIndex = 0;
+//	m_nSeclectedIdx = 1;
+	m_nBossCount = 0;
+	_bossCardAry = CCArray::create();
+	_bossCardAry->retain();
+	_bgSprite = NULL;
+	_selectSp = NULL;
+	_leftNode = NULL;
+	_midNode = NULL;
+	_rightNode = NULL;
+
+
+	
+	_bgSprite = dynamic_cast<CCSprite*>(this->getChildByTag(BPK_CHALLENGEBG));
+	_selectSp = dynamic_cast<CCSprite*>(_bgSprite->getChildByTag(BPK_SELECT));
+	_leftNode = dynamic_cast<CCNode*>(_bgSprite->getChildByTag(BPK_LEFTBOSS));
+	_midNode = dynamic_cast<CCNode*>(_bgSprite->getChildByTag(BPK_MIDBOSS));
+	_rightNode = dynamic_cast<CCNode*>(_bgSprite->getChildByTag(BPK_RIGHTBOSS));
+	
+
+	_card1Point = _leftNode->getPosition();
+	_card2Point = _midNode->getPosition();
+	_card3Point = _rightNode->getPosition();
+	_selectSp->setPosition(_card1Point);
+	
+	//获取BOSS数量和资料
+	typedef std::map<int, int> TempDataMap;
+	TempDataMap* bossIDMap = BossPKMgr::getInstance()->getBossDatamap(BPK_BOSSIDMAP);
+	for (TempDataMap::iterator iter = (*bossIDMap).begin(); iter != (*bossIDMap).end(); ++iter)
+	{
+		//int bosid = iter->second;
+		++m_nBossCount;
+	}
+	if (m_nBossCount > 0)
+	{
+		this->getBossCardMap(m_nBossCount);
+	}
+	_bossIDMap = BossPKMgr::getInstance()->getBossDatamap(BPK_BOSSIDMAP);
+
+	SetAllOpacity(this, 1);
+}
+
+bool BossPKUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )			//点击事件began
+{
+	if (!isVisible() || !isRunning() || !hasVisibleParents())
+	{
+		return false;
+	}
+	//是否点击在界面内，点击到外部则关闭界面
+	CCPoint framePoint = _bgSprite->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _bgSprite->getContentSize();
+	CCRect frameRect(0.0f,0.0f,frameSize.width,frameSize.height);
+	if (frameRect.containsPoint(framePoint))
+	{
+		if (isTouchOnNodeContent(_leftNode, pTouch))
+		{
+			if(!_selectSp->isVisible())
+				_selectSp->setVisible(true);
+			_selectSp->setPosition(_card1Point);
+// 			if (1 != m_nSeclectedIdx)
+// 				m_nSeclectedIdx = 1;
+		}
+		else if (isTouchOnNodeContent(_midNode, pTouch))
+		{
+			if(!_selectSp->isVisible())
+				_selectSp->setVisible(true);
+			_selectSp->setPosition(_card2Point);
+// 			if (2 != m_nSeclectedIdx)
+// 				m_nSeclectedIdx = 2;
+		}
+		else if (isTouchOnNodeContent(_rightNode, pTouch))
+		{
+			if(!_selectSp->isVisible())
+				_selectSp->setVisible(true);
+			_selectSp->setPosition(_card3Point);
+// 			if (3 != m_nSeclectedIdx)
+// 				m_nSeclectedIdx = 3;
+		}
+		//是否点击到显示的bossCard以显示boss描述
+		if (m_nBossCount < 3)
+		{
+			for(int j = m_nBossIDIndex; j >= 1; --j)
+			{
+				dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(m_nBossIDIndex-1))->setTouched(pTouch);
+			}
+		}
+		else
+		{
+			for (int i = 3; i >= 1; --i)												
+			{
+				dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(m_nBossIDIndex-i))->setTouched(pTouch);
+			}
+		}
+
+// 		for (std::vector<BossDropItem*>::iterator iter = _dropItemVec.begin(); iter != _dropItemVec.end(); ++iter)
+// 		{
+// 			BossDropItem* item = *iter;
+// 			if (item->getDropItemID() != 0 && item->getDropItemID() != -1)
+// 			{
+// 				if (item->isTouched(pTouch))
+// 				{
+// 					if (MIsEquipment(item->getDropItemID()))
+// 					{
+// 						EquipTipUiLayer* ui = EquipTipUi::create();
+// 						ui->showUi(ccp(0,0), item->getDropItemID());
+// 					}
+// 					else
+// 					{
+// 						ItemTip::getInstace()->open();
+// 						ItemTip::getInstace()->setPosition(item->getDropItemPos()-ccp(0,50));
+// 						ItemTip::getInstace()->setDataId(item->getDropItemID());
+// 						ItemTip::getInstace()->hideOpBtn();
+// 						return true;
+// 					}
+// 				}
+// 			}
+//		}
+
+
+
+		return true;
+	}
+	else
+	{
+		CLOSE_UI(WCT_BOSSPKUI);
+		return false;
+	}
+	return true;
+}
+
+void BossPKUiLayer::onExit()				//界面退出
+{
+	if(!_dropItemVec.empty())
+		for (std::vector<BossDropItem*>::iterator iter = _dropItemVec.begin(); iter != _dropItemVec.end(); ++iter)
+		{
+	//		dynamic_cast<BossDropItem*>(*iter)->removeFromParentAndCleanup(true);
+			CC_SAFE_RELEASE(dynamic_cast<BossDropItem*>(*iter));
+		}
+	_dropItemVec.clear();
+	BossPKMgr::getInstance()->setOpenBossUi(false);
+	CCLayer::onExit();
+	CC_SAFE_DELETE(_bossCardAry);
+}
+
+void BossPKUiLayer::onCloseBtnPressed( cocos2d::CCObject* pSender, cocos2d::extension::CCControlEvent pCCControlEvent )			//关闭界面按钮
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_BOSSPKUI);
+}
+
+void BossPKUiLayer::updateBossCard()								//更新BOSS资料显示
+{
+	for(unsigned int j = 0; j < _bossCardAry->count() ; ++j)
+	{
+		(dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(j)))->setVisible(false);
+	}
+	if (m_nBossCount < 3)
+	{
+		for (int k = 1; k <= m_nBossCount; ++k)
+		{
+			switch(k)
+			{
+			case 1:
+				dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(m_nBossIDIndex))->setPosition(_card1Point);
+				SetAllOpacity(dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(m_nBossIDIndex)), 255);
+				dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(m_nBossIDIndex))->setVisible(true);
+				break;
+			case 2:
+				dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(m_nBossIDIndex))->setPosition(_card2Point);
+				SetAllOpacity(dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(m_nBossIDIndex)), 255);
+				dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(m_nBossIDIndex))->setVisible(true);
+				break;
+			default:
+				break;
+			}
+			++m_nBossIDIndex;
+		}
+	}
+	else
+	{
+		for (int i = 1; i <= 3; ++i)
+		{
+			switch (i)
+			{
+			case 1: 
+				dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(m_nBossIDIndex))->setPosition(_card1Point);
+				SetAllOpacity(dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(m_nBossIDIndex)), 255);
+				dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(m_nBossIDIndex))->setVisible(true);
+				break;
+			case 2:
+				dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(m_nBossIDIndex))->setPosition(_card2Point);
+				SetAllOpacity(dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(m_nBossIDIndex)), 255);
+				dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(m_nBossIDIndex))->setVisible(true);
+				break;
+			case 3:
+				dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(m_nBossIDIndex))->setPosition(_card3Point);
+				SetAllOpacity(dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(m_nBossIDIndex)), 255);
+				dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(m_nBossIDIndex))->setVisible(true);
+				break;
+			default:
+				break;
+			}
+			++m_nBossIDIndex;
+		}
+	}
+}
+
+void BossPKUiLayer::clearCardAry()								//清空BOSSCard数组
+{
+	_bossCardAry->removeAllObjects();
+}
+
+void BossPKUiLayer::getBossCardMap(int BosCount)				//获取BOSS信息
+{
+
+	if (_bossCardAry->count() > 0)
+	{
+//		this->updateBossCard();
+//		return;
+		_bossCardAry->removeAllObjects();
+	}
+	typedef std::map<int, int> TempDataMap;
+	TempDataMap* bossIDMap = BossPKMgr::getInstance()->getBossDatamap(BPK_BOSSIDMAP);
+	BossPKMgr::BossFlushMap bossFlushTimeMap = BossPKMgr::getInstance()->getBossFlushMap();
+	for (TempDataMap::iterator iter = (*bossIDMap).begin(); iter != (*bossIDMap).end(); ++iter)
+	{
+		int bosid = iter->second;
+		BossPKMgr::BossFlushMap::iterator tempIter = bossFlushTimeMap.find(bosid);
+		if (tempIter != bossFlushTimeMap.end())
+		{
+			BossCard* bossCard = new BossCard(bosid,tempIter->second.oddTime);
+			_bossCardAry->addObject(bossCard);
+			_bgSprite->addChild(bossCard);
+			bossCard->setDelegate(this);
+			//(dynamic_cast<BossCard*>(_bossCardAry->objectAtIndex(iter->first)))->setDelegate(this);
+		}
+	}
+	this->setBossDes((*bossIDMap)[0]);
+	this->updateBossCard();
+}
+
+void BossPKUiLayer::onChallenge(int bossID)							//点击挑战按钮
+{
+	unsigned int stageID = 0;
+	DWORD	mapId = 0;
+
+	int level = 0;
+
+
+	const sBossProto* t_data = BossPKMgr::getInstance()->getBossDataByBossID(bossID);
+	if (t_data == NULL) return;
+	stageID = t_data->m_nRelayID;
+	mapId = t_data->m_nMapID;
+	level = t_data->bossLevel;
+
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM BossChallenge WHERE id = ?1");
+// 	cmd->set_integer32(1, bossID);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("relayID");
+// 		stageID = table->get_integer64(idx);
+// 		idx = table->get_index("map_id");
+// 		mapId = table->get_integer64(idx);
+// 		idx = table->get_index("lv");
+// 		level = table->get_integer32(idx);
+// 	}
+// 
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+	
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if (player)
+	{
+
+		if (player->getLevel() < level)
+		{
+			ToolTip::getInstance()->push(GET_STR(2392));
+			return;
+		}
+		int id = MapManager::getInstance()->getCurMapId();
+		if (mapId == id)
+		{
+			ToolTip::getInstance()->push(GET_STR(9032));
+			AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+			CLOSE_UI(WCT_BOSSPKUI);
+			return;
+		}
+		if (player->isRoleInStaticState())//摆摊交易双修中禁止操作
+		{
+			ToolTip::getInstance()->push(GET_STR(7209));
+			return;
+		}
+	}
+	
+	//取消自动寻路
+	MapManager::getInstance()->resetCrossMapping();
+	RoleManager::getInstance()->getLocalPlayer()->stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+	if (RoleManager::getInstance()->getLocalPlayer()->getAutoRunState())
+	{
+		RoleManager::getInstance()->getLocalPlayer()->setAutoRunState(false);
+	}				
+
+	NET_SIC_posthouse cmdN;
+	cmdN.dwPosID = stageID;
+	TCP_CLIENT->send_net_cmd(&cmdN,NP_NORMAL,false);
+}
+
+void BossPKUiLayer::setBossDes( int bossID )								//设置BOSS描述
+{
+	std::string bossDes;
+	int bossDroped1 = 0;							//掉落物品
+	int bossDroped2 = 0;
+	int bossDroped3 = 0;
+	int bossDroped4 = 0;
+	int bossDroped5 = 0;
+	int bossDroped6 = 0;
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM BossChallenge WHERE id = ?1");
+// 	cmd->set_integer32(1, bossID);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("desc");
+// 		bossDes = table->get_text(idx);
+// 		idx = table->get_index("item1");
+// 		bossDroped1 = table->get_integer32(idx);
+// 		setBossDropItemName(bossDroped1,1);
+// 
+// 		idx = table->get_index("item2");
+// 		bossDroped2 = table->get_integer32(idx);
+// 		setBossDropItemName(bossDroped2,2);
+// 
+// 		idx = table->get_index("item3");
+// 		bossDroped3 = table->get_integer32(idx);
+// 		setBossDropItemName(bossDroped3,3);
+// 
+// 		idx = table->get_index("item4");
+// 		bossDroped4 = table->get_integer32(idx);
+// 		setBossDropItemName(bossDroped4,4);
+// 
+// 		idx = table->get_index("item5");
+// 		bossDroped5 = table->get_integer32(idx);
+// 		setBossDropItemName(bossDroped5,5);
+// 
+// 		idx = table->get_index("item6");
+// 		bossDroped6 = table->get_integer32(idx);
+// 		setBossDropItemName(bossDroped6,6);
+// 	}
+// 
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	const sBossProto* t_data = BossPKMgr::getInstance()->getBossDataByBossID(bossID);
+	CC_ASSERT(t_data != NULL);
+	bossDes = t_data->m_sDesc;
+
+
+	//CCLabelTTF* bossDesLabel = dynamic_cast<CCLabelTTF*>(_bgSprite->getChildByTag(BPK_BOSSDES));
+	LabelFT* bossDesLabel = Helper::getLabelFTByParentAndTag(_bgSprite, BPK_BOSSDES);
+	CC_ASSERT(bossDesLabel != NULL);
+	if (bossDesLabel)
+	{
+		bossDesLabel->setString(bossDes.c_str());
+		//bossDesLabel->setDimensions(CCSize(_bgSprite->getChildByTag(BPK_BOSSDESCONTENT)->getContentSize().width,0.0f));
+		bossDesLabel->setDimensions(_bgSprite->getChildByTag(BPK_BOSSDESCONTENT)->getContentSize().width,0.0f);
+	}
+	if(!_dropItemVec.empty())
+		for (std::vector<BossDropItem*>::iterator iter = _dropItemVec.begin(); iter != _dropItemVec.end(); ++iter)
+		{
+	//		dynamic_cast<BossDropItem*>(*iter)->removeFromParentAndCleanup(true);
+			CC_SAFE_RELEASE(dynamic_cast<BossDropItem*>(*iter));
+		}
+	_dropItemVec.clear();
+	this->createDropItem(1,bossDroped1);
+	this->createDropItem(2,bossDroped2);
+	this->createDropItem(3,bossDroped3);
+	this->createDropItem(4,bossDroped4);
+	this->createDropItem(5,bossDroped5);
+	this->createDropItem(6,bossDroped6);
+}
+
+void BossPKUiLayer::setBossDropItemName( int itemId ,int index)								//设置BOSS描述
+{
+
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM PackageData WHERE TypeId = ?1");
+	cmd->set_integer32(1, itemId);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	std::string itemName;
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("Name");
+		itemName = table->get_text(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	//CCLabelTTF* itemNameLabel = (CCLabelTTF*)_bgSprite->getChildByTag(20 + index);
+	LabelFT* itemNameLabel = Helper::getLabelFTByParentAndTag(_bgSprite, 20 + index);
+	CC_ASSERT(itemNameLabel != NULL);
+	if (itemNameLabel)
+		itemNameLabel->setString(itemName.c_str());
+}
+
+void BossPKUiLayer::onLeftMovePressed( cocos2d::CCObject* pSender, cocos2d::extension::CCControlEvent pCCControlEvent )			//向左翻页按钮
+{
+	if (m_nBossIDIndex-6 < 0)
+		return;
+
+//	++m_nSeclectedIdx;
+// 	switch(m_nSeclectedIdx)
+// 	{
+// 	case 1:
+// 		if(!_selectSp->isVisible())
+// 			_selectSp->setVisible(true);
+// 		_selectSp->setPosition(_card1Point);
+// 		break;
+// 	case 2:
+// 		if(!_selectSp->isVisible())
+// 			_selectSp->setVisible(true);
+// 		_selectSp->setPosition(_card2Point);
+// 		break;
+// 	case 3:
+// 		if(!_selectSp->isVisible())
+// 			_selectSp->setVisible(true);
+// 		_selectSp->setPosition(_card3Point);
+// 		break;
+// 	default:
+// 		if (_selectSp->isVisible())
+// 			_selectSp->setVisible(false);
+// 		break;
+// 	}
+
+	m_nBossIDIndex -= 6;
+	_selectSp->setPosition(_card1Point);
+	this->setBossDes((*_bossIDMap)[m_nBossIDIndex]);
+	this->updateBossCard();
+	
+}
+
+void BossPKUiLayer::onRightMovePressed( cocos2d::CCObject* pSender, cocos2d::extension::CCControlEvent pCCControlEvent )		//向右翻页按钮
+{
+	if (m_nBossIDIndex+2 >= m_nBossCount)
+		return;
+
+// 	--m_nSeclectedIdx;
+// 	switch(m_nSeclectedIdx)
+// 	{
+// 	case 1:
+// 		if(!_selectSp->isVisible())
+// 			_selectSp->setVisible(true);
+// 		_selectSp->setPosition(_card1Point);
+// 		break;
+// 	case 2:
+// 		if(!_selectSp->isVisible())
+// 			_selectSp->setVisible(true);
+// 		_selectSp->setPosition(_card2Point);
+// 		break;
+// 	case 3:
+// 		if(!_selectSp->isVisible())
+// 			_selectSp->setVisible(true);
+// 		_selectSp->setPosition(_card3Point);
+// 		break;
+// 	default:
+// 		if (_selectSp->isVisible())
+// 			_selectSp->setVisible(false);
+// 		break;
+// 	}
+	_selectSp->setPosition(_card1Point);
+	this->setBossDes((*_bossIDMap)[m_nBossIDIndex]);
+	this->updateBossCard();
+
+}
+
+void BossPKUiLayer::createDropItem( int dropIndex,int dropID )									//创建BOSS掉落ItemNode
+{
+	CCPoint nodePoint = _bgSprite->getChildByTag(dropIndex+10)->getPosition();
+	BossDropItem* bossDropItem = new BossDropItem(dropID);
+	bossDropItem->addToParentBg(_bgSprite);
+	bossDropItem->setPosition(nodePoint);
+	_dropItemVec.push_back(bossDropItem);
+}
+
+void BossPKUiLayer::onEnter()
+{
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+}
+
+

@@ -1,0 +1,1720 @@
+#include "StrengthenUi.h"
+#include "World.h"
+#include "CfgReader.h"
+#include "PackageManager.h"
+#include "MessageBoxUi.h"
+#include "tools.h"
+//#include "AnimationCache.h"
+//#include "BSAnimate.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "ToolTip.h"
+#include "IndifityUi.h"
+#include "InlayUi.h"
+#include "TouchSprite.h"
+#include "NewPlayerGuide.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+//#include <WinSvc.h>
+#include "TCPClient.h"
+#include "EquipFusionManager.h"
+#include "DBMgr.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "NumericalIniMgr.h"
+#include "UiResourceMgr.h"
+#include "CheckButton.h"
+#include "SystemUi.h"
+#include "EquipLevelUpNoticeMgr.h"
+#include "ItemTip.h"
+#include "TextTip.h"
+#include "Helper.h"
+#include "PlacardManager.h"
+#include "SecondVerifyMgr.h"
+const static unsigned int wending_stone = 1102179;
+
+CCNode* StrengthenUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["StrengthenUiLayer"] = UiLayerLoader<StrengthenUiLayer>::loader();
+	nodeLoaders["TouchSprite"] = TouchSpriteLoader::loader();
+	nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+	nodeLoaders["CheckButton"] = CheckButtonLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("EquipmentStrong2", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+void StrengthenUi::onSuccess(/*INT64 equipID*/)
+{
+	StrengthenUiLayer *ui = getUiNodeByTag<StrengthenUiLayer>(WCT_STRENGTHENUI);
+	if(ui != NULL)
+	{
+		ui->playSuccessSE();
+		AudioPlayer::getSigletonPtr()->playerSoundSceneEffect(SCENE_EQUIPSTRENGTHENSUCCESS);//强化成功音效
+	}
+}
+
+void StrengthenUi::onFailed(/* INT64 equipId */)
+{
+	StrengthenUiLayer *ui = getUiNodeByTag<StrengthenUiLayer>(WCT_STRENGTHENUI);
+	if(ui != NULL)
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundSceneEffect(SCENE_EQUIPSTRENGTHENFAIL);//强化失败音效
+		ui->playFailedSE();
+		ui->update_wending_stone();
+	}
+}
+
+cocos2d::CCRect StrengthenUi::getBtnPos( int tag )
+{
+	StrengthenUiLayer *ui = getUiNodeByTag<StrengthenUiLayer>(WCT_STRENGTHENUI);
+	if(ui != NULL)
+	{
+		return ui->getBtnPos(tag);
+	}
+
+	return CCRect();
+}
+
+cocos2d::CCRect StrengthenUi::getCloseBtnPos()
+{
+	StrengthenUiLayer *ui = getUiNodeByTag<StrengthenUiLayer>(WCT_STRENGTHENUI);
+	if(ui != NULL)
+	{
+		return ui->getCloseBtnPos();
+	}
+
+	return CCRect();
+}
+
+void StrengthenUi::setPermission( bool canContinue )
+{
+	StrengthenUiLayer* ui = getUiNodeByTag<StrengthenUiLayer>(WCT_STRENGTHENUI);
+	if (ui != NULL)
+	{
+		ui->setPermition(canContinue);
+		ui->onSECalback(0.f);
+	}
+}
+StrengthenUiLayer * StrengthenUi::getUiLayer()const
+{
+	return getUiNodeByTag<StrengthenUiLayer>(WCT_STRENGTHENUI);
+}
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler StrengthenUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler StrengthenUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", StrengthenUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onAutoPutBtnPressed", StrengthenUiLayer::onAutoPutBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOneKeyBuyBtnPressed", StrengthenUiLayer::onOneKeyBuyBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onStrengThenBtnPressed", StrengthenUiLayer::onStrengThenBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSubbtn", StrengthenUiLayer::onSubbtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onAddbtn", StrengthenUiLayer::onAddbtn);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onStrongDescPressed", StrengthenUiLayer::onStrongDescPressed);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseDescBtnPressed", StrengthenUiLayer::onCloseDescBtnPressed);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onKnowBtnPressed", StrengthenUiLayer::onKnowBtnPressed);
+
+	
+	return NULL;
+}
+
+/*
+// 鉴定页签、镶嵌页签点击事件
+void StrengthenUiLayer::onIndentifyTabClicked(TouchSprite*, bool)
+{
+	CCLOG("click indentify");
+	CLOSE_UI(WCT_STRENGTHENUI);
+	OPEN_UI(WCT_IndifityUi);
+}
+
+void StrengthenUiLayer::onInlayTabClicked(TouchSprite*, bool)
+{
+	CLOSE_UI(WCT_STRENGTHENUI);
+	OPEN_UI(WCT_InlayUi);
+}*/
+bool StrengthenUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (_equipLevel >= MAX_STRENGTHEN_LEVEL)//装备强化等级已为16
+	{		
+		updateAllHideControl();	
+		return true;
+	}
+	if(isTouchOnNodeContent(_curEquipitem,pTouch))
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+
+// 		EquipLevelupNoticeUiMgr::getInstance()->setTouchIndex(0);
+// 		EquipLevelupNoticeUiMgr::getInstance()->setNoticeDataItemId(_equipPro->StuffId);
+// 		EquipLevelupNoticeUiMgr::getInstance()->setNoticeDataItemYuanbao(_equipPro->Num);
+// 		EquipLevelupNoticeUiMgr::getInstance()->setGotoBtnShow(true);
+// 		EquipLevelupNoticeUiMgr::getInstance()->setOpenUiId(WCT_STRENGTHENUI);
+// 		EquipLevelupNoticeUiMgr::getInstance()->setSwitchUiTag(WCT_STRENGTHENUI);
+// 		OPEN_UI(WCT_EQUIPLEVELUPNOTICEUI);
+		ItemTip::getInstace()->open();
+		ItemTip::getInstace()->setPosition((_curEquipitem->getParent())->convertToWorldSpace(_curEquipitem->getPosition()));
+		ItemTip::getInstace()->setDataId(_equipPro->StuffId);
+		ItemTip::getInstace()->showTipsButton(PackageManager::getInstance()->getItemTypeData(_equipPro->StuffId).byTipsBtnIdx);
+		ItemTip::getInstace()->setOpenUiId(WCT_STRENGTHENUI);
+		ItemTip::getInstace()->setSwitchUiTag(WCT_STRENGTHENUI);
+	}
+	if (isTouchOnNodeContent(_iconSp,pTouch))
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+
+		ItemTip::getInstace()->open();
+		ItemTip::getInstace()->setPosition((_iconSp->getParent())->convertToWorldSpace(_iconSp->getPosition()));
+		ItemTip::getInstace()->setDataId(wending_stone);
+		ItemTip::getInstace()->hideOpBtn();
+	}
+	if (isTouchOnNodeContent(_iconTip,pTouch))
+	{
+		TextTip::getInstance()->open();
+		TextTip::getInstance()->setString(8006);
+		TextTip::getInstance()->setPostion(_iconTip,ETTD_Left);
+	}
+	if (isTouchOnNodeContent(_autoBuyTip,pTouch))
+	{
+		TextTip::getInstance()->open();
+		TextTip::getInstance()->setString(8007);
+		TextTip::getInstance()->setPostion(_autoBuyTip,ETTD_Right);
+	}
+	return true;
+}
+
+void StrengthenUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	TextTip::getInstance()->close();
+}
+
+void StrengthenUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	//GET_UI(SystemUi,WCT_SystemUi)->slotChangeShowState();
+	_equipId = (INT64)-1;
+	_stuffId = (unsigned int)-1;
+	_stuffNum = 0;
+	_equipLevel = -1;
+	_enableStrengthen  = true;
+	m_bIsPermissible = true;
+	_stringCurTimes = 10;
+	//_descframe = NULL;
+	_successAcNode = NULL;
+	_failedAcNode = NULL;
+	_strengthenBtn = NULL;
+
+	_equipPro = new EquipReinforcementPro;
+	//初始化显示的装备数据
+	setEquipDataInTable();
+	setStrengthenData();
+	//字符串初始化
+	_strMap[EAT_NextLevel] = "\xE4\xB8\x8B\xE4\xB8\x80\xE7\xBA\xA7\xEF\xBC\x9A\x25\x64\xE7\xBA\xA7";	//下一级：%d级
+	_strMap[EAT_SucceeRate] = "\xE6\x88\x90\xE5\x8A\x9F\xE7\x8E\x87\xEF\xBC\x9A\x25\x64\x25\x25";	//成功率：%d%%
+	_strMap[EAT_UpSign] = "  \x2B  ";	//+
+
+	_baseAttrNameStr[ERA_MaxHP] = "\xE7\x94\x9F\xE5\x91\xBD\xEF\xBC\x9A";
+	_baseAttrNameStr[ERA_MaxMP] = "\xE9\xAD\x94\xE5\x8A\x9B\xEF\xBC\x9A";
+	_baseAttrNameStr[ERA_ExAttackMin] = "\xE7\x89\xA9\xE6\x94\xBB\xEF\xBC\x9A";
+	_baseAttrNameStr[ERA_ExAttackMax] = "\xE7\x89\xA9\xE6\x94\xBB\xEF\xBC\x9A";
+	_baseAttrNameStr[ERA_InAttackMin] = "\xE9\xAD\x94\xE6\x94\xBB\xEF\xBC\x9A";
+	_baseAttrNameStr[ERA_InAttackMax] = "\xE9\xAD\x94\xE6\x94\xBB\xEF\xBC\x9A";
+	_baseAttrNameStr[ERA_ArmorIn] = "\xE9\x81\x93\xE6\x94\xBB\xEF\xBC\x9A";
+	_baseAttrNameStr[ERA_ArmorEx] = "\xE9\x81\x93\xE6\x94\xBB\xEF\xBC\x9A";
+	_baseAttrNameStr[ERA_ExMinDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xEF\xBC\x9A";
+	_baseAttrNameStr[ERA_ExMaxDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xEF\xBC\x9A";
+	_baseAttrNameStr[ERA_InMinDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xEF\xBC\x9A";
+	_baseAttrNameStr[ERA_InMaxDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xEF\xBC\x9A";
+	_baseAttrNameStr[ERA_HitRate] = "\xE5\x91\xBD\xE4\xB8\xAD\xEF\xBC\x9A";
+	_baseAttrNameStr[ERA_Dodge] = "\xE9\x97\xAA\xE9\x81\xBF\xEF\xBC\x9A";
+	_baseAttrNameStr[ERA_Crit_Rate] = "\xE6\x9A\xB4\xE5\x87\xBB\xEF\xBC\x9A";
+	_baseAttrNameStr[ERA_UnCrit_Rate] = "\xE5\x85\x8D\xE6\x9A\xB4\xEF\xBC\x9A";
+	_baseAttrNameStr[ERA_UnCrit_Amount] = "\xE5\x85\x8D\xE7\x88\x86\xEF\xBC\x9A";
+
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(0));
+	CC_ASSERT(_frame != NULL);
+
+// 	_descframe = dynamic_cast<FrameSprite*>(getChildByTag(20));
+// 	_descframe->retain();
+// 	_descframe->removeFromParent();
+// 	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+// 	_descframe->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+
+	_strengTimesLabel = Helper::getLabelFTByParentAndTag(_frame,0);
+	_strengTimesLabel->setString(CCString::createWithFormat("%d",EquipFusionManager::getInstance()->getNeedStrengTimes())->getCString());
+	_strengTimes = EquipFusionManager::getInstance()->getNeedStrengTimes();
+// 	bgsprite=dynamic_cast<CCSprite*>(_frame->getChildByTag(89));
+// 	CCRotateBy* rotateto = CCRotateBy::create(10, 360);
+// 	bgsprite->runAction(CCRepeatForever::create(rotateto));
+	//加载文字控件
+	_coin = Helper::getLabelFTByParentAndTag(_frame,UI_COIN);//所需金币
+
+	_equipName = Helper::getLabelFTByParentAndTag(_frame,UI_EQUIPNAME);//装备名称
+	_job = Helper::getLabelFTByParentAndTag(_frame,UI_JOB);//职业
+	_level = Helper::getLabelFTByParentAndTag(_frame,UI_LEVEL);//等级
+	_equipPlace = Helper::getLabelFTByParentAndTag(_frame,UI_EQUIPPLACE);//部位
+	_durable = Helper::getLabelFTByParentAndTag(_frame,UI_DURABLE);//耐久
+	_nextLevel = Helper::getLabelFTByParentAndTag(_frame,UI_NEXTLEVEL);//下一等级
+	_curLevel = Helper::getLabelFTByParentAndTag(_frame,UI_CURLEVEL);//当前等级
+	_curLevel->setString("");
+	CC_ASSERT(_curLevel != NULL);
+	_successRate = Helper::getLabelFTByParentAndTag(_frame,UI_SUCCESSRATE);//成功率
+	_successRate->setVisible(false);
+	_equipStrengthenItem = Helper::getLabelFTByParentAndTag(_frame,UI_EQUIPSTRENGTHENITEM);
+	_goodsName = Helper::getLabelFTByParentAndTag(_frame,ui_GOODNAME);
+	_curEquip = dynamic_cast<CCSprite*>(_frame->getChildByTag(UI_CUREQUIP));
+	_curEquipitem = dynamic_cast<CCSprite*>(_frame->getChildByTag(UI_CUREQUIPITEM));
+	_curEquipHead=dynamic_cast<CCSprite*>(_frame->getChildByTag(UI_CUREQUIPHEAD));
+	_iconSp = dynamic_cast<CCSprite*>(_frame->getChildByTag(UI_WENDING_ICON));
+	_iconTip = dynamic_cast<CCSprite*>(_frame->getChildByTag(UI_WENGUOSHILABEL));
+	_autoBuyTip = dynamic_cast<CCSprite*>(_frame->getChildByTag(UI_AUTOBUYLABEL));
+	_isAutoBuy = false;
+
+	_autoBuy = dynamic_cast<CCSprite*>(_frame->getChildByTag(UI_AUTOBUY));
+
+	_autoBuyRect = dynamic_cast<TouchSprite*>(_frame->getChildByTag(UI_AUTOBUYRECT));
+	_autoBuyRect->signalTouched.connect(this, &StrengthenUiLayer::onSetAutoBuy);
+	_autoBuy->setVisible(false);
+	_container = dynamic_cast<CCNode*>(_frame->getChildByTag(UI_ATTRFRAME));
+	_strengthenBtn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(UI_STRENGTHENBTN));
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+	std::string sSESuccess = sSEDir + "E1_77.plist";
+	std::string sSEFailed = sSEDir + "E1_78.plist";
+	_plist.insert(sSESuccess);
+	_plist.insert(sSEFailed);
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSESuccess.c_str());
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEFailed.c_str());
+	_successAcNode = this->getSuccessAcNode();
+	_successAcNode->setPosition(_frame->getChildByTag(UI_CUREQUIP)->getPosition());
+	_frame->addChild(_successAcNode, RZN_EFFECT);
+	_failedAcNode = this->getFailedAcNode();
+	_failedAcNode->setPosition(_frame->getChildByTag(UI_CUREQUIP)->getPosition());
+	_frame->addChild(_failedAcNode, RZN_EFFECT);
+	CheckButton *check = (CheckButton*)_frame->getChildByTag(UI_WENDING_CHECK);
+	check->setCheck(false);
+	updateEquipBaseDate();
+	updateEquipStrengDate();
+	if (_equipLevel >= MAX_STRENGTHEN_LEVEL)//装备强化等级已为16
+	{		
+		updateAllHideControl();		
+	}		
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);  
+}
+
+void StrengthenUiLayer::updateAllHideControl()
+{	
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	_frame->getChildByTag(114)->setVisible(true);
+	_frame->getChildByTag(114)->setPositionY(winSize.height/6);
+	_frame->getChildByTag(0)->setVisible(false);
+	_frame->getChildByTag(1)->setVisible(false);
+	_frame->getChildByTag(2)->setVisible(false);
+	_frame->getChildByTag(4)->setVisible(false);
+	_frame->getChildByTag(6)->setVisible(false);
+	_frame->getChildByTag(31)->setVisible(false);
+	_frame->getChildByTag(40)->setVisible(false);
+	_frame->getChildByTag(41)->setVisible(false);
+	_frame->getChildByTag(42)->setVisible(false);
+	_frame->getChildByTag(43)->setVisible(false);
+	_frame->getChildByTag(44)->setVisible(false);
+	_frame->getChildByTag(100)->setVisible(false);
+	_frame->getChildByTag(101)->setVisible(false);
+	_frame->getChildByTag(110)->setVisible(false);
+	_frame->getChildByTag(111)->setVisible(false);
+	_frame->getChildByTag(112)->setVisible(false);
+	_frame->getChildByTag(113)->setVisible(false);
+	_frame->getChildByTag(115)->setVisible(false);
+	_frame->getChildByTag(116)->setVisible(false);
+	_frame->getChildByTag(117)->setVisible(false);
+	_frame->getChildByTag(118)->setVisible(false);
+	_frame->getChildByTag(119)->setVisible(false);
+	_frame->getChildByTag(120)->setVisible(false);
+
+}
+
+void StrengthenUiLayer::updateEquipBaseDate()
+{
+	f_equipment *equip = EquipFusionManager::getInstance()->getEquipment();
+	_equipName->setString(_equipPro->equipName.c_str());//装备名称
+	_job->setString(_equipPro->equipProfession.c_str());//职业
+	_level->setString(CCString::createWithFormat("%d",_equipPro->equipLevel)->getCString());//等级
+	_equipPlace->setString(_equipPro->equipPos.c_str());//部位
+	int tempEquipDurability = GetEquipNewness((EEquipPos)_equipPro->equipPosIndex,equip->get_item_use_times(),_equipPro->equipDurability);
+	int tempEquipLv = EquipFusionManager::getInstance()->getCurEquipLevel(equip->get_item_type_id());
+	INT64 tempMoney = NumericalIniMgr::getInstance()->GetEquipStrengthenMoney(tempEquipLv);
+	_coin->setString(CCString::createWithFormat("%d",tempMoney)->getCString());
+
+	_durable->setString(CCString::createWithFormat("%d%s%d",tempEquipDurability,"/",_equipPro->equipDurability)->getCString());//耐久
+
+	int tempIconId = 0;
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM PackageData WHERE TypeId = ?1");
+	cmd->set_integer32(1 , _equipPro->StuffId);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("Icon");
+		tempIconId = table->get_integer32(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	//const ItemTypeData &typeDataItem  = PackageManager::getInstance()->getItemTypeData(_equipPro->StuffId);
+	std::string fileName = CFGReader::instance()->get_profile_string("Art", "ICON", "") + CCString::createWithFormat("%d",tempIconId)->getCString() + std::string(".png");
+	_curEquipitem->initWithFile(fileName.c_str());
+
+	const ItemTypeData &typeData  = PackageManager::getInstance()->getItemTypeData(equip->get_item_type_id());
+	std::string equipIconFileName = CFGReader::instance()->get_profile_string("Art", "ICON", "") + typeData.icon + std::string(".png");
+	_curEquip->initWithFile(equipIconFileName.c_str());
+	_curEquipHead->initWithFile(equipIconFileName.c_str());
+}
+
+void StrengthenUiLayer::onSetAutoBuy(TouchSprite*, bool)//设置自动购买
+{
+	if (_isAutoBuy == true)
+	{
+		_isAutoBuy = false;
+		_autoBuy->setVisible(false);
+	}else{
+		_isAutoBuy = true;
+		_autoBuy->setVisible(true);
+	}
+}
+
+void StrengthenUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+		
+	//DropDragDelegate::getInstance()->addDropLayer(this);
+}
+
+void StrengthenUiLayer::onExit()
+{
+	//AnimationCache::releaseDefList(_anims);
+	//AnimationCache::getInstance()->releaseSpecislEffect("qianghuatexiao");
+
+	
+
+//	AnimationCache::releaseDefList(_anims2);
+//	AnimationCache::getInstance()->releaseSinEffect("qianghuachenggong");
+
+	//DropDragDelegate::getInstance()->removeDropLayer(this);
+
+	PackageManager::getInstance()->unLockItem(EICT_Bag, _equipId, true);
+
+	PackageManager::getInstance()->unLockItem(EICT_Equip, _equipId, true);
+	SecondVerifyMgr::getInstance()->destroyRequsetVerityData();
+	CC_SAFE_DELETE(_equipPro);
+	//CC_SAFE_RELEASE(_descframe);
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);	
+ }
+
+void StrengthenUiLayer::setEquipDataInTable()
+{
+	f_equipment* equip = EquipFusionManager::getInstance()->getEquipment();
+
+	const EquipTypeData* data = PackageManager::getInstance()->getEquipTypeDataPointer(equip->get_item_type_id());
+	if (data != NULL)
+	{
+		_equipPro->equipName = data->name;
+		_equipPro->equipProfession = data->profession;
+		_equipPro->equipPos = data->pos;
+		_equipPro->equipPosIndex = data->posIndex;
+		_equipPro->equipLevel = data->level;
+		_equipPro->equipDurability = data->durability;
+	}
+
+//已完成 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 	cmd->set_integer32(1 , equip->get_item_type_id());
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("Name");
+// 		_equipPro->equipName = table->get_text(idx);//装备名字
+// 		idx = table->get_index("Profession");//职业
+// 		_equipPro->equipProfession = table->get_text(idx);
+// 		idx = table->get_index("Pos");//部位
+// 		_equipPro->equipPos = table->get_text(idx);
+// 		idx = table->get_index("PosIndex");//部位
+// 		_equipPro->equipPosIndex = table->get_integer32(idx);
+// 		idx = table->get_index("Level");//等级
+// 		_equipPro->equipLevel = table->get_integer32(idx);
+// 		idx = table->get_index("Durability");//耐久
+// 		_equipPro->equipDurability = table->get_integer32(idx);
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+}
+
+//short StrengthenUiLayer::getItemBegin( CCTouch &touch, eGetResult &result )
+//{
+//	CCPoint framePoint = _frame->convertTouchToNodeSpace(&touch);
+//	const CCSize &frameSize = _frame->getContentSize();
+//	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+//	if(frameRect.containsPoint(framePoint))
+//	{
+//		result = GR_SUCCESS;
+//	}
+//	else
+//	{
+//		result = GR_ERROR;
+//	}
+//
+//	return -1;
+//}
+
+void StrengthenUiLayer::setEquipthenItem()
+{
+	int tempItemNum = PackageManager::getInstance()->getItemNumber(EICT_Bag,_equipPro->StuffId);
+	if (tempItemNum<_equipPro->Num)
+	{
+		_equipStrengthenItem->setColor(ccc3(255,0,0));
+	}
+	else
+	{
+		_equipStrengthenItem->setColor(ccc3(0,255,0));
+	}
+		_goodsName->setString(_equipPro->equipItemName.c_str());
+		_equipStrengthenItem->setString(CCString::createWithFormat("%d%s%d",tempItemNum,"/",_equipPro->Num)->getCString());
+
+		//modify by lpf 2015-09-18
+	/*	EquipLevelupNoticeUiMgr::getInstance()->setNeedItemNum(0,_equipPro->Num - tempItemNum > 0 ? _equipPro->Num - tempItemNum : 0);*/
+}
+
+void StrengthenUiLayer::updateEquipStrengDate()
+{
+	f_item *item = EquipFusionManager::getInstance()->getEquipment();
+	if(item != NULL)
+	{
+		const ItemTypeData &typeData = PackageManager::getInstance()->getItemTypeData(item->get_item_type_id());
+
+		if(MIsEquipment(item->get_item_type_id()))
+		{
+
+			//时装，翅膀不能强化
+			//const EquipTypeData &equipTypeData = PackageManager::getInstance()->getEquipTypeData(item->get_item_type_id());
+			/*if (EEP_Fashion == equipTypeData.posIndex || EEP_Body1 == equipTypeData.posIndex || EEP_Ride == equipTypeData.posIndex)
+			{
+				ToolTip::getInstance()->push(GET_STR(2114));//输出时装 翅膀不能强化
+				//return;
+			}*/
+			//首先判断该装备是否已经强化到了顶级 gx add
+			f_equipment* p_equip = dynamic_cast<f_equipment*>(item);
+			if (!p_equip)
+				return;
+			INT64 tempMoney = NumericalIniMgr::getInstance()->GetEquipStrengthenMoney(_equipPro->equipLevel);
+			//int tempEquipLv = EquipFusionManager::getInstance()->getCurEquipLevel(p_equip->get_item_type_id());
+			_coin->setString(CCString::createWithFormat("%d",tempMoney)->getCString());
+			//end
+			//若装备等级大于玩家当前等级，也不能强化
+			LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+			if (!ploc)
+			{
+				//return;
+			}
+			ItemNode *node = ItemNode::create();
+			CC_ASSERT(node != NULL);
+			node->setDataId(item->get_item_type_id());
+			setContainerData(dynamic_cast<f_equipment*>(item));
+			setEquipthenItem();
+		}
+		else if(typeData.type == PIT_QiangHuaMat)
+		{
+			if(_equipId == -1)
+			{
+				ToolTip::getInstance()->push("\xE8\xAF\xB7\xE5\x85\x88\xE6\x94\xBE\xE5\x85\xA5\xE8\xA3\x85\xE5\xA4\x87\xEF\xBC\x81");
+			}
+			else
+			{
+				if (_equipLevel >= MAX_STRENGTHEN_LEVEL)//装备强化等级已为16
+				{
+					ToolTip::getInstance()->push(GET_STR(2089));
+					//result = GR_SUCCESS;
+					return;
+				}
+				unsigned int dwTempID = item->get_item_type_id();
+				//特殊判断下强化神石
+				if (CSI_QiangHuaShenShi == dwTempID || CSI_QiangHua_3 == dwTempID || CSI_QiangHua_5 == dwTempID || CSI_QiangHua_8 == dwTempID)
+				{
+					f_item *p_Tempitem = PackageManager::getInstance()->getItem(_equipId);
+					if (!p_Tempitem)
+					{
+						ToolTip::getInstance()->push("\xE8\xAF\xB7\xE5\x85\x88\xE6\x94\xBE\xE5\x85\xA5\xE8\xA3\x85\xE5\xA4\x87\xEF\xBC\x81");
+						//result = GR_SUCCESS;
+						return;
+					}
+					f_equipment* p_equip = dynamic_cast<f_equipment*>(p_Tempitem);
+					if (!p_equip)
+					{
+						//result = GR_SUCCESS;
+						return;
+					}
+					if (CSI_QiangHuaShenShi == dwTempID)
+					{
+						if (15 == p_equip->m_equipex.byConsolidateLevel)
+						{
+							ToolTip::getInstance()->push(GET_STR(2089));
+							//result = GR_SUCCESS;
+							return;
+						}
+					}
+					else if (CSI_QiangHua_3 == dwTempID)
+					{
+						if (p_equip->m_equipex.byConsolidateLevel >= 3)
+						{
+							ToolTip::getInstance()->push(GET_STR(2340));
+							//result = GR_SUCCESS;
+							return;
+						}
+					}
+					else if (CSI_QiangHua_5 == dwTempID)
+					{
+						if (p_equip->m_equipex.byConsolidateLevel >= 5)
+						{
+							ToolTip::getInstance()->push(GET_STR(2341));
+							//result = GR_SUCCESS;
+							return;
+						}
+					}
+					else if (CSI_QiangHua_8 == dwTempID)
+					{
+						if (p_equip->m_equipex.byConsolidateLevel >= 8)
+						{
+							ToolTip::getInstance()->push(GET_STR(2342));
+							//result = GR_SUCCESS;
+							return;
+						}
+					}
+				}
+				if(getStuffIdByEquipLevel(_equipLevel) == dwTempID || CSI_QiangHuaShenShi == dwTempID
+					|| CSI_QiangHua_3 == dwTempID || CSI_QiangHua_5 == dwTempID || CSI_QiangHua_8 == dwTempID)
+				{
+					addStuff(item->get_item_type_id(), (eStrengthenUiTag)1);
+					updateContainerData();
+				}
+				else
+				{
+					//TODO:提示物品错误
+				}
+			}
+		}
+	}
+	update_wending_stone();
+}
+
+//short StrengthenUiLayer::getItemEnd( CCTouch &touch, eGetResult &result, EItemConType src, short itemIndex )
+//{
+//	CCPoint framePoint = _frame->convertTouchToNodeSpace(&touch);
+//	const CCSize &frameSize = _frame->getContentSize();
+//	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+//	if(frameRect.containsPoint(framePoint))
+//	{
+//		if(src == EICT_Bag)
+//		{
+//			int index = getItemUnderPoint(framePoint);
+//			if(index != -1)
+//			{
+//				//f_item *item = PackageManager::getInstance()->getItem(src, itemIndex);
+//				f_item *item = EquipFusionManager::getInstance()->getEquipment();
+//				if(item != NULL)
+//				{
+//					const ItemTypeData &typeData = PackageManager::getInstance()->getItemTypeData(item->get_item_type_id());
+//					if(typeData.type == PIT_Equip)
+//					{
+//						if(index == STUT_Equip)
+//						{
+//							//时装，翅膀不能强化
+//							const EquipTypeData &equipTypeData = PackageManager::getInstance()->getEquipTypeData(item->get_item_type_id());
+//							if (EEP_Fashion == equipTypeData.posIndex || EEP_Body1 == equipTypeData.posIndex || EEP_Ride == equipTypeData.posIndex)
+//							{
+//								ToolTip::getInstance()->push(GET_STR(2114));
+//								result = GR_SUCCESS;
+//								return -1;
+//							}
+//							//首先判断该装备是否已经强化到了顶级15 gx add
+//							f_equipment* p_equip = dynamic_cast<f_equipment*>(item);
+//							if (!p_equip)
+//								return -1;
+//							if (p_equip->get_equip_consolidate_level() >= 15)
+//							{
+//								ToolTip::getInstance()->push(GET_STR(2089));
+//								result = GR_SUCCESS;
+//								return -1;
+//							}
+//							//end
+//							//若装备等级大于玩家当前等级，也不能强化
+//							LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+//							if (!ploc)
+//							{
+//								result = GR_SUCCESS;
+//								return -1;
+//							}
+//							if (equipTypeData.level > ploc->getLevel())
+//							{
+//								ToolTip::getInstance()->push(GET_STR(2194));
+//								result = GR_SUCCESS;
+//								return -1;
+//							}
+//							ItemNode *node = getItemNode((eStrengthenUiTag)index);
+//							CC_ASSERT(node != NULL);
+//							node->setDataId(item->get_item_type_id());
+//							setContainerData(dynamic_cast<f_equipment*>(item));
+//						}
+//					}
+//					else if(typeData.type == PIT_QiangHuaMat)
+//					{
+//						if(index >= STUT_Mat1 && index <= STUT_Mat4)
+//						{
+//							if(_equipId == -1)
+//							{
+//								//提示没有装备
+//								/*MessageBoxUi *msgUi = MessageBoxUi::createWithOneBtn("\xE6\x8F\x90\xE7\xA4\xBA",
+//								"\xE8\xAF\xB7\xE5\x85\x88\xE6\x94\xBE\xE5\x85\xA5\xE8\xA3\x85\xE5\xA4\x87\xEF\xBC\x81",
+//								"\xE7\xA1\xAE\xE5\xAE\x9A");
+//								World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);*/
+//								ToolTip::getInstance()->push("\xE8\xAF\xB7\xE5\x85\x88\xE6\x94\xBE\xE5\x85\xA5\xE8\xA3\x85\xE5\xA4\x87\xEF\xBC\x81");
+//							}
+//							else
+//							{
+//								if (_equipLevel >= 15)//装备强化等级已为15
+//								{
+//									ToolTip::getInstance()->push(GET_STR(2089));
+//									result = GR_SUCCESS;
+//									return -1;
+//								}
+//								unsigned int dwTempID = item->get_item_type_id();
+//								//特殊判断下强化神石
+//								if (CSI_QiangHuaShenShi == dwTempID || CSI_QiangHua_3 == dwTempID || CSI_QiangHua_5 == dwTempID || CSI_QiangHua_8 == dwTempID)
+//								{
+//									f_item *p_Tempitem = PackageManager::getInstance()->getItem(_equipId);
+//									if (!p_Tempitem)
+//									{
+//										ToolTip::getInstance()->push("\xE8\xAF\xB7\xE5\x85\x88\xE6\x94\xBE\xE5\x85\xA5\xE8\xA3\x85\xE5\xA4\x87\xEF\xBC\x81");
+//										result = GR_SUCCESS;
+//										return -1;
+//									}
+//									f_equipment* p_equip = dynamic_cast<f_equipment*>(p_Tempitem);
+//									if (!p_equip)
+//									{
+//										result = GR_SUCCESS;
+//										return -1;
+//									}
+//									if (CSI_QiangHuaShenShi == dwTempID)
+//									{
+//										if (15 == p_equip->m_equipex.byConsolidateLevel)
+//										{
+//											ToolTip::getInstance()->push(GET_STR(2089));
+//											result = GR_SUCCESS;
+//											return -1;
+//										}
+//									}
+//									else if (CSI_QiangHua_3 == dwTempID)
+//									{
+//										if (p_equip->m_equipex.byConsolidateLevel >= 3)
+//										{
+//											ToolTip::getInstance()->push(GET_STR(2340));
+//											result = GR_SUCCESS;
+//											return -1;
+//										}
+//									}
+//									else if (CSI_QiangHua_5 == dwTempID)
+//									{
+//										if (p_equip->m_equipex.byConsolidateLevel >= 5)
+//										{
+//											ToolTip::getInstance()->push(GET_STR(2341));
+//											result = GR_SUCCESS;
+//											return -1;
+//										}
+//									}
+//									else if (CSI_QiangHua_8 == dwTempID)
+//									{
+//										if (p_equip->m_equipex.byConsolidateLevel >= 8)
+//										{
+//											ToolTip::getInstance()->push(GET_STR(2342));
+//											result = GR_SUCCESS;
+//											return -1;
+//										}
+//									}
+//								}
+//								if(getStuffIdByEquipLevel(_equipLevel) == dwTempID || CSI_QiangHuaShenShi == dwTempID
+//									|| CSI_QiangHua_3 == dwTempID || CSI_QiangHua_5 == dwTempID || CSI_QiangHua_8 == dwTempID)
+//								{
+//									addStuff(item->get_item_type_id(), (eStrengthenUiTag)index);
+//									updateContainerData();
+//								}
+//								else
+//								{
+//									//TODO:提示物品错误
+//								}
+//							}
+//						}
+//					}
+//				}
+//			}
+//		}
+//		result = GR_SUCCESS;
+//	}
+//	else
+//	{
+//		result = GR_ERROR;
+//	}
+//
+//	return -1;
+//}
+//
+//bool StrengthenUiLayer::onClicked( CCTouch &touch )
+//{
+//	CCPoint framePoint = _frame->convertTouchToNodeSpace(&touch);
+//	const CCSize &frameSize = _frame->getContentSize();
+//	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+//	if(frameRect.containsPoint(framePoint))
+//	{
+//		return true;
+//	}
+//
+//	return false;
+//}
+
+EItemConType StrengthenUiLayer::getConType()
+{
+	return EICT_CLIENT;
+}
+
+void StrengthenUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_STRENGTHENUI);
+}
+
+void StrengthenUiLayer::onAutoPutBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	autoAddStuff();
+}
+
+void StrengthenUiLayer::onOneKeyBuyBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+
+}
+
+void StrengthenUiLayer::onSubbtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	if (_strengTimes > 1)
+	{
+		--_strengTimes;
+	}
+	EquipFusionManager::getInstance()->setNeedStrengTimes(_strengTimes);
+	_strengTimesLabel->setString(CCString::createWithFormat("%d",_strengTimes)->getCString());
+}
+
+void StrengthenUiLayer::onAddbtn( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	if (_strengTimes < 10)
+	{
+		++_strengTimes;
+	}
+	EquipFusionManager::getInstance()->setNeedStrengTimes(_strengTimes);
+	_strengTimesLabel->setString(CCString::createWithFormat("%d",_strengTimes)->getCString());
+}
+void StrengthenUiLayer::onStrongDescPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+// 	CC_ASSERT(_descframe != NULL);
+// 	if(_descframe->getParent() == NULL)
+// 	{
+// 		_descframe->setVisible(true);
+// 		_descframe->setTouchPriority(-1);
+// 		setAllChildernButtonPriority(_descframe,-1);
+// 		_descframe->setTouchEnable(true);
+// 		World::getInstance()->getScene()->addChild(_descframe,WZ_POPUI);
+// 	}
+	PlacardManager::getInstance()->open_placard_node(10);
+}
+// void StrengthenUiLayer::onCloseDescBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+// {
+// 	CC_ASSERT(_descframe != NULL);
+// 	_descframe->setTouchEnable(false);
+// 	_descframe->removeFromParent();
+// }
+
+// void StrengthenUiLayer::onKnowBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+// {
+// 	CC_ASSERT(_descframe != NULL);
+// 	_descframe->setTouchEnable(false);
+// 	_descframe->removeFromParent();
+// }
+void StrengthenUiLayer::onStrengThenBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+/*
+	int num = getStuffNum();
+
+	if (_equipLevel >= 15)//装备强化等级已为15
+	{
+		ToolTip::getInstance()->push(GET_STR(2089));
+		return;
+	}
+	if(num > 0)
+	{
+		//CC_ASSERT(_equipId != -1 && _stuffId != -1 );
+		if (_equipId != -1 && _stuffId != -1 && _enableStrengthen)
+		{
+			PackageManager::getInstance()->strengthenEquip(_equipId, _stuffId, num);
+			setEnableStrengthen(false);
+		}
+		
+	}
+	//强化材料不足，需要提醒用户打开商城购买 gx add
+	else
+	{
+		strengthItemLackInfo(_equipId);
+	}
+	NewPlayerGuider::getInstance()->onConlidateBtnClicked(StrengthenUi::BT_Conlidate);*/
+	
+		//Delay(2 * 1000);
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_16);
+	setIsSuccess(true);
+	_stringCurTimes = _strengTimes;
+	if (_strengTimes == 0)
+	{
+		ToolTip::getInstance()->push("\xE8\xAF\xB7\xE9\x80\x89\xE6\x8B\xA9\xE5\xBC\xBA\xE5\x8C\x96\xE6\xAC\xA1\xE6\x95\xB0");		//请选择强化次数
+		return;
+	}
+	this->sendStrengthenEquipMsg(0.0f);			//象征性的参数，无实质意义
+}
+
+void StrengthenUiLayer::sendStrengthenEquipMsg(float dt)//发送强化装备信息
+{
+	if((_stringCurTimes > 1) && !m_bIsPermissible)
+	{
+		CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&StrengthenUiLayer::sendStrengthenEquipMsg), this);
+		if (!_strengthenBtn->isEnabled())
+			_strengthenBtn->setEnabled(true);
+		m_bIsPermissible = true;
+		return;
+	}
+	else
+	{
+		if(!m_bIsPermissible)
+			m_bIsPermissible = true;
+	}
+	this->setButtonFunc(false);
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&StrengthenUiLayer::sendStrengthenEquipMsg), this, 1.6f, false);		//因为要播特效，间隔改为1.5s	【J】
+	//int num = getStuffNum();
+	if (getIsSuccess())
+	{
+		setIsSuccess(false);
+		if (_equipLevel >= MAX_STRENGTHEN_LEVEL)//装备强化等级已为16
+		{		
+			updateAllHideControl();
+			return;
+		}		
+		CheckButton *check = (CheckButton*)_frame->getChildByTag(UI_WENDING_CHECK);
+		int isWending = check->isCheckd()?1:0;
+		std::function<void(bool)> func = [this,isWending](bool isSuccess){
+			if (isSuccess)
+			{
+				PackageManager::getInstance()->strengthenEquip(_equipId,_isAutoBuy,isWending);
+				--_stringCurTimes;
+				if (_stringCurTimes <= 0)
+				{
+					CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&StrengthenUiLayer::sendStrengthenEquipMsg), this);
+				}
+			}
+			else
+			{
+				setIsSuccess(true);
+				setPermition(false);
+				_stringCurTimes = 0;
+				onSECalback(0);
+				CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&StrengthenUiLayer::sendStrengthenEquipMsg), this);
+			}
+		};
+		SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+	}
+}
+
+int StrengthenUiLayer::getItemUnderPoint( const CCPoint &point )
+{
+	CCRect rect(point.x - ITEMNODE_CONTENTWIDTH / 2.0f, point.y - ITEMNODE_CONTENTHEIGHT / 2.0f, 
+		ITEMNODE_CONTENTWIDTH, ITEMNODE_CONTENTHEIGHT);
+
+	for(int i = STUT_PosBegin; i < STUT_PosEnd; i ++)
+	{
+		if(rect.containsPoint(_pos[i]))
+			return i;
+	}
+
+	return -1;
+}
+
+ItemNode * StrengthenUiLayer::getItemNode( eStrengthenUiTag tag )
+{
+	ItemNode *node = dynamic_cast<ItemNode*>(_frame->getChildByTag(tag + STUT_ItemBegin));
+	return node;
+}
+
+void StrengthenUiLayer::setContainerData( f_equipment *equipInfo )
+{
+	PackageManager::getInstance()->unLockItem(EICT_Bag, _equipId);
+
+	_equipId = equipInfo->get_item_id();
+	_equipLevel = equipInfo->get_equip_consolidate_level();
+
+	PackageManager::getInstance()->lockItem(EICT_Bag, _equipId);
+
+	//_container->removeAllChildren();
+	//clearAllStuff();//gx add 2014.3.24
+
+	updateContainerData();
+
+	if(_stuffId != (unsigned int)-1 && _stuffId != getStuffIdByEquipLevel(_equipLevel))
+	{//如果需要的材料改变，则清空原有的
+		clearAllStuff();
+	}
+}
+
+unsigned int StrengthenUiLayer::getStuffIdByEquipLevel( int equipLevel )
+{
+	if(equipLevel < 0)
+		return (unsigned int)-1;
+	else if(equipLevel < 3)
+		return CSI_MiYin;
+	else if(equipLevel < 7)
+		return CSI_HuoShi;
+	else if(equipLevel < 11)
+		return CSI_XuanTie;
+	else if(equipLevel < 15)
+		return CSI_TianJieXuanTie;
+	return 0;
+}
+
+void StrengthenUiLayer::addStuff( unsigned int stuffId, eStrengthenUiTag pos )
+{
+	if (CSI_QiangHuaShenShi == _stuffId || CSI_QiangHua_3 == _stuffId || CSI_QiangHua_5 == _stuffId || CSI_QiangHua_8 == _stuffId)
+	{
+		ToolTip::getInstance()->push(GET_STR(2354));
+		return;
+	}
+	if(_stuffId == (unsigned int)-1)
+	{
+		_stuffId = stuffId;
+	}
+	else if(_stuffId != stuffId)
+	{
+		clearAllStuff();
+		_stuffId = stuffId;
+	}
+
+
+	//CC_ASSERT(stuffId == _stuffId);
+
+	eStrengthenUiTag newPos = getValidStuffPos(pos);
+	if(newPos >= STUT_Mat1 && newPos < STUT_PosEnd)
+	{
+		ItemNode *node = getItemNode(newPos);
+		CC_ASSERT(node != NULL);
+		node->setDataId(stuffId);
+		_stuffNum |= (1 << newPos);
+	}
+}
+
+int StrengthenUiLayer::getStuffNum()
+{
+	int num = 0;
+	for(int i = STUT_Mat1; i < STUT_PosEnd; i ++)
+	{
+		if(((_stuffNum >> i) & 0x1) == 1)
+		{
+			num ++;
+		}
+	}
+
+	return num;
+}
+
+StrengthenUiLayer::eStrengthenUiTag StrengthenUiLayer::getValidStuffPos( eStrengthenUiTag pos )
+{
+	CC_ASSERT(pos >= STUT_Mat1 && pos < STUT_PosEnd);
+	if(((_stuffNum >> pos) & 0x1) == 0)
+	{
+		return pos;
+	}
+	else
+	{
+		for(int i = STUT_Mat1; i < STUT_PosEnd; i ++)
+		{
+			if(((_stuffNum >> i) & 0x1) == 0)
+			{
+				return eStrengthenUiTag(i);
+			}
+		}
+	}
+
+	return STUT_PosEnd;
+}
+
+void StrengthenUiLayer::setStrengthenData()
+{
+	int lv = EquipFusionManager::getInstance()->getEquipment()->get_equip_consolidate_level();//
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipReinforcementPro WHERE ID = ?1");
+// 	cmd->set_integer32(1 , lv);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("id");
+// 		_equipPro->id = table->get_integer32(idx);
+// 		idx = table->get_index("StuffId");
+// 		_equipPro->StuffId = table->get_integer32(idx);
+// 		idx = table->get_index("Num");
+// 		_equipPro->Num = table->get_integer32(idx);
+// 		idx = table->get_index("LvUpPro");
+// 		_equipPro->LvUpPro = table->get_integer32(idx);
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	const equip_reinforcement* rein = EquipFusionManager::getInstance()->getEquipReinforcement(lv);
+	if (rein)
+	{
+		_equipPro->id = rein->idx;
+		_equipPro->StuffId = rein->stuffId;
+		_equipPro->Num = rein->num;
+		_equipPro->LvUpPro = rein->levelUp;
+	}
+
+	////////////////////////////////////////////////////////////////////////////////////////////////////
+	c_sql_command* cmd_1 = c_db_manager::getSingleton()->begin_operation("SELECT * FROM ItemTipData WHERE id = ?1");
+	cmd_1->set_integer32(1 , _equipPro->StuffId);
+	c_sql_table* table_1 = c_db_manager::getSingleton()->create_table();
+	while(table_1->retrieve_row())
+	{
+		unsigned int idx = table_1->get_index("name");
+		_equipPro->equipItemName = table_1->get_text(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table_1);
+	c_db_manager::getSingleton()->end_operation(cmd_1);
+}
+
+int StrengthenUiLayer::calculateProbability()
+{
+	int num = getStuffNum();
+	if(num == 0)
+		return 0;
+
+	if(CSI_QiangHuaShenShi == _stuffId || CSI_QiangHua_3 == _stuffId
+		|| CSI_QiangHua_5 == _stuffId || CSI_QiangHua_8 == _stuffId)
+		return 100;
+
+	int probability = 0;
+	if(_equipLevel == 0) probability = 25;
+	else if(_equipLevel == 1) probability = 15;
+	else if(_equipLevel == 2) probability = 5;
+	else if(_equipLevel == 3) probability = 15;
+	else if(_equipLevel == 4) probability = 11;
+	else if(_equipLevel == 5) probability = 7;
+	else if(_equipLevel == 6) probability = 3;
+	else if(_equipLevel == 7) probability = 8;
+	else if(_equipLevel == 8) probability = 6;
+	else if(_equipLevel == 9) probability = 4;
+	else if(_equipLevel == 10) probability = 2;
+	else if(_equipLevel == 11) probability = 4;
+	else if(_equipLevel == 12) probability = 3;
+	else if(_equipLevel == 13) probability = 2;
+	else if(_equipLevel == 14) probability = 1;
+
+	return probability * num;
+}
+
+void StrengthenUiLayer::clearAllStuff()
+{
+	_stuffNum = 0;
+	_stuffId = (unsigned int)-1;
+
+	for(int i = STUT_Mat1; i < STUT_PosEnd; i ++)
+	{
+		ItemNode *itemNode = getItemNode((eStrengthenUiTag)i);
+		CC_ASSERT(itemNode != NULL);
+		itemNode->setBlank();
+	}
+}
+
+void StrengthenUiLayer::autoAddStuff()
+{
+	if(_equipId == (INT64)-1)
+	{
+		ToolTip::getInstance()->push("\xE8\xAF\xB7\xE5\x85\x88\xE6\x94\xBE\xE5\x85\xA5\xE8\xA3\x85\xE5\xA4\x87");
+		return;
+	}
+
+	clearAllStuff();
+
+	if (_equipLevel >= MAX_STRENGTHEN_LEVEL)//装备强化等级已为满级
+	{
+		ToolTip::getInstance()->push(GET_STR(2089));
+		return;
+	}
+
+	unsigned int stuffId = getStuffIdByEquipLevel(_equipLevel);
+	if(_stuffId == (unsigned int)-1)
+		_stuffId = stuffId;
+
+	f_item *item = PackageManager::getInstance()->getItem(EICT_Bag, (unsigned int)_stuffId,true);//gx modify
+	if(item != NULL)
+	{
+		int num = MIN(4, item->get_item_number());
+		for(int i = 0; i < num ;  i++)
+		{
+			addStuff(_stuffId, STUT_Mat1);
+		}
+		updateContainerData();
+	}
+	else
+	{
+		//TODO:提示找不到物品
+		//ToolTip::getInstance()->push("\xE6\x82\xA8\xE7\x9A\x84\xE5\x8C\x85\xE8\xA3\xB9\xE9\x87\x8C\xE9\x9D\xA2\xE6\xB2\xA1\xE6\x9C\x89\xE5\xBC\xBA\xE5\x8C\x96\xE6\x9D\x90\xE6\x96\x99");
+		strengthItemLackInfo(_equipId);//gx add
+	}
+}
+
+void StrengthenUiLayer::updateContainerData()
+{
+	if(_equipId == NULL)
+		return;
+	//f_item *item = PackageManager::getInstance()->getItem(EICT_Bag, (short)index);
+	//f_equipment *equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(EICT_Bag, _equipId));
+	f_equipment *equip = EquipFusionManager::getInstance()->getEquipment();
+	//f_equipment *equip = EquipFusionManager::getInstance()->getEquipment();
+	if(equip == NULL)
+		return;
+
+	_equipLevel = equip->get_equip_consolidate_level();//装备当前等级
+	if (_equipLevel > 0)
+	{
+		std::string tmpEquipLvStr = CCString::createWithFormat("%s%d","+",_equipLevel)->getCString();
+		_equipName->setString(CCString::createWithFormat("%s%s",_equipPro->equipName.c_str(),tmpEquipLvStr.c_str())->getCString());//装备名称
+	}
+	else
+		_equipName->setString(_equipPro->equipName.c_str());//装备名称
+	CC_ASSERT(_container != NULL);
+	_container->removeAllChildren();
+	CCSize containerSize = _container->getContentSize();
+
+	if(_equipLevel < MAX_STRENGTHEN_LEVEL)
+	{//显示下一级和成功率
+		ccColor3B orangeColor = ccc3(255, 128, 0);//蓝色字体
+
+		//CCLabelTTF *nextLevel = CCLabelTTF::create();//下一等级
+		//nextLevel->setAnchorPoint(ccp(1.f, 1.f));
+		_nextLevel->setColor(orangeColor);
+		if(_stuffId == CSI_QiangHuaShenShi)//强化神石
+		{
+			CCString *str = CCString::createWithFormat(_strMap[EAT_NextLevel].c_str(), 15);
+			_nextLevel->setString(str->getCString());
+		}
+		else if (CSI_QiangHua_3 == _stuffId)
+		{
+			CCString *str = CCString::createWithFormat(_strMap[EAT_NextLevel].c_str(), 3);
+			_nextLevel->setString(str->getCString());
+		}
+		else if (CSI_QiangHua_5 == _stuffId)
+		{
+			CCString *str = CCString::createWithFormat(_strMap[EAT_NextLevel].c_str(), 5);
+			_nextLevel->setString(str->getCString());
+		}
+		else if (CSI_QiangHua_8 == _stuffId)
+		{
+			CCString *str = CCString::createWithFormat(_strMap[EAT_NextLevel].c_str(), 8);
+			_nextLevel->setString(str->getCString());
+		}
+		else
+		{
+			_nextLevel->setString(CCString::createWithFormat("%d",_equipLevel + 1)->getCString());//%s%d  ,_equipLevel,"-",
+		}
+
+		_successRate->setColor(orangeColor);
+		_successRate->setString(CCString::createWithFormat("%d%s",_equipPro->LvUpPro/100,"%")->getCString());
+	}else{
+		_nextLevel->setString(CCString::createWithFormat("%d",MAX_STRENGTHEN_LEVEL)->getCString());
+		_successRate->setString("\x30\x25");
+	}
+
+	std::map<ERoleAttribute, int> baseAttr;
+	std::vector<ERoleAttribute> baseAttrVector;
+	if(_stuffId != 1400085)
+	{
+		for(int i = 0; i < MAX_BASE_ATT; i ++)
+		{//基础属性
+			ERoleAttribute attr = equip->m_equipex.EquipAttitionalAtt[i].eRoleAtt;
+			if(attr != ERA_Null)
+			{
+				if(attr != ERA_Luck)
+				{
+					baseAttr[attr] = equip->m_equipex.EquipAttitionalAtt[i].nValue;
+					baseAttrVector.push_back(attr);
+				}
+			}
+		}
+	}
+
+	int n = 0;
+	for(std::vector<ERoleAttribute>::iterator iter = baseAttrVector.begin(); iter != baseAttrVector.end(); ++ iter)//增加属性
+	{
+		int iterValue = baseAttr[*iter];
+		if(iterValue == -1)
+			continue;
+
+		switch(*iter)
+		{
+		case ERA_ExAttackMin:
+			{
+				int v1 = iterValue;
+				int v2 = baseAttr[ERA_ExAttackMax];
+				baseAttr[ERA_ExAttackMax] = -1;
+				addBaseAttrLabel(n, _baseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExAttackMax:
+			{
+				int v2 = iterValue;
+				int v1 = baseAttr[ERA_ExAttackMin];
+				baseAttr[ERA_ExAttackMin] = -1;
+				addBaseAttrLabel(n, _baseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InAttackMin:
+			{
+				int v1 = iterValue;
+				int v2 = baseAttr[ERA_InAttackMax];
+				baseAttr[ERA_InAttackMax] = -1;
+				addBaseAttrLabel(n, _baseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InAttackMax:
+			{
+				int v2 = iterValue;
+				int v1 = baseAttr[ERA_InAttackMin];
+				baseAttr[ERA_InAttackMin] = -1;
+				addBaseAttrLabel(n, _baseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ArmorEx:
+			{
+				int v1 = iterValue;
+				int v2 = baseAttr[ERA_ArmorIn];
+				baseAttr[ERA_ArmorIn] = -1;
+				addBaseAttrLabel(n, _baseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ArmorIn:
+			{
+				int v2 = iterValue;
+				int v1 = baseAttr[ERA_ArmorEx];
+				baseAttr[ERA_ArmorEx] = -1;
+				addBaseAttrLabel(n, _baseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExMaxDefense:
+			{
+				int v2 = iterValue;
+				int v1 = baseAttr[ERA_ExMinDefense];
+				baseAttr[ERA_ExMinDefense] = -1;
+				addBaseAttrLabel(n, _baseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExMinDefense:
+			{
+				int v1 = iterValue;
+				int v2 = baseAttr[ERA_ExMaxDefense];
+				baseAttr[ERA_ExMaxDefense] = -1;
+				addBaseAttrLabel(n, _baseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InMaxDefense:
+			{
+				int v2 = iterValue;
+				int v1 = baseAttr[ERA_InMinDefense];
+				baseAttr[ERA_InMinDefense] = -1;
+				addBaseAttrLabel(n, _baseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InMinDefense:
+			{
+				int v1 = iterValue;
+				int v2 = baseAttr[ERA_InMaxDefense];
+				baseAttr[ERA_InMaxDefense] = -1;
+				addBaseAttrLabel(n, _baseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		default:
+			addBaseAttrLabel(n, _baseAttrNameStr[*iter].c_str(), iterValue);
+			break;
+		}
+		n++;
+	}
+}
+
+void StrengthenUiLayer::addBaseAttrLabel( int n, const char *attrName, int v1, int v2 /*= -1*/, const char *split /*= "-"*/ )
+{//添加基础属性
+	ccColor3B colorBlack = ccc3(255, 255, 255);
+	ccColor3B colorGreen = ccc3(100, 255, 100);
+
+	CCSize conSize = _container->getContentSize();
+
+	//float posx = (n % 2) * conSize.width / 2.0f;
+	//float posy = conSize.height - ((n / 2) + 1) * STRENGTHENUI_LINE_SPACE;
+	float posx = 30.f;
+	float posy = conSize.height - (n + 1) * STRENGTHENUI_LINE_SPACE; 
+
+	CCString *str1 = NULL;
+	CCString *str3 = NULL;
+	if (v1 == 0)
+	{
+		return;
+	}
+
+	if(v2 != -1)
+	{
+		str1 = CCString::createWithFormat("%s", attrName);//%d%s%d   , v1 + getConsolidateAtt(v1, _equipLevel + 1 , split, v2 + getConsolidateAtt(v2 , _equipLevel + 1)
+	}	
+	else
+	{
+		str1 = CCString::createWithFormat("%s", attrName);
+	}
+
+	if(v2 != -1)
+	{
+		str3 = CCString::createWithFormat("%s%d%s%d", attrName, v1 + getConsolidateAtt(v1, _equipLevel), split, v2 + getConsolidateAtt(v2 , _equipLevel));
+	}
+	else
+	{
+		str3 = CCString::createWithFormat("%s%d", attrName, v1 + getConsolidateAtt(v1, _equipLevel));
+	}
+	TTFConfig config;
+	config.fontFilePath=  FT_FONTFACE;
+	config.fontSize = 16;
+	config.outlineSize = 1;
+	LabelFT *label1 = LabelFT::createWithTTF(config,"");//下面的属性值
+	if (n%2 == 1)
+	{
+		label1->setTextColor(Helper::converColor3B_2_4B(colorBlack));
+		label1->setString(str1->getCString());
+		label1->setAnchorPoint(ccp(0.f, 1.0f));
+		label1->setPosition(ccp(posx * 5-7.0f, posy + (n / 2 + 1) * 25+23.0f));//vv下右
+		_container->addChild(label1);
+	}
+	else
+	{
+		label1->setTextColor(Helper::converColor3B_2_4B(colorBlack));
+		label1->setString(str1->getCString());
+		label1->setAnchorPoint(ccp(0.f, 1.0f));
+		label1->setPosition(ccp(posx-22.0f, posy + n / 2 * 25+23.0f));//vv下左 22
+		_container->addChild(label1);
+	}
+
+
+	if(_equipLevel >= MAX_STRENGTHEN_LEVEL)
+	{
+		label1->setVisible(false);
+	}
+
+	LabelFT *label3 = LabelFT::createWithTTF(config,"");//上面的属性值  上右
+	if (n%2 == 1)
+	{
+		label3->setTextColor(Helper::converColor3B_2_4B(colorBlack));
+		label3->setString(str3->getCString());
+		label3->setAnchorPoint(ccp(0.f, 1.0f));
+		label3->setPosition(ccp(posx * 5-7.0f, posy + STRENGTHENUI_LINE_SPACE_2 +  (n / 2 + 1) * 25-18.0f));
+		_container->addChild(label3);
+	}
+	else
+	{
+		label3->setTextColor(Helper::converColor3B_2_4B(colorBlack));
+		label3->setString(str3->getCString());
+		label3->setAnchorPoint(ccp(0.f, 1.0f));
+		label3->setPosition(ccp(posx-22.0f, posy + STRENGTHENUI_LINE_SPACE_2 +  (n / 2 -1) * 25+6.5f));
+		_container->addChild(label3);
+	}
+	if(_equipLevel >= MAX_STRENGTHEN_LEVEL)
+		return;
+
+	//posx += label1->getContentSize().width;
+
+	CCString *str2 = NULL;
+	if(v2 != -1)
+	{
+		str2 = CCString::createWithFormat("%s%d%s%d", "         ", getConsolidateAtt(v1, _equipLevel + 1) - getConsolidateAtt(v1, _equipLevel), split, getConsolidateAtt(v2, _equipLevel + 1) - getConsolidateAtt(v2, _equipLevel));
+	}
+	else
+	{
+		str2 = CCString::createWithFormat("%s%d", "         ", getConsolidateAtt(v1, _equipLevel + 1) - getConsolidateAtt(v1, _equipLevel));
+	}
+	LabelFT *label2 = LabelFT::createWithTTF(config,"");//增加和箭头
+	if (n%2 == 1)//右边
+	{
+		label2->setTextColor(Helper::converColor3B_2_4B(colorGreen));
+		label2->setString(str2->getCString());
+		//label2->setAnchorPoint(ccp(0.f, 1.0f));
+		label2->setPosition(ccp(label1->getPositionX() + label1->getContentSize().width, posy + (n / 2 + 1) * 25+11.0f));
+		CCSprite* upIcon = CCSprite::create();
+		upIcon->initWithFile("Art/Icon/upsign.png");
+		upIcon->setPosition(ccp(label2->getPositionX() + 7.5f, posy - 9 + (n / 2 + 1) * 25+23.5f));
+	     upIcon->setScale(0.65f);
+		_container->addChild(upIcon);
+		_container->addChild(label2);
+	} 
+	else
+	{//左边
+		label2->setTextColor(Helper::converColor3B_2_4B(colorGreen));
+		label2->setString(str2->getCString());
+		//label2->setAnchorPoint(ccp(0.f, 1.0f));
+		label2->setPosition(ccp(label1->getPositionX() + label1->getContentSize().width, posy + n / 2 * 25+11.0f));
+		CCSprite* upIcon = CCSprite::create();
+		upIcon->initWithFile("Art/Icon/upsign.png");
+		upIcon->setPosition(ccp(label2->getPositionX() + 7.5f, posy - 9 + n / 2 * 25+23.5f));
+		 upIcon->setScale(0.65f);
+		_container->addChild(upIcon);
+		_container->addChild(label2);
+	}
+}
+
+// void StrengthenUiLayer::runSuccessAnimation()
+// {
+// 	runAnimation(STUT_Equip, SA_Success);
+// }
+
+// void StrengthenUiLayer::runFailedAnimation()
+// {
+// 	runAnimation(STUT_Equip, SA_Failed);
+// }
+
+// void StrengthenUiLayer::runDisapperAnimation()
+// {
+// 	if(_stuffNum == 0)
+// 		return;
+// 
+// 	for(int i = STUT_Mat1; i < STUT_PosEnd; i ++)
+// 	{
+// 		if(((_stuffNum >> i) & 0x01) == 1)
+// 		{
+// 			runAnimation((eStrengthenUiTag)i, SA_Disappear);
+// 		}
+// 	}
+// }
+
+// void StrengthenUiLayer::loadAnimation()
+// {
+	//AnimationCache::createDefList(3, _anims, false);
+	//AnimationCache::getInstance()->getSpecialEffect(0, "qianghuatexiao", _anims);
+
+// 	AnimationCache::createDefList(1, _anims2, false);
+// 	AnimationCache::getInstance()->getSinEffect(0,"qianghuachenggong", _anims2);
+// }
+
+// void StrengthenUiLayer::runAnimation( eStrengthenUiTag pos, eStrengthenAnim anim )
+// {
+// 	CC_ASSERT(pos >= STUT_Equip && pos < STUT_PosEnd);
+// 	//loadAnimation();
+// 	AnimationCache::AnimateList anims;
+// 	AnimationCache::createDefList(3, anims);
+// 	AnimationCache::getInstance()->getSpecialEffect(0, "qianghuatexiao", anims);
+// 	CCSprite *sprite = CCSprite::create();
+// 	sprite->setAnchorPoint(ccp(0.0f, 1.0f));
+// 	BSAnimate *animate = anims[anim];
+// 	CCSequence *action = CCSequence::createWithTwoActions(animate, CCCallFuncN::create(this, SEL_CallFuncN(&StrengthenUiLayer::animationCallback)));
+// 	_frame->addChild(sprite);
+// 	sprite->runAction(action);
+// 	sprite->setPosition(_pos[pos]);
+// 	if ( pos == STUT_Equip && anim == SA_Success)
+// 	{
+// 		CCSprite *sprite2 = CCSprite::create();
+// 		sprite2->setAnchorPoint(ccp(0.0f, 1.0f));
+// 		BSAnimate *animste2 = _anims2[0];
+// 		CCSequence *action = CCSequence::createWithTwoActions(animste2, CCCallFuncN::create(this,SEL_CallFuncN(&StrengthenUiLayer::animationCallback)));
+// 		_frame->addChild(sprite2);
+// 		sprite2->runAction(action);
+// 		sprite2->setPosition(ccp(_pos[pos].x, _pos[pos].y - 30.0f));
+// 	}
+// }
+
+// void StrengthenUiLayer::animationCallback( CCNode *node )
+// {
+// 	node->removeFromParent();
+// }
+
+void StrengthenUiLayer::strengthItemLackInfo( INT64 equipId )
+{
+	if (-1 == equipId)
+		return;
+	f_item* item = PackageManager::getInstance()->getItem(EICT_Bag,equipId);
+	if (!item)
+		return;
+	f_equipment* equip = dynamic_cast<f_equipment*>(item);
+	if (equip)
+	{
+		std::string strbasic("");
+		unsigned int stuffid_temp = getStuffIdByEquipLevel(equip->get_equip_consolidate_level());
+		switch (stuffid_temp)
+		{
+		case (unsigned int)-1:
+			return;
+			break;
+		case CSI_MiYin:
+			strbasic = GET_STR(2001);
+			break;
+		case CSI_HuoShi:
+			strbasic = GET_STR(2002);
+			break;
+		case CSI_XuanTie:
+			strbasic = GET_STR(2003);
+			break;
+		case CSI_TianJieXuanTie:
+			strbasic = GET_STR(2004);
+			break;
+		}
+		//首先应该判断背包是否已经有强化材料 
+		f_item *item = PackageManager::getInstance()->getItem(EICT_Bag, (unsigned int)stuffid_temp);
+		if(item != NULL)
+		{
+			//背包中有强化材料，提示先放入材料
+			std::ostringstream ss;
+			ss <<"\xE8\xAF\xB7\xE6\x94\xBE\xE5\x85\xA5"<<strbasic;
+			ToolTip::getInstance()->push(ss.str());
+			return;
+		}
+		std::string str = GET_STR(2000);
+		str += strbasic;
+		MessageBoxUi *strengthUI = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,str.c_str(), "\xE8\xB4\xAD\xE4\xB9\xB0","\xE5\x8F\x96\xE6\xB6\x88");
+		World::getInstance()->getScene()->addChild(strengthUI, WZ_MESSAGEBOX);
+		strengthUI->signalOkBtnPressed.connect(this,&StrengthenUiLayer::OpenMall);
+	}
+}
+
+void StrengthenUiLayer::OpenMall()
+{
+	OPEN_UI(WCT_STOREUI);
+}
+
+void StrengthenUiLayer::setEnableStrengthen( bool enable )
+{
+	if(_frame != NULL)
+	{
+		_enableStrengthen = enable;
+		CCControlButton *btn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(STUT_StrengBtn));
+		CC_ASSERT(btn != NULL);
+		btn->setEnabled(enable);
+	}
+}
+
+cocos2d::CCRect StrengthenUiLayer::getBtnPos( int tag )
+{
+	CCNode *node = _frame->getChildByTag(tag);
+	
+	if(node != NULL)
+	{
+		SetNodeTintTo(node);
+
+		CCPoint pt = node->convertToWorldSpace(ccp(0, 0));
+		CCSize size = node->getContentSize();
+		return CCRect(pt.x, pt.y, size.width, size.height);
+	}
+
+	return CCRect();
+}
+
+cocos2d::CCRect StrengthenUiLayer::getCloseBtnPos()
+{
+	CCSize size = _frame->getContentSize();
+	CCPoint pt = _frame->convertToWorldSpace(ccp(size.width - 10, size.height - 10));
+	
+	return CCRect(pt.x - 33, pt.y - 31, 40, 40);
+}
+
+GameActionNode* StrengthenUiLayer::getSuccessAcNode()
+{
+	GameActionNode* successSEAcNode = GameActionNode::create();
+// 	for (int i=1; i<99; ++i)
+// 	{
+// 		CCString* fireStr = CCString::createWithFormat("%s%02d", "E1_77", i);
+// 		if(!successSEAcNode->AddTexture(fireStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+	successSEAcNode->InitTextureWithSpriteFrame("E1_77");
+	return successSEAcNode;
+}
+
+GameActionNode* StrengthenUiLayer::getFailedAcNode()
+{
+	GameActionNode* failedSEAcNode = GameActionNode::create();
+// 	for (int i=1; i<99; ++i)
+// 	{
+// 		CCString* fireStr = CCString::createWithFormat("%s%02d", "E1_78", i);
+// 		if(!failedSEAcNode->AddTexture(fireStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+	failedSEAcNode->InitTextureWithSpriteFrame("E1_78");
+	return failedSEAcNode;
+}
+
+void StrengthenUiLayer::playSuccessSE()
+{
+	if(_successAcNode->GetActionState())
+		_successAcNode->StopAction();
+	_successAcNode->playAnimOnce(0.12f, false);
+	if(0 >= _stringCurTimes)
+		this->scheduleOnce(schedule_selector(StrengthenUiLayer::onSECalback), 1.8f);
+}
+ 
+void StrengthenUiLayer::playFailedSE()
+{
+	if(_failedAcNode->GetActionState())
+		_failedAcNode->StopAction();
+	_failedAcNode->playAnimOnce(0.07f, false);
+	if(0 >= _stringCurTimes)
+		this->scheduleOnce(schedule_selector(StrengthenUiLayer::onSECalback), 1.0f);
+}
+
+void StrengthenUiLayer::setButtonFunc( bool isUseble )
+{
+	_strengthenBtn->setEnabled(isUseble);
+}
+
+void StrengthenUiLayer::onSECalback( float dt )
+{
+	if(0 == _stringCurTimes)
+		if(!m_bIsPermissible)
+			m_bIsPermissible = true;
+	this->setButtonFunc(true);
+}
+
+void StrengthenUiLayer::setPermition( bool canContinue )
+{
+	m_bIsPermissible = canContinue;
+}
+
+void StrengthenUiLayer::update_wending_stone()
+{
+	int itemnum = PackageManager::getInstance()->getItemNumber(EICT_Bag,wending_stone);
+	int neednum = 1;
+	const ItemTypeData &data = PackageManager::getInstance()->getItemTypeData(wending_stone);
+	LabelFT *ttf = Helper::getLabelFTByParentAndTag(_frame,UI_WENDING_LAB);
+	if (itemnum<neednum)
+	{
+		ttf->setTextColor(Helper::converColor3B_2_4B(ccc3(255,0,0)));
+	}
+	else
+	{
+		ttf->setTextColor(Helper::converColor3B_2_4B(ccc3(0,255,0)));
+	}
+	//ttf->setString(CCString::createWithFormat("%s%d/%d",data.name.c_str(),itemnum,neednum)->getCString());
+	ttf->setString(CCString::createWithFormat("%d/%d",itemnum,neednum)->getCString());
+	std::string equipIconFileName = CFGReader::instance()->get_profile_string("Art", "ICON", "") + data.icon + std::string(".png");
+	//CCSprite *sp = dynamic_cast<CCSprite*>(_frame->getChildByTag(UI_WENDING_ICON));
+	_iconSp->initWithFile(equipIconFileName.c_str());
+}

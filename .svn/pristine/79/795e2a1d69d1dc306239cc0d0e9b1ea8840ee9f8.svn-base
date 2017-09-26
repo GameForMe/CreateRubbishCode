@@ -1,0 +1,514 @@
+#ifndef EQUIPTIPUI_H
+#define EQUIPTIPUI_H
+
+#include "cocos2d.h"
+#include "cocos-ext.h"
+#include "item.h"
+#include "ItemNode.h"
+#include "UiTools.h"
+#include "UiInterface.h"
+#include "GameActionNode.h"
+#include "EquipFusionUi.h"
+
+using namespace cocos2d;
+using namespace cocos2d::extension;
+
+#define EQUIPTIPITEMSPACE 25
+#define EQUIPTIPSTONFRAMEWH 40
+#define EQUIPTIPSATTRWH 140
+#define EQUIPBUTTONSPACE 40
+#define EQUIPTIPCUTLINE 5
+
+class f_equipment;
+class EquipCompareUI;
+class LabelEx;
+struct tagStallGoodsInfo;
+
+struct EquipBaseAttr;
+
+
+struct stBuffStrenEffect 
+{
+	unsigned int	buff_id;
+	int				effect_val;
+	float				persist_time;
+
+	stBuffStrenEffect():buff_id(0),effect_val(0),persist_time(0){}
+	bool is_valid()const{return buff_id !=0;}
+};
+
+//[bing] 装备属性的标签页
+class EquipTipUiAttrItem
+{
+public:
+	EquipTipUiAttrItem();
+	~EquipTipUiAttrItem();
+	CCSize getContentSize();
+	float getContentHieght();
+	void addToParent(CCNode *parent);
+	void setString(const char *str);
+	void setPosition(const CCPoint &pos);
+	void setLabelVisible(bool isVisibl);
+	const char* getAttrString();
+	void addChildByTag(CCNode* node, int tag);
+	CCNode* getChildByTag(int tag);
+	CCPoint getPosition();
+protected:
+	LabelFT *_label;
+};
+
+//[bing] 装备镶嵌的宝石
+struct EquipTipUiStoneItem
+{
+public:
+	EquipTipUiStoneItem(unsigned int id)
+	{
+		sprite =CCSprite::create();
+		sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("diamondframe"));
+		sprite->retain();
+
+		itemNode = ItemNode::create();
+		itemNode->setDataId(id);
+		itemNode->setClickable(true);
+		itemNode->hideItemOpBtn();
+		sprite->addChild(itemNode);
+		
+		CCSize size = sprite->getContentSize();
+		itemNode->setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+		itemNode->setScale(0.75);
+
+		stoneId = id;
+	}
+	EquipTipUiStoneItem()
+		: stoneId(0)
+	{
+		sprite =CCSprite::create();
+		sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("diamondframe"));
+		sprite->retain();
+		CCSize size = sprite->getContentSize();
+	}
+
+	~EquipTipUiStoneItem()
+	{
+		CC_SAFE_RELEASE(sprite);
+	}
+
+	void addToParent(CCNode *node)
+	{
+		CC_ASSERT(node != NULL && sprite != NULL);
+		node->addChild(sprite);
+	}
+
+	void setPosition(const CCPoint &pos)
+	{
+		sprite->setPosition(pos);
+	}
+
+	bool isTouched(CCTouch *touch)
+	{
+		return isTouchOnNodeContent(sprite, touch);
+	}
+
+	unsigned int getDataId() const { return stoneId; }
+
+	CCPoint getItemWorldPos() 
+	{
+		CCSize size = sprite->getContentSize();
+		return sprite->convertToWorldSpace(ccp(size.width / 2.0f, size.height / 2.0f));
+	}
+
+	CCSprite* get_icon()
+	{
+		return sprite;
+	}
+
+private:
+	CCSprite *sprite;
+	ItemNode *itemNode;
+	unsigned int stoneId;
+};
+
+class EquipTipUiLayer;
+
+//[bing] 装备Tips接口类 这个不加入到UI管理器内 由所用的模块自己调用create方法生成
+class EquipTipUi : public UiInterface
+{
+public:
+	EquipTipUi();
+	~EquipTipUi();
+
+	virtual CCNode* openUi();
+	static EquipTipUiLayer* create();
+};
+
+//[bing] 装备Tips的实现模块 控制界面控件用
+class EquipTipUiLayer 
+	: public CCLayer
+	, public cocos2d::extension::CCScrollViewDelegate
+	, public cocos2d::extension::CCBSelectorResolver
+	, public cocos2d::extension::CCBMemberVariableAssigner
+	, public cocos2d::extension::CCNodeLoaderListener
+{
+	friend class EquipTipUi;
+
+	enum eEquipTag			//如此多的标签，是因为复杂的实现过.....
+	{
+		ETT_ComparisonIn = 1,				//背景1,对比界面 1
+		ETT_SingleIn,						//背景2,单装备信息界面 2
+		ETT_ButtonBg,						//背景3,功能按钮界面 3
+		ETT_ContentLayerSelf = 0,           //对比界面内容载体层
+		ETT_ContentLayerDes,                //对比界面目标装备内容载体层
+		ETT_ContentLayerSingle,				//无对比界面装备内容载体层
+		ETT_IconFrame = 0,                  //装备图像框;
+		ETT_EquipName,	                	//装备名字 1;
+		ETT_Quality,		                //装备品质 2;
+		ETT_Sword,			                //装备战力 3;
+		ETT_Profession,		                //适合职业 4;
+		ETT_EquipLevel,		                //等级 5;
+		ETT_EquipPos,		                //部位 6;
+		ETT_EquipDurability,                //耐久 7;
+		ETT_BaseAttr,		                //基础属性 8;
+		ETT_IndentifyAttr,	                //附加属性 9;
+		ETT_FightPicture,		            //战斗力底纹图片 10;
+		ETT_FashionTime,                    //时装时效 11;
+		ETT_BaseAttrCutline,                //基础属性栏分割线 12;
+		ETT_AditionalAttrCutline,           //附加属性栏分割线 13;
+		ETT_Luck,                           //幸运 14;
+		ETT_SpecialRingDesc,                //特戒说明 15;
+		ETT_BaseAttrLabel,					//基础属性label		16-21
+		ETT_AdditionalLabel = 22,			//附加属性label		22-27
+		ETT_StoneModel = 28,				//宝石模型,用来取位置	28
+		ETT_FashionShow = 40,				//时装说明
+		ETT_ProfessionName = 51,			//职业 ;
+		ETT_EquipLevelName = 52,			//等级 ;
+		ETT_EquipPosName = 53,				//部位 ;
+		ETT_EquipDurabilityName = 54,		//耐久 ;
+		ETT_UpEffect = 77,					//向上箭头 ;
+		ETT_DownEffect = 78,				//向下箭头 ;
+		ETT_List = 99,						//列表CCScrollview ;
+ 		ETT_UnloadBtn = 100,                //卸下按钮 100;
+		ETT_EquipBtn,                       //装备按钮 101;
+		ETT_FusionBtn,                      //熔炼按钮 102;
+		ETT_StarupBtn,                      //升星按钮 103;
+		ETT_InlayBtn,                       //镶嵌按钮 104;
+		ETT_StrengthenBtn,                  //强化按钮 105;
+		ETT_LevelupBtn,                     //升级按钮 106;
+		ETT_RlEquipPos,						//右侧左边装卸按钮位置node标签	107
+		ETT_LlEquipPos,						//左侧左边装卸按钮位置node标签	108
+		ETT_RmEquipPos,						//右侧中间装卸按钮位置node标签	109
+		ETT_LmEquipPos,						//左侧中间装卸按钮位置node标签	110
+		ETT_EquipedSymbol = 101,            //已经装备的标志 101;
+		ETT_FightNumSE = 30,				//战斗力特效node	30
+		ETT_FightNum,						//战斗力字体		31
+		ETT_MaiChuBtn = 122,				//卖出按钮
+		ETT_ZhanShiBtn = 123,					//展示按钮
+		ETT_FenJieBtn = 124,					//分解按钮
+		ETT_Evolution = 125,					//进化按钮
+		ETT_FlyBtn = 126,					//分解按钮
+
+	};
+	enum professionTag
+	{
+		PROFESSION0,  //NULL
+		PROFESSION1, //战士
+		PROFESSION2, //法师
+		PROFESSION3, //道士
+		PROFESSION4, //战士套装
+		PROFESSION5, //法师套装
+		PROFESSION6, //道士套装
+		PROFESSION7, //战士散件
+		PROFESSION8, //法师散件
+		PROFESSION9, //道士散件
+		PROFESSION10,//通用
+		PROFESSION11,//通用套件
+		PROFESSION12 //通用散件
+	};
+
+	enum{
+		eSingle=0,
+		eSource,
+		eDest,
+		eTotal,
+	};
+
+	struct  f_wing_att_label_item
+	{
+		LabelFT* first_att_label;
+		LabelFT* second_att_label;
+
+		f_wing_att_label_item():first_att_label(NULL),second_att_label(NULL)
+		{
+
+		}
+	};
+
+	typedef std::vector<ERoleAttribute> TempAttrVector;
+public:
+
+	EquipTipUiLayer();
+	~EquipTipUiLayer();
+	CCB_STATIC_NEW_AUTORELEASE_OBJECT_WITH_INIT_METHOD(EquipTipUiLayer, create);
+	virtual SEL_MenuHandler onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName);
+	virtual SEL_CCControlHandler onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName);
+	virtual bool onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode);
+
+	//界面初始化加载时执行
+	virtual void onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader);
+
+	virtual void onEnter();
+	//界面退出后执行
+	virtual void onExit();
+
+	//界面开启后执行 位于onNodeLoaded之后
+	//virtual void onEnter();
+
+	//接收点击事件开始
+	virtual bool ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent);
+	virtual void scrollViewDidScroll(CCScrollView* view);
+	virtual void scrollViewDidZoom(CCScrollView* view);
+
+	void onCloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onEquipBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onUnloadBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onFusionBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onStarupBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onInlayBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onStrengthenBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onLevelupBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onmaichuBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onzhanshiBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onfenjieBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	
+
+	//调用界面关闭 会执行销毁等操作
+	void close();
+
+	void showEquality(EItemQuality eQuality,unsigned int typeId);
+public:
+	
+	CCRect GetBtnPos( unsigned char nBtnIdx );
+	
+	void setData(f_equipment *equip,bool isShowLock = true,bool isShowSelfEquip = true);//设置装备数据
+	void setData(const tagEquipViewInfo *equipInfo);
+	void setData(const tagStallGoodsInfo &stallGoodsInfo);
+	void setData(unsigned int typeId);
+	void updateUi();
+	void updateSelfUi();
+	CCSize getFrameSize();
+	void setUiPosition(const CCPoint &point);
+	void showUi(f_equipment *equip,bool isShowLock = true,bool isShowSelfEquip = true);
+	void showUi(const CCPoint &point, f_equipment *equip);
+	void showUi(const CCPoint &point, const tagEquipViewInfo *equip);
+	void showUi(const CCPoint &point, const tagStallGoodsInfo &info);
+	void showUi(const CCPoint &point, unsigned int id);
+	void showUiSetPT(const CCPoint &point, f_equipment *equip);
+	void showSelfEquip();
+	void showEquipBtn();
+	void showUnloadBtn();
+	void setIndex(int index);
+	void useSelectEquip();
+	void changeSelectEquip( EItemConType srcConType, EItemConType destConType, short src, short dest);
+	void unloadEquip();
+	void exhibitSelfEquip(CCObject* pObject);
+	void exhibitBagEquip(CCObject* pObject);
+	void showMroe(CCObject* pObject);
+public:
+	void setAllButtonOff(eWroldChildTag showType = WCT_Null);						//隐藏所有功能按钮
+	void showEquipClick(unsigned long long n64EquipID);		//点击装备展示
+	void updateButtonStatus(EEquipPos pos);					//设置功能按钮显示和位置
+	void setEquipVisible(bool isShow);
+	//添加显示不同品质装备的功能
+	void showUi(const CCPoint &point, unsigned int id,EItemQuality eQuality);
+	void setData(unsigned int typeId,EItemQuality eQuality);
+
+	void show_compare_by_related_id(f_equipment* src,unsigned int related_model_id);
+	void show_pure_compare(f_equipment* src,f_equipment* dest);
+	void modify_equip_base_att(f_equipment* equip);
+	void modify_recast_equip_base_att(f_equipment* equip);
+	void setData(f_equipment* src,f_equipment* dest);
+
+	void show_recast_tip(f_equipment* src,unsigned int related_model_id);
+	void set_is_remote_player(bool is_remote){m_is_remote_player = is_remote;}
+
+	static bool get_wing_equip_stren(unsigned int model_id,int fly_lv,float& spec_att_stren_val,stBuffStrenEffect& buff_stren_effect);
+private:
+	struct stEquipTipViewModel
+	{
+		int model_id;
+		unsigned char quanlity;
+
+		stEquipTipViewModel():model_id(INVALID),quanlity(0)
+		{
+
+		}
+
+		stEquipTipViewModel(f_equipment const* equip)
+		{
+			CC_ASSERT(equip);
+			this->model_id = equip->get_item_type_id();
+			this->quanlity = equip->get_item_quality();
+		}
+
+		stEquipTipViewModel(  const tagEquipViewInfo * equip)
+		{
+			CC_ASSERT(equip);
+			this->model_id = equip->dw_data_id;
+			this->quanlity = equip->byConsolidateLevelStar;
+		}
+
+		bool is_valid()const{return model_id != INVALID;}
+	};
+
+
+	void initAttrNameStr();
+	void setselfdata(f_equipment *selfequip,bool self = true);
+	void setTitleText(eEquipTag tag, const char *str,bool redColor = false, bool grayColor = false);
+	void setTitleText(eEquipTag tag, const wchar_t *str, bool redColor = false, bool grayColor = false );
+	void setTitleText(eEquipTag tag, int v, bool redColor = false, bool grayColor = false);
+	void setFightText(int v,bool showAdd = false);
+	void setText(LabelFT *label, const char *str, bool redColor = false);
+	void setText(LabelFT *label, const char *str, ccColor3B& color);
+	void setEquipIcon(const char *iconFrameName);
+	void setFashionTime(unsigned int time);
+	void setFashionTime(tagDWORDTime getitemtime,unsigned int time);
+	void addLuckAttr(int v);
+	void addBaseAttr(const char *attrName, int v1, int v2 = -1, const char *split = "-");
+	void addIndentifyAttr(const char *attrName, int v1, int v2 = -1, const char *split = "-",bool hide = false,const ERoleAttribute eRoleAtt=ERA_Null,stEquipTipViewModel equip=stEquipTipViewModel());
+	EquipTipUiAttrItem *createAttrItem(const ERoleAttribute eRoleAtt,const char *attrName, int v1, int v2 = -1, const char *split = "-",bool hide = false,stEquipTipViewModel  equip=stEquipTipViewModel());
+	void getComparisonUi();
+	void getSingleUi();
+	GameActionNode* getBattleSuperEffect();					//战斗力特效，后期可以移为一个公共的装备有关的公共方法
+	void setEqualityText(EItemQuality eQuality);			//设置装备品质显示
+	void setSelect_From(const std::string& selectFrom);
+	void GetDecomBagListOK();
+	LabelFT* getLabelFTByTag(CCNode* node,int tag);//通过此方法获得LabelFT
+	void changLabel();
+
+	void on_evolution(CCObject * pSender, CCControlEvent pCCControlEvent);
+	void on_fly(CCObject * pSender, CCControlEvent pCCControlEvent);
+
+	bool gem_enable_by_pos_type(EEquipPos pos)const;
+private:
+	float fPct;
+	//int equipAtt[EquipFusionUiLayer::EAA_End];
+	int _headHeight ;						//表头高度
+	int _index;										//获取装备位置，以支持界面外的穿戴卸下功能
+	int m_nSuitID;									//获取装备的套装ID，检测装备是否有升星功能
+	CCSprite* _comparisonBg;                        //对比界面背景图
+	CCSprite* _singleBg;							//无对比界面背景图
+	CCSprite* _buttonBg;							//功能按钮背景图
+	CCSprite* _currentBg;							//当前使用的背景图
+	CCLayer* _contentLayerSelf;						//对比界面自己装备内容加载层
+	CCLayer* _contentLayerDest;						//对比界面目标装备内容加载层
+	CCLayer* _contentLayerSingle;					//无对比界面内容加载层
+	CCLayer* _currentLayer;							//获取当前操作层
+	bool m_bEquiped;								//是否为已装备
+	bool m_bComparison;								//是否为对比界面
+	bool m_bCanUplevel;								//是否能够升级
+	bool m_bCanInlay;								//是否能够镶嵌
+	bool m_bCanFusion;								//是否能够熔炼
+	//f_equipment* _selfEquip;						//身上对应位置装备
+	f_equipment* _desEquip;							//目标装备
+	EEquipPos _selfEquipPosIndex;					//装备位置索引
+	int m_nBtnIndex;								//按钮索引，控制功能按钮的位置和按钮背景框大小
+	CCLabelBMFont* _fightNumBLabel1;				//战斗力艺术字label
+	CCLabelBMFont* _fightNumBLabel2;				//战斗力艺术字label2
+	CCLabelBMFont* _fightNumBLabelCurrent;			//当前操作层战斗力label
+
+	EquipTipUiAttrItem *_luckAttrItem;							//幸运属性
+	std::vector<EquipTipUiStoneItem*> _stoneList;				
+	typedef std::list<EquipTipUiAttrItem*> AttrItemList;
+	AttrItemList _baseAttr;
+	AttrItemList _indentifyAttr;
+	//CCLabelTTF *_specialRingLabel;
+	//CCLabelTTF *_ringLabelNode;
+	CCControlButton* _equipBtn;
+	CCControlButton* _unloadBtn;
+	CCControlButton* _fusionBtn;
+	CCControlButton* _starupBtn;
+	CCControlButton* _inlayBtn;
+	CCControlButton* _strengthenBtn;
+	CCControlButton* _levelupBtn;
+	CCControlButton* _maichuBtn;
+	CCControlButton* _zhanshiBtn;
+	CCControlButton* _fenjieBtn;
+
+	CCControlButton*	_evo_btn;
+	CCControlButton*	_fly_btn;
+
+	typedef std::map<ERoleAttribute, int> TempAttrMap;
+	std::map<ERoleAttribute, int> _selfEquipAttrMap;						//存放身上装备基本属性
+	std::map<ERoleAttribute, int> _selfEquipIdentifyMap;					//存放身上装备附加属性
+	std::vector<ERoleAttribute> _selfEquipAttrVector;						//基本属性类型
+	std::vector<ERoleAttribute> _selfEquipIdentifyVector;					//附加属性类型
+	std::map<int, CCPoint> _buttonCoordsMap;								//存放按钮位置
+	std::set<std::string> _usedPlistFile;									//存放plist(目前特效)
+	std::map<EquipTipUiAttrItem*, LabelFT*> _attrValueLabelMap;			//存放属性数值label
+	std::map<EquipTipUiAttrItem*, CCSprite*> _attrImageMap;                //存放附加属性等级图片
+	std::string _Select_From;
+	CCLayer* _layer;
+	eWroldChildTag _showType;
+	bool _isShowMoreBtn;
+	bool m_is_remote_player;
+
+	void init_wing_label_item(CCNode* root);
+	void make_item(CCNode* layer,size_t index);
+
+	void update_wing_att(bool b_show,unsigned int equip_model_id,int fly_level);
+	void update_wing_att_text(int panel_type,bool show,unsigned int equip_model_id,int fly_level);
+	void set_wing_att_text(int panel_type,size_t index,std::string const& text,ccColor3B const& color =ccBLUE);
+
+	f_wing_att_label_item		_wing_att_dest_item[eTotal]; 
+
+
+	void setup_base_att(tagEquipSpec const& att_array,int consolid_level);
+	void setup_base_att(tagEquipViewInfo const* euip_view,int consolid_level);
+	void setup_base_att(EquipBaseAttr const& atts,int add_luck);
+
+	void set_base_att_label(TempAttrVector const& baseAttrVector,TempAttrMap& baseAttr);
+
+	void setup_indentify_att(f_equipment const* equip ,bool deal_with_unkown);
+	void set_indentify_att_label(TempAttrVector const& baseAttrVector,TempAttrMap& baseAttr,f_equipment const* equip);
+
+	void setup_indentify_att(tagEquipViewInfo const* equip /*,bool deal_with_unkown*/);
+	void set_indentify_att_label(TempAttrVector const& baseAttrVector,TempAttrMap& baseAttr,tagEquipViewInfo const* equip);
+// 	std::map<int,LabelFT*>  _selfLabelFTMap;			//对比界面自己装备内容加载层的Label集合
+// 	std::map<int,LabelFT*>  _destLabelFTMap;			//对比界面目标装备内容加载层的Label集合
+// 	std::map<int,LabelFT*>  _singleLabelFTMap;			//无对比界面内容加载层的Label集合
+
+
+private:
+	void refresh_list();
+	void clear_ui_info();
+	void add_base_att_label(const char* name, int v1, int v2);
+	void add_indentify_att_label(const char* name, int v1, const ERoleAttribute eRoleAtt, stEquipTipViewModel equip);
+	void add_fashion_label(const char* text, bool is_time);
+	void add_equip_suit(DWORD suit_id, bool is_self = false);
+	void set_equip_desc(const string& str);
+	void add_special_label(const string& str, int tag);
+	void add_cut_line(CCScrollView* list, float& pos_y);
+	void add_title_text(CCScrollView* list, float& pos_y, const string& str);
+
+private:
+	CCScrollView* m_list_1;
+	CCScrollView* m_list_2;
+	CCScrollView* m_list_3;
+
+	CCSprite* m_up_1;
+	CCSprite* m_up_2;
+	CCSprite* m_up_3;
+	CCSprite* m_down_1;
+	CCSprite* m_down_2;
+	CCSprite* m_down_3;
+
+	std::vector<LabelEx*> m_vector_self_base_att;
+	std::vector<LabelEx*> m_vector_self_base_value;
+	std::vector<LabelEx*> m_vector_self_indentify_att;
+	std::vector<LabelEx*> m_vector_indentify_value;
+	std::vector<LabelEx*> m_vector_indentify_pic;
+	std::map<int, LabelEx*> m_map_special_att;
+	std::map<int, LabelEx*> m_map_suit_att;
+	int m_list_width;
+};
+
+#endif //EQUIPTIPUI_H

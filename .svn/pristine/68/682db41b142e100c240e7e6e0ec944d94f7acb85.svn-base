@@ -1,0 +1,233 @@
+/**
+ *	@file		SDCheckDefenderUI.cpp
+ *	@author		shenyaoyan
+ *	@date		2016/07/27
+ *	@version	
+ *	@brief		沙巴克神殿关卡守卫者显示界面
+ */
+
+#include "SDCheckDefenderUI.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "CommonClient.h"
+#include "SBKSDManager.h"
+#include "AnimationCache.h"
+#include "BSAnimate.h"
+#include "GameEventDefine.h"
+#include "UiManager.h"
+
+SDCheckDefenderUI::SDCheckDefenderUI()
+{
+
+}
+
+SDCheckDefenderUI::~SDCheckDefenderUI()
+{
+
+}
+
+CCNode* SDCheckDefenderUI::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["SDCheckDefenderUI"] = UiLayerLoader<SDCheckDefenderUILayer>::loader();
+	CCNode* uiNode = readUiFromCCBI("sbkfubenguanka",nodeLoaders,_loadSpriteSheet);
+	return uiNode;
+}
+
+//////////////////////////////////////////////////////////
+
+SDCheckDefenderUILayer::SDCheckDefenderUILayer()
+	: m_frame(NULL)
+	, m_checkNum(NULL)
+	, m_checkLabel(NULL)
+	, m_isNeedClose(false)
+{
+	for ( size_t i = 0 ; i < DEFENDER_MAX_MUN ; ++i )
+	{
+		m_classType[i]  = NULL;
+		m_nameLabel[i]  = NULL;
+		m_levelLabel[i] = NULL;
+		m_attLabel[i]   = NULL;
+		m_attEffect[i]  = NULL;
+		m_attNode[i]    = NULL;
+	}
+}
+
+SDCheckDefenderUILayer::~SDCheckDefenderUILayer()
+{
+
+}
+
+SEL_MenuHandler SDCheckDefenderUILayer::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+SEL_CCControlHandler SDCheckDefenderUILayer::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+bool SDCheckDefenderUILayer::onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode)
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*, m_frame);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*, m_checkNum);
+	return false;
+}
+void SDCheckDefenderUILayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	CC_ASSERT(m_frame);
+
+	m_checkLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(m_checkNum);
+
+	for ( size_t i = 0 ; i < DEFENDER_MAX_MUN ; ++i )
+	{
+		CCSprite* defenderSprite = dynamic_cast<CCSprite*>(m_frame->getChildByTag(i+1));
+		CC_ASSERT(defenderSprite);
+		m_classType[i]  = dynamic_cast<CCSprite*>(defenderSprite->getChildByTag(Defender_ClassType));
+		CC_ASSERT(m_classType[i]);
+		m_nameLabel[i]  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(defenderSprite->getChildByTag(Defender_Name)));
+		CC_ASSERT(m_nameLabel[i]);
+		m_levelLabel[i] = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(defenderSprite->getChildByTag(Defender_Level)));
+		CC_ASSERT(m_levelLabel[i]);
+		m_attNode[i]    = defenderSprite->getChildByTag(Defender_AttrNode);
+		CC_ASSERT(m_attNode[i]);
+		m_attEffect[i]  = m_attNode[i]->getChildByTag(Defender_EffectNode);
+		CC_ASSERT(m_attEffect[i]);
+		m_attLabel[i]   = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_attNode[i]->getChildByTag(Defender_Attr)));
+		CC_ASSERT(m_attLabel[i]);
+	}
+}
+
+void SDCheckDefenderUILayer::onEnter()
+{
+	NormalLayer::onEnter();
+	setTouchPriority(-1);
+	REGISTER_EVENT(shendian_checkpoint,SDCheckDefenderUILayer,onGetCheckPointNum);
+}
+
+void SDCheckDefenderUILayer::onExit()
+{
+	NormalLayer::onExit();
+	UNREGISTER_EVENT(shendian_checkpoint,SDCheckDefenderUILayer,onGetCheckPointNum);
+}
+
+void SDCheckDefenderUILayer::updateData(int checkPoint)
+{
+	std::string checkStr;
+	safe_sprintf(checkStr,STRING_TABLE["check_num_str"],checkPoint);
+	m_checkLabel->setString(checkStr);
+	const SBKSDManager::defend_player_data& check_data = SBKSDManager::get_singleton_ptr()->getCheckData();
+	auto itor = check_data.find(checkPoint);
+	if (itor!=check_data.end())
+	{
+		int defenderNum = 0;
+		for_each(itor->second.begin(),itor->second.end(),[&](SBKSDManager::check_defender_data::value_type const& cd)
+		{
+			if (defenderNum>DEFENDER_MAX_MUN)
+			{
+				CC_ASSERT(false);
+				return;
+			}
+			if (cd.isMonster)
+			{
+				setTypeSprite(defenderNum,RT_Warrior);
+				setName(defenderNum,STRING_TABLE["shendian_defender_monster"]);
+				const SBKSDManager::check_data& data = SBKSDManager::get_singleton_ptr()->getData();
+				auto itor = data.find(checkPoint);
+				if (itor!=data.end())
+				{
+					setLevel(defenderNum,itor->second.moster_level);
+				}
+			}
+			else
+			{
+				setTypeSprite(defenderNum,cd.classType);
+				setName(defenderNum,cd.name);
+				setLevel(defenderNum,cd.level);
+			}
+			setAttr(defenderNum,cd.attNum,cd.isMonster);
+			++defenderNum;
+		});
+	}
+}
+
+void SDCheckDefenderUILayer::setTypeSprite(int index, int classType)
+{
+	std::string classStr;
+	switch(classType)
+	{
+	case RT_Warrior:	//战士
+		classStr = "sbkfubenguanka_zhan";
+		break;
+	case RT_Mage:   //法师
+		classStr = "sbkfubenguanka_fa";
+		break;
+	case RT_Taoist:   //道士
+		classStr = "sbkfubenguanka_dao";
+		break;
+	default:
+		return;
+	}
+	m_classType[index]->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(classStr.c_str()));
+}
+
+void SDCheckDefenderUILayer::setName(int index,const std::string& nameStr)
+{
+	m_nameLabel[index]->setString(nameStr);
+}
+
+void SDCheckDefenderUILayer::setLevel(int index, int level)
+{
+	std::string levelStr;
+	safe_sprintf(levelStr,"%d",level);
+	m_levelLabel[index]->setString(levelStr);
+}
+
+void SDCheckDefenderUILayer::setAttr(int index, int attr, bool isPlayer)
+{
+	m_attNode[index]->setVisible(!isPlayer);
+	if (!isPlayer)
+	{
+		std::string attStr;
+		safe_sprintf(attStr,"%d",attr);
+		m_attLabel[index]->setString(attStr);
+
+		CCSprite* sprite = CCSprite::create();
+		if (m_attEffect[index]->getChildByTag(Attr_Effect) == NULL)
+		{
+			AnimationCache::AnimateList anims;
+			AnimationCache::createDefList(1,anims);
+			AnimationCache::getInstance()->getSinEffect(0,"E1_50",anims);
+			BSAnimate* animste = anims[0];
+			sprite->runAction(CCRepeatForever::create(animste));
+			m_attEffect[index]->addChild(sprite,0,Attr_Effect);
+		}
+	}
+}
+
+void SDCheckDefenderUILayer::onGetCheckPointNum(shendian_checkpoint* trans)
+{
+	updateData(trans->check_point);
+}
+
+bool SDCheckDefenderUILayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (isTouchOnNodeContent(m_frame,pTouch))
+	{
+		m_isNeedClose = false;
+	}
+	else
+	{
+		m_isNeedClose = true;
+	}
+	return true;
+}
+
+void SDCheckDefenderUILayer::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (m_isNeedClose)
+	{
+		CLOSE_UI(WCT_ShenDian_Tips_UI);
+	}
+}

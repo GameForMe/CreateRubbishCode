@@ -1,0 +1,166 @@
+#ifndef KAIFUHUODONGMGR_H_
+#define KAIFUHUODONGMGR_H_
+
+#include <map>
+#include "BaseDefine.h"
+#include "CmdAdapter.h"
+#include "kaifuhudong_protocol.h"
+#include "GameEventDefine.h"
+
+#define MAX_Activity_Reward 5
+struct  SProtoKaifuItemActivity
+{
+	SProtoKaifuItemActivity():id(0),activityID(0),actType(0),_value(0)
+	{
+		memset(reward, 0, sizeof(reward));
+		memset(m_Num, 0, sizeof(m_Num));
+	}
+	int id;
+	int activityID;
+	int actType;
+	int _value;
+	int	reward[MAX_Activity_Reward];	//奖励
+	int	m_Num[MAX_Activity_Reward];		//数量
+	std::string btnName;
+};
+
+struct SProtoKaifuActivity 
+{
+	int id;
+	int activityID;
+	std::string name;
+	std::string describe;
+	std::string title;
+	int actType;//对应kaifuhudong_protoclo.h中的 E_OS_Activity_Type
+	std::vector<SProtoKaifuItemActivity> m_ActivityItem_VecProto;
+};
+
+// 运营活动推荐类型 枚举 [2016-2-4 by willing]
+enum E_Activity_Recommend
+{
+	EAR_Not,        // 不推荐
+	EAR_Recommend,  // 推荐
+	EAR_ChaoZhi,    // 超值
+	EAR_XianShi,    // 限时
+	EAR_End
+};
+
+
+struct SProtoYunYingActivity
+{
+	SProtoYunYingActivity():id(0),activityID(0),name(""),describe(""),title(""),actType(0),reconmmend(EAR_Not),score_clear(0),showTitle("")
+	{
+	}
+	int id;
+	int activityID;
+	std::string name;
+	std::string describe;
+	std::string title;
+	int actType;//对应kaifuhudong_protoclo.h中的 E_OS_Activity_Type
+	E_Activity_Recommend reconmmend;//推荐类型
+	//当前奖励的物品信息
+	std::vector<SProtoKaifuItemActivity> m_ActivityItem_VecProto;
+	int score_clear;
+	std::string showTitle;
+};
+
+struct YunYing_Rank_Act
+{
+	int nActID;
+	int nCount;
+	int nOrder;     // 名次
+	int nScore;     // 积分 [2016-3-18 by willing]
+	tagDWORDTime dwBeginTime;
+	tagDWORDTime dwEndTime;
+	int nState;     // 活动的状态 [2016-3-24 by willing]
+	int nMinScore;  // 活动最小积分
+	std::list<NET_SIS_YunYing_Activity_Rank_Item> tempList;
+};
+
+// 悬赏任务，给客户端显示积分用的 [2016-4-19 by willing]
+struct SXuanShangItemScore
+{
+	int nScore:16;
+	int nTarget:16;
+
+	SXuanShangItemScore(int nValue)
+	{
+		memcpy(this,&nValue,sizeof(int));
+	}
+};
+
+struct CLEARLIST;
+
+class KaifuHuodongMgr
+{
+public:
+	KaifuHuodongMgr();
+	~KaifuHuodongMgr();
+	static KaifuHuodongMgr* getInstance();
+	void init();
+	void destroy();
+	std::map<int, SPacket_Activity> const& GetActivityList() const{ return m_ActivityList;}
+	bool requestData();
+	SProtoKaifuActivity* getKaifuActivity(int id);
+	SPacket_Activity* getKaifuPacketActivity(int id);
+	void getReward(int id, int index);
+	void setIosShowRecharge(bool isShow);
+	bool getIosShowRecharge();
+	void setIosShowGift(bool isShow);
+	bool getIosShowGift();
+	void setIosShowActCentre(bool isShow);
+	bool getIosShowActCentre();
+	void reset();
+	//运营活动
+	bool requestYunyingData();
+	bool requestYunyingRankData();  //发送获取运营活动排行榜信息
+	const std::list<SPacket_YunYing_Activity>& getYunyingActList() { return m_YunyingActList; }
+	std::map<int, YunYing_Rank_Act>& getYunyingRankMap() { return m_YunyingRankList; }
+	SProtoYunYingActivity* getYunyingActivity(int id);
+	SPacket_YunYing_Activity* getYunyingPacketActivity(int id);
+	YunYing_Rank_Act* getYunYingRankAct(int id);
+	NET_SIS_YunYing_Activity_Rank_Item* getYunyingRankItem(int id,int index);
+	bool getYunyingReward(int id, int index);
+	bool checkHaveYunyingReward();
+	int getYunYingActListSize();
+	int getActYunYingMapSize();
+	void requestYunyingAllData();
+private:
+	unsigned int onServerRequest_Activity(s_net_cmd* cmd);
+	unsigned int onServerRequest_Activity_Result(s_net_cmd* cmd);
+	unsigned int onServerIosRechargeFunction(s_net_cmd* cmd);
+	void LoadInfoFromDB();
+	unsigned int onServer_ProtoKaifuActivity(s_net_cmd* cmd);
+	unsigned int onServer_ProtoKaifuItemActivity(s_net_cmd* cmd);
+	//运营活动
+	unsigned int onServerRequest_YunyingAct(s_net_cmd* cmd);
+	unsigned int onServer_ProtoYunyingActivity(s_net_cmd* cmd);
+	unsigned int onServer_ProtoYunyingItemActivity(s_net_cmd* cmd);
+	unsigned int onXianshiBuyResult(s_net_cmd* cmd);
+	unsigned int onServerRequest_YunyingRank(s_net_cmd* cmd);
+	unsigned int onServerAllActive(s_net_cmd* cmd);
+	unsigned int onServerCanResetYunying(s_net_cmd* cmd);
+private:
+	std::map<int, SPacket_Activity> m_ActivityList;
+	bool isGetData;
+	bool _isReceiveSucceed;
+	std::map<int, SProtoKaifuActivity> m_Activity_VecProto;   //保存开服活动所有的活动
+	bool _iosShowRecharge;//ios平台下是否需要显示各种充值相关活动
+	bool _iosShowGift;//ios平台下是否需要显示礼包
+	bool _iosShowActCentre;//ios平台下是否需要显示活动中心
+	//运营活动
+	bool m_hasGetYunyingData;
+	bool m_hasGetYunyingRankData;
+	std::list<SPacket_YunYing_Activity> m_YunyingActList;  //保存运营活动里所有非排行榜的活动
+	std::map<int, YunYing_Rank_Act> m_YunyingRankList;   //保存运营活动里所有排行榜的活动
+
+	void clear_YunyingRankList(){m_YunyingRankList.clear();	CLEARLIST trans; SEND_EVENT(&trans);}
+	std::map<int, SProtoYunYingActivity> m_ActivityYunying;   //保存运营活动所有的活动
+	void clear_ActivityYunying(){m_ActivityYunying.clear();	CLEARLIST trans; SEND_EVENT(&trans);}
+	int sendNum;
+	int receiveNum;
+	bool m_canResetYunying;
+};
+
+
+#endif

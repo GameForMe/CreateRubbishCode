@@ -1,0 +1,380 @@
+/**
+ *	@file		AnswerManager.cpp
+ *	@author		shenyaoyan
+ *	@date		2016/06/07
+ *	@version	
+ *	@brief		趣味答题的管理类
+ */
+
+#include "AnswerManager.h"
+#include "TCPClient.h"
+#include "exam_protocol.h"
+#include "f_string_util.h"
+#include "GameEventDefine.h"
+#include "ChatMgr.h"
+#include "ToolTip.h"
+#include "UiManager.h"
+#include "ActivityMgr.h"
+#include "SystemUi.h"
+
+AnswerManager::AnswerManager()
+	: curNumber(0)  
+	, allNumber(0)
+	, rightNumber(0)
+	, remainTime(0)
+	, questionStr("")
+	, rightAnswer(0)
+	, allGainExp(0)
+	, curExp(0)
+	, luckyStar(0)
+	, guildHelp(0)
+	, inited(false)
+	, btnLock(false)
+{
+	for ( int i=0 ; i<2 ; ++i )
+	{
+		rewardID[i]=0;
+		rewardState[i]=false;
+	}
+	answerStr.clear();
+}
+
+AnswerManager::~AnswerManager()
+{
+	if (answerStr.size())
+	{
+		answerStr.clear();
+	}
+}
+
+bool AnswerManager::init()
+{
+	inited = true;
+	if (inited)
+	{
+		TCP_CLIENT->register_net_cmd("NET_SIC_Exam_OpenExamWindow",this,&AnswerManager::onServerOpenWindow);
+		TCP_CLIENT->register_net_cmd("NET_SIC_Exam_Answer",this,&AnswerManager::onServerAnswer);
+		TCP_CLIENT->register_net_cmd("NET_SIC_Exam_NextQuestion",this,&AnswerManager::onServerNextQuestion);
+		TCP_CLIENT->register_net_cmd("NET_SIC_Exam_UseStar",this,&AnswerManager::onServerLuckyStar);
+		TCP_CLIENT->register_net_cmd("NET_SIC_Exam_UpdateReward",this,&AnswerManager::onServerUpdateReward);
+		TCP_CLIENT->register_net_cmd("NET_SIC_Exam_Over",this,&AnswerManager::onServerAnswerOver);
+		TCP_CLIENT->register_net_cmd("NET_SIC_Exam_GuildHelp",this,&AnswerManager::onServerGuildHelp);
+		TCP_CLIENT->register_net_cmd("NET_SIC_Exam_State",this,&AnswerManager::onServerIsAnswerd);
+	}
+	return inited;
+}
+
+void AnswerManager::destory()
+{
+	if (inited)
+	{
+		answerStr.clear();
+
+		TCP_CLIENT->unregister_net_cmd("NET_SIC_Exam_OpenExamWindow",this,&AnswerManager::onServerOpenWindow);
+		TCP_CLIENT->unregister_net_cmd("NET_SIC_Exam_Answer",this,&AnswerManager::onServerAnswer);
+		TCP_CLIENT->unregister_net_cmd("NET_SIC_Exam_NextQuestion",this,&AnswerManager::onServerNextQuestion);
+		TCP_CLIENT->unregister_net_cmd("NET_SIC_Exam_UseStar",this,&AnswerManager::onServerLuckyStar);
+		TCP_CLIENT->unregister_net_cmd("NET_SIC_Exam_UpdateReward",this,&AnswerManager::onServerUpdateReward);
+		TCP_CLIENT->unregister_net_cmd("NET_SIC_Exam_Over",this,&AnswerManager::onServerAnswerOver);
+		TCP_CLIENT->unregister_net_cmd("NET_SIC_Exam_GuildHelp",this,&AnswerManager::onServerGuildHelp);
+		TCP_CLIENT->unregister_net_cmd("NET_SIC_Exam_State",this,&AnswerManager::onServerIsAnswerd);
+	
+		inited = false;
+	}
+}
+
+int AnswerManager::getCurNumber()
+{
+	return curNumber;
+}
+
+int AnswerManager::getAllNumber()
+{
+	return allNumber;
+}
+
+int AnswerManager::getRightNumber()
+{
+	return rightNumber;
+}
+
+void AnswerManager::setRemainTime(int time)
+{
+	remainTime = time;
+}
+
+unsigned int AnswerManager::getRemainTime()
+{
+	return remainTime;
+}
+
+std::string& AnswerManager::getQuestionStr()
+{
+	return questionStr;
+}
+
+std::string AnswerManager::getAnswerStr(int id)
+{
+	std::map<int,string>::iterator itor = answerStr.find(id);
+	if (itor!=answerStr.end())
+	{
+		return itor->second;
+	}
+	return std::string("");
+}
+
+int AnswerManager::getRightAnswer()
+{
+	return rightAnswer;
+}
+
+int AnswerManager::getAllGainExp()
+{
+	return allGainExp;
+}
+
+int AnswerManager::getCurExp()
+{
+	return curExp;
+}
+
+int AnswerManager::getLuckyStar()
+{
+	return luckyStar;
+}
+
+void AnswerManager::onUesdLuckyStar()
+{
+	if (luckyStar<=0)
+	{
+		return ;
+	}
+	NET_C2S_Exam_UseStar cmd;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+}
+
+int AnswerManager::getGuildHelp()
+{
+	return guildHelp;
+}
+
+unsigned int AnswerManager::getRewardID(int index)
+{
+	return rewardID[index];
+}
+
+bool AnswerManager::getRewardState(int index)
+{
+	return rewardState[index];
+}
+	
+unsigned int AnswerManager::onServerOpenWindow(s_net_cmd* cmd)
+{
+	NET_SIC_Exam_OpenExamWindow* msg = (NET_SIC_Exam_OpenExamWindow*)cmd;
+	switch(msg->m_nRes)
+	{
+	case E_ExamSuccess:
+		{
+			allNumber = msg->m_nMaxNum;
+			luckyStar = msg->m_nStarMaxCounts;
+			guildHelp = msg->m_nHelpMaxCounts;
+			allGainExp= msg->m_nExamExp;
+		}
+		break;
+	case E_ExamJoined:
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["player_have_answer"]);
+			DayActivityData* openItem = ActivityMgr::getInstance()->getDataById(ACT_ANSWER_INDEX);
+			openItem->state = DayActivityData::S_Yijieshu;
+		}
+		break;
+	case E_ExamEnd:
+		ToolTip::getInstance()->push(STRING_TABLE["answer_not_open"]);
+		break;
+	}
+	btnLock = false;
+	return 0;
+}
+	
+unsigned int AnswerManager::onServerAnswer(s_net_cmd* cmd)
+{
+	NET_SIC_Exam_Answer* msg = (NET_SIC_Exam_Answer*)cmd;
+	if (msg)
+	{
+		rightAnswer = msg->m_nID;
+		curExp = msg->m_nExp;
+		get_right_answer trans;
+		trans.rightAnswer = rightAnswer;
+		SEND_EVENT(&trans);
+	}
+	return 0;
+}
+	
+unsigned int AnswerManager::onServerNextQuestion(s_net_cmd* cmd)
+{
+	NET_SIC_Exam_NextQuestion* msg = (NET_SIC_Exam_NextQuestion*) cmd;
+	if (msg)
+	{
+		answerStr.clear();
+		curNumber = msg->m_nCurNum;
+		rightNumber = msg->m_nRightNum;
+		remainTime = msg->m_nRemainTime;
+
+		std::string answerAStr;
+		std::string answerBStr;
+		std::string answerCStr;
+		std::string answerDStr;
+		questionStr = Utf16ToUtf8(msg->m_szQuestion);
+		answerAStr = Utf16ToUtf8(msg->m_szA);
+		answerBStr = Utf16ToUtf8(msg->m_szB);
+		answerCStr = Utf16ToUtf8(msg->m_szC);
+		answerDStr = Utf16ToUtf8(msg->m_szD);
+
+		answerStr.insert(std::make_pair(0,answerAStr));
+		answerStr.insert(std::make_pair(1,answerBStr));
+		answerStr.insert(std::make_pair(2,answerCStr));
+		answerStr.insert(std::make_pair(3,answerDStr));
+
+		refresh_question_info trans;
+		SEND_EVENT(&trans);
+	}
+	return 0;
+}
+	
+unsigned int AnswerManager::onServerLuckyStar(s_net_cmd* cmd)
+{
+	NET_SIC_Exam_UseStar* msg = (NET_SIC_Exam_UseStar*)cmd;
+	switch(msg->m_nError)
+	{
+	case E_ExamSuccess:
+		{
+			luckyStar = msg->m_nNum;
+			curExp *=2;
+			refresh_lucky_star trans;
+			SEND_EVENT(&trans);
+			ToolTip::getInstance()->push(STRING_TABLE["first_used_lucky_star"]);
+		}
+		break;
+	case E_ExamNoStar:
+		ToolTip::getInstance()->push(STRING_TABLE["lucky_star_not_enough"]);
+		break;
+	case E_ExamUsedStar:
+		ToolTip::getInstance()->push(STRING_TABLE["exam_used_lucky_star"]);
+		break;
+	default:
+		break;
+	}
+	return 0;
+}
+	
+unsigned int AnswerManager::onServerUpdateReward(s_net_cmd* cmd)
+{
+	NET_SIC_Exam_UpdateReward* msg = (NET_SIC_Exam_UpdateReward*)cmd;
+	if (msg)
+	{
+		for (int i = 0 ; i<2 ; ++i )
+		{
+			rewardID[i]=msg->m_nRewardsID[i];
+			rewardState[i]=msg->m_bRewardsStates[i];
+		}
+	}
+	return 0;
+}
+	
+unsigned int AnswerManager::onServerAnswerOver(s_net_cmd* cmd)
+{
+	DayActivityData* openItem = ActivityMgr::getInstance()->getDataById(ACT_ANSWER_INDEX);
+	openItem->state = DayActivityData::S_Yijieshu;
+	answer_over trans;
+	SEND_EVENT(&trans);
+	return 0;
+}
+
+void AnswerManager::sendOpenMessage()
+{
+	if (btnLock)
+	{
+		return;
+	}
+	btnLock = true;
+	NET_C2S_Exam_OpenExamWindow cmd;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+}
+
+void AnswerManager::setSelectAnswer(int id)
+{
+	selectNumber = id+1;
+	NET_C2S_Exam_Answer cmd;
+	cmd.m_nID = selectNumber;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+}
+
+int AnswerManager::getSelectAnswer()
+{
+	return selectNumber;
+}
+
+unsigned int AnswerManager::onServerGuildHelp(s_net_cmd* cmd)
+{
+	NET_SIC_Exam_GuildHelp* msg = (NET_SIC_Exam_GuildHelp*)cmd;
+	switch(msg->m_nError)
+	{
+	case E_ExamSuccess:
+		{
+			show_chat_ui trans;
+			trans.isShow = true;
+			trans.zolder = 10;
+			SEND_EVENT(&trans);
+
+			guildHelp = msg->m_nNum;
+
+			refresh_guild_help cmd;
+			SEND_EVENT(&cmd);
+		}
+		break;
+	case E_ExamNoHelp:
+		ToolTip::getInstance()->push(STRING_TABLE["guild_help_not_enough"]);
+		break;
+	case E_ExamUsedHelp:
+		ToolTip::getInstance()->push(STRING_TABLE["exam_used_guild_help"]);
+		break;
+	case E_ExamNoGuild:
+		ToolTip::getInstance()->push(STRING_TABLE["player_no_guild"]);
+		break;
+	default:
+		break;
+	}
+	return 0;
+}
+
+void AnswerManager::askNextQuestion()
+{
+	NET_C2S_Exam_NextAnswer cmd;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+}
+
+void AnswerManager::sendGuildHelp()
+{
+	NET_C2S_Exam_GuildHelp cmd;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+}
+
+void AnswerManager::setAllGainExp(int allExp)
+{
+	allGainExp = allExp;
+}
+
+unsigned int AnswerManager::onServerIsAnswerd(s_net_cmd* cmd)
+{
+	NET_SIC_Exam_State* msg = (NET_SIC_Exam_State*)cmd;
+	DayActivityData* openItem = ActivityMgr::getInstance()->getDataById(ACT_ANSWER_INDEX);
+	if (msg->m_nState == 1)
+	{
+		openItem->state = DayActivityData::S_Yijieshu;
+	}
+	else
+	{
+		openItem->state = DayActivityData::S_Weikaishi;
+	}
+	return 0;
+}

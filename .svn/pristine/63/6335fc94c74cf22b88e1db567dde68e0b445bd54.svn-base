@@ -1,0 +1,1786 @@
+#include "WorldMapUi.h"
+#include "CfgReader.h"
+#include "MapManager.h"
+#include "RoleManager.h"
+#include "BaseDefine.h"
+#include "UiTools.h"
+#include "UiLoader.h"
+#include "UiManager.h"
+#include "LocalPlayer.h"
+#include "Auto_ActionMgr.h"
+#include "CheckButton.h"
+#include "MapManager.h"
+#include "ExchangeBusinessMgr.h"
+#include "SQLCommand.h"
+#include "DBMgr.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "TeamMgr.h"
+#include "InstanceMgr.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "boost/lexical_cast.hpp"
+#include "InstanceMgr.h"
+#include "CrossSceneUI.h"
+#include "Helper.h"
+#include "f_util.h"
+#include "f_game_tiled_map.h"
+
+using namespace cocos2d;
+using namespace boost;
+
+WorldMapUi::WorldMapUi()
+{
+	_filterCheck[0] = true;
+	_filterCheck[1] = true;
+	_filterCheck[2] = true;
+}
+
+CCNode * WorldMapUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["WorldMapUiLayer"] = UiLayerLoader<WorldMapUiLayer>::loader();
+	nodeLoaders["CheckButton"] = CheckButtonLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("worldMapUi", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+WorldMapUiLayer::AimListItem::AimListItem()
+	:_trigger_param(INVALID)
+{
+	TTFConfig fc;
+	fc.fontFilePath = FT_FONTFACE;
+	fc.fontSize = 16;
+	fc.outlineSize = 1;
+
+	/*CCLabelTTF *label = CCLabelTTF::create();
+	label->setFontSize(16);*/
+	//label->setColor(ccc3(0xfe, 0xf8, 0xd8));
+	LabelFT* label = LabelFT::createWithTTF(fc, "");
+	label->setAnchorPoint(ccp(0.f, 1.f));
+	label->setPosition(ccp(2,8));
+	label->setTag(NT_Name);
+	_node->addChild(label);
+	CCSprite *sprite=CCSprite::create();
+	CCSpriteFrame* frame=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_selrect");
+	CC_ASSERT(frame!=NULL);
+	sprite->setDisplayFrame(frame);
+	sprite->setAnchorPoint(ccp(0,0.5));
+	sprite->setPosition(ccp(-20,0));  
+	sprite->setTag(NT_Tiao);
+	_node->addChild(sprite,-1);
+	//
+	CCSprite *selectSprite=CCSprite::create();
+	CCSpriteFrame* selectframe=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_sign");
+	CC_ASSERT(frame!=NULL);
+	selectSprite->setDisplayFrame(selectframe);
+	selectSprite->setAnchorPoint(ccp(0,0.5));
+	selectSprite->setPosition(ccp(-20,0));  
+	selectSprite->setTag(NT_Select);
+	selectSprite->setVisible(false);
+	_node->addChild(selectSprite,-1);
+}
+
+WorldMapUiLayer::AimListItem::~AimListItem()
+{
+
+}
+
+void WorldMapUiLayer::AimListItem::setData( const std::string &name, const CCPoint &pos, const std::string &colour,unsigned int trigger_to_map_id/*=INVALID*/)
+{
+	//CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Name));
+	LabelFT* label = dynamic_cast<LabelFT*>(_node->getChildByTag(NT_Name));
+	CC_ASSERT(label != NULL);
+	label->setString(name.c_str());
+	_labColor = label->getColor();
+	if(std::strcmp(colour.c_str(),"blue") == 0)
+	{
+		_labColor = ccc3(23,164,198);
+	}
+	else if(std::strcmp(colour.c_str(),"yellow") == 0)
+	{
+		_labColor = ccc3(255,228,0);
+	}
+	else if(std::strcmp(colour.c_str(),"red") == 0)
+	{
+		_labColor = ccc3(255,0,0);
+	}
+	else if(std::strcmp(colour.c_str(),"green") == 0)
+	{
+		_labColor = ccc3(49,155,19);
+	}
+	else if(std::strcmp(colour.c_str(),"purple") == 0)
+	{
+		_labColor = ccc3(163,26,211);
+	}
+	//label->setColor(_labColor);
+	label->setTextColor(Helper::converColor3B_2_4B(_labColor));
+	_pos = pos;
+	//_is_strigger = is_trigger;
+	_trigger_param = trigger_to_map_id;
+}
+
+void WorldMapUiLayer::AimListItem::onTouch( CCTouch *touck )
+{
+	//TODO 玩家状态限制，挂机判断
+	if (AutoActionMgr::getInstance()->Get_Auto_Action())//gx add
+	{
+		AutoActionMgr::getInstance()->Set_Auto_Action(false);
+	}
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(ploc))
+		return;
+	if (InstanceMgr::getInstance()->IsCannotFindWayOutTheMap() && !MapManager::getInstance()->getIsSelectCurMap())
+	{
+		ToolTip::getInstance()->push(GET_STR(7264));
+		return;
+	}
+	if (ploc->isInRoleStateAny(RA_ShuangXiu) || ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))
+	{
+		if (ploc->isInRoleStateAny(RA_Exchange))
+		{
+			ExchangeBusinessMgr::getInstance()->CancleExchange();
+		}
+		return;
+	}
+
+	if( ploc != NULL )
+	{
+		if (!ploc->getAutoRunState())
+		{
+			ploc->setAutoRunState(true);
+		}
+		if (MapManager::getInstance()->getIsSelectCurMap())
+		{
+			ploc->runPathTo(_pos);
+			std::string curMapName = MapManager::getInstance()->getCurMapName();
+			int s = (int)curMapName.find_last_of('/');
+			int e = (int)curMapName.find_last_of('.');
+			const std::string tmp = curMapName.substr(s+1 , e -s -1);
+			RoleHeadUi *ui = World::getInstance()->getRoleHeadUi();
+			if (ui)
+			{
+				CC_ASSERT(NULL != ui);
+				CC_ASSERT(NULL != ui->GetRoleUI());
+				ploc->SetisMouseClick(false);
+				ui->GetRoleUI()->SetMapidStr(tmp);
+				ui->GetRoleUI()->SetQuestPosx(_pos.x);
+				ui->GetRoleUI()->SetQuestPosy(_pos.y);
+				ui->GetRoleUI()->SetNpcId(-1);
+			}
+		}
+		else
+		{
+			if (IS_VALID(_trigger_param))
+			{
+				MapManager::getInstance()->set_path_to_trigger_map_id(_trigger_param);
+
+			}
+
+			MapManager::getInstance()->getSelectMiniMapIndex();
+			std::string str2 = MapManager::getInstance()->getSelectMiniMapIndex().substr(1,MapManager::getInstance()->getSelectMiniMapIndex().length());
+			int mapid = lexical_cast<int>(str2);
+			ploc->runPathTo(_pos,mapid);//写死
+
+			RoleHeadUi *ui = World::getInstance()->getRoleHeadUi();
+			if (ui)
+			{
+				CC_ASSERT(NULL != ui);
+				CC_ASSERT(NULL != ui->GetRoleUI());
+				ploc->SetisMouseClick(false);
+				ui->GetRoleUI()->SetMapidStr(MapManager::getInstance()->getSelectMiniMapIndex());
+				ui->GetRoleUI()->SetQuestPosx(_pos.x);
+				ui->GetRoleUI()->SetQuestPosy(_pos.y);
+				ui->GetRoleUI()->SetNpcId(-1);
+			}
+		}
+		if (ploc->getRunSELastState())
+			ploc->setRunSEOutMap(false);
+		if (!ploc->getReachDesControl())
+			ploc->setReachDesControl(true);
+	}
+}
+
+void WorldMapUiLayer::AimListItem::onSelectChanged( bool select )
+{
+	//CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Name));
+	LabelFT* label = dynamic_cast<LabelFT*>(_node->getChildByTag(NT_Name));
+	CCSprite *selectSprite=dynamic_cast<CCSprite*>(_node->getChildByTag(NT_Select));
+	CC_ASSERT(label != NULL);
+	if(select)
+	{
+		//label->setColor(ccc3(0xff, 0xf0, 0x01));
+		label->setTextColor(ccc4(0xff, 0xf0, 0x01, 255));
+		//label->setFontSize(20.0f);
+		selectSprite->setVisible(true);
+	}
+	else
+	{
+		//label->setColor(_labColor);
+		label->setTextColor(Helper::converColor3B_2_4B(_labColor));
+		//label->setFontSize(16.0f);
+		selectSprite->setVisible(false);
+	}
+
+}
+
+cocos2d::CCSize WorldMapUiLayer::AimListItem::getContentSize()
+{
+	//CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_node->getChildByTag(NT_Name));
+	LabelFT* label = dynamic_cast<LabelFT*>(_node->getChildByTag(NT_Name));
+	CC_ASSERT(label != NULL);
+	return label->getContentSize();
+}
+
+float WorldMapUiLayer::AimListItem::getItemHeight()
+{
+	return ListItem::getItemHeight();
+}
+
+float WorldMapUiLayer::AimListItem::getItemWidth()
+{
+	return _node->getChildByTag(NT_Tiao)->getContentSize().width;
+}
+
+cocos2d::CCPoint WorldMapUiLayer::AimListItem::getPosition()
+{
+	CCPoint cp = _node->getPosition();
+	cp.y = cp.y + getItemHeight() / 2 + 3;
+	return cp;	
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+
+WorldMapUiLayer::WorldMapUiLayer()
+	: _aimList(NULL), _curSpriteIndex(0), scaleW(1.0f), scaleH(1.0f), mapId(0),mapSpriteTmp(NULL),mapSprite(NULL)
+{
+	MapManager::getInstance()->setIsSelectCurMap(true);
+}
+
+WorldMapUiLayer::~WorldMapUiLayer()
+{
+	CC_SAFE_DELETE(_aimList);
+}
+
+bool WorldMapUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_frame[FT_Current], pTouch))
+	{
+		if(isTouchOnNodeContent(_mapContentNode, pTouch))
+		{
+			_beginOffset = _mapView->getContentOffset();
+		}
+		else if(isTouchOnNodeContent(_aimListContent, pTouch))
+		{
+			AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+			_stPt = _aimListContent->convertTouchToNodeSpace(pTouch);
+		}
+		return true;
+	}
+	else if(isTouchOnNodeContent(_frame[FT_World], pTouch))
+	{
+		return true;
+	}
+
+	return false;
+}
+
+void WorldMapUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	//在切换地图过程中不能点击
+	if ( CrossSceneUI::getInstance()->isInCross() )
+		return;
+	if (MapManager::getInstance()->getMap() == NULL)
+		return;
+	if (MapManager::getInstance()->getSparseGraph() == NULL)
+		return;
+	if(isTouchOnNodeContent(_mapContentNode, pTouch))
+	{
+		CCPoint offset = _mapView->getContentOffset();
+		if(ccpDistance(offset, _beginOffset) < TOUCH_MOVE_DIS)
+		{
+			if (!MapManager::getInstance()->getIsSelectCurMap())
+			{
+				return;
+			}
+			unsigned int tempMapId = MapManager::getInstance()->getCurMapId();
+			if (InstanceMgr::getInstance()->isInZumaCommonMap(tempMapId))
+			{
+				return;
+			}
+			CCPoint point = _mapContentNode->convertTouchToNodeSpace(pTouch);
+			CCPoint mapPoint = ccpSub(point, offset);
+			mapPoint = ccp(mapPoint.x * 1.0f/scaleW, mapPoint.y * 1.0f/scaleH);
+
+			LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+			if (!lp->getAutoRunState())
+			{
+				lp->setAutoRunState(true);
+			}
+			if (lp->getRunSELastState())
+				lp->setRunSEOutMap(false);
+			if (!lp->getReachDesControl())
+				lp->setReachDesControl(true);
+
+			lp->runPathTo(mapPoint);
+			std::string curMapName = MapManager::getInstance()->getCurMapName();
+			int s = (int)curMapName.find_last_of('/');
+			int e = (int)curMapName.find_last_of('.');
+			const std::string tmp = curMapName.substr(s+1 , e -s -1);
+			RoleHeadUi *ui = World::getInstance()->getRoleHeadUi();
+			if (ui)
+			{
+				CC_ASSERT(NULL != ui);
+				CC_ASSERT(NULL != ui->GetRoleUI());
+				lp->SetisMouseClick(false);
+				ui->GetRoleUI()->SetMapidStr(tmp);
+				ui->GetRoleUI()->SetQuestPosx(mapPoint.x);
+				ui->GetRoleUI()->SetQuestPosy(mapPoint.y);
+				ui->GetRoleUI()->SetNpcId(-1);
+			}
+
+			//TODO:取消挂机
+			if (AutoActionMgr::getInstance()->Get_Auto_Action())//gx add
+			{
+				AutoActionMgr::getInstance()->Set_Auto_Action(false);
+			}
+
+			LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+			if (!IS_VALID_PTR(ploc))
+				return;
+			if (ploc->isInRoleStateAny(RA_ShuangXiu) || ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))
+			{
+				if (ploc->isInRoleStateAny(RA_Exchange))
+				{
+					ExchangeBusinessMgr::getInstance()->CancleExchange();
+				}
+				return;
+			}
+		}
+	}
+	else if(isTouchOnNodeContent(_aimListContent, pTouch))
+	{
+		CCPoint pt = _aimListContent->convertTouchToNodeSpace(pTouch);
+		if(ccpDistance(_stPt, pt) < TOUCH_MOVE_DIS)
+		{
+			_aimList->onTouch(pTouch);
+		}
+	}
+}
+
+void WorldMapUiLayer::onExit()
+{
+	CCLayer::onExit();
+	unscheduleUpdate();
+
+	_aimList->clear();
+	MapManager::getInstance()->setIsSelectCurMap(true);
+	//_renderTexture->release();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+
+	for(std::vector<CCSprite*>::iterator iter = _dots.begin(); iter != _dots.end(); ++iter)
+	{
+		CCSprite *sprite = *iter;
+		sprite->release();
+	}
+	_dots.clear();
+
+	for (unsigned int i = 0; i < _teamSprite.size(); i++)
+	{
+		if (_teamSprite[i]->getUserData())
+		{
+			delete (unsigned int*)_teamSprite[i]->getUserData();
+		}
+	}
+
+	//std::for_each(_miniMapText.begin(),_miniMapText.end(),[](CCLabelTTF* p){
+	std::for_each(_miniMapText.begin(),_miniMapText.end(),[](LabelFT* p){
+		CC_SAFE_RELEASE(p);
+	});
+
+	_miniMapText.clear();
+
+	AnimationCache::getInstance()->releaseAnims(_miniMapUsedAnims);
+	_miniMapUsedAnims.clear();
+}
+
+void WorldMapUiLayer::clearLabelData()
+{
+	for(std::vector<CCSprite*>::iterator iter = _dots.begin(); iter != _dots.end(); ++iter)
+	{
+		CCSprite *sprite = *iter;
+		if (sprite)
+		{
+			sprite->removeFromParent();
+		}
+		//sprite->setVisible(false);
+	}
+
+	_curSpriteIndex = 0;
+	for (unsigned int i = 0; i < _teamSprite.size(); i++)
+	{
+		if (_teamSprite[i]->getUserData())
+		{
+			delete (unsigned int*)_teamSprite[i]->getUserData();
+			_teamSprite[i]->setUserData(NULL);
+		}
+	}
+	_teamSprite.clear();
+
+
+	//std::for_each(_miniMapText.begin(),_miniMapText.end(),[](CCLabelTTF* p){
+	std::for_each(_miniMapText.begin(),_miniMapText.end(),[](LabelFT* p){
+		CC_SAFE_RELEASE(p);
+	});
+
+	_miniMapText.clear();
+}
+
+void WorldMapUiLayer::initScrollViewScene()
+{
+	const CCSize &mapSize = mapSprite->getContentSize();
+	CCNode* containerNode = CCNode::create();
+	CCSprite* containerSprite = CCSprite::create();
+	containerSprite->setAnchorPoint(ccp(0.0f, 0.0f));
+	containerSprite->setFlipY(true);
+	containerNode->addChild(containerSprite);
+
+	_mapView->setContainer(containerNode);
+	//_mapView->setContentSize(CCSize(mapSize.width / 4, mapSize.height / 4));
+	_mapView->setContentSize(CCSize(mapSize.width, mapSize.height));
+	_mapView->addChild(mapSprite,-1);
+	_mapView->addChild(mapSpriteTmp,1);
+	_mapIndex = MapManager::getInstance()->getCurMapIndex();
+	mapId = MapManager::getInstance()->getCurMapId();
+	initLabelData();
+	CCTMXTiledMap *_map = MapManager::getInstance()->getMap();
+	CCTMXObjectGroup *trigger = _map->objectGroupNamed("trigger");
+	_triggerMap.clear();
+	if(trigger)
+	{
+		int objectName = 1;
+		CCString *str = CCString::createWithFormat("%d", objectName);
+		CCDictionary *director = trigger->objectNamed(str->getCString());
+		while(director != NULL)
+		{
+			//沙巴克特殊处理
+			if (mapId == SBK_MAP_CRC_ID && objectName == 5)
+			{
+				objectName ++;
+				str = CCString::createWithFormat("%d", objectName);
+				director = trigger->objectNamed(str->getCString());
+				continue;
+			}
+			int x = director->valueForKey("x")->intValue();
+			int y = director->valueForKey("y")->intValue();
+			int w = director->valueForKey("width")->intValue();
+			int h = director->valueForKey("height")->intValue();
+			int type = director->valueForKey("type")->intValue();
+			std::string mapFileName = director->valueForKey("MapName")->getCString();
+			std::string mapName = getMapName(mapFileName);
+			//mapFileName = mapFileName.substr(1);
+
+			//在触发器上添加传送阵;
+			if(type != 0){
+				miniMapTrigger triggerRect;
+				triggerRect.rect = CCRect(x, y, w, h);
+				triggerRect.mapName = atoi(mapFileName.substr(1).c_str());
+				triggerRect.nameStr = mapName;
+				triggerRect.go_through_map_name = mapFileName;
+				_triggerMap[objectName] = triggerRect;
+
+				addTransfer(ccp(x, y), mapName);
+			}
+
+			objectName ++;
+			str = CCString::createWithFormat("%d", objectName);
+			director = trigger->objectNamed(str->getCString());
+		}
+	}
+}
+
+void WorldMapUiLayer::initSelectMapScrollViewScene(int mapIndex)//在世界地图上选择的地图初始化
+{
+	const CCSize &mapSize = mapSprite->getContentSize();
+	CCNode* containerNode = CCNode::create();
+	CCSprite* containerSprite = CCSprite::create();
+	containerSprite->setAnchorPoint(ccp(0.0f, 0.0f));
+	containerSprite->setFlipY(true);
+	containerNode->addChild(containerSprite);
+
+	_mapView->setContainer(containerNode);
+	//_mapView->setContentSize(CCSize(mapSize.width / 4, mapSize.height / 4));
+	_mapView->setContentSize(CCSize(mapSize.width, mapSize.height));
+	_mapView->addChild(mapSprite,-1);
+	_mapView->addChild(mapSpriteTmp,1);
+	//_mapIndex = MapManager::getInstance()->getCurMapIndex();
+	_mapIndex = mapIndex;
+	initLabelData();
+
+	CCTMXTiledMap *_map = f_game_tile_map::create(CCString::createWithFormat("%s%d%s","Art/Scene/m",mapIndex,".tmx")->getCString());
+	CCTMXObjectGroup *trigger = _map->objectGroupNamed("trigger");
+	_triggerMap.clear();
+	if(trigger)
+	{
+		int objectName = 1;
+		CCString *str = CCString::createWithFormat("%d", objectName);
+		CCDictionary *director = trigger->objectNamed(str->getCString());
+		while(director != NULL)
+		{
+			int x = director->valueForKey("x")->intValue();
+			int y = director->valueForKey("y")->intValue();
+			int w = director->valueForKey("width")->intValue();
+			int h = director->valueForKey("height")->intValue();
+			std::string mapFileName = director->valueForKey("MapName")->getCString();
+			std::string mapName = getMapName(mapFileName);
+			//mapFileName = mapFileName.substr(1);
+
+			miniMapTrigger triggerRect;
+			triggerRect.rect = CCRect(x, y, w, h);
+			triggerRect.mapName = atoi(mapFileName.substr(1).c_str());
+			triggerRect.nameStr = mapName;
+			triggerRect.go_through_map_name = mapFileName;
+			_triggerMap[objectName] = triggerRect;
+
+			//在触发器上添加传送阵;
+			addTransfer(ccp(x + w, y + h), mapName);
+
+			objectName ++;
+			str = CCString::createWithFormat("%d", objectName);
+			director = trigger->objectNamed(str->getCString());
+		}
+	}
+	npcTouch=true;
+	chuansongTouch=false;
+	bossTouch=false;
+	currentTag = 1;
+	updateBtnState();
+}
+
+unsigned int WorldMapUiLayer::crc32(const wchar_t* sz_buffer_)
+{
+	unsigned char* p_data = (unsigned char*)sz_buffer_;
+	if( !(*p_data || *(p_data+1)) ) 
+		return (unsigned int)-1;
+
+	unsigned int n_result = *p_data++ << 24;
+	n_result |= *p_data++ << 16;
+	if( *p_data || *(p_data+1) )
+	{
+		n_result |= *p_data++ << 8;
+		n_result |= *p_data++;
+	}
+	n_result = ~ n_result;
+	int n_count = 0;
+	while( (n_count&1) ? true : (*p_data || *(p_data+1)) )
+	{
+		n_result = (n_result << 8 | *p_data) ^ crc32_table[n_result >> 24];
+		++p_data;
+		++n_count;
+	}
+	return ~n_result;
+}
+
+std::string WorldMapUiLayer::getMapName( const std::string &mapFileName )
+{
+	wchar_t vStr[300];
+	memset(vStr, 0, sizeof(vStr));
+	Utf8ToUtf16(mapFileName.c_str(), vStr,300,0);
+
+	unsigned int id = crc32(vStr);
+	return getMapName(id);
+}
+
+std::string WorldMapUiLayer::getMapName( unsigned int mapId )
+{
+// 	std::map<unsigned int, std::string> _mapNameMap = MapManager::getInstance()->getMapNameMap();
+// 	std::map<unsigned int, std::string>::iterator iter = _mapNameMap.find(mapId);
+// 	if(iter != _mapNameMap.end())
+// 	{
+// 		return iter->second;
+// 	}
+
+	return MapManager::getInstance()->getMapName(mapId);
+}
+
+// void WorldMapUiLayer::setScrollViewOffset( const CCPoint &pos )
+// {
+// 	_mapView->setContentOffset(pos);
+// 	_containerSprite->setPosition(pos);
+// }
+
+void WorldMapUiLayer::initLabelData()
+{
+	clearLabelData();
+
+	eCreatureType creatureType;
+	std::string name;
+	int posX;
+	int posY;
+
+	TTFConfig fc;
+	fc.fontFilePath = FT_FONTFACE;
+	fc.fontSize = 14;
+	fc.outlineSize = 1;
+
+	MapManager::getInstance()->getWorldMapScale(mapId, mapSprite->getTextureRect(), scaleW, scaleH);
+	const MapManager::CreatureVector& t_vecData = MapManager::getInstance()->getAllMapCreatureInfo();
+
+	MapManager::CreatureVector::const_iterator iter = t_vecData.begin();
+	while(iter != t_vecData.end())
+	{
+		if (iter->mapIndex != _mapIndex)
+		{
+			iter++;
+			continue;
+		}
+		const MapManager::CreatureInfo& t_data = *iter;
+		creatureType = (eCreatureType)t_data.creatureType;
+		name = t_data.creatureName;
+		posX = t_data.pos.x;
+		posY = t_data.pos.y;
+		std::string colour = t_data.colour;
+
+		LabelFT* label = LabelFT::createWithTTF(fc, "");
+		label->setString(name.c_str());
+		label->setPosition(ccp(posX * scaleW, posY * scaleH));
+		label->retain();
+		_miniMapText.push_back(label);
+		_mapView->addChild(label,0);
+
+		ccColor4B nowLabelColor= ccc4(255,255,255,255);
+		if(std::strcmp(colour.c_str(),"blue") == 0)
+		{
+			//label->setColor(ccc3(23,164,198));
+			nowLabelColor = ccc4(23,164,198, 255);
+		}
+		else if(std::strcmp(colour.c_str(),"yellow") == 0)
+		{
+			//label->setColor(ccc3(255,228,0));
+			nowLabelColor = ccc4(255,228,0, 255);
+		}
+		else if(std::strcmp(colour.c_str(),"red") == 0)
+		{
+			//label->setColor(ccc3(255,0,0));
+			nowLabelColor = ccc4(255,0,0, 255);
+		}
+		else if(std::strcmp(colour.c_str(),"green") == 0)
+		{
+			//label->setColor(ccc3(49,155,19));
+			nowLabelColor = ccc4(49,155,19, 255);
+		}
+		else if(std::strcmp(colour.c_str(),"purple") == 0)
+		{
+			//label->setColor(ccc3(163,26,211));
+			nowLabelColor = ccc4(163,26,211, 255);
+		}
+		label->setTextColor(nowLabelColor);
+
+		if (creatureType == CT_NPC)
+		{
+			CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_green");
+			if(spriteFrame != NULL)
+			{
+				CCSprite *sprite = getSprite();
+				sprite->setDisplayFrame(spriteFrame);
+				sprite->setVisible(true);
+				sprite->setPosition(ccp(posX * scaleW, posY * scaleH));
+				_mapView->addChild(sprite);
+			}
+		}
+
+		iter++;
+	}
+
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM mapCreatureData WHERE mapIndex = ?1");
+// 	cmd->set_integer32(1 , _mapIndex);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("creatureType");
+// 		creatureType = (eCreatureType)table->get_integer32(idx);
+// 		idx = table->get_index("creatureName");
+// 		name = table->get_text(idx);
+// 		idx = table->get_index("posX");
+// 		posX = table->get_integer32(idx);
+// 		idx = table->get_index("posY");
+// 		posY = table->get_integer32(idx);
+// 		idx = table->get_index("colour");
+// 		std::string colour = table->get_text(idx);
+// 
+// 		//CCLabelTTF *label = CCLabelTTF::create();
+// 		//label->setFontSize(14.0f);
+// 		LabelFT* label = LabelFT::createWithTTF(fc, "");
+// 		label->setString(name.c_str());
+// 		label->setPosition(ccp(posX * scaleW, posY * scaleH));
+// 		label->retain();
+// 		_miniMapText.push_back(label);
+// 		_mapView->addChild(label,0);
+// 		
+// 		ccColor4B nowLabelColor= ccc4(255,255,255,255);
+// 		if(std::strcmp(colour.c_str(),"blue") == 0)
+// 		{
+// 			//label->setColor(ccc3(23,164,198));
+// 			nowLabelColor = ccc4(23,164,198, 255);
+// 		}
+// 		else if(std::strcmp(colour.c_str(),"yellow") == 0)
+// 		{
+// 			//label->setColor(ccc3(255,228,0));
+// 			nowLabelColor = ccc4(255,228,0, 255);
+// 		}
+// 		else if(std::strcmp(colour.c_str(),"red") == 0)
+// 		{
+// 			//label->setColor(ccc3(255,0,0));
+// 			nowLabelColor = ccc4(255,0,0, 255);
+// 		}
+// 		else if(std::strcmp(colour.c_str(),"green") == 0)
+// 		{
+// 			//label->setColor(ccc3(49,155,19));
+// 			nowLabelColor = ccc4(49,155,19, 255);
+// 		}
+// 		else if(std::strcmp(colour.c_str(),"purple") == 0)
+// 		{
+// 			//label->setColor(ccc3(163,26,211));
+// 			nowLabelColor = ccc4(163,26,211, 255);
+// 		}
+// 		label->setTextColor(nowLabelColor);
+// 
+// 		if (creatureType == CT_NPC)
+// 		{
+// 			CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_green");
+// 			if(spriteFrame != NULL)
+// 			{
+// 				CCSprite *sprite = getSprite();
+// 				sprite->setDisplayFrame(spriteFrame);
+// 				sprite->setVisible(true);
+// 				sprite->setPosition(ccp(posX * scaleW, posY * scaleH));
+// 				_mapView->addChild(sprite);
+// 			}
+// 		}
+// 	}
+// 
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	if (TeamMgr::getInstance()->is_inteam() && mapId == MapManager::getInstance()->getCurMapId())
+	{
+		CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_blue");
+		TeamMgr::teammates_vector members = TeamMgr::getInstance()->get_teammate_list();
+		for (unsigned int i = 0; i < members.size(); i++)
+		{
+			if (members[i].uRoleID != RoleManager::getInstance()->getLocalPlayer()->getId())
+			{
+				if(spriteFrame != NULL)
+				{
+					CCSprite *sprite = getSprite();
+					Role *role = RoleManager::getInstance()->findRole(members[i].uRoleID);
+					if (sprite && role)
+					{
+						sprite->setDisplayFrame(spriteFrame);
+						sprite->setVisible(true);
+						sprite->setPosition(ccp(role->getPosition().x * scaleW, role->getPosition().y * scaleH));
+						unsigned int* pData = new unsigned int;
+						*pData = members[i].uRoleID;
+						sprite->setUserData(pData);
+						_mapView->addChild(sprite);
+
+						_teamSprite.push_back(sprite);
+					}
+				}
+			}
+		}
+	}
+}
+
+void WorldMapUiLayer::addTransfer( const CCPoint &pos, const std::string &name )
+{
+	AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_26", anims);					//【Ji：】  更改传送阵特效名称(原名chuansongzhen)
+	_miniMapUsedAnims.push_back(AnimsUsed(AT_Sin, "E1_26"));
+	BSAnimate *animate = anims[0];
+	CCSprite *sprite = CCSprite::create();
+	sprite->runAction(CCRepeatForever::create(animate));
+	sprite->setPosition(ccp(pos.x * scaleW - 90.0f,pos.y * scaleH - 90.0f));
+	sprite->setScale(0.25);
+
+	TTFConfig fc;
+	fc.fontFilePath = FT_FONTFACE;
+	fc.fontSize = 14;
+	fc.outlineSize = 1;
+
+	//CCLabelTTF *label = CCLabelTTF::create();
+	//label->setFontSize(14);
+	LabelFT* label = LabelFT::createWithTTF(fc, "");
+	label->setString(name.c_str());
+	//label->setColor(ccc3(200 , 0 , 100));
+	label->setTextColor(ccc4(200, 0, 100, 255));
+	label->setPosition(ccp(pos.x * scaleW - 15.0f,pos.y * scaleH - 15.0f));
+	_mapView->addChild(sprite, MZ_ROLE);
+	_mapView->addChild(label, MZ_ROLE);
+}
+
+float WorldMapUiLayer::getMiniOrderAtPoint( const CCPoint &pos )
+{
+	if(_mapView != NULL)
+		return _mapView->getContentSize().height - pos.y;
+
+	return 0.0f;
+}
+
+void WorldMapUiLayer::update( float delta )
+{
+	//[bing] 老代码利用render画布进行渲染 这里代码保留一下 也许对以后有帮助
+	/*
+		MapManager::getInstance()->setSmallMapMode(true);
+		_renderTexture->beginWithClear(0.0, 0.0, 0.0, 0.0, 0.0);
+		tiledMap->visit();
+		_renderTexture->end();
+		MapManager::getInstance()->setSmallMapMode(false);
+
+		_containerSprite->setDisplayFrame(_renderTexture->getSprite()->displayFrame());
+		_containerSprite->setPosition(ccp(-offset.x, -offset.y));
+	*/
+
+	CCPoint pos = RoleManager::getInstance()->getLocalPlayer()->getPosition();
+	mapSpriteTmp->setPosition(ccp(pos.x * scaleW,pos.y * scaleH));
+	for (unsigned int i = 0; i < _teamSprite.size(); i++)
+	{
+		if (_teamSprite[i]->getUserData())
+		{
+			Role *role = RoleManager::getInstance()->findRole(*(unsigned int*)_teamSprite[i]->getUserData());
+			if (role)
+			{
+				_teamSprite[i]->setVisible(true);
+				_teamSprite[i]->setPosition(ccp(role->getPosition().x * scaleW, role->getPosition().y * scaleH));
+			}
+			else
+			{
+				_teamSprite[i]->setVisible(false);
+			}
+		}
+	}
+}
+
+cocos2d::SEL_MenuHandler WorldMapUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL; 
+}
+
+cocos2d::extension::SEL_CCControlHandler WorldMapUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", WorldMapUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCurBtnPressed", WorldMapUiLayer::onCurBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onAreaBtnPressed", WorldMapUiLayer::onAreaBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onWorldBtnPressed", WorldMapUiLayer::onWorldBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed1", WorldMapUiLayer::onCloseBtnPressed1);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCurBtnPressed1", WorldMapUiLayer::onCurBtnPressed1);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onWorldBtnPressed1", WorldMapUiLayer::onWorldBtnPressed1);
+	//世界地图的按钮组
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm1", WorldMapUiLayer::onGotoBtnPressedm1);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm2", WorldMapUiLayer::onGotoBtnPressedm2);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm6", WorldMapUiLayer::onGotoBtnPressedm6);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm7", WorldMapUiLayer::onGotoBtnPressedm7);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm8", WorldMapUiLayer::onGotoBtnPressedm8);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm9", WorldMapUiLayer::onGotoBtnPressedm9);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm11", WorldMapUiLayer::onGotoBtnPressedm11);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm13", WorldMapUiLayer::onGotoBtnPressedm13);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm14", WorldMapUiLayer::onGotoBtnPressedm14);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm15", WorldMapUiLayer::onGotoBtnPressedm15);//沃玛深林
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm16", WorldMapUiLayer::onGotoBtnPressedm16);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm17", WorldMapUiLayer::onGotoBtnPressedm17);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm20", WorldMapUiLayer::onGotoBtnPressedm20);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm3", WorldMapUiLayer::onGotoBtnPressedm3);//毒蛇山谷
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm21", WorldMapUiLayer::onGotoBtnPressedm21);//丛林迷宫
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm22", WorldMapUiLayer::onGotoBtnPressedm22);//赤月峡谷
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm23", WorldMapUiLayer::onGotoBtnPressedm23); //牛魔寺庙
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm24", WorldMapUiLayer::onGotoBtnPressedm24);//蜈蚣洞
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm25", WorldMapUiLayer::onGotoBtnPressedm25);//祖玛寺庙
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGotoBtnPressedm26", WorldMapUiLayer::onGotoBtnPressedm26);//封魔谷
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onnpcBtnPressed", WorldMapUiLayer::onnpcBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onchuansongBtnPressed", WorldMapUiLayer::onchuansongBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onguaiwuBtnPressed", WorldMapUiLayer::onguaiwuBtnPressed);
+	return NULL;
+}
+
+bool WorldMapUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+
+void WorldMapUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	//current
+	_frame[FT_Current] = getChildByTag(FT_Current);
+	_mapContentNode = _frame[FT_Current]->getChildByTag(CT_MapContent);
+	_mapView = createScrollViewWithContent(_mapContentNode);
+	_mapView->setDirection(kCCScrollViewDirectionBoth);
+	_mapView->setBounceable(false);
+	_mapContentNode->addChild(_mapView);
+
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame[FT_Current]->getChildByTag(CT_MapName)));
+
+	//_renderTexture = CCRenderTexture::create(_mapContentNode->getContentSize().width, _mapContentNode->getContentSize().height, kCCTexture2DPixelFormat_RGBA8888);
+	//CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	//_renderTexture->setPosition(winSize.width / 2, winSize.height / 2);
+	//_renderTexture->retain();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1,true);
+
+	//[bing] 主角游标
+	if (mapSpriteTmp)
+		mapSpriteTmp->removeFromParent();
+	mapSpriteTmp = CCSprite::createWithSpriteFrameName("rendui_youbiao");//vv
+	mapSpriteTmp->setScale(0.25f);
+	mapSpriteTmp->setVisible(true);
+	std::string curMapName = MapManager::getInstance()->getCurCopyMapName();
+	std::string _curMapName = curMapName.substr(0,curMapName.find("."));
+	_curMapName += "_mini.jpg";
+	if (mapSprite)
+		mapSprite->removeFromParent();
+	mapSprite = CCSprite::create(_curMapName.c_str());
+	mapSprite->setPosition(ccp(0,0));
+	unsigned int tempMapId = MapManager::getInstance()->getCurMapId();
+	if (InstanceMgr::getInstance()->isInZumaCommonMap(tempMapId))
+	{
+		mapSprite->setVisible(false);
+	}
+
+	initScrollViewScene();
+	scheduleUpdate();
+	_curFrame = FT_Current;
+
+	for(int i = 0; i < 3; i ++)
+	{
+		CheckButton *checkBtn = dynamic_cast<CheckButton*>(_frame[FT_Current]->getChildByTag(CT_NPCCheck + i));
+		CC_ASSERT(checkBtn != NULL);
+		checkBtn->setCheck(GET_UI(WorldMapUi, WCT_WorldMapUi)->_filterCheck[i]);
+		checkBtn->signalStateChanged.connect(this, &WorldMapUiLayer::onAimListFilterChanged);
+	}
+	
+	_aimListContent = _frame[FT_Current]->getChildByTag(CT_AimListContent);
+	_aimListScrollView = createScrollViewWithContent(_aimListContent);
+	_aimListContent->addChild(_aimListScrollView);
+	if (_aimList)
+		_aimList->clear();
+	CC_SAFE_DELETE(_aimList);
+	_aimList = new VerticalList<AimListItem>;
+	_aimList->addToScrollView(_aimListScrollView);
+	_aimList->setMinSize(_aimListContent->getContentSize());
+	_aimList->setLineSpace(-5);
+	_aimList->setEnableSelect(true);
+
+	//worldmap
+	_frame[FT_World] = getChildByTag(FT_World);
+
+	initMapName();
+	npcTouch=true;
+	chuansongTouch=false;
+	bossTouch=false;
+	npcbtn=dynamic_cast<CCControlButton*>(_frame[FT_Current]->getChildByTag(10));
+	chuansongbtn=dynamic_cast<CCControlButton*>(_frame[FT_Current]->getChildByTag(11));
+	bossbtn=dynamic_cast<CCControlButton*>(_frame[FT_Current]->getChildByTag(12));
+	npcPoint=_frame[FT_Current]->getChildByTag(10)->getPosition();
+	chuansongPoint=_frame[FT_Current]->getChildByTag(11)->getPosition();
+	bossPoint=_frame[FT_Current]->getChildByTag(12)->getPosition();
+	currentTag=1;
+	updateBtnState();
+	//updateAimList();
+	updateSelectMapAimList(MapManager::getInstance()->getCurMapIndex());
+	setPosition(RoleManager::getInstance()->getLocalPlayer()->getPosition());
+}
+
+void WorldMapUiLayer::setCurMiniMap()
+{
+	if (MapManager::getInstance()->getIsSelectCurMap() )
+		return;
+	MapManager::getInstance()->setIsSelectCurMap(true);
+	//[bing] 主角游标
+	if (mapSpriteTmp)
+		mapSpriteTmp->removeFromParent();
+	mapSpriteTmp = CCSprite::createWithSpriteFrameName("rendui_youbiao");//vv
+	mapSpriteTmp->setScale(0.25f);
+	mapSpriteTmp->setVisible(true);
+	std::string curMapName = MapManager::getInstance()->getCurCopyMapName();
+	std::string _curMapName = curMapName.substr(0,curMapName.find("."));
+	_curMapName += "_mini.jpg";
+	if (mapSprite)
+		mapSprite->removeFromParent();
+	mapSprite = CCSprite::create(_curMapName.c_str());
+	mapSprite->setPosition(ccp(0,0));
+	unsigned int tempMapId = MapManager::getInstance()->getCurMapId();
+	if (InstanceMgr::getInstance()->isInZumaCommonMap(tempMapId))
+	{
+		mapSprite->setVisible(false);
+	}
+
+	initScrollViewScene();
+	_curFrame = FT_Current;
+
+	for(int i = 0; i < 3; i ++)
+	{
+		CheckButton *checkBtn = dynamic_cast<CheckButton*>(_frame[FT_Current]->getChildByTag(CT_NPCCheck + i));
+		CC_ASSERT(checkBtn != NULL);
+		checkBtn->setCheck(GET_UI(WorldMapUi, WCT_WorldMapUi)->_filterCheck[i]);
+		checkBtn->signalStateChanged.connect(this, &WorldMapUiLayer::onAimListFilterChanged);
+	}
+
+	_aimListScrollView->setTouchEnabled(false);
+	_aimListScrollView->removeAllChildren();
+	_aimListScrollView->removeFromParent();
+
+	_aimListContent->removeAllChildren();
+	_aimListContent = _frame[FT_Current]->getChildByTag(CT_AimListContent);
+	_aimListScrollView = createScrollViewWithContent(_aimListContent);
+	_aimListContent->addChild(_aimListScrollView);
+	if (_aimList)
+		_aimList->clear();
+	CC_SAFE_DELETE(_aimList);
+	_aimList = new VerticalList<AimListItem>;
+	_aimList->addToScrollView(_aimListScrollView);
+	_aimList->setMinSize(_aimListContent->getContentSize());
+	_aimList->setLineSpace(-5);
+	_aimList->setEnableSelect(true);
+	updateSelectMapAimList(MapManager::getInstance()->getCurMapIndex());
+	_frame[FT_World] = getChildByTag(FT_World);
+
+	initMapName();
+
+	setPosition(RoleManager::getInstance()->getLocalPlayer()->getPosition());
+}
+
+void WorldMapUiLayer::setSelectMiniMap(std::string mapName,std::string mapIndex)
+{
+	MapManager::getInstance()->setIsSelectCurMap(false);
+	MapManager::getInstance()->setSelectMiniMapIndex(mapIndex);
+	//[bing] 主角游标
+	if (mapSpriteTmp)
+		mapSpriteTmp->removeFromParent();
+	mapSpriteTmp = CCSprite::createWithSpriteFrameName("rendui_youbiao");//vv
+	mapSpriteTmp->setScale(0.25f);
+	mapSpriteTmp->setVisible(false);//隐藏玩家游标
+	std::string curMapName = mapName;
+	std::string _curMapName = curMapName.substr(0,curMapName.find("."));
+	_curMapName += "_mini.jpg";
+	if (mapSprite)
+		mapSprite->removeFromParent();
+	mapSprite = CCSprite::create(_curMapName.c_str());
+	mapSprite->setPosition(ccp(0,0));
+	int s = (int)mapName.find_last_of('/');
+	int e = (int)mapName.find_last_of('.');
+	std::string tmp = mapName.substr(s+1 , e -s -1);
+
+	wchar_t vStr[300];
+	memset(vStr, 0, sizeof(vStr));
+	Utf8ToUtf16(tmp.c_str(), vStr,300,0);
+
+	mapId = crc32(vStr);
+
+	std::string str2 = mapIndex.substr(1,mapIndex.length());
+	int mapid = lexical_cast<int>(str2);
+	initSelectMapScrollViewScene(mapid);
+	_curFrame = FT_Current;
+
+	for(int i = 0; i < 3; i ++)
+	{
+		CheckButton *checkBtn = dynamic_cast<CheckButton*>(_frame[FT_Current]->getChildByTag(CT_NPCCheck + i));
+		CC_ASSERT(checkBtn != NULL);
+		checkBtn->setCheck(GET_UI(WorldMapUi, WCT_WorldMapUi)->_filterCheck[i]);
+		checkBtn->signalStateChanged.connect(this, &WorldMapUiLayer::onAimListFilterChanged);
+	}
+
+	_aimListScrollView->setTouchEnabled(false);
+	_aimListScrollView->removeAllChildren();
+	_aimListScrollView->removeFromParent();
+
+	_aimListContent = _frame[FT_Current]->getChildByTag(CT_AimListContent);
+	_aimListScrollView = createScrollViewWithContent(_aimListContent);
+	_aimListContent->addChild(_aimListScrollView);
+	//_aimListScrollView->removeAllChildren();
+	if (_aimList)
+		_aimList->clear();
+	CC_SAFE_DELETE(_aimList);
+	_aimList = new VerticalList<AimListItem>;
+	_aimList->addToScrollView(_aimListScrollView);
+	_aimList->setMinSize(_aimListContent->getContentSize());
+	_aimList->setLineSpace(-5);
+	_aimList->setEnableSelect(true);
+	//_aimList->setSelectSpriteFrame("worldmapui_selrect");
+	//updateAimList();
+	updateSelectMapAimList(mapid);
+	//worldmap
+	_frame[FT_World] = getChildByTag(FT_World);
+
+	initSelectMapName();
+
+	setPosition(RoleManager::getInstance()->getLocalPlayer()->getPosition());
+}
+
+void WorldMapUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_WorldMapUi);
+}
+
+void WorldMapUiLayer::onCurBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+/*
+	std::string curMapName = MapManager::getInstance()->getCurMapName();
+	std::string _curMapName = curMapName.substr(curMapName.find_last_of("/") + 1,curMapName.find("."));
+	_curMapName = _curMapName.substr(1,_curMapName.find(".") - 1);
+	int mapIndex = atoi(_curMapName.c_str());
+	setSelectMiniMap(_curMapName.c_str(),mapIndex);*/
+	/*setCurMiniMap();
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_Current);*/
+}
+
+void WorldMapUiLayer::onAreaBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//区域
+}
+
+void WorldMapUiLayer::onWorldBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	MapManager::getInstance()->setIsSelectCurMap(false);
+	_curFrame = FT_Current;
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+void WorldMapUiLayer::onCloseBtnPressed1( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_WorldMapUi);
+}
+
+void WorldMapUiLayer::onCurBtnPressed1( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setCurMiniMap();
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+void WorldMapUiLayer::onWorldBtnPressed1( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	/*MapManager::getInstance()->setIsSelectCurMap(false);
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);*/
+}
+
+void WorldMapUiLayer::showFrame( eFrameTag ft )
+{
+	if(ft == _curFrame || ft <0 || ft >= FT_FrameNum)
+		return;
+
+	CCPoint src = _frame[_curFrame]->getPosition();
+	CCPoint dest = _frame[ft]->getPosition();
+	_frame[_curFrame]->setPosition(dest);
+	_frame[ft]->setPosition(src);
+	_curFrame = ft;
+}
+
+void WorldMapUiLayer::initMapName()
+{
+	//CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_frame[FT_Current]->getChildByTag(CT_MapName));
+	LabelFT* label = dynamic_cast<LabelFT*>(_frame[FT_Current]->getChildByTag(CT_MapName));
+	CC_ASSERT(label != NULL);
+	//unsigned int temp = MapManager::getInstance()->getCurMapId();
+	std::string mapName = MapManager::getInstance()->getMapName(MapManager::getInstance()->getCurMapId());
+	label->setString(mapName.c_str());
+}
+
+void WorldMapUiLayer::initSelectMapName()
+{
+	//CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_frame[FT_Current]->getChildByTag(CT_MapName));
+	LabelFT *label = dynamic_cast<LabelFT*>(_frame[FT_Current]->getChildByTag(CT_MapName));
+	CC_ASSERT(label != NULL);
+	std::string tempMapName = "";
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM TiledMapData WHERE MapFileName = ?1");
+	std::string temp = MapManager::getInstance()->getSelectMiniMapIndex();
+	cmd->set_text(1 , temp.c_str());
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("MapName");
+		tempMapName = table->get_text(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	//std::string mapName = MapManager::getInstance()->getMapName(MapManager::getInstance()->getSelectMiniMapIndex());
+	label->setString(tempMapName.c_str());
+}
+
+void WorldMapUiLayer::updateAimList()
+{
+	_aimList->clear();
+	//CheckButton *checkBtn = NULL;
+	int contentPositionY=0;
+	if (currentTag==1)
+	{
+		const MapManager::CreatureVector &npcVector = MapManager::getInstance()->getNpcInfo();
+		for(MapManager::CreatureVector::const_iterator iter = npcVector.begin(); iter != npcVector.end(); ++ iter)
+		{
+			const MapManager::CreatureInfo &npcInfo = *iter;
+			AimListItem *item = new AimListItem;
+			item->setData(npcInfo.creatureName, npcInfo.pos, npcInfo.colour);
+			_aimList->addItem(item);
+		}
+		contentPositionY=npcbtn->getPositionY()-chuansongbtn->getContentSize().height/2;
+	}
+	else if (currentTag==2)
+	{
+		for(std::map<int, miniMapTrigger>::const_iterator iter = _triggerMap.begin(); iter != _triggerMap.end(); ++ iter)
+		{
+			const miniMapTrigger &trigger = iter->second;
+			CCPoint pos = ccp(trigger.rect.getMidX(), trigger.rect.getMidY());
+			AimListItem *item = new AimListItem;
+			//bool ret =MapManager::get_map_tigger_exit_data(trigger.mapName,trigger.exit_key,modifier);
+			if (trigger.go_through_map_name.empty())
+			{
+				item->setData(trigger.nameStr, pos);
+			}
+			else
+			{
+				wchar_t tmp[32]={0};
+				Utf8ToUtf16(trigger.go_through_map_name.c_str(),tmp,32,0);
+				unsigned int  id = f_util::get_crc(tmp);
+				item->setData(trigger.nameStr, pos,"white",id);
+				
+			}
+
+			_aimList->addItem(item);
+		}
+		chuansongbtn->setPositionY(chuansongPoint.y);
+		contentPositionY=chuansongbtn->getPositionY()-chuansongbtn->getContentSize().height/2;
+	}
+	else if (currentTag==3)
+	{
+		const MapManager::CreatureVector &monsterVector = MapManager::getInstance()->getMonsterInfo();
+		for(MapManager::CreatureVector::const_iterator iter = monsterVector.begin(); iter != monsterVector.end(); ++ iter)
+		{
+			const MapManager::CreatureInfo &monsterInfo = *iter;
+			AimListItem *item = new AimListItem;
+			item->setData(monsterInfo.creatureName, monsterInfo.pos, monsterInfo.colour);
+			_aimList->addItem(item);
+		}
+		npcbtn->setPositionY(npcPoint.y);
+		bossbtn->setPositionY(bossPoint.y);
+		chuansongbtn->setPositionY(chuansongPoint.y);
+		contentPositionY=bossbtn->getPositionY()-bossbtn->getContentSize().height/2;
+	}
+	else
+	{
+		chuansongbtn->setPositionY(chuansongPoint.y);
+		bossbtn->setPositionY(bossPoint.y);
+	}
+	//
+	_aimListContent->setPositionY(contentPositionY);
+	int count=_aimList->getItemCount();
+	int npcContentHeight=0;
+	if (count>6)
+	{
+		npcContentHeight=195;
+	}
+	else
+	{
+		npcContentHeight=32*count;
+	}
+	_aimListContent->setContentSize(CCSizeMake(_aimListContent->getContentSize().width,npcContentHeight));
+	_aimList->setMinSize(CCSizeMake(_aimListContent->getContentSize().width,npcContentHeight));
+	_aimListScrollView->setViewSize(CCSizeMake(_aimListContent->getContentSize().width,npcContentHeight));
+	_aimList->updateDisplay();
+	CCPoint minpt = _aimListScrollView->minContainerOffset();
+	_aimListScrollView->setContentOffset(minpt);
+	//CCPoint point=_aimListScrollView->getContentOffset();
+	//int VisibleHeight=_aimList->GetVisibleHeight();
+	if (count>6)
+	{
+		if (currentTag==1)
+		{
+			chuansongbtn->setPositionY((_aimList->getContentHieght()/count)*2+chuansongbtn->getContentSize().height/2-_aimList->GetLineSpace()*2);
+			bossbtn->setPositionY(chuansongbtn->getPositionY()-chuansongbtn->getContentSize().height);
+		}
+		if (currentTag==2)
+		{
+			bossbtn->setPositionY((_aimList->getContentHieght()-10/count)*2+chuansongbtn->getContentSize().height/2);
+		}
+		if (currentTag==3)
+		{
+			chuansongbtn->setPositionY(chuansongPoint.y);
+			bossbtn->setPositionY(bossPoint.y);
+		}
+	}
+	else
+	{
+		if (currentTag==1)
+		{
+			chuansongbtn->setPositionY(npcPoint.y-(_aimList->GetVisibleHeight()+_aimList->GetLineSpace())-chuansongbtn->getContentSize().height);
+			//npcContentHeight=_aimList->GetVisibleHeight();
+			bossbtn->setPositionY(chuansongbtn->getPositionY()-chuansongbtn->getContentSize().height);
+		}
+		if (currentTag==2)
+		{
+			int height=_aimList->GetVisibleHeight()-_aimList->GetLineSpace()-10;
+			//int count=_aimList->getItemCount();
+			bossbtn->setPositionY(chuansongPoint.y-height-chuansongbtn->getContentSize().height);
+		}
+		if (currentTag==3)
+		{
+			chuansongbtn->setPositionY(chuansongPoint.y);
+			bossbtn->setPositionY(bossPoint.y);
+		}
+	}
+}
+
+void WorldMapUiLayer::updateSelectMapAimList(int mapIndex)
+{
+	currentTag=1;
+	MapManager::getInstance()->updataSelectAllRoleMap(mapIndex);
+	_aimList->clear();
+	updateAimList();
+	//CheckButton *checkBtn = NULL;
+
+/*
+	checkBtn = dynamic_cast<CheckButton*>(_frame[FT_Current]->getChildByTag(CT_TransCheck));
+	if(checkBtn->isCheckd())
+	{
+		const MapManager::TriggerMap &triggerMap = MapManager::getInstance()->getTriggerMap();
+		for(MapManager::TriggerMap::const_iterator iter = triggerMap.begin(); iter != triggerMap.end(); ++ iter)
+		{
+			const MapManager::Trigger &trigger = iter->second;
+			CCPoint pos = ccp(trigger.rect.getMidX(), trigger.rect.getMidY());
+			AimListItem *item = new AimListItem;
+			item->setData(trigger.nameStr, pos);
+			_aimList->addItem(item);
+		}
+
+	}
+
+	checkBtn = dynamic_cast<CheckButton*>(_frame[FT_Current]->getChildByTag(CT_NPCCheck));
+	if(checkBtn->isCheckd())
+	{
+		const MapManager::CreatureVector &npcVector = MapManager::getInstance()->getNpcInfo();
+		for(MapManager::CreatureVector::const_iterator iter = npcVector.begin(); iter != npcVector.end(); ++ iter)
+		{
+			const MapManager::CreatureInfo &npcInfo = *iter;
+			AimListItem *item = new AimListItem;
+			item->setData(npcInfo.creatureName, npcInfo.pos);
+			_aimList->addItem(item);
+		}
+	}
+
+	checkBtn = dynamic_cast<CheckButton*>(_frame[FT_Current]->getChildByTag(CT_MonsterCheck));
+	if(checkBtn->isCheckd())
+	{
+		const MapManager::CreatureVector &monsterVector = MapManager::getInstance()->getMonsterInfo();
+		for(MapManager::CreatureVector::const_iterator iter = monsterVector.begin(); iter != monsterVector.end(); ++ iter)
+		{
+			const MapManager::CreatureInfo &monsterInfo = *iter;
+			AimListItem *item = new AimListItem;
+			item->setData(monsterInfo.creatureName, monsterInfo.pos);
+			_aimList->addItem(item);
+		}
+	}
+
+	_aimList->updateDisplay();*/
+	//if (currentTag==1)
+	//{
+	//	const MapManager::CreatureVector &npcVector = MapManager::getInstance()->getNpcInfo();
+	//	for(MapManager::CreatureVector::const_iterator iter = npcVector.begin(); iter != npcVector.end(); ++ iter)
+	//	{
+	//		const MapManager::CreatureInfo &npcInfo = *iter;
+	//		AimListItem *item = new AimListItem;
+	//		item->setData(npcInfo.creatureName, npcInfo.pos);
+	//		_aimList->addItem(item);
+	//	}
+	//	_aimListContent->setPositionY(npcbtn->getPositionY()-chuansongbtn->getContentSize().height/2);
+	//	int count=_aimList->getItemCount();
+	//	int npcContentHeight=0;
+	//	if (count>6)
+	//	{
+	//		npcContentHeight=195;
+	//	}
+	//	else
+	//	{
+	//		npcContentHeight=32*count;
+	//	}
+	//	_aimListContent->setContentSize(CCSizeMake(_aimListContent->getContentSize().width,npcContentHeight));
+	//	_aimList->setMinSize(CCSizeMake(_aimListContent->getContentSize().width,npcContentHeight));
+	//	_aimListScrollView->setViewSize(CCSizeMake(_aimListContent->getContentSize().width,npcContentHeight));
+	//	//_aimListScrollView->setContentOffsetInDuration(ccp(0,npcContentHeight),0);
+	//	_aimList->updateDisplay();
+	//	if (count>6)
+	//	{
+	//		_aimListScrollView->setContentOffset(ccp(0,-npcContentHeight-10));
+	//	}
+	//	else
+	//	{
+	//		_aimListScrollView->setContentOffset(ccp(0,0));
+	//	}
+	//	if (count==9)
+	//	{
+	//		_aimListScrollView->setContentOffset(ccp(0,-55));
+	//	}
+	//	CCPoint point=_aimListScrollView->getContentOffset();
+	//	int VisibleHeight=_aimList->GetVisibleHeight();
+	//	if (count>6)
+	//	{
+	//		chuansongbtn->setPositionY((_aimList->getContentHieght()/count)*2+chuansongbtn->getContentSize().height/2-_aimList->GetLineSpace()*2);
+	//		
+	//	}
+	//	else
+	//	{
+	//		//chuansongbtn->setPositionY(_aimList->getContentHieght());
+	//		chuansongbtn->setPositionY(npcPoint.y-(_aimList->GetVisibleHeight()+_aimList->GetLineSpace())-chuansongbtn->getContentSize().height);
+	//		npcContentHeight=_aimList->GetVisibleHeight();
+	//	}
+	//	//_aimList->updateDisplay();
+	//	//_aimListContent->setContentSize(CCSizeMake(_aimListContent->getContentSize().width,npcContentHeight));
+	//	//_aimList->setMinSize(_aimListContent->getContentSize());
+	//	bossbtn->setPositionY(chuansongbtn->getPositionY()-chuansongbtn->getContentSize().height);
+	//}
+	//	if (currentTag==2)
+	//	{
+	//		const MapManager::TriggerMap &triggerMap = MapManager::getInstance()->getTriggerMap();
+	//		for(MapManager::TriggerMap::const_iterator iter = triggerMap.begin(); iter != triggerMap.end(); ++ iter)
+	//		{
+	//			const MapManager::Trigger &trigger = iter->second;
+	//			CCPoint pos = ccp(trigger.rect.getMidX(), trigger.rect.getMidY());
+	//			AimListItem *item = new AimListItem;
+	//			item->setData(trigger.nameStr, pos);
+	//			_aimList->addItem(item);
+	//		}
+	//		chuansongbtn->setPositionY(chuansongPoint.y);
+	//		_aimListContent->setPositionY(chuansongbtn->getPositionY()-chuansongbtn->getContentSize().height/2);
+	//		int count=_aimList->getItemCount();
+	//		int ChuanSongHeight=0;
+	//		if (count>6)
+	//		{
+	//			ChuanSongHeight=195;
+	//		}
+	//		else
+	//		{
+	//			ChuanSongHeight=32*count;
+	//		}
+	//		_aimListContent->setContentSize(CCSizeMake(_aimListContent->getContentSize().width,ChuanSongHeight));
+	//		_aimList->setMinSize(CCSizeMake(_aimListContent->getContentSize().width,ChuanSongHeight));
+	//		_aimListScrollView->setViewSize(CCSizeMake(_aimListContent->getContentSize().width,ChuanSongHeight));
+	//		_aimListScrollView->setContentOffsetInDuration(ccp(0,0),0);
+	//		_aimList->updateDisplay();
+	//		if (count>6)
+	//		{
+	//			bossbtn->setPositionY((_aimList->getContentHieght()-10/count)*2+chuansongbtn->getContentSize().height/2);
+	//		}
+	//		else
+	//		{
+	//			int height=_aimList->GetVisibleHeight()-_aimList->GetLineSpace()-10;
+	//			int count=_aimList->getItemCount();
+	//			bossbtn->setPositionY(chuansongPoint.y-height-chuansongbtn->getContentSize().height);
+	//		}
+	//	}
+	//checkBtn = dynamic_cast<CheckButton*>(_frame[FT_Current]->getChildByTag(CT_MonsterCheck));
+	//if (currentTag==3)
+	//{
+	//	const MapManager::CreatureVector &monsterVector = MapManager::getInstance()->getMonsterInfo();
+	//	for(MapManager::CreatureVector::const_iterator iter = monsterVector.begin(); iter != monsterVector.end(); ++ iter)
+	//	{
+	//		const MapManager::CreatureInfo &monsterInfo = *iter;
+	//		AimListItem *item = new AimListItem;
+	//		item->setData(monsterInfo.creatureName, monsterInfo.pos);
+	//		_aimList->addItem(item);
+	//	}
+	//	chuansongbtn->setPositionY(chuansongPoint.y);
+	//	bossbtn->setPositionY(bossPoint.y);
+	//	int bossHeight=(_aimList->getContentHieght()/(_aimList->getItemCount()))*6;
+	//	_aimListContent->setPositionY(bossbtn->getPositionY()-bossbtn->getContentSize().height/2);
+	//	_aimListContent->setContentSize(CCSizeMake(_aimListContent->getContentSize().width,195));
+	//	_aimList->setMinSize(CCSizeMake(_aimListContent->getContentSize().width,195));
+	//	_aimListScrollView->setViewSize(CCSizeMake(_aimListContent->getContentSize().width,195));
+	//	if (_aimList->getItemCount()>6)
+	//	{
+	//		_aimListScrollView->setContentOffsetInDuration(ccp(0,-195),0);
+	//	}
+	//	else
+	//	{
+	//		_aimListScrollView->setContentOffsetInDuration(ccp(0,0),0);
+	//	}
+	//	//
+	//	_aimList->updateDisplay();
+	//}
+	//if (currentTag==0)
+	//{
+	//	chuansongbtn->setPositionY(chuansongPoint.y);
+	//	bossbtn->setPositionY(bossPoint.y);
+	//}
+}
+
+void WorldMapUiLayer::onAimListFilterChanged( CheckButton* btn, bool check)
+{
+	int tag = btn->getTag() - CT_NPCCheck;
+	GET_UI(WorldMapUi, WCT_WorldMapUi)->_filterCheck[tag] = check;
+	updateAimList();
+}
+
+void WorldMapUiLayer::setPosition( const CCPoint &pos )
+{
+	CCSize size = _mapContentNode->getContentSize();
+	_mapView->setContentOffset(ccp(-pos.x * scaleW + size.width / 2, -pos.y * scaleH + size.height / 2));
+}
+
+void WorldMapUiLayer::onGotoBtnPressedm1( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setSelectMiniMap("Art/Scene/m1.tmx","m1");
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+
+void WorldMapUiLayer::onGotoBtnPressedm2( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setSelectMiniMap("Art/Scene/m2.tmx","m2");
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+
+//毒蛇山谷
+void WorldMapUiLayer::onGotoBtnPressedm3( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setSelectMiniMap("Art/Scene/m34.tmx","m34");
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+
+void WorldMapUiLayer::onGotoBtnPressedm6( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setSelectMiniMap("Art/Scene/m6.tmx","m6");
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+
+void WorldMapUiLayer::onGotoBtnPressedm7( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setSelectMiniMap("Art/Scene/m7.tmx","m7");
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+
+void WorldMapUiLayer::onGotoBtnPressedm8( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setSelectMiniMap("Art/Scene/m8.tmx","m8");
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+
+void WorldMapUiLayer::onGotoBtnPressedm9( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setSelectMiniMap("Art/Scene/m9.tmx","m9");
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+
+// void WorldMapUiLayer::onGotoBtnPressedm11( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+// {
+// 	setSelectMiniMap("Art/Scene/m11.tmx",11);
+// 	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+// 	showFrame(FT_World);
+// }
+// 
+// void WorldMapUiLayer::onGotoBtnPressedm13( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+// {
+// 	setSelectMiniMap("Art/Scene/m13.tmx",13);
+// 	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+// 	showFrame(FT_World);
+// }
+
+void WorldMapUiLayer::onGotoBtnPressedm14( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setSelectMiniMap("Art/Scene/m14.tmx","m14");
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+
+//沃玛森林
+void WorldMapUiLayer::onGotoBtnPressedm15( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setSelectMiniMap("Art/Scene/m45.tmx","m45");
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+
+void WorldMapUiLayer::onGotoBtnPressedm16( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setSelectMiniMap("Art/Scene/m16.tmx","m16");
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+
+// void WorldMapUiLayer::onGotoBtnPressedm17( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+// {
+// 	setSelectMiniMap("Art/Scene/m17.tmx",17);
+// 	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+// 	showFrame(FT_World);
+// }
+// 
+// void WorldMapUiLayer::onGotoBtnPressedm20( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+// {
+// 	setSelectMiniMap("Art/Scene/m20.tmx",20);
+// 	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+// 	showFrame(FT_World);
+// }
+
+//新增世界地图按钮
+//牛魔寺庙
+void WorldMapUiLayer::onGotoBtnPressedm23( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setSelectMiniMap("Art/Scene/m46.tmx","m46");
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+
+//蜈蚣洞
+void WorldMapUiLayer::onGotoBtnPressedm24( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setSelectMiniMap("Art/Scene/m36.tmx","m36");
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+
+//祖玛寺庙
+void WorldMapUiLayer::onGotoBtnPressedm25( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setSelectMiniMap("Art/Scene/m42.tmx","m42");
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+
+//封魔谷
+void WorldMapUiLayer::onGotoBtnPressedm26(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	setSelectMiniMap("Art/Scene/m67.tmx","m67");
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+
+//丛林迷宫
+void WorldMapUiLayer::onGotoBtnPressedm21( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setSelectMiniMap("Art/Scene/m15.tmx","m15");
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+
+//赤月峡谷
+void WorldMapUiLayer::onGotoBtnPressedm22( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setSelectMiniMap("Art/Scene/m17.tmx","m17");
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showFrame(FT_World);
+}
+
+CCSprite * WorldMapUiLayer::getSprite()
+{
+	CCSprite *sprite = NULL;
+	int size = (int)_dots.size();
+	if(_curSpriteIndex >= size)
+	{
+		sprite = CCSprite::create();
+		sprite->retain();
+		//_mapView->addChild(sprite);
+		sprite->setVisible(false);
+		_dots.push_back(sprite);
+	}
+	else
+	{
+		sprite = _dots[_curSpriteIndex];
+		//sprite->removeFromParent();
+		//_mapView->addChild(sprite);
+	}
+	++ _curSpriteIndex;
+	return sprite;
+}
+
+void WorldMapUiLayer::onnpcBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	npcTouch=!npcTouch;
+	chuansongTouch=false;
+	bossTouch=false;
+	if (npcTouch)
+	{
+		currentTag=1;
+	}
+	else
+		currentTag=0;
+	updateBtnState();
+	updateAimList();
+}
+
+void WorldMapUiLayer::onchuansongBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	chuansongTouch=!chuansongTouch;
+	npcTouch=false;
+	bossTouch=false;
+	if (chuansongTouch)
+	{
+		currentTag=2;
+	}
+	else
+		currentTag=0;
+	updateBtnState();
+	updateAimList();
+}
+
+void WorldMapUiLayer::onguaiwuBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	bossTouch=!bossTouch;
+	chuansongTouch=false;
+	npcTouch=false;
+	if (bossTouch)
+	{
+		currentTag=3;
+	}
+	else
+		currentTag=0;
+	updateBtnState();
+	updateAimList();
+}
+
+void WorldMapUiLayer::updateBtnState()
+{
+ if (currentTag==1)
+ {
+	 npcbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_npc_btnh"),CCControlStateNormal);
+	 npcbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_npc_btnh"),CCControlStateHighlighted);
+	 chuansongbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_chuansong_btnn"),CCControlStateNormal);
+	 chuansongbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_chuansong_btnn"),CCControlStateHighlighted);
+	 bossbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_guaiwu_btnn"),CCControlStateNormal);
+	 bossbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_guaiwu_btnn"),CCControlStateHighlighted);
+ }
+ if (currentTag==2)
+ {
+	 npcbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_npc_btnn"),CCControlStateNormal);
+	 npcbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_npc_btnn"),CCControlStateHighlighted);
+	 chuansongbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_chuansong_btnh"),CCControlStateNormal);
+	 chuansongbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_chuansong_btnh"),CCControlStateHighlighted);
+	 bossbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_guaiwu_btnn"),CCControlStateNormal);
+	 bossbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_guaiwu_btnn"),CCControlStateHighlighted);
+ }
+ if (currentTag==3)
+ {
+	 npcbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_npc_btnn"),CCControlStateNormal);
+	 npcbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_npc_btnn"),CCControlStateHighlighted);
+	 chuansongbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_chuansong_btnn"),CCControlStateNormal);
+	 chuansongbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_chuansong_btnn"),CCControlStateHighlighted);
+	 bossbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_guaiwu_btnh"),CCControlStateNormal);
+	 bossbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_guaiwu_btnh"),CCControlStateHighlighted);
+ }
+ if (currentTag==0)
+ {
+	 npcbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_npc_btnn"),CCControlStateNormal);
+	 npcbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_npc_btnn"),CCControlStateHighlighted);
+	 chuansongbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_chuansong_btnn"),CCControlStateNormal);
+	 chuansongbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_chuansong_btnn"),CCControlStateHighlighted);
+	 bossbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_guaiwu_btnn"),CCControlStateNormal);
+	 bossbtn->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("worldmapui_guaiwu_btnn"),CCControlStateHighlighted);
+ }
+}

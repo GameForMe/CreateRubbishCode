@@ -1,0 +1,345 @@
+#pragma once
+#include "CmdAdapter.h"
+#include "Trading_Define.h"
+#pragma pack(push, 1)
+
+struct tagTradingItemDataMsg 
+{
+	tagEquip			m_ItemInfo;						//物品的结构
+	DWORD				dwUpRoleID;						//上架者
+	DWORD				dwBuyRoleID;					//购买者
+	int					nUnitPrice;						//单价
+	int					nNumber;						//数量
+	int					nState;							//状态
+	tagDWORDTime		tOvertime;					    //过期开始时间
+	tagDWORDTime		tUptime;					    //开始上架时间
+
+	tagTradingItemDataMsg()
+	{ 
+		dwUpRoleID			=	 0;
+		dwBuyRoleID			=	 0;
+		nUnitPrice			=	 0;
+		nNumber				=	 0;
+		nState				=    0;
+
+		tUptime.Clear();
+		tOvertime.Clear();
+		memset(&m_ItemInfo,0,sizeof(m_ItemInfo));
+	}
+};
+
+struct tagTradingItemDataMsgEx : public tagTradingItemDataMsg
+{
+	INT	 msgInfo;//返回的错误码
+	tagTradingItemDataMsgEx()
+	{
+		msgInfo = 0;
+	}
+};
+
+struct tagTradingGetItemDataMsg
+{
+	INT64				n64Serial;						//物品流水号
+	DWORD				dwItemId;						//表中的id															
+	DWORD				dwUpRoleID;						//上架者
+	DWORD				dwBuyRoleID;					//购买者
+	int					nUnitPrice;						//单价
+	int					nNumber;						//数量
+	int					nState;							//状态
+	tagDWORDTime		tOvertime;					    //过期开始时间
+	tagDWORDTime		tUptime;					    //开始上架时间
+
+	tagTradingGetItemDataMsg()
+	{ 
+		n64Serial			=	 0;
+		dwItemId			=	 0;
+		dwUpRoleID			=	 0;
+		dwBuyRoleID			=	 0;
+		nUnitPrice			=	 0;
+		nNumber				=	 0;
+
+		tUptime.Clear();
+		tOvertime.Clear();
+	}
+};
+
+struct tagTradingOntherItemDataMsg
+{
+	INT64				n64Serial;						//物品流水号
+	DWORD				dwItemId;						//表中的id															
+	int					nUnitPrice;						//单价
+	int					nNumber;						//数量
+
+	tagTradingOntherItemDataMsg()
+	{ 
+		n64Serial			=	 0;
+		dwItemId			=	 0;
+		nUnitPrice			=	 0;
+		nNumber				=	 0;
+	}
+};
+
+enum 
+{
+	E_trading_error								= -1,
+	E_trading_success							= 0,
+	E_trading_createitem_fail					= 1,		//创建物品失败
+	E_trading_getitem_fail						= 2,		//获取物品失败
+	E_trading_get_no_item						= 3,		//没有这个物品
+	E_trading_get_dele_item						= 4,		//删除物品失败
+	E_trading_get_down_item						= 5,		//下架失败
+	E_trading_get_push_item						= 6,		//放入可领取容器失败
+	E_trading_get_state_item					= 7,		//设置物品状态失败
+	E_trading_not_yuanbao						= 8,		//元宝不足
+	E_trading_not_gold							= 9,		//金钱不足
+	E_trading_same_role							= 10,		//不能购买自己的物品
+	E_trading_no_itemnode						= 11,		//格子已满
+	E_trading_remove_gem						= 12,		//宝石移除失败
+	E_trading_remove_yuanbao					= 13,		//扣元宝失败
+	E_trading_already_buy_down					= 14,		//已经购买了或者下架了
+	E_trading_level_fail						= 15,		//开放等级不够
+	E_trading_get_container_count_fail			= 16,		//领取容器达到上限
+	E_trading_uptime_to_overtime				= 17,		//从上架时间直接变成了过期时间已到
+	E_trading_no_up								= 18,		//不能上架
+};
+
+//上架
+struct NET_C2G_Trading_Up : public s_net_cmd
+{
+	DECL_NETCMD(NET_C2G_Trading_Up)
+	DWORD			dwClientRoleID; 
+	INT64			n64Serial;
+	DWORD			dwItemId; 
+	int				nUnitPrice; 
+	int				nNumber;
+};
+
+//上架后成功返回的物品信息
+struct NET_G2C_Trading_Up : public s_net_cmd
+{
+	DECL_NETCMD(NET_G2C_Trading_Up)
+	int							msgInfo;
+	bool						bIsSplit;	
+	INT64						nOld64_serial;
+	tagTradingItemDataMsg		item;
+};
+
+//加载个人所有上架的物品数据
+struct NET_C2G_Load_Trading_Role_Up : public s_net_cmd
+{
+	DECL_NETCMD(NET_C2G_Load_Trading_Role_Up)
+	DWORD dwClientRoleID;
+};
+
+//返回得到的个人上架的所有物品
+struct NET_G2C_Load_Trading_Role_Up : public s_net_cmd
+{
+	DECL_NETCMD(NET_G2C_Load_Trading_Role_Up)
+	tagTradingItemDataMsg item[1];
+};
+
+//加载我要购买筛选后的物品数据
+struct NET_C2G_Load_Trading_Buy_Item : public s_net_cmd
+{
+	DECL_NETCMD(NET_C2G_Load_Trading_Buy_Item)
+
+	DWORD	dwClientRoleID;
+	int		ScrollIndex;
+	bool    bIsPrice;
+	wchar_t	Key[1];	// 交易行容器Key;
+};
+
+//返回我要购买筛选后的物品数据
+struct NET_G2C_Load_Trading_Buy_Item : public s_net_cmd
+{
+	DECL_NETCMD(NET_G2C_Load_Trading_Buy_Item)
+	int		msgInfo; 
+	bool	isHave;
+	tagTradingItemDataMsg item[1];
+};
+
+//下架
+struct NET_C2G_Delete_Trading_Role_Down : public s_net_cmd
+{
+	DECL_NETCMD(NET_C2G_Delete_Trading_Role_Down)
+	DWORD	dwClientRoleID;
+	INT64	n64Serial;
+};
+
+struct NET_G2C_Delete_Trading_Role_Down : public s_net_cmd
+{
+	DECL_NETCMD(NET_G2C_Delete_Trading_Role_Down)
+	INT64			n64Serial;	
+	int				nState;			
+	tagDWORDTime	tOvertime;	
+	bool			isBuy;
+	int				msgInfo;
+};
+
+//得到个人可以获取的物品
+struct NET_C2G_Load_Trading_Role_Get_Item : public s_net_cmd
+{
+	DECL_NETCMD(NET_C2G_Load_Trading_Role_Get_Item)
+	DWORD dwClientRoleID;
+};
+
+struct NET_G2C_Load_Trading_Role_Get_Item : public s_net_cmd
+{
+	DECL_NETCMD(NET_G2C_Load_Trading_Role_Get_Item)
+	int							msgInfo;
+	tagTradingGetItemDataMsg	item[1];
+};
+
+//购买
+struct NET_C2G_Trading_BuyItem : public s_net_cmd
+{
+	DECL_NETCMD(NET_C2G_Trading_BuyItem)
+	DWORD	dwClientRoleID;
+	INT64	n64Serial;
+	DWORD   dwYuanBao;//元宝
+	wchar_t Key[1];
+};
+
+struct NET_G2C_Trading_BuyItem : public s_net_cmd
+{
+	DECL_NETCMD(NET_G2C_Trading_BuyItem)	
+	int							nState;			
+	int							msgInfo;
+	tagTradingGetItemDataMsg	item;
+};
+
+//领取单个物品
+struct NET_C2G_Trading_One_Get_Item : public s_net_cmd
+{
+	DECL_NETCMD(NET_C2G_Trading_One_Get_Item)
+	DWORD	dwClientRoleID;
+	DWORD	dwItemId;
+	INT64	n64Serial;
+	INT32	num;
+};
+
+struct NET_G2C_Trading_One_Get_Item : public s_net_cmd
+{
+	DECL_NETCMD(NET_G2C_Trading_One_Get_Item)
+	INT64	n64Serial;
+	INT		msgInfo;
+};
+
+struct GetitemData
+{
+	DWORD	dwItemId;
+	INT64	n64Serial;
+	DWORD	dwUpRoleID;
+	int		nNum;
+};
+
+//领取所有物品
+struct NET_C2G_Trading_All_Get_Item : public s_net_cmd
+{
+	DECL_NETCMD(NET_C2G_Trading_All_Get_Item)
+	DWORD		dwClientRoleID;
+	GetitemData	ItemData[1];
+};
+
+struct NET_G2C_Trading_All_Get_Item : public s_net_cmd
+{
+	DECL_NETCMD(NET_G2C_Trading_All_Get_Item)
+	INT		msgInfo;
+};
+
+//得到别人出售的其他物品信息
+struct NET_C2G_Load_Trading_Onter_Buy_Item : public s_net_cmd
+{
+	DECL_NETCMD(NET_C2G_Load_Trading_Onter_Buy_Item)
+	DWORD	dwClientRoleID;
+	INT64	n64Serial; 
+	DWORD	dwItemId;	
+	wchar_t Key[1];
+};
+
+struct NET_G2C_Load_Trading_Onter_Buy_Item : public s_net_cmd
+{
+	DECL_NETCMD(NET_G2C_Load_Trading_Onter_Buy_Item)
+	int msgInfo; 
+	tagTradingOntherItemDataMsg item[1];
+};
+
+struct remove_gemItem
+{
+	INT64 itemid;
+	int itemnum;
+	remove_gemItem():itemid(0),itemnum(0)
+	{
+	}
+};
+
+//开始拆宝石
+struct NET_C2G_remove_gem_begin : public s_net_cmd
+{
+	DECL_NETCMD(NET_C2G_remove_gem_begin)
+	DWORD dwClientRoleID;
+	INT64 itemid;	//装备id
+};
+
+//拆宝石完成
+struct NET_G2C_remove_gem_result : public s_net_cmd
+{
+	DECL_NETCMD(NET_G2C_remove_gem_result)
+	DWORD		errorInfo;
+	remove_gemItem  data_infos[1]; //镶嵌的宝石
+};
+
+ //过期时间到了改变状态
+struct NET_G2C_update_trading_state : public s_net_cmd
+{
+	DECL_NETCMD(NET_G2C_update_trading_state)
+
+	INT64	n64Serial;
+	int		nState;
+};
+
+//交易行服务器状态
+struct NET_G2C_trading_Server_state : public s_net_cmd
+{
+	DECL_NETCMD(NET_G2C_trading_Server_state)
+};
+
+//搜索
+struct NET_C2G_Trading_Load_Search_Item : public s_net_cmd 
+{
+	DECL_NETCMD(NET_C2G_Trading_Load_Search_Item)
+
+	DWORD		dwClientRoleID;
+	bool		bIsPrice;
+	bool	    bIsClear;
+	DWORD		dwItemId[1];;
+};
+
+struct NET_G2C_Trading_Load_Search_Item : public s_net_cmd
+{
+	DECL_NETCMD(NET_G2C_Trading_Load_Search_Item)
+
+	int		msgInfo; 
+	bool	isHave;
+};
+
+//根据滑动索引得到搜索数据
+struct NET_C2G_Trading_Get_Search_Item : public s_net_cmd
+{
+	DECL_NETCMD(NET_C2G_Trading_Get_Search_Item)
+
+	DWORD	dwClientRoleID;
+	int		ScrollIndex;
+	bool    bIsPrice;
+};
+
+struct NET_G2C_Trading_Get_Search_Item : public s_net_cmd
+{
+	DECL_NETCMD(NET_G2C_Trading_Get_Search_Item)
+
+	int		msgInfo; 
+	bool	isHave;
+	tagTradingItemDataMsg item[1];
+};
+
+#pragma pack(pop)

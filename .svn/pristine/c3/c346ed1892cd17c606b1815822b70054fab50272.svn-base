@@ -1,0 +1,6240 @@
+#include "NewPlayerGuide.h"
+#include "CfgReader.h"
+#include "CmdAdapter.h"
+#include "PackageManager.h"
+#include "WelcomeUi.h"
+#include "World.h"
+#include "tools.h"
+#include "QuestMgr.h"
+#include "SystemUi.h"
+#include "PackageUi.h"
+#include "ItemNode.h"
+#include "UiManager.h"
+#include "NPCTalkUi.h"
+#include "ShortCutUi.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "RoleEquipUi.h"
+#include "SkillUi.h"
+#include "UiManager.h"
+#include "StrengthenUi.h"
+#include "HookSetUi.h"
+#include "TianmingUi.h"
+#include "TaskTraceUi.h"
+#include "ToolTip.h"
+#include <fstream>
+#include "ChatUi.h"
+#include "InstanceUi.h"
+#include "MartialEquipUi.h"
+#include "MartialObtainUi.h"
+#include "MysteryBoxUi.h"
+#include "Auto_ActionMgr.h"
+#include "EquipTipUi.h"
+#include "FubenDuoRenUI.h"
+#include "InlayUi.h"
+#include "EquipLevelUpUi.h"
+#include "EquipFusionUi.h"
+#include "MessageBoxUi.h"
+#include "FubenInfoUI.h"
+#include "FubenUI.h"
+#include "ExchangeMgr.h"
+#include "TransmitMgr.h"
+#include "GameActionNode.h"
+#include "TreasureLoftUi.h"
+#include "UiLoader.h"
+#include "ImmediateEquipUi.h"
+#include "ShopMgr.h"
+#include "UpMgr.h"
+#include "MarryMgr.h"
+#include "StoreMgr.h"
+#include "item.h"
+#include "SkillManager.h"
+#include "MountUi.h"
+#include "WuXueUi.h"
+#include "GongfaTip.h"
+#include "UiResourceMgr.h"
+#include "SocialMgr.h"
+#include "ItemTip.h"
+#include "ArenaMainUi.h"
+#include "StoreUi.h"
+#include "BuySetUi.h"
+#include "ChongZhiActivityFarmeUI.h"
+#include "NewFuncGuider.h"
+#include "GameEventDefine.h"
+#include "ItemAutoUseDaojuTip.h"
+#include "World.h"
+#include "ForgingDecomUI.h"
+#include "UiTools.h"
+#include "AutoSelfProtect_define.h"
+#include "Helper.h"
+#include "FuncGuideMgr.h"
+#include "ClientCfg.h"
+#include "HuoYueUi.h"
+
+//extern std::ofstream testOf;
+std::string fntName = (CFGReader::instance()->get_profile_string("Art", "Scene", "")+ "fontNum.fnt");
+
+NewPlayerGuiderHandler * NewPlayerGuiderHandler::getInstance()
+{
+	static NewPlayerGuiderHandler instance;
+	return &instance;
+}
+
+void NewPlayerGuiderHandler::init()
+{
+	//_fn = fn;
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -11, false);	//[bing] 点击优先级仅次于NPCChatUI
+}
+
+void NewPlayerGuiderHandler::destroy()
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&NewPlayerGuiderHandler::update), this);
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool NewPlayerGuiderHandler::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	return true;
+}
+
+void NewPlayerGuiderHandler::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	NewPlayerGuider::getInstance()->onTouchEnd(pTouch);
+}
+
+void NewPlayerGuiderHandler::update( float dt )
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&NewPlayerGuiderHandler::update), this);
+
+	if((int)NewPlayerGuider::getInstance()->m_pHand->getPositionX() != (int)NewPlayerGuider::getInstance()->_HandTargetPos.x
+		|| (int)NewPlayerGuider::getInstance()->m_pHand->getPositionY() != (int)NewPlayerGuider::getInstance()->_HandTargetPos.y)
+	{
+		CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&NewPlayerGuiderHandler::update), this, 0.1f, false);
+		return;
+	}
+
+	NewPlayerGuider::getInstance()->m_pHand->stopAllActions();
+	CCNode* pNode = dynamic_cast<CCNode*>(NewPlayerGuider::getInstance()->m_pHand->getChildByTag(100));
+	if(pNode)
+		NewPlayerGuider::getInstance()->m_pHand->removeChildByTag(100);
+	NewPlayerGuider::getInstance()->runArrowsAnim();
+}
+
+void NewPlayerGuiderHandler::onSkipBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	NewPlayerGuider::getInstance()->SkipNewGuide();
+}
+
+
+NewPlayerGuiderHandler2 * NewPlayerGuiderHandler2::getInstance()
+{
+	static NewPlayerGuiderHandler2 instance;
+	return &instance;
+}
+
+void NewPlayerGuiderHandler2::init()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -10, true);	//[bing] 点击优先级仅次于NPCChatUI
+}
+
+void NewPlayerGuiderHandler2::destroy()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool NewPlayerGuiderHandler2::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	return NewPlayerGuider::getInstance()->onTouchBegin(pTouch);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+NewPlayerGuider * NewPlayerGuider::getInstance()
+{
+	static NewPlayerGuider instance;
+	return &instance;
+}
+
+NewPlayerGuider::NewPlayerGuider()
+	: _node(NULL)
+	, _guideState(GS_Valid)
+	, _newEquipPos(-1)
+	, m_pLabelSprite(NULL)
+	, m_isStrongGuide(false)
+	,IsNewGuide(false)
+	, m_subGuideState(GS_Valid)
+	, m_nSubGuildeIdx(SG_NULL)
+{
+}
+
+void NewPlayerGuider::init()
+{
+	m_pInfoLabel = NULL;
+	pClip = NULL;
+	_HandTargetPos = ccp(0.0f, 0.0f);
+	m_bClickEvent = false;
+	m_nGuildeIdx = 0;
+	m_nSubGuildeIdx = SG_NULL;
+	m_subGuideState = GS_Valid;
+	_guideState = GS_Valid;
+	_IsGuide = false;
+	m_isStrongGuide = false;
+
+	_node = CCNode::create();
+	_node->retain();
+	CCScene *scene = UiMgr::getInstance()->getCurScene();
+	CC_ASSERT(scene != NULL);
+	scene->addChild(_node, WZ_NewPlayerGuideLayer);
+
+	QuestMgr::getInstance()->_sigAcceptQuest.connect(this, &NewPlayerGuider::onAcceptQuest);
+	QuestMgr::getInstance()->_sigFinishQuest.connect(this, &NewPlayerGuider::onFinishQuest);
+	World::getInstance()->getNPCDialog()->signalBtnShow.connect(this, &NewPlayerGuider::onNpcTalkUi);
+
+	REGISTER_EVENT(RoleHeadPressed,NewPlayerGuider,onRoleHeadPressed);
+
+// 	if(World::getInstance()->getRoleHeadUi())
+// 	{
+// 		World::getInstance()->getRoleHeadUi()->signalHeadPressed.connect(this, &NewPlayerGuider::onRoleHeadPressed);
+// 	}
+	if(RoleManager::getInstance()->getLocalPlayer())
+		RoleManager::getInstance()->getLocalPlayer()->_sigPathFinished.connect(this, &NewPlayerGuider::onRoleFindpathEnd);
+
+	//NewPlayerGuiderHandler2* pHandler2 = NewPlayerGuiderHandler2::getInstance();
+	//pHandler2->init();
+	NewPlayerGuiderHandler* pHandler1 = NewPlayerGuiderHandler::getInstance();
+	pHandler1->init();
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string sSEFile = sSEDir + "E1_25.plist";
+	m_pEffectNode = GameActionNode::create();
+	m_pEffectNode->InitWithPList(sSEFile.c_str(), "E1_25");
+	_node->addChild(m_pEffectNode, 9);
+
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "ICON", "");
+	std::string FullFileName = uiDir + "SingleUI/ng_skip_btn.png";
+	CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addImage(FullFileName.c_str());
+	CCSpriteFrame *BtnClickFrame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+	//[bing] 在这里挂载3个sprite与一个button
+
+	_SkipButton = CCControlButton::create(); //打开副本信息按钮
+	_SkipButton->setContentSize(CCSize(193.0f, 75.0f));
+	_SkipButton->setPreferredSize(CCSize(193.0f, 75.0f));
+	_SkipButton->setBackgroundSpriteFrameForState(BtnClickFrame, CCControlStateSelected);
+	_SkipButton->setBackgroundSpriteFrameForState(BtnClickFrame, CCControlStateNormal);
+
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	_SkipButton->setPosition(ccp(winSize.width - 193 / 2 - 30, 75 / 2 + 30));
+
+	_SkipButton->addTargetWithActionForControlEvents( pHandler1, cccontrol_selector(NewPlayerGuiderHandler::onSkipBtnPressed), CCControlEventTouchUpInside );
+	_SkipButton->setTouchPriority(-11);
+	_SkipButton->setVisible(false);
+	_node->addChild(_SkipButton, 11);
+
+	clear();
+
+	//[bing] debug
+	//const CCRect& rc = GET_UI(ShortCutUi, WCT_ShorCutUi)->GetMedicineBtnPos();
+	//SetClip(rc);
+	//runArrowsAnim(rc);
+}
+
+void NewPlayerGuider::destroy()
+{
+	clear();
+	if (m_pInfoLabel)
+	{
+		m_pInfoLabel->removeFromParent();
+		m_pInfoLabel = NULL;
+	}
+
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("ng_info_bg");
+
+	if(_node)
+	{
+		_node->removeFromParent();
+		_node->release();
+		_node = NULL;
+	}
+
+	m_pHand = NULL;
+	m_pMoveHand = NULL;
+	m_pEffectNode = NULL;
+
+	_guideState = GS_Valid;//gx add
+
+	QuestMgr::getInstance()->_sigAcceptQuest.disconnect(this, &NewPlayerGuider::onAcceptQuest);
+	QuestMgr::getInstance()->_sigFinishQuest.disconnect(this, &NewPlayerGuider::onFinishQuest);
+	if (World::getInstance()->getNPCDialog())
+		World::getInstance()->getNPCDialog()->signalBtnShow.disconnect(this, &NewPlayerGuider::onNpcTalkUi);
+
+	UNREGISTER_EVENT(RoleHeadPressed,NewPlayerGuider,onRoleHeadPressed);
+
+	//if (World::getInstance()->getRoleHeadUi())
+	//	World::getInstance()->getRoleHeadUi()->signalHeadPressed.disconnect(this, &NewPlayerGuider::onRoleHeadPressed);
+	if(RoleManager::getInstance()->getLocalPlayer())
+		RoleManager::getInstance()->getLocalPlayer()->_sigPathFinished.disconnect(this, &NewPlayerGuider::onRoleFindpathEnd);
+
+	NewPlayerGuiderHandler::getInstance()->destroy();
+	NewPlayerGuiderHandler2::getInstance()->destroy();
+	m_isStrongGuide = false;
+
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "ICON", "");
+	std::string FullFileName = uiDir + "SingleUI/ng_skip_btn.png";
+	CCTextureCache::sharedTextureCache()->removeTextureForKey(FullFileName.c_str());
+}
+
+void NewPlayerGuider::onWelcomeUiOkBtnPressed()
+{
+	CCLOG("onWelcomeUiOkBtnPressed");
+	RunNewPlayerGuilde();
+}
+
+void NewPlayerGuider::onAcceptQuest( unsigned short questId )
+{
+	//switch(questId)
+	//{
+	//case 1047:
+	//	//竞技场介绍
+	//	SystemTipUI::Init("ng_arena.png")->m_uFunction = 6;
+	//	break;
+	//}
+
+	//[bing] 增加一个某些主线任务需要断掉引导下次进入时继续
+	
+	if(m_nGuildeIdx == 0)
+	{
+		switch(questId)
+		{
+		case 1001:
+			m_nGuildeIdx = (unsigned int)GN_1001_1;
+			_guideState = GS_ACCEPT_QUEST;
+			break;
+		case 1002:
+			m_nGuildeIdx = (unsigned int)GN_1002_5;
+			_guideState = GS_ACCEPT_QUEST;
+			break;
+		case 1012:
+			m_nGuildeIdx = (unsigned int)GN_1012_1;
+			_guideState = GS_ACCEPT_QUEST;
+			break;
+		case 1020:
+			m_nGuildeIdx = (unsigned int)GN_1020_1;
+			_guideState = GS_ACCEPT_QUEST;
+			break;
+		case 1056:
+			m_nGuildeIdx = (unsigned int)GN_1056_1;
+			_guideState = GS_ACCEPT_QUEST;
+			break;
+		case 1064:
+			m_nGuildeIdx = (unsigned int)GN_1064_1;
+			_guideState = GS_ACCEPT_QUEST;
+			break;
+		case 1099:
+			m_nGuildeIdx = (unsigned int)GN_1099_1;
+			_guideState = GS_ACCEPT_QUEST;
+			break;
+		//case 1103:
+		//	m_nGuildeIdx = (unsigned int)GN_1103_1;
+		//	_guideState = GS_ACCEPT_QUEST;
+		//	break;
+		case 1119:
+			m_nGuildeIdx = (unsigned int)GN_1119_1;
+			_guideState = GS_ACCEPT_QUEST;
+			break;
+		case 1038:
+			m_nGuildeIdx = (unsigned int)GN_1013_1;
+			_guideState = GS_ACCEPT_QUEST;
+			break;
+// 		case 1170:
+// 			m_nGuildeIdx = (unsigned int)GN_1170_1;
+// 			_guideState = GS_ACCEPT_QUEST;
+// 			break;
+// 		case 1015:
+// 			m_nGuildeIdx = (unsigned int)GN_1015_1;
+// 			_guideState = GS_ACCEPT_QUEST;
+// 			break;
+// 		case 1018:
+// 			m_nGuildeIdx = (unsigned int)GN_1018_1;
+// 			_guideState = GS_ACCEPT_QUEST;
+// 			break;
+// 		case 1024:
+// 			m_nGuildeIdx = (unsigned int)GN_1024_1;
+// 			_guideState = GS_ACCEPT_QUEST;
+// 			break;
+// 		case 1029:
+// 			m_nGuildeIdx = (unsigned int)GN_1029_1;
+// 			_guideState = GS_ACCEPT_QUEST;
+// 			break;
+// 		case 1030:
+// 			m_nGuildeIdx = (unsigned int)GN_1030_1;
+// 			_guideState = GS_ACCEPT_QUEST;
+// 			break;
+// 		case 1031:
+// 			m_nGuildeIdx = (unsigned int)GN_1031_1;
+// 			_guideState = GS_ACCEPT_QUEST;
+// 			break;
+// 		case 1039:
+// 			m_nGuildeIdx = (unsigned int)GN_1039_1;
+// 			_guideState = GS_ACCEPT_QUEST;
+// 			break;
+// 		case 1028:
+// 			m_nGuildeIdx = (unsigned int)GN_1028_1;
+// 			_guideState = GS_ACCEPT_QUEST;
+// 			break;
+// 		case 1032:
+// 			m_nGuildeIdx = (unsigned int)GN_1032_1;
+// 			_guideState = GS_ACCEPT_QUEST;
+// 			break;
+// 		case 1065:
+// 			m_nGuildeIdx = (unsigned int)GN_1065_1;
+// 			_guideState = GS_ACCEPT_QUEST;
+// 			break;
+		}
+	}
+
+	switch(questId)
+	{
+	case 1038:
+		//完成召见任务 开启送花，双修
+		//SystemTipUI::Init("ng_folwer.png")->m_uFunction = 1;
+		{
+			AreaPlayerUI* pUI = AreaPlayerUI::Init();
+			if (!pUI)
+			{
+				SystemTipUI::Init("ng_folwer.png")->m_uFunction = 1;
+			}
+		}
+		break;
+	case 1075:
+		//行会介绍
+		SystemTipUI::Init("ng_guild.png")->m_uFunction = 2;
+		break;
+	case 1086:
+		//摆摊介绍
+		SystemTipUI::Init("ng_stall.png")->m_uFunction = 7;
+		break;
+	case 1127:
+		//饮酒介绍
+		SystemTipUI::Init("ng_drink.png")->m_uFunction = 4;
+		break;
+	case 1149:
+		SystemTipUI::Init("ng_arena.png")->m_uFunction = 6;
+		break;
+	}
+
+	if(GS_ACCEPT_QUEST != _guideState)
+		return;
+
+	CCLOG("onAcceptQuest %d", questId);
+	IsNewGuide = true;
+	RunNewPlayerGuilde();
+	
+	return;
+}
+
+void NewPlayerGuider::onNpcTalkUi( int btn, unsigned int questId )
+{
+	if(GS_NPC_TALK != _guideState)
+		return;
+
+	CCLOG("onNpcTalkUi %d", questId);
+	RunNewPlayerGuilde();
+	return;
+}
+
+void NewPlayerGuider::onFinishQuest( unsigned short questId )
+{
+	//[bing] 增加一个某些主线任务需要断掉引导下次进入时继续
+	if(m_nGuildeIdx == 0)
+	{
+		switch(questId)
+		{
+		case 1002:
+			m_nGuildeIdx = (unsigned int)GN_1002_1;
+			_guideState = GS_FINISH_QUEST;
+			break;
+		case 1008:
+			m_nGuildeIdx = (unsigned int)GN_1008_1;
+			_guideState = GS_FINISH_QUEST;
+			break;
+		case 1011:
+			m_nGuildeIdx = (unsigned int)GN_1011_1;
+			_guideState = GS_FINISH_QUEST;
+			break;
+		case 1033:
+			m_nGuildeIdx = (unsigned int)GN_1034_1;
+			_guideState = GS_FINISH_QUEST;
+			break;
+		case 1047:
+			m_nGuildeIdx = (unsigned int)GN_1047_1;
+			_guideState = GS_FINISH_QUEST;
+			break;
+		case 1096:
+			m_nGuildeIdx = (unsigned int)GN_1096_1;
+			_guideState = GS_FINISH_QUEST;
+			break;
+// 		case 1046:
+// 			m_nGuildeIdx = (unsigned int)GN_1046_1;
+// 			_guideState = GS_SYS_TIPS_OPEN;
+// 			break;
+// 		case 1012:
+// 			m_nGuildeIdx = (unsigned int)GN_1012_2;
+// 			_guideState = GS_FINISH_QUEST;
+// 			break;
+// 		case 1013:
+// 			m_nGuildeIdx = (unsigned int)GN_1013_1;
+// 			_guideState = GS_SYS_TIPS_OPEN;
+// 			break;
+// 		case 1054:
+// 			m_nGuildeIdx = (unsigned int)GN_1054_1;
+// 			_guideState = GS_SYS_TIPS_OPEN;
+// 			break;
+// 		case 1064:
+// 			m_nGuildeIdx = (unsigned int)GN_1064_1;
+// 			_guideState = GS_SYS_TIPS_OPEN;
+// 			break;
+// 		case 1028:
+// 			m_nGuildeIdx = (unsigned int)GN_1028_2;
+// 			_guideState = GS_FINISH_QUEST;
+// 			break;
+// 		case 1032:
+// 			m_nGuildeIdx = (unsigned int)GN_1032_2;
+// 			_guideState = GS_FINISH_QUEST;
+// 			break;
+// 		case 1039 :
+// 			m_nGuildeIdx = (unsigned int)GN_1039_3;
+// 			_guideState = GS_FINISH_QUEST;
+// 			break;
+// 		case 1047:
+// 			m_nGuildeIdx = (unsigned int)GN_1047_1;
+// 			_guideState = GS_SYS_TIPS_OPEN;
+// 			break;
+// 		case 1175:
+// 			m_nGuildeIdx = (unsigned int)GN_1175_1;
+// 			_guideState = GS_FINISH_QUEST;
+// 			break;
+// 		case 1048:
+// 			m_nGuildeIdx = (unsigned int)GN_1048_1;
+// 			_guideState = GS_FINISH_QUEST;
+// 			break;
+		}
+	}
+
+	switch(questId)
+	{
+	case 1047:
+		//开启锻造
+		{
+			SystemUi* systemUI = GET_UI(SystemUi, WCT_SystemUi);
+			float delay = 3.0f;
+			systemUI->playShiftAction(SystemUi::BT_Forge, false, delay);
+		}
+		break;
+// 	case 1046:
+// 		//完成任务初试 开启坐骑
+// 		//SystemTipUI::Init("ng_ride.png")->m_uFunction = 0;
+// 		break;
+// 	case 1029:
+// 		//师徒介绍
+// 		//SystemTipUI::Init("ng_shitu.png")->m_uFunction = 3;
+// 		break;
+// 	case 1054:
+// 		//武学介绍
+// 		//SystemTipUI::Init("ng_wuxue.png")->m_uFunction = 5;
+// 		break;
+// 	case 1064:
+// 		//开启装备融合
+// 		//SystemTipUI::Init("ng_fusion.png")->m_uFunction = 8;
+// 		break;
+// 	case 1084:
+// 		//开启装备升星
+// 		//SystemTipUI::Init("ng_upstar.png")->m_uFunction = 9;
+// 		break;
+	}
+
+	//支线任务引导
+	if(m_nSubGuildeIdx == SG_NULL && questId > 0 && questId < 500){
+		switch((eSubQuest)questId)
+		{
+		case SQ_HeroWorship:
+				m_nSubGuildeIdx = SG_HeroWorship_1;
+			break;
+		case SQ_DevilInstance:
+				m_nSubGuildeIdx = SG_DevilInstance_1;
+			break;
+		case SQ_DrinkWine:
+				m_nSubGuildeIdx = SG_DrinkWine_1;
+			break;
+		default:
+			break;
+		}
+		if(m_nSubGuildeIdx != SG_NULL){
+			RunSubNewGuide();
+		}
+	}
+
+	if(GS_FINISH_QUEST != _guideState)
+		return;
+
+	CCLOG("onFinishQuest %d", questId);
+	IsNewGuide = true;
+	RunNewPlayerGuilde();
+	return;
+}
+
+void NewPlayerGuider::onRoleFindpathEnd()
+{
+	if(_guideState == GS_MOVE_PATH_END)
+	{
+		CCPoint pos = RoleManager::getInstance()->getLocalPlayer()->getPosition();
+		if(ccpDistance(pos, _questDestPos) < PLAY_POS_RANK_CHECK)
+		{
+			CCLOG("onRoleFindpathEnd");
+			RunNewPlayerGuilde();
+		}
+	}
+}
+
+void NewPlayerGuider::runArrowsAnim( const CCRect &rect )
+{
+	float fHandPosX = rect.getMidX();
+	float fHandPosY = rect.getMidY();
+
+	fHandPosX += 3;
+	fHandPosY -= 8;
+
+	_HandTargetPos = ccp(fHandPosX, fHandPosY);
+
+	if(m_pHand == NULL)
+	{
+		m_pHand = GameActionNode::create();
+		m_pHand->AddTexture("NewGuide_00000", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00001", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00002", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00003", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00004", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00005", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00006", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00007", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00008", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00009", "ICON", "png");
+		_node->addChild(m_pHand, 10);
+		m_pHand->setVisible(false);
+	}
+
+	if(!m_pHand->isVisible())
+	{
+		CCNode* pNode = dynamic_cast<CCNode*>(m_pHand->getChildByTag(100));
+		if(pNode)
+			m_pHand->removeChildByTag(100);
+		m_pHand->setPosition(ccp(fHandPosX, fHandPosY));
+		m_pHand->setVisible(true);
+		m_pHand->BeginAction(0.1, true);
+	}
+	else
+	{
+		CCNode* pNode = dynamic_cast<CCNode*>(m_pHand->getChildByTag(100));
+		if(pNode)
+			m_pHand->removeChildByTag(100);
+		m_pHand->StopAction(false, true);
+		m_pHand->stopAllActions();
+		CCSprite* MoveHandSprite = CCSprite::create();
+		MoveHandSprite->initWithSpriteFrame(GameActionNode::getFrameByName( "NewGuide_00002", "ICON", "png" ));
+		MoveHandSprite->setTag(100);
+		m_pHand->addChild(MoveHandSprite);
+		CCMoveTo* pAction = CCMoveTo::create(0.8f, ccp(fHandPosX, fHandPosY));
+		m_pHand->runAction(pAction);
+		NewPlayerGuiderHandler* pHandler = NewPlayerGuiderHandler::getInstance();
+		CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&NewPlayerGuiderHandler::update), pHandler);
+		CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&NewPlayerGuiderHandler::update), pHandler, 1.0f, false);
+	}
+
+	_IsGuide = true;
+	_curRect = rect;
+	//_curRect = CCRect(rect.origin.x,rect.origin.y, 1.5 * rect.size.width, 1.5 * rect.size.height);
+
+	//SetClip(rect);
+
+	if (m_isStrongGuide)
+	{
+		_SkipButton->setVisible(true);
+
+		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+
+		CCSize cs = _SkipButton->getContentSize();
+		CCPoint cp = ccp(winSize.width - cs.width / 2 - 30, cs.height / 2 + 30);	//右下角
+		//[bing] 如果引导位置在屏幕左侧 跳过按钮在右侧 反之在左侧
+		if(_curRect.getMaxX() > winSize.width / 2 )
+		{
+			//放左下角
+			cp = ccp(cs.width / 2 + 30, cs.height / 2 + 30);
+		}
+		_SkipButton->setPosition(cp);
+	}else
+	{
+		_SkipButton->setVisible(false);
+	}
+}
+
+void NewPlayerGuider::setTextClip(LabelFT* pLabel, int strId, const CCPoint& pos, bool isflip, float scaleY, CCPoint labelPos)
+{
+	if (!pLabel)
+		pLabel = getLabelTTF();
+	if (pLabel && m_pInfoLabel)
+	{
+		if (isflip == true && scaleY == 0.6f)
+			labelPos.x += 15.0f;
+		pLabel->setString(GET_STR(strId).c_str());
+		m_pInfoLabel->setPosition(pos);
+		flipSprites(m_pLabelSprite, isflip);
+		m_pLabelSprite->setScaleY(scaleY);
+		pLabel->setPosition(labelPos);
+		m_pInfoLabel->setVisible(true);
+	}
+}
+
+void NewPlayerGuider::runAction()
+{
+	if (m_pInfoLabel && m_pInfoLabel->isVisible())
+	{
+		m_pInfoLabel->stopAllActions();
+		CCMoveTo* pAction = CCMoveTo::create(0.3f, ccp(m_pInfoLabel->getPositionX() - 8,m_pInfoLabel->getPositionY()));
+		CCMoveTo* pAction1 = CCMoveTo::create(0.3f, ccp(m_pInfoLabel->getPositionX() + 8,m_pInfoLabel->getPositionY()));
+		m_pInfoLabel->runAction(CCRepeatForever::create(CCSequence::createWithTwoActions(pAction, pAction1)));
+	}
+}
+
+LabelFT* NewPlayerGuider::getLabelTTF()
+{
+	LabelFT* pLabel = NULL;
+	if (m_pInfoLabel == NULL)
+	{
+		std::string fileName = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "SingleUI/ng_info_bg.png";
+		m_pLabelSprite = CCSprite::create(fileName.c_str());
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(m_pLabelSprite->displayFrame(), "ng_info_bg");
+		m_pInfoLabel = CCNode::create();
+		m_pInfoLabel->addChild(m_pLabelSprite);
+		TTFConfig config;
+		config.fontFilePath=  FT_FONTFACE;
+		config.fontSize = 14;
+		config.outlineSize = 1;
+		pLabel = LabelFT::createWithTTF(config,"");
+		pLabel->setAnchorPoint(ccp(0.5f, 0.5f));
+		pLabel->setTag(1);
+		pLabel->setHorizontalAlignment(LEFT);
+		pLabel->setVerticalAlignment(VCENTER);
+		CCSize size = m_pLabelSprite->getContentSize();
+		size.width -= 40.0f;
+		pLabel->setDimensions(size.width,size.height);
+		m_pInfoLabel->addChild(pLabel);
+		_node->addChild(m_pInfoLabel, 11);
+		pLabel->setPosition(ccp(-5.0f, -1.0f));
+	}
+	else
+	{
+		pLabel = dynamic_cast<LabelFT*>(m_pInfoLabel->getChildByTag(1));
+		pLabel->setPosition(ccp(-5.0f, -1.0f));
+	}
+	return pLabel;
+}
+
+void NewPlayerGuider::runArrowsAnim()
+{
+	if (m_pHand != NULL)
+	{
+		m_pHand->BeginAction(0.1, true);
+	}
+	
+	if (m_isStrongGuide)
+	{
+		_SkipButton->setVisible(true);
+
+		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+
+		CCSize cs = _SkipButton->getContentSize();
+		CCPoint cp = ccp(winSize.width - cs.width / 2 - 30, cs.height / 2 + 30);	//右下角
+		//[bing] 如果引导位置在屏幕左侧 跳过按钮在右侧 反之在左侧
+		if(_curRect.getMaxX() > winSize.width / 2 )
+		{
+			//放左下角
+			cp = ccp(cs.width / 2 + 30, cs.height / 2 + 30);
+		}
+		_SkipButton->setPosition(cp);
+	}else
+	{
+		_SkipButton->setVisible(false);
+	}
+
+	if(m_nSubGuildeIdx != SG_NULL)
+		return;
+
+	LabelFT* pLabel = getLabelTTF();
+
+	if (pLabel && m_pInfoLabel)
+	{
+		m_pInfoLabel->setVisible(true);
+		switch(m_nGuildeIdx)
+		{
+		case GN_1000_3:
+			setTextClip(pLabel, 6037, ccp(_curRect.getMinX() + 250.0f, _curRect.getMinY() + 30), true, 0.6f, ccp(30.0f, -1.0f));
+			break;
+		case GN_1008_2:
+			setTextClip(pLabel, 6038, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 30), true, 0.6f, ccp(30.0f, -1.0f));
+			break;
+		case GN_1008_3:
+			setTextClip(pLabel, 6039, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 30), true, 0.6f, ccp(50.0f, -1.0f));
+			break;
+		case GN_1008_4:
+			setTextClip(pLabel, 6023, ccp(_curRect.getMaxX() + 150.0f, _curRect.getMinY() + 30.0f), true, 0.6f, ccp(30.0f, -1.0f));
+			break;
+		case GN_1008_5:
+			setTextClip(pLabel, 6024, ccp(_curRect.getMinX() - 120.0f, _curRect.getMinY() + 20.0f), false, 0.6f, ccp(25.0f, -1.0f));
+			break;
+		case GN_1011_1:
+			setTextClip(pLabel, 9051, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 15), false, 0.6f, ccp(2.0f, -1.0f));
+			break;
+		case GN_1011_3:
+			setTextClip(pLabel, 9087, ccp(_curRect.getMinX() + 165.0f, _curRect.getMinY() + 30), true, 1.0f, ccp(20.0f, -1.0f));
+			break;
+		case GN_1011_4:
+			setTextClip(pLabel, 9088, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 25.0f), false, 0.6f, ccp(10.0f, -1.0f));
+			break;
+		case GN_1011_5:
+			setTextClip(pLabel, 9089, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 1.0f, ccp(-8.0f, -1.0f));
+			break;
+		case GN_1034_3:
+			setTextClip(pLabel, 6067, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 30), false, 0.6f, ccp(2.0f, -1.0f));
+			break;
+		case GN_1034_4:
+			setTextClip(pLabel, 6068, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 10), false, 0.6f, ccp(2.0f, -1.0f));
+			break;
+		case GN_1034_6:
+			setTextClip(pLabel, 6069, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 30), true, 0.6f, ccp(12.0f, -1.0f));
+			break;
+		case GN_1034_7:
+			setTextClip(pLabel, 6028, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 0.6f, ccp(30.0f, -1.0f));
+			break;
+		case GN_1047_3:
+			setTextClip(pLabel, 9052, ccp(_curRect.getMinX() + 220.0f, _curRect.getMinY() + 20.0f), true, 0.6f, ccp(5.0f, -1.0f));
+			break;
+		case GN_1047_4:
+			setTextClip(pLabel, 9053, ccp(_curRect.getMinX() + 150.0f, _curRect.getMinY() + 5.0f), true, 0.6f, ccp(20.0f, -1.0f));
+			break;
+		case GN_1047_5:
+			setTextClip(pLabel, 9054, ccp(_curRect.getMinX() - 60.0f, _curRect.getMinY() + 50.0f), false, 0.6f, ccp(-5.0f, -1.0f));
+			break;
+		case GN_1047_6:
+			setTextClip(pLabel, 9055, ccp(_curRect.getMinX() - 80.0f, _curRect.getMinY() + 20), false, 0.6f, ccp(-13.0f, -1.0f));
+			break;
+		case GN_1047_7:
+			setTextClip(pLabel, 9056, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 0.6f, ccp(-12.0f, -1.0f));
+			break;
+		//锻造
+		case GN_1056_2:
+			setTextClip(pLabel, 9058, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 1.0f, ccp(-12.0f, -1.0f));
+			break;
+		case GN_1056_3:
+			setTextClip(pLabel, 9059, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 1.0f, ccp(-12.0f, -1.0f));
+			break;
+		case GN_1056_4:
+			setTextClip(pLabel, 9060, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 20), true, 1.0f, ccp(20.0f, -1.0f));
+			break;
+		case GN_1056_5:
+			setTextClip(pLabel, 9061, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 30), false, 0.6f, ccp(25.0f, -1.0f));
+			break;
+		//升级
+		case GN_1064_4:
+			setTextClip(pLabel, 9102, ccp(_curRect.getMinX() + 150.0f, _curRect.getMinY() + 20), true, 0.6f, ccp(30.0f, -1.0f));
+			break;
+		case GN_1064_5:
+			setTextClip(pLabel, 9103, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20.0f), false, 0.6f, ccp(15.0f, -1.0f));
+			break;
+		case GN_1064_6:
+			setTextClip(pLabel, 9104, ccp(_curRect.getMinX() + 400.0f, _curRect.getMinY() + 325.f), true, 1.0f, ccp(22.0f, -1.0f));
+			break;
+		case GN_1064_7:
+			setTextClip(pLabel, 9105, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20.0f), false, 0.6f, ccp(5.0f, -1.0f));
+			break;
+		//强化
+		case GN_1099_5:
+			setTextClip(pLabel, 9064, ccp(_curRect.getMinX() + 150.0f, _curRect.getMinY() + 20), true, 0.6f, ccp(40.0f, -1.0f));
+			break;
+		case GN_1099_6:
+			setTextClip(pLabel, 9065, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 1.0f, ccp(-12.0f, -1.0f));
+			break;
+		case GN_1099_7:
+			setTextClip(pLabel, 9066, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 1.0f, ccp(-12.0f, -1.0f));
+			break;
+		case GN_1099_8:
+			setTextClip(pLabel, 9067, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 1.0f, ccp(-12.0f, -1.0f));
+			break;
+		case GN_1099_9:
+			setTextClip(pLabel, 9068, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 1.0f, ccp(-12.0f, -1.0f));
+			break;
+		//进阶
+		case GN_1119_5:
+		case GN_1119_7:
+			setTextClip(pLabel, 9080, ccp(_curRect.getMinX() + 150.0f, _curRect.getMinY() + 20), true, 0.6f, ccp(40.0f, -1.0f));
+			break;
+		case GN_1119_8:
+			setTextClip(pLabel, 9081, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 1.0f, ccp(-12.0f, -1.0f));
+			break;
+		case GN_1119_9:
+			setTextClip(pLabel, 9082, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 20), true, 1.0f, ccp(20.0f, -1.0f));
+			break;
+///////////////////////////////////////
+		case GN_1028_7:
+			setTextClip(pLabel, 6034, ccp(_curRect.getMinX() - 190.0f, _curRect.getMinY() + 175.0f), false, 1.0f);
+			break;
+		case GN_1039_6:
+			setTextClip(pLabel, 6033, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 40.0f), false, 1.0f);
+			break;
+		case GN_1024_7:
+			setTextClip(pLabel, 6029, ccp(_curRect.getMinX() - 200.0f, _curRect.getMinY() + 120.0f), false, 1.0f);
+			break;
+		case GN_1024_8:
+			setTextClip(pLabel, 6030, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20.0f), false, 0.6f);
+			break;
+		case GN_1024_10:
+			setTextClip(pLabel, 6031, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20.0f), false, 0.6f);
+			break;
+		case GN_1012_4:
+			setTextClip(pLabel, 6041, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 0.6f, ccp(12.0f, -1.0f));
+			break;
+		case GN_1018_3:
+			setTextClip(pLabel, 6044, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 30), false, 0.6f, ccp(35.0f, -1.0f));
+			break;
+		case GN_1018_4:
+			setTextClip(pLabel, 6045, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 20), true, 0.6f, ccp(35.0f, -1.0f));
+			break;
+		case GN_1018_5:
+			setTextClip(pLabel, 6046, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 20), true, 0.6f, ccp(5.0f, -1.0f));
+			break;
+		case GN_1018_6:
+			setTextClip(pLabel, 6047, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 20), true, 0.6f, ccp(35.0f, -1.0f));
+			break;
+		case GN_1018_8:
+			setTextClip(pLabel, 6040, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 0.6f, ccp(20.0f, -1.0f));
+			break;
+		case GN_1018_9:
+			setTextClip(pLabel, 6048, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 0.6f, ccp(35.0f, -1.0f));
+			break;
+		case GN_1018_10:
+			setTextClip(pLabel, 6049, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 20), true, 0.6f, ccp(25.0f, -1.0f));
+			break;
+		case GN_1018_11:
+			setTextClip(pLabel, 6050, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 30), false, 0.6f, ccp(35.0f, -1.0f));
+			break;
+		case GN_1024_4:
+			setTextClip(pLabel, 6039, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 30), true, 0.6f, ccp(45.0f, -1.0f));
+			break;
+		case GN_1024_5:
+			setTextClip(pLabel, 6051, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 20), true, 0.6f, ccp(30.0f, -1.0f));
+			break;
+		case GN_1024_6:
+			setTextClip(pLabel, 6053, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 0.6f, ccp(10.0f, -1.0f));
+			break;
+		case GN_1031_4:
+			setTextClip(pLabel, 6039, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 30), true, 0.6f, ccp(45.0f, -1.0f));
+			break;
+		case GN_1031_5:
+			setTextClip(pLabel, 6051, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 20), true, 0.6f, ccp(30.0f, -1.0f));
+			break;
+		case GN_1031_7:
+			setTextClip(pLabel, 6057, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 0.6f, ccp(15.0f, -1.0f));
+			break;
+		case GN_1028_4:
+			setTextClip(pLabel, 6039, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 30), true, 0.6f, ccp(45.0f, -1.0f));
+			break;
+		case GN_1028_5:
+			setTextClip(pLabel, 6051, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 20), true, 0.6f, ccp(30.0f, -1.0f));
+			break;
+		case GN_1028_6:
+			setTextClip(pLabel, 6060, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 0.6f, ccp(12.0f, -1.0f));
+			break;
+		case GN_1019_3:
+			setTextClip(pLabel, 6039, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 30), true, 0.6f, ccp(45.0f, -1.0f));
+			break;
+		case GN_1019_4:
+			setTextClip(pLabel, 6051, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 20), true, 0.6f, ccp(30.0f, -1.0f));
+			break;
+		case GN_1019_5:
+			setTextClip(pLabel, 6052, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 0.6f, ccp(30.0f, -1.0f));
+			break;
+		case GN_1030_3:
+			setTextClip(pLabel, 6055, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 30), false, 0.6f, ccp(2.0f, -1.0f));
+			break;
+		case GN_1030_4:
+			setTextClip(pLabel, 6056, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 1.0f);
+			break;
+		case GN_1046_4:
+			setTextClip(pLabel, 6061, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 1.0f);
+			break;
+		case GN_1046_6:
+			setTextClip(pLabel, 6062, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 1.0f);
+			break;
+		case GN_1054_4:
+			setTextClip(pLabel, 6064, ccp(_curRect.getMinX() + 150.0f, _curRect.getMinY() + 20), true, 0.6f, ccp(30.0f, -1.0f));
+			break;
+		case GN_1065_5:
+			setTextClip(pLabel, 6066, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 20), false, 1.0f);
+			break;
+		case GN_1175_3:
+			setTextClip(NULL, 6070, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 30), false, 1.0f);
+			break;
+		case GN_1018_13:
+			setTextClip(NULL, 6073, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 30), false, 1.0f);
+			break;
+		case GN_1032_4:
+		case GN_1012_3:
+		case GN_1030_2:
+		case GN_1031_8:
+		case GN_1039_2:
+		case GN_1018_2:
+		case GN_1024_3:
+		case GN_1031_3:
+		case GN_1028_3:
+		case GN_1019_2:
+			break;
+		case GN_1096_3:
+			setTextClip(NULL, 9539, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 30), true, 0.6f, ccp(50.0f, -1.0f));
+		case GN_1096_4:
+			setTextClip(NULL, 9539, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 30), false, 1.0f);
+			break;
+		case GN_1096_5:
+			setTextClip(NULL, 9540, ccp(_curRect.getMinX() + 250.0f, _curRect.getMinY() + 30), true, 1.0f, ccp(30.0f, 0.0f));
+			break;
+		case GN_1096_6:
+			setTextClip(NULL, 9541, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 30), false, 1.0f, ccp(15.0f, 0.0f));
+			break;
+		case GN_1096_7:
+			setTextClip(NULL, 9542, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 30), false, 1.0f);
+			break;
+		default:
+			m_pInfoLabel->setVisible(false);
+			break;
+		}
+		runAction();
+	}
+}
+
+void NewPlayerGuider::clear(bool bClearHand /*= true*/)
+{
+	if(m_nSubGuildeIdx != SG_NULL)
+		return;
+
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	_curRect = CCRect(0.f, 0.f, winSize.width, winSize.height);
+
+	_HandTargetPos = ccp(0.0f, 0.0f);
+
+	_IsGuide = false;
+	if(m_pHand)
+	{
+		//m_pHand->setVisible(false);
+		//m_pHand->StopAction();
+
+		m_pHand->removeFromParent();
+		m_pHand = NULL;
+
+		CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("NewGuide_00000");
+		CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("NewGuide_00001");
+		CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("NewGuide_00002");
+		CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("NewGuide_00003");
+		CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("NewGuide_00004");
+		CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("NewGuide_00005");
+		CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("NewGuide_00006");
+		CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("NewGuide_00007");
+		CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("NewGuide_00008");
+		CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("NewGuide_00009");
+	}
+
+	if(m_pMoveHand && m_pMoveHand->isVisible())
+	{
+		m_pMoveHand->removeFromParent();
+		m_pMoveHand = NULL;
+
+		CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("NewGuide_00002");
+	}
+
+	if(pClip)
+	{
+		pClip->removeFromParent();
+		pClip = NULL;
+	}
+
+	if (m_isStrongGuide)
+	{
+		_SkipButton->setVisible(false);
+	}
+	
+	if(bClearHand)
+	{
+		NewPlayerGuiderHandler* pHandler = NewPlayerGuiderHandler::getInstance();
+		CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&NewPlayerGuiderHandler::update), pHandler);
+	}
+
+	if(m_pInfoLabel)
+	{
+		m_pInfoLabel->setVisible(false);
+	}
+}
+
+void NewPlayerGuider::switchGuideWeakOrStrong(eGuideState gameState)
+{
+	//CCAssert(gameState != NULL);
+	switch(gameState)
+	{
+	case GS_Weak:
+		{
+			if (!m_isStrongGuide)
+				break;
+			m_isStrongGuide = false;
+			NewPlayerGuiderHandler2::getInstance()->destroy();
+			break;
+		}
+	case GS_Strong:
+		{
+			if (m_isStrongGuide)
+				break;
+			m_isStrongGuide = true;
+			NewPlayerGuiderHandler2::getInstance()->init();
+			break;
+		}
+
+	default:
+		break;
+	}
+}
+
+void NewPlayerGuider::onUiOpen( eWroldChildTag uiTag )
+{
+	//[bing] 
+	if(_guideState == GS_OPENUI)
+	{
+		CCLOG("onUiOpen for GS_Package %d", (int)uiTag);
+		RunNewPlayerGuilde();
+	}
+	if(m_subGuideState == GS_OPENUI)
+	{
+		RunSubNewGuide();
+	}
+
+	return;
+}
+
+void NewPlayerGuider::onUiClose( eWroldChildTag uiTag )
+{
+	//[bing] 
+	if(_guideState == GS_CLOSEUI)
+	{
+		CCLOG("onUiClose for GS_ControlUI %d", (int)uiTag);
+		RunNewPlayerGuilde();
+	}
+	if (uiTag == WCT_EquipFusionUi)
+	{
+		if (m_pInfoLabel)
+			m_pInfoLabel->setVisible(false);
+		clear();
+	}
+	if (uiTag == WCT_NPCCHATUI)
+	{
+		World::getInstance()->getTaskTraceUi()->froceShowUi(true);
+	}
+	return;
+}
+
+void NewPlayerGuider::doHeadPressed()
+{
+	if(_guideState != GS_CLICK_HEAD)
+		return;
+
+	CCLOG("onRoleHeadPressed");
+	RunNewPlayerGuilde();
+	return;
+}
+
+void NewPlayerGuider::onRoleHeadPressed( RoleHeadPressed* evt )
+{
+	doHeadPressed();
+}
+
+void NewPlayerGuider::onSkillUiItemSelect( int index )
+{
+	if (_guideState != GS_SKILL_STUDY)
+		return;
+	CCLOG("onSkillUiItemSelect %d", index);
+	RunNewPlayerGuilde();
+	return;
+}
+
+void NewPlayerGuider::onStudySkill( int id )
+{
+	if (_guideState != GS_SKILL_STUDY)
+		return;
+	CCLOG("onStudySkill %d", id);
+	RunNewPlayerGuilde();
+	return;
+}
+
+void NewPlayerGuider::onMiniMapGroupBtnShow()
+{
+	if(GS_MINI_MAP_BTN_CLICK != _guideState)
+		return;
+	RunNewPlayerGuilde();
+	return;
+}
+
+void NewPlayerGuider::onDragItemBegin( EItemConType conType, short index )
+{
+	if(_guideState != GS_DRAG_ITEM)
+		return;
+	CCLOG("onDragItemBegin");
+	RunNewPlayerGuilde();
+	return;
+}
+
+void NewPlayerGuider::onDropItemEnd( CCPoint pos )
+{
+	if(_guideState != GS_DRAG_DWON_ITEM)
+		return;
+	CCLOG("onDropItemEnd");
+	RunNewPlayerGuilde();
+	return;
+}
+
+void NewPlayerGuider::drawRect( const CCRect &rect )
+{
+	CCDrawNode *drawNode = CCDrawNode::create();
+	CCPoint p[4];
+	p[0] = ccp(rect.getMinX(), rect.getMinY());
+	p[1] = ccp(rect.getMinX(), rect.getMaxY());
+	p[2] = ccp(rect.getMaxX(), rect.getMaxY());
+	p[3] = ccp(rect.getMaxX(), rect.getMinY());
+
+	drawNode->drawPolygon(p, 4, ccc4f(0.f, 0.f, 0.f, 0.f), 3.f, ccc4f(1.0f, 0.f, 0.f, 1.f));
+	_node->addChild(drawNode);
+}
+
+void NewPlayerGuider::disableClick()
+{
+	_IsGuide = true;
+	_curRect = CCRect(-1, -1, 1, 1);
+}
+
+const CCRect NewPlayerGuider::setDirectionRect( const CCRect &rect )
+{
+	CCSize screenSize = CCDirector::sharedDirector()->getWinSize();
+	float px = rect.getMidX() / 800.0f * screenSize.width - rect.size.width / 2.0f;
+	float py = rect.getMidY() / 480.0f * screenSize.height - rect.size.height / 2.0f;
+	return CCRect(px, py, rect.size.width, rect.size.height);
+}
+
+bool NewPlayerGuider::onTouchBegin(CCTouch *pTouch)
+{
+	CCPoint pos = _node->convertTouchToNodeSpace(pTouch);
+	if(_curRect.containsPoint(pos))
+	{
+		return false;
+	}
+
+	return true;
+}
+
+void NewPlayerGuider::onTouchEnd(CCTouch *pTouch)
+{
+	CCPoint pos = _node->convertTouchToNodeSpace(pTouch);
+	if(_curRect.containsPoint(pos))
+	{
+		SetNodeTintTo(NULL);
+		//[bing] 部分不需要界面反馈的点击指引
+		if(m_bClickEvent)
+		{
+			m_bClickEvent = false;
+			CCLOG("NewPlayerGuider::onTouchBegin");
+			RunNewPlayerGuilde();
+		}
+	}
+}
+bool NewPlayerGuider::isQuestNeedHoldById(int pQuestId)
+{
+	if (m_holdQuestMap.find(pQuestId) != m_holdQuestMap.end())
+		return true;
+	return false;
+}
+
+void NewPlayerGuider::RunNewPlayerGuilde(void* tempArr/* = NULL*/)
+{
+	CCLOG("GuildeIdx = %d", m_nGuildeIdx);
+
+	switch((eGuideNode)m_nGuildeIdx)
+	{
+	case GN_1000_1:
+		{
+			//当欢迎界面打开时调用新手引导
+			WelcomeUi *ui = dynamic_cast<WelcomeUi*>(World::getInstance()->getScene()->getChildByTag(WCT_WELCOMEUI));
+			if(ui)
+			{
+				CLOSE_ALL_UI();
+				clear();
+				switchGuideWeakOrStrong(GS_Weak);
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1000_2:
+		//传奇之旅 获取传奇之旅任务 引导任务追踪
+		if(ArrForTaskTrace(1000))
+		{
+			runArrowsAnim();
+			_guideState = GS_Valid;
+			m_bClickEvent = true;
+		}
+		break;
+	case GN_1000_3:
+		switchGuideWeakOrStrong(GS_Strong);
+		{
+			clear();
+			m_nGuildeIdx++;
+			_guideState = GS_NPC_TALK;
+		}
+		break;
+	case GN_1000_4:
+		//传奇之旅 完成任务
+		if(ArrForNPCTalk(1000, false))
+		{
+			_guideState = GS_Valid;
+			m_bClickEvent = true;
+		}
+		break;
+	case GN_1000_5:
+		{
+			clear();
+			m_nGuildeIdx++;
+			_guideState = GS_NPC_TALK;
+			IsNewGuide = false;
+
+		}
+		break;
+// 	case GN_1001_1:
+// 		//银杏村 引导任务追踪
+// 		switchGuideWeakOrStrong(GS_Weak);
+// 		clear(false);
+// 		if(ArrForTaskTrace(1001))
+// 			_guideState = GS_NPC_TALK;
+// 		break;
+	case GN_1001_1:
+		//银杏村 接受任务
+		switchGuideWeakOrStrong(GS_Strong);
+		clear(false);
+		if(ArrForNPCTalk(1001, true))
+		{
+			//m_nGuildeIdx++;
+			_guideState = GS_Valid;
+			m_bClickEvent = true;
+		}
+		break;
+	case GN_1001_2:
+		{
+			clear();
+			m_nGuildeIdx++;
+			_guideState = GS_ACCEPT_QUEST;
+		}
+		break;
+	case GN_1001_3:
+		//银杏村 引导任务追踪
+		{
+			clear(false);
+			switchGuideWeakOrStrong(GS_Weak);
+			if(ArrForTaskTrace(1001))
+			{
+				_guideState = GS_Valid;
+				m_bClickEvent = true;
+			}
+			break;
+		}
+		
+	case GN_1001_4:
+		//switchGuideWeakOrStrong(GS_Strong);
+		{
+			clear();
+			m_nGuildeIdx++;
+			_guideState = GS_NPC_TALK;
+		}
+		break;
+	case GN_1001_5:
+		//银杏村 完成任务
+		//if(ArrForNPCTalk(1001, false))
+		{
+			m_nGuildeIdx++;
+			_guideState = GS_FINISH_QUEST;
+			IsNewGuide = false;
+		}
+		break;
+	case GN_1002_1:
+		//switchGuideWeakOrStrong(GS_Weak);
+		//if(ArrForTaskTrace(1002))
+		{
+			CLOSE_ALL_UI();
+			clear();
+			m_nGuildeIdx++;
+			_guideState = GS_NPC_CHAT;
+		}
+		break;
+	case GN_1002_2:
+		//杀鸡 引导任务追踪
+		if(ArrForTaskTrace(1002))
+		{
+			_guideState = GS_Valid;
+			m_bClickEvent = true;
+		}
+		break;
+	case GN_1002_3:
+		//switchGuideWeakOrStrong(GS_Strong);
+		{
+			clear();
+			m_nGuildeIdx++;
+			_guideState = GS_NPC_TALK;
+		}
+		break;
+	case GN_1002_4:
+		//杀鸡 接取杀鸡任务
+		//if(ArrForNPCTalk(1002, true))
+		{
+			m_nGuildeIdx++;
+			_guideState = GS_ACCEPT_QUEST;
+		}
+		break;
+	case GN_1002_5:
+		{
+			//杀鸡  引导任务追踪
+			//switchGuideWeakOrStrong(GS_Weak);
+			clear(false);
+			if(ArrForTaskTrace(1002))
+			{
+				if(QuestMgr::getInstance()->getNowQuestState(1002) == QS_READY_FINISH)
+				{
+					//因为在攻击野鸡前有可能被别人连带完成 所以要跳过下一步
+	// 				if(ArrForTaskTrace(1002))
+	// 					_guideState = GS_NPC_TALK;
+	// 				m_nGuildeIdx = (int) GN_1002_9;
+	// 				return;
+					if(ArrForTaskTrace(1002))
+					{
+						_guideState = GS_Valid;
+						m_nGuildeIdx = (unsigned int) GN_1002_8;
+						m_bClickEvent = true;
+					}
+					return;
+				}
+				_guideState = GS_Valid;
+				m_bClickEvent = true;
+			}
+			break;
+		}
+		
+	case GN_1002_6:
+		{
+			clear();
+			m_nGuildeIdx++;
+			_guideState = GS_MOVE_PATH_START;
+		}
+		break;
+	case GN_1002_7:
+		//杀鸡 攻击野鸡
+		{
+			if(QuestMgr::getInstance()->getNowQuestState(1002) == QS_READY_FINISH)
+			{
+				//因为在攻击野鸡前有可能被别人连带完成 所以要跳过下一步
+// 				if(ArrForTaskTrace(1002))
+// 				{
+					_guideState = GS_NPC_TALK;
+					m_nGuildeIdx = (unsigned int) GN_1002_8;
+					//m_bClickEvent = true;
+				//}
+				return;
+			}
+			CLOSE_ALL_UI();
+			clear();	//清除箭头
+			_guideState = GS_NPC_TALK;
+			m_nGuildeIdx++;
+			//增加摇杆攻击引导
+			CCPoint pos = ccp(300.0f, 30.0f);
+			SystemTipUI::Init("ng_caozuoditu.png", &pos)->m_uFunction = 10;
+		}
+		break;
+// 	case GN_1002_8:
+// 		{
+// 			clear();
+// 			m_nGuildeIdx++;
+// 			_guideState = GS_UPDATE_QUEST;
+// 			onServerUpdateQuest();
+// 		}
+// 		break;
+// 	case GN_1002_9:
+// 		//杀鸡 引导任务追踪
+// 		if(QuestMgr::getInstance()->getNowQuestState(1002) == QS_READY_FINISH)
+// 		{
+// 			if(ArrForTaskTrace(1002))
+// 			{
+// 				_guideState = GS_Valid;
+// 				m_bClickEvent = true;
+// 			}
+// 		}
+// 		break;
+// 	case GN_1002_10:
+// 		{
+// 			clear();
+// 			m_nGuildeIdx++;
+// 			_guideState = GS_NPC_TALK;
+// 		}
+// 		break;
+// 	case GN_1002_11:
+// 		//杀鸡 完成任务
+// 		//switchGuideWeakOrStrong(GS_Strong);
+// 		//if(ArrForNPCTalk(1002, false))
+// 		{
+// 			m_nGuildeIdx++;
+// 			_guideState = GS_FINISH_QUEST;
+// 		}
+// 		break;
+	case GN_1002_8:
+		//switchGuideWeakOrStrong(GS_Weak);
+		{
+			clear();
+			_guideState = GS_FINISH_QUEST;
+			m_nGuildeIdx++;
+			IsNewGuide = false;
+		}
+		break;
+	case GN_1008_1:
+		CLOSE_ALL_UI();
+		if (PackageManager::getInstance()->getBlankCount(EICT_Bag) == 0)
+		{
+			m_nGuildeIdx = GN_1008_7;
+			RunNewPlayerGuilde();
+		}
+		switchGuideWeakOrStrong(GS_Strong);
+		{
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1008);
+			if (e != QS_READY_FINISH)
+				return;
+			CLOSE_ALL_UI();
+			//[bing] 如果system界面显示为true 跳过点击头像引导
+			if(GET_UI(SystemUi,WCT_SystemUi)->showState() == true)
+			{
+				clear();
+				_guideState = GS_Valid;
+				m_nGuildeIdx++;
+				RunNewPlayerGuilde();
+				return;
+			}
+
+			//制药 点击左上角角色头像
+			ArrForHead();
+			runArrowsAnim();
+			_guideState = GS_CLICK_HEAD;
+		}
+		break;
+	case GN_1008_2:
+		{
+			//制药 点击包裹按钮
+			clear(false);
+			runArrowsAnim(GET_UI(SystemUi, WCT_SystemUi)->getBtnPos(SystemUi::BT_Package));
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1008_3:
+		{
+			//制药点击药水瓶
+			f_item* pItem = PackageManager::getInstance()->getItem(EICT_Bag, (unsigned int)1001008);	//[bing] 疗伤药(小)
+			if(!pItem)
+				return;
+
+			const CCRect &rc = GET_UI(Package, WCT_PACKAGEUI)->getItemRect(pItem->get_pos());
+			if(rc.getMinX() == 0 && rc.getMaxX() == 0)
+				return;
+			clear(false);
+			//SetClip(rc);
+			runArrowsAnim(rc);
+
+			DropDragDelegate::getInstance()->setDoubleClickEnble(false);
+			DropDragDelegate::getInstance()->setMoveDiffConEnble(false);
+			DropDragDelegate::getInstance()->setDragEnable(false);
+
+			_guideState = GS_Valid;
+			m_bClickEvent = true;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1008_4:
+		{
+			//制药 药水点击到快捷栏
+			const CCRect& rc = GET_UI(ShortCutUi, WCT_ShorCutUi)->GetMedicineBtnPos();
+			clear(false);
+			//SetClip(rc);
+			runArrowsAnim(rc);
+			_guideState = GS_Valid;
+			m_bClickEvent = true;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1008_5:
+		{
+			//制药之后 这里告一个段落
+			DropDragDelegate::getInstance()->setDoubleClickEnble(true);
+			DropDragDelegate::getInstance()->setMoveDiffConEnble(true);
+			DropDragDelegate::getInstance()->setDragEnable(true);
+			clear(false);
+			runArrowsAnim(GET_UI(Package, WCT_PACKAGEUI)->getCloseBtnPos());
+			_guideState = GS_CLOSEUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1008_6:
+		switchGuideWeakOrStrong(GS_Weak);
+		if (ArrForTaskTrace(1009))
+		{
+			m_bClickEvent = true;
+		}
+		break;
+	case GN_1008_7:
+		clear();
+		switchGuideWeakOrStrong(GS_Weak);
+		{
+			//引导关闭x按钮
+			_guideState = GS_FINISH_QUEST;
+			m_nGuildeIdx++;
+			IsNewGuide = false;
+
+		}
+		break;
+	case GN_1011_1:
+		switchGuideWeakOrStrong(GS_Strong);
+		//技能学习引导开始
+		{
+			//CLOSE_ALL_UI();
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1011);
+			if(e != QS_READY_FINISH && e != QS_GET)
+				return;
+			CLOSE_ALL_UI();
+			switchGuideWeakOrStrong(GS_Strong);
+			CCScene *worldScene = World::getInstance()->getScene();
+			kuaijieshiyongUiLayer *autoItemTip = dynamic_cast<kuaijieshiyongUiLayer*>(worldScene->getChildByTag(WCT_ItemAutoUseDaojuTip));
+			if (autoItemTip)
+			{
+				runArrowsAnim(autoItemTip->getUseBtnPos());
+				runArrowsAnim();
+			}
+			m_nGuildeIdx++;
+			_guideState = GS_OPENUI;
+		}
+		break;
+	case GN_1011_2:
+		{
+			SkillUi* pUI = GET_UI(SkillUi, WCT_SKILLUI);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->getGuildBtnPos(SkillUi::GP_Item1));
+				_guideState = GS_SKILL_STUDY;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1011_3:
+		{
+			ShortCutUi* pUI = GET_UI(ShortCutUi, WCT_ShorCutUi);
+			if (pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->GetSkillBtnPos(0));
+				_guideState = GS_Valid;
+				m_nGuildeIdx++;
+				m_bClickEvent = true;
+			}
+		}
+		break;
+	case GN_1011_4:
+		{
+			//技能学习
+			clear();
+			SkillUi* pUI = GET_UI(SkillUi, WCT_SKILLUI);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->getGuildBtnPos(SkillUi::GP_CloseBtn));
+				_guideState = GS_CLOSEUI;
+				m_nGuildeIdx++;
+				runArrowsAnim();
+			}
+		}
+		break;
+	case GN_1011_5:
+		//任务追踪
+		switchGuideWeakOrStrong(GS_Weak);
+		if(ArrForTaskTrace(1012))
+		{
+			_guideState = GS_Valid;
+			m_bClickEvent = true;
+		}
+		break;
+	case GN_1011_6:
+		{
+			clear();
+			_guideState = GS_ACCEPT_QUEST;
+			m_nGuildeIdx++;
+			IsNewGuide = false;
+
+		}
+		break;
+	case GN_1020_1:
+		{
+			switchGuideWeakOrStrong(GS_Strong);
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1020);
+			if(e != QS_READY_FINISH && e != QS_GET)
+				return;
+			CLOSE_ALL_UI();
+			//检测背包中是否有药
+			int drugTotalNum = 0; 
+			for (int i = 0; i < INSTANT_DRUG_NUM; i++)
+			{
+				drugTotalNum += PackageManager::getInstance()->getItemNumber(EICT_Bag, g_InstantDrug_Array[i]);
+			}
+			for (int i = 0; i < NORMAL_DRUG_NUM; i++)
+			{
+				drugTotalNum += PackageManager::getInstance()->getItemNumber(EICT_Bag, g_NormalMPDrug_Array[i]);
+			}
+			for (int i = 0; i < NORMAL2_DRUG_NUM; i++)
+			{
+				drugTotalNum += PackageManager::getInstance()->getItemNumber(EICT_Bag, g_NormalHPDrug_Array[i]);
+			}
+			if (drugTotalNum == 0)
+			{
+				_guideState = GS_FINISH_QUEST;
+				m_nGuildeIdx = GN_1020_11;
+				RunNewPlayerGuilde();
+				QuestMgr::getInstance()->onQuestTraceSelect(1020);
+				break;
+			}
+
+			//如果system界面显示为true 跳过点击头像引导
+			if(GET_UI(SystemUi,WCT_SystemUi)->showState() == true)
+			{
+				clear();
+				_guideState = GS_Valid;
+				m_nGuildeIdx++;
+				RunNewPlayerGuilde();
+				return;
+			}
+
+			//点击左上角角色头像
+			ArrForHead();
+			_guideState = GS_CLICK_HEAD;
+		}
+		break;
+	case GN_1020_2:
+		{
+			clear(false);
+			CCRect rc = GET_UI(SystemUi, WCT_SystemUi)->getBtnPos(SystemUi::BT_Set);
+			CCPoint cp = ccp(rc.getMidX(), rc.getMidY());
+			runArrowsAnim(rc);
+			m_pEffectNode->setPosition(cp);
+			m_pEffectNode->BeginAction(0.1f);
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1020_3:
+		{
+			HookSetUi* pUI = GET_UI(HookSetUi, WCT_HookSetUi);
+			if (pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->getPosition(HookSetUi::GP_ProtectLab));
+				//runArrowsAnim(CCRect(300, 200, 4, 4));
+				_guideState = GS_HOOK_SET;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1020_4:
+		{
+			int instantDrugNum = 0;
+			for (int i = 0; i < INSTANT_DRUG_NUM; i++)
+			{
+				instantDrugNum += PackageManager::getInstance()->getItemNumber(EICT_Bag, g_InstantDrug_Array[i]);
+			}
+			if (instantDrugNum == 0)
+			{
+				_guideState = GS_HOOK_SET;
+				m_nGuildeIdx = GN_1020_6;
+				RunNewPlayerGuilde();
+				break;
+			}
+			HookSetUi* pUI = GET_UI(HookSetUi, WCT_HookSetUi);
+			if (pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->getPosition(HookSetUi::GP_SelBtn1));
+				_guideState = GS_HOOK_SET;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1020_5:
+		{
+			HookSetUi* pUI = GET_UI(HookSetUi, WCT_HookSetUi);
+			if (pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->getPosition(HookSetUi::GP_ListItem1));
+				_guideState = GS_HOOK_SET;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1020_6:
+		{
+			int normal2DrugNum = 0;
+			for (int i = 0; i < NORMAL2_DRUG_NUM; i++)
+			{
+				normal2DrugNum += PackageManager::getInstance()->getItemNumber(EICT_Bag, g_NormalHPDrug_Array[i]);
+			}
+			if (normal2DrugNum == 0)
+			{
+				_guideState = GS_HOOK_SET;
+				m_nGuildeIdx = GN_1020_8;
+				RunNewPlayerGuilde();
+				break;
+			}
+			HookSetUi* pUI = GET_UI(HookSetUi, WCT_HookSetUi);
+			if (pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->getPosition(HookSetUi::GP_SelBtn2));
+				_guideState = GS_HOOK_SET;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1020_7:
+		{
+			HookSetUi* pUI = GET_UI(HookSetUi, WCT_HookSetUi);
+			if (pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->getPosition(HookSetUi::GP_ListItem1));
+				_guideState = GS_HOOK_SET;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1020_8:
+		{
+			int normalDrugNum = 0;
+			for (int i = 0; i < NORMAL_DRUG_NUM; i++)
+			{
+				normalDrugNum += PackageManager::getInstance()->getItemNumber(EICT_Bag, g_NormalMPDrug_Array[i]);
+			}
+			if (normalDrugNum == 0)
+			{
+				_guideState = GS_HOOK_SET;
+				m_nGuildeIdx = GN_1020_10;
+				RunNewPlayerGuilde();
+				break;
+			}
+			HookSetUi* pUI = GET_UI(HookSetUi, WCT_HookSetUi);
+			if (pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->getPosition(HookSetUi::GP_SelBtn3));
+				_guideState = GS_HOOK_SET;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1020_9:
+		{
+			HookSetUi* pUI = GET_UI(HookSetUi, WCT_HookSetUi);
+			if (pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->getPosition(HookSetUi::GP_ListItem1));
+				_guideState = GS_HOOK_SET;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1020_10:
+		{
+			HookSetUi* pUI = GET_UI(HookSetUi, WCT_HookSetUi);
+			if (pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->getPosition(HookSetUi::GP_CLOSE));
+				_guideState = GS_CLOSEUI;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1020_11:
+		{
+			clear();
+			switchGuideWeakOrStrong(GS_Weak);
+			_guideState = GS_FINISH_QUEST;
+			m_nGuildeIdx++;
+			IsNewGuide = false;
+
+		}
+		break;
+	case GN_1034_1:
+		{
+			//引导回城石使用
+			switchGuideWeakOrStrong(GS_Strong);
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1033);
+			if(e != QS_READY_FINISH)
+				return;
+			CLOSE_ALL_UI();
+			f_item* pItem = PackageManager::getInstance()->getItem(EICT_Bag, (unsigned int)1102191); //1102191比奇回城石券
+			if(!pItem)
+			{
+				pItem = PackageManager::getInstance()->getItem(EICT_Bag, (unsigned int)1002004);  //1002004比奇回城石
+				if(pItem)
+				{
+					if(GET_UI(SystemUi,WCT_SystemUi)->showState() == true)
+					{
+						ArrForHead();
+						m_nGuildeIdx = GN_1034_7;
+						_guideState = GS_CLICK_HEAD;
+					}
+					else
+					{
+						ShortCutUi* pUI = GET_UI(ShortCutUi, WCT_ShorCutUi);
+						if(pUI)
+						{
+							pUI->setRandTransId(pItem->get_item_id());
+							//pUI->saveRandTranId(pItem->get_item_id());
+							clear();
+							CCRect rc = pUI->GetRandTransPos();
+							SetClip(rc);
+							runArrowsAnim(rc);
+							_guideState = GS_Valid;
+							m_bClickEvent = true;
+							m_nGuildeIdx = GN_1034_7;
+						}
+					}
+					return;
+				}
+			}
+			m_nGuildeIdx++;
+			RunNewPlayerGuilde();
+		}
+		break;
+	case GN_1034_2:
+		{
+			//回城 引导打开商城
+			CLOSE_ALL_UI();
+			
+			MiniMapUi* pUI = World::getInstance()->getMiniMapUi();
+			if (pUI)
+			{
+				MiniMapUiLoaderLayer* pMiniMapLayer = (MiniMapUiLoaderLayer*)pUI->getChildByTag(0);
+				if(pMiniMapLayer && !pMiniMapLayer->getMiniMapIsShow())
+				{
+					pMiniMapLayer->hidePressed(NULL, 0);
+				}
+			}
+			clear(false);
+
+			CCRect rc = World::getInstance()->getMiniMapUi()->GetMiniMapBtnPos(MiniMapUi::BT_Store);
+			CCPoint cp = ccp(rc.getMidX(), rc.getMidY());
+			SetClip(rc);
+			runArrowsAnim(rc);
+			m_pEffectNode->setPosition(cp);
+			m_pEffectNode->BeginAction(0.1f);
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1034_3:
+		{
+			//回城 引导购买比奇回城石
+			StoreUi* pUI = GET_UI(StoreUi, WCT_STOREUI);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->getGuildBtnPos(StoreUiLayer::SUT_ContentLayer));
+				_guideState = GS_OPENUI;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1034_4:
+		{
+			//回城 引导确定购买
+			CCNode* pNode = UiMgr::getInstance()->getCurScene()->getChildByTag(WCT_BuySetUi);
+			BuySetUiFrame* pUI =  dynamic_cast<BuySetUiFrame*>(pNode);
+			if(pUI)
+			{
+				clear();
+				runArrowsAnim(pUI->getGuildBtnPos(0));
+				_guideState = GS_Valid;
+				m_bClickEvent = true;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1034_5:
+		{
+			//回城 引导关闭商店
+			StoreUi* pUI = GET_UI(StoreUi, WCT_STOREUI);
+			if(pUI)
+			{
+				clear();
+				runArrowsAnim(pUI->getGuildBtnPos(StoreUiLayer::SUT_Close));
+				_guideState = GS_CLOSEUI;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+// 	case GN_1034_6:
+// 		{
+// 			//回城 引导点击头像，打开操作键上面的回城按钮
+// 			ArrForHead();
+// 			_guideState = GS_CLICK_HEAD;
+// 		}
+// 		break;
+	case GN_1034_6:
+		{
+			//回城 引导点击使用回城石
+			f_item* pItem = PackageManager::getInstance()->getItem(EICT_Bag, (unsigned int)1002004);
+			if(!pItem)
+			{
+				_guideState = GS_ACCEPT_QUEST;
+				m_nGuildeIdx ++;
+				return;
+			}
+			ShortCutUi* pUI = GET_UI(ShortCutUi, WCT_ShorCutUi);
+			if(pUI)
+			{
+				pUI->setRandTransId(pItem->get_item_id());
+				//pUI->saveRandTranId(pItem->get_item_id());
+				clear();
+				CCRect rc = pUI->GetRandTransPos();
+				SetClip(rc);
+				runArrowsAnim(rc);
+				_guideState = GS_Valid;
+				m_bClickEvent = true;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1034_7:
+		{
+// 			clear();
+// 			switchGuideWeakOrStrong(GS_Weak);
+// 			_guideState = GS_Valid;
+// 			m_nGuildeIdx = 0;
+// 			IsNewGuide = false;
+// 			m_holdQuestMap[1047] = GN_1047_1;
+			clear();
+			_guideState = GS_FINISH_QUEST;
+			m_nGuildeIdx = GN_1013_1;
+			//m_nGuildeIdx = GN_1013_2;
+		}
+		break;
+	case GN_1013_1:
+		{
+			//[bing] 完成召见任务引导双修界面 引导点击"我知道了"按钮
+			//SystemTipUI* pUI = SystemTipUI::Init("ng_folwer.png");
+			SystemTipUI* pUI = getUiNodeByTag<SystemTipUI>(WCT_SYSTEMTIPSUI);
+			if(pUI)
+			{
+				CLOSE_ALL_UI();
+				pUI->m_uFunction = 1;
+				clear();
+				runArrowsAnim(pUI->GetBtnPos());
+				_guideState = GS_OPUI_NIL_UI_MGR;
+				m_bClickEvent = true;
+				m_nGuildeIdx += 3;
+			}
+			else
+			{
+				m_nGuildeIdx ++;
+				RunNewPlayerGuilde();
+			}
+		}
+		break;
+	case GN_1013_2:
+		{
+			//打开一键加好友界面 引导点击加好友按钮
+			AreaPlayerUI* pUI = getUiNodeByTag<AreaPlayerUI>(WCT_AREA_PLAYER_UI);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->GetBtnPos(101));
+				_guideState = GS_Valid;
+				m_bClickEvent = true;
+				m_nGuildeIdx++;
+			}
+			else
+			{
+				//没打开页面可能是周围没有玩家这个界面弹不出来
+				m_nGuildeIdx += 2;
+				RunNewPlayerGuilde();
+			}
+		}
+		break;
+	case GN_1013_3:
+		{
+			//引导关闭界面
+			AreaPlayerUI* pUI = getUiNodeByTag<AreaPlayerUI>(WCT_AREA_PLAYER_UI);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->GetBtnPos(100));
+				_guideState = GS_Valid;
+				m_bClickEvent = true;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1013_4:
+		{
+			//关闭界面告一个段落
+// 			clear();
+// 			_guideState = GS_ACCEPT_QUEST;
+// 			m_nGuildeIdx = GN_1047_1;
+
+			clear();
+			switchGuideWeakOrStrong(GS_Weak);
+			_guideState = GS_Valid;
+			m_nGuildeIdx = 0;
+			IsNewGuide = false;
+			m_holdQuestMap[1047] = GN_1047_1;
+		}
+		break;
+	case GN_1047_1:
+		//锻造引导 点击系统ui锻造按钮
+		{
+			switchGuideWeakOrStrong(GS_Strong);
+ 			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1047);
+ 			if (e != QS_READY_FINISH)
+ 				return;
+			SystemUi *pUI = GET_UI(SystemUi, WCT_SystemUi);
+			if (pUI)
+			{
+				std::map<unsigned short,eGuideNode>::iterator iter = m_holdQuestMap.find(1047);
+				if (iter != m_holdQuestMap.end())
+				{
+					m_holdQuestMap.erase(iter);
+					_sigEraseHoldQuest.emit(1047);
+				}
+					
+				runArrowsAnim(pUI->getBtnPos(SystemUi::BT_Forge));
+				m_nGuildeIdx++;
+				_guideState = GS_OPENUI;
+			}
+		}
+		break;
+	case GN_1047_2:
+		//锻造引导 选择要锻造的装备套装
+		{
+			ForgingDecomUI *forgingDecomUi = GET_UI(ForgingDecomUI, WCT_ForgingDecomUI);
+			if (forgingDecomUi && forgingDecomUi->getUiLayer())
+			{
+				runArrowsAnim(forgingDecomUi->getForgingLabel1PosByIndex(0));
+				//_guideState = GS_Valid;
+				m_bClickEvent = true;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1047_3:
+		//锻造引导 点击要锻造的装备
+		{
+			ForgingDecomUI *forgingDecomUi = GET_UI(ForgingDecomUI, WCT_ForgingDecomUI);
+			clear(false);
+			if (forgingDecomUi && forgingDecomUi->getUiLayer())
+			{
+				runArrowsAnim(forgingDecomUi->getForgingLabel2PosByIndex(0));
+				m_bClickEvent = true;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1047_4:
+		//锻造引导 点击材料
+		{
+			clear(false);
+			ForgingDecomUI *forgingDecomUi = GET_UI(ForgingDecomUI, WCT_ForgingDecomUI);
+			if (forgingDecomUi && forgingDecomUi->getUiLayer())
+			{
+				runArrowsAnim(forgingDecomUi->getUiLayer()->getMaterialNodePos());
+				m_bClickEvent = true;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1047_5:
+		//锻造引导 点击锻造按钮
+		clear(false);
+		{
+			ForgingDecomUI *forgingDecomUi = GET_UI(ForgingDecomUI, WCT_ForgingDecomUI);
+			if (forgingDecomUi && forgingDecomUi->getUiLayer())
+			{
+				runArrowsAnim(forgingDecomUi->getUiLayer()->getForgingBtnPos());
+				_guideState = GS_ADD_ITEM;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1047_6:
+		//锻造引导 判断锻造的装备是否比身上穿戴的装备好，是则弹出立即装备ui，引导点击立即装备，否则引导点击锻造ui关闭按钮
+		{
+			clear();
+			f_item *tempItem = reinterpret_cast<f_item*>(tempArr);
+			f_equipment *forgingResultEquip = dynamic_cast<f_equipment*>(tempItem);
+			if (forgingResultEquip)
+			{
+				if (PackageManager::getInstance()->isEquipCanImmediateEquip(forgingResultEquip))
+				{
+					m_nGuildeIdx++;
+					_guideState = GS_OPENUI;
+				}else
+				{
+					m_nGuildeIdx += 2;
+					RunNewPlayerGuilde();
+				}
+			}else
+			{
+				m_nGuildeIdx += 2;
+				RunNewPlayerGuilde();
+			}
+		}
+		break;
+	case GN_1047_7:
+		//锻造引导 点击立即装备按钮
+		{
+			ImmediateEquipUiFrame* immediateEquipUiFrame = dynamic_cast<ImmediateEquipUiFrame*>(UiMgr::getInstance()->getCurScene()->getChildByTag(WCT_ImmediateEquipUi));;
+			if (immediateEquipUiFrame)
+			{
+				runArrowsAnim(immediateEquipUiFrame->getEquipBtnRect());
+				runArrowsAnim();
+				//_guideState = GS_CLOSEUI;
+				m_bClickEvent = true;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1047_8:
+		//锻造引导 引导点击关闭按钮
+		{
+			clear(false);
+			ForgingDecomUI *forgingDecomUi = GET_UI(ForgingDecomUI, WCT_ForgingDecomUI);
+			if (forgingDecomUi)
+			{
+				runArrowsAnim(forgingDecomUi->getUiLayer()->getCloseBtnPos());
+				m_nGuildeIdx++;
+				_guideState = GS_CLOSEUI;
+			}
+		}
+		break;
+	case GN_1047_9:
+		//锻造引导 任务追踪
+		{
+			if (ArrForTaskTrace(1048))
+			{
+				m_bClickEvent = true;
+			}
+		}
+		break;
+	case GN_1047_10:
+		//锻造引导 结束
+		clear();
+		switchGuideWeakOrStrong(GS_Weak);
+		{
+			m_nGuildeIdx++;
+			_guideState = GS_ACCEPT_QUEST;
+			IsNewGuide = false;
+		}
+		break;
+	case GN_1056_1: //领取遥远的记忆 引导进入单人副本
+		switchGuideWeakOrStrong(GS_Strong);
+		{
+			
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1056);
+			if(e != QS_READY_FINISH && e != QS_GET)
+				return;
+			CLOSE_ALL_UI();
+			//如果在组队则强制退出
+			if (TeamMgr::getInstance()->is_inteam())
+			{
+				TeamMgr::getInstance()->onSignalLeaveTeamConfirm();
+			}
+			MiniMapUi* pUI = World::getInstance()->getMiniMapUi();
+			if (!pUI)
+				return;
+			MiniMapUiLoaderLayer* pMiniMapLayer = (MiniMapUiLoaderLayer*)pUI->getChildByTag(0);
+			if(pMiniMapLayer && !pMiniMapLayer->getMiniMapIsShow())
+			{
+				pMiniMapLayer->hidePressed(NULL, 0);
+			}
+
+			if(!World::getInstance()->getMiniMapUi()->isActivityGroupShow())
+			{
+				MiniMapUi *ui = World::getInstance()->getMiniMapUi();
+				if(ui != NULL)
+				{
+					clear(false);
+					_guideState = GS_MINI_MAP_BTN_CLICK;
+					CCRect rc = ui->GetMiniMapBtnPos(MiniMapUi::NT_HuoBtn);
+					SetClip(rc);
+					runArrowsAnim(rc);
+					m_nGuildeIdx++;
+				}
+			}
+			else
+			{
+				MiniMapUi *ui = World::getInstance()->getMiniMapUi();
+				if(ui != NULL)
+				{
+					clear(false);
+					_guideState = GS_OPENUI;
+					CCRect rc = ui->GetMiniMapBtnPos(24);
+					SetClip(rc);
+					runArrowsAnim(rc);
+					m_nGuildeIdx += 2;
+				}
+			}
+			runArrowsAnim();
+		}
+		break;
+	case GN_1056_2:
+		{
+			//引导点击副本(战役)按钮
+			MiniMapUi *ui = World::getInstance()->getMiniMapUi();
+			if(ui != NULL)
+			{
+				MiniMapUi* pUI = World::getInstance()->getMiniMapUi();
+				if (!pUI)
+					return;
+				MiniMapUiLoaderLayer* pMiniMapLayer = (MiniMapUiLoaderLayer*)pUI->getChildByTag(0);
+				if(pMiniMapLayer && !pMiniMapLayer->getMiniMapIsShow())
+				{
+					pMiniMapLayer->hidePressed(NULL, 0);
+				}
+
+				clear(false);
+				_guideState = GS_OPENUI;
+				CCRect rc = ui->GetMiniMapBtnPos(3);
+				SetClip(rc);
+				runArrowsAnim(rc);
+				m_nGuildeIdx++;
+			} 
+		}
+		break;
+	case GN_1056_3:
+		{
+			//引导点击第一个神龙帝国按钮
+			FubenUiLayer* pUI = getUiNodeByTag<FubenUiLayer>(WCT_FubenUI);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->GetBtnPos(FubenUiLayer::BT_FirstFubenBtnId));
+				_guideState = GS_OPENUI;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1056_4:
+		{
+			//引导点击进入副本按钮
+			FubenInfoUiLayer* pUI = getUiNodeByTag<FubenInfoUiLayer>(WCT_FubenInfoUI);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->GetEnterFubenBtnPos());
+				_guideState = GS_Valid;
+				m_bClickEvent = true;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+// 	case GN_1056_5:
+// 		{
+// 			//进入单人本 告一个段落
+// 			clear();
+// 			_guideState = GS_NPC_CHAT;
+// 			m_nGuildeIdx++;
+// 		}
+// 		break;
+// 	case GN_1056_6:
+// 		{
+// 			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1056);
+// 			if(e != QS_READY_FINISH && e != QS_GET)
+// 				return;
+// 			MiniMapUi *ui = World::getInstance()->getMiniMapUi();
+// 			if(ui)
+// 			{
+// 				clear();
+// 				CCRect rc = ui->getAutoBattleBtnPos();
+// 				//SetClip(rc);
+// 				runArrowsAnim(rc);	//[bing] 只给个特效 非强制引导离开副本
+// 				_guideState = GS_Valid;
+// 				m_nGuildeIdx++;
+// 				m_bClickEvent = true;
+// 				setTextClip(NULL, 9061, ccp(rc.getMinX() - 100.0f, rc.getMinY() + 30), false, 1.0f);
+// 				runAction();
+// 			}
+// 		}
+// 		break;
+// 	case GN_1056_7:
+// 		{
+// 			//告一个段落
+// 			clear();
+// 			_guideState = GS_UPDATE_QUEST;
+// 			m_nGuildeIdx++;
+// 		}
+// 		break;
+// 	case GN_1056_8:
+// 		{
+// 			//完成神龙帝国副本引导离开副本按钮
+// 			if(QuestMgr::getInstance()->getNowQuestState(1056) == QS_READY_FINISH)
+// 			{
+// 				MiniMapUi *ui = World::getInstance()->getMiniMapUi();
+// 				if(ui)
+// 				{
+// 					clear();
+// 					CCRect rc = ui->GetMiniMapBtnPos(21);
+// 					//SetClip(rc);
+// 					//runArrowsAnim(rc);	//[bing] 只给个特效 非强制引导离开副本
+// 					m_pEffectNode->setPosition(ccp(rc.getMidX(), rc.getMidY()));
+// 					m_pEffectNode->BeginAction(0.1f);
+// 					m_nGuildeIdx++;
+// 					m_bClickEvent = true;
+// 				}
+// 			}
+// 		}
+// 		break;
+	case GN_1056_5:
+		clear();
+		switchGuideWeakOrStrong(GS_Weak);
+		{
+			//告一个段落
+			_guideState = GS_ACCEPT_QUEST;
+			m_nGuildeIdx++;
+			IsNewGuide = false;
+		}
+		break;
+// 	case GN_1064_1:
+// 		{
+// 			//接取提升任务
+// 			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1064);
+// 			if(e != QS_READY_FINISH && e != QS_GET)
+// 				return;
+// 			_guideState = GS_FINISH_QUEST;
+// 			m_nGuildeIdx++;
+// 		}
+// 		break;
+	case GN_1064_1:
+		{
+			//完成提升任务
+			switchGuideWeakOrStrong(GS_Strong);
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1064);
+			if(e != QS_READY_FINISH && e != QS_GET)
+				return;
+			if (!GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->isWeaponEquiped() || GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->isWeaponUpgrade() || !getUiNodeByTag<RoleUiLayer>(WCT_ROLEEQUIPUI)->isWeaponCanUpgrade())
+			{
+				m_nGuildeIdx = GN_1064_7;
+				RunNewPlayerGuilde();
+				break;
+			}
+
+			CLOSE_ALL_UI();
+			if(!GET_UI(SystemUi, WCT_SystemUi)->showState())
+			{//如果系统按钮没有显示，首先显示
+				ArrForHead();
+				_guideState = GS_CLICK_HEAD;
+			}
+			else
+			{
+				m_nGuildeIdx++;
+				RunNewPlayerGuilde();
+			}
+		}
+		break;
+	case GN_1064_2:
+		{
+			//点开人物属性
+			clear(false);
+			runArrowsAnim(GET_UI(SystemUi, WCT_SystemUi)->getBtnPos(SystemUi::BT_Role));
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1064_3:
+		{
+			//引导点击武器
+// 			LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+// 			if(!pLP)
+// 				return;
+// 			unsigned int dwItemID = 0;
+// 			if(pLP->getRoleType() == RT_MWARRIOR || pLP->getRoleType() == RT_WWARRIOR)
+// 				dwItemID = 9112020;
+// 			else if(pLP->getRoleType() == RT_MMAGE || pLP->getRoleType() == RT_WMAGE)
+// 				dwItemID = 9212020;
+// 			else
+// 				dwItemID = 9312020;
+// 			f_item* pItem = PackageManager::getInstance()->getItem(EICT_Bag, dwItemID);
+// 			if(!pItem)
+// 				return;
+// 			GET_UI(Package, WCT_PACKAGEUI)->gotoIndexPage(pItem->get_pos());
+
+			const CCRect& rc = GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->getEquipBtnPos(EEP_RightHand);
+			if(rc.getMinX() == 0 && rc.getMaxX() == 0)
+				return;
+
+			DropDragDelegate::getInstance()->setDoubleClickEnble(false);
+			DropDragDelegate::getInstance()->setDragEnable(false);
+
+			clear(false);
+			runArrowsAnim(rc);
+			_guideState = GS_OPUI_NIL_UI_MGR;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1064_4:
+		{
+			//引导点击tips的升级
+			EquipTipUiLayer* pNode = (EquipTipUiLayer*)World::getInstance()->getScene()->getChildByTag(WCT_EQUIP_TIPS_UI_TAG);
+			if(!pNode)
+				return;
+			DropDragDelegate::getInstance()->setDoubleClickEnble(true);
+			DropDragDelegate::getInstance()->setDragEnable(true);
+			clear(false);
+			runArrowsAnim(pNode->GetBtnPos(3));
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1064_5:
+		{
+			//引导基础属性
+			if (IS_UI_OPEN(WCT_EquipLevelUpUi))
+			{
+				clear();
+				EquipLevelUpUiLayer *equipLevelUpUiLayer = GET_UI(EquipLevelUpUi, WCT_EquipLevelUpUi)->getUiLayer();
+				if (NULL != equipLevelUpUiLayer)
+				{
+					//runArrowsAnim(equipLevelUpUiLayer->getEquipAttrRect());
+					CCSize size = CCDirector::sharedDirector()->getWinSize();
+					_curRect = CCRect(0, 0, size.width, size.height);
+					m_bClickEvent = true;
+					_guideState = GS_Valid;
+					m_nGuildeIdx++;
+					runArrowsAnim();
+				}
+			}
+		}
+		break;
+	case GN_1064_6:
+		{
+			//引导点击升级按钮
+			EquipLevelUpUiLayer* pUI = getUiNodeByTag<EquipLevelUpUiLayer>(WCT_EquipLevelUpUi);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->GetEquipLevelUpBtnPos());
+				_guideState = GS_OPUI_NIL_UI_MGR;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+// 	case GN_1064_6:
+// 		{
+// 			//引导点击确认框的确定按钮
+// 			clear(false);
+// 			runArrowsAnim(MessageBoxUi::GetBtnPos(0));
+// 			_guideState = GS_Valid;
+// 			m_nGuildeIdx++;
+// 		}
+// 		break;
+	case GN_1064_7:
+		{
+// 			LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+// 			if(!pLP)
+// 				return;
+// 			unsigned int dwItemID = 0;
+// 			if(pLP->getRoleType() == RT_MWARRIOR || pLP->getRoleType() == RT_WWARRIOR)
+// 				dwItemID = 9119030;
+// 			else if(pLP->getRoleType() == RT_MMAGE || pLP->getRoleType() == RT_WMAGE)
+// 				dwItemID = 9219030;
+// 			else
+// 				dwItemID = 9319030;
+// 			f_equipment* pEquip = (f_equipment*)PackageManager::getInstance()->getItem(EICT_Bag, dwItemID);
+// 			if(pEquip)
+// 			{
+// 				ImmediateEquipUi::getInstance()->open();
+// 				ImmediateEquipUi::getInstance()->setData(pEquip);
+// 			}
+
+			//引导点击关闭按钮
+			EquipLevelUpUiLayer* pUI = getUiNodeByTag<EquipLevelUpUiLayer>(WCT_EquipLevelUpUi);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->GetCloseBtnPos());
+				_guideState = GS_CLOSEUI;
+				m_nGuildeIdx++;
+			}
+			else
+			{
+				_guideState = GS_CLOSEUI;
+				m_nGuildeIdx++;
+				RunNewPlayerGuilde();
+			}
+		}
+		break;
+	case GN_1064_8:
+		{
+			//告个段落
+			clear();
+			switchGuideWeakOrStrong(GS_Weak);
+			_guideState = GS_FINISH_QUEST;
+			m_nGuildeIdx++;
+			IsNewGuide = false;
+		}
+		break;
+	case GN_1099_1:
+		//强化引导 开始
+		switchGuideWeakOrStrong(GS_Strong);
+		{
+			//强化任务接取检查
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1099);
+			if(e != QS_READY_FINISH && e != QS_GET)
+				return;
+			if (GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->isWeaponEquiped())
+			{
+				m_nGuildeIdx++;
+			}else
+			{
+				m_nGuildeIdx = GN_1099_10;
+			}
+			CLOSE_ALL_UI();
+			RunNewPlayerGuilde();
+		}
+		break;
+	case GN_1099_2:
+		{
+			//强化任务结束 引导打开背包 先引导点击头像
+// 			CCRect rc;
+// 			if(World::getInstance()->getTaskTraceUi()->getGuidePos(1099, rc))
+// 				return;
+
+			CLOSE_ALL_UI();
+			if(!GET_UI(SystemUi, WCT_SystemUi)->showState())
+			{//如果系统按钮没有显示，首先显示
+				ArrForHead();
+				_guideState = GS_CLICK_HEAD;
+			}
+			else
+			{
+				m_nGuildeIdx++;
+				RunNewPlayerGuilde();
+			}
+		}
+		break;
+	case GN_1099_3:	//强化 引导点击角色按钮
+		{
+			clear(false);
+			runArrowsAnim(GET_UI(SystemUi, WCT_SystemUi)->getBtnPos(SystemUi::BT_Role));
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1099_4: //强化 点击包裹引导查找勋章物品  战士查找9172027 法师查找9272027 道士查找9372027
+		{
+// 			LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+// 			if(!pLP)
+// 				return;
+// 			unsigned int dwItemID = 0;
+// 			if(pLP->getRoleType() == RT_MWARRIOR || pLP->getRoleType() == RT_WWARRIOR)
+// 				dwItemID = 9172027;
+// 			else if(pLP->getRoleType() == RT_MMAGE || pLP->getRoleType() == RT_WMAGE)
+// 				dwItemID = 9272027;
+// 			else
+// 				dwItemID = 9372027;
+// 			f_item* pItem = PackageManager::getInstance()->getItem(EICT_Bag, dwItemID); 
+// 			if(!pItem)
+// 				return;
+// 
+// 			GET_UI(Package, WCT_PACKAGEUI)->gotoIndexPage(pItem->get_pos());
+			const CCRect& rc = GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->getEquipBtnPos(EEP_RightHand);
+			if(rc.getMinX() == 0 && rc.getMaxX() == 0)
+				return;
+
+			DropDragDelegate::getInstance()->setDoubleClickEnble(false);
+			DropDragDelegate::getInstance()->setDragEnable(false);
+
+			clear(false);
+			runArrowsAnim(rc);
+			_guideState = GS_OPUI_NIL_UI_MGR;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1099_5:	//点击物品弹出tips 引导点击强化按钮
+		{
+			EquipTipUiLayer* pNode = (EquipTipUiLayer*)World::getInstance()->getScene()->getChildByTag(WCT_EQUIP_TIPS_UI_TAG);
+			if(!pNode)
+				return;
+
+			DropDragDelegate::getInstance()->setDoubleClickEnble(true);
+			DropDragDelegate::getInstance()->setDragEnable(true);
+
+			clear(false);
+			CCRect rc = pNode->GetBtnPos(1);
+			runArrowsAnim(rc);
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1099_6:	//点击强化
+		{
+			const CCRect& rc = GET_UI(StrengthenUi, WCT_STRENGTHENUI)->getBtnPos(101);
+			if(rc.getMinX() == 0 && rc.getMinY() == 0)
+				return;
+			clear(false);
+			_guideState = GS_Valid;
+			runArrowsAnim(rc);
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1099_7:	//点击强化
+		{
+			const CCRect& rc = GET_UI(StrengthenUi, WCT_STRENGTHENUI)->getBtnPos(101);
+			if(rc.getMinX() == 0 && rc.getMinY() == 0)
+				return;
+			clear(false);
+			runArrowsAnim(rc);
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1099_8:	//点击关闭
+		{
+			 const CCRect& rc = GET_UI(StrengthenUi, WCT_STRENGTHENUI)->getCloseBtnPos();
+			 if (0 == rc.getMinX() && 0 == rc.getMinY())
+				return;
+			 clear(false);
+			 runArrowsAnim(rc);
+			 m_nGuildeIdx++;
+			 m_bClickEvent = true;
+			 //_guideState = GS_CLOSEUI;
+		}
+		break;
+	case GN_1099_9:
+		{
+			clear(false);
+			if (ArrForTaskTrace(1099))
+			{
+				m_bClickEvent = true;
+			}
+		}
+		break;
+	case GN_1099_10:	//告一段落
+		//强化引导 结束
+		clear();
+		switchGuideWeakOrStrong(GS_Weak);
+		{
+			_guideState = GS_ACCEPT_QUEST;
+			m_nGuildeIdx++;
+			IsNewGuide = false;
+		}
+		break;
+
+	//case GN_1103_1:				// 今日目标
+	//	{
+	//		switchGuideWeakOrStrong(GS_Strong);
+	//		//eQuestState e = QuestMgr::getInstance()->getNowQuestState(1103);
+	//		//if(e != QS_GET)
+	//		//	return;
+	//		CLOSE_ALL_UI();
+
+	//		MiniMapUi* pUI = World::getInstance()->getMiniMapUi();
+	//		if (!pUI)
+	//			return;
+	//		MiniMapUiLoaderLayer* pMiniMapLayer = (MiniMapUiLoaderLayer*)pUI->getChildByTag(0);
+	//		if(pMiniMapLayer && !pMiniMapLayer->getMiniMapIsShow())
+	//		{
+	//			pMiniMapLayer->hidePressed(NULL, 0);
+	//		}
+
+	//		clear(false);
+	//		_guideState = GS_MINI_MAP_BTN_CLICK;
+	//		CCRect rc = pUI->GetMiniMapBtnPos(MiniMapUi::BT_RichangBtn);
+	//		SetClip(rc);
+	//		runArrowsAnim(rc);
+	//		m_nGuildeIdx++;
+
+	//	}
+	//	break;
+	//case GN_1103_2:
+
+	//	clear();
+	//	OPEN_UI(WCT_HuoyueUi);
+	//	GET_UI( HuoYueUi , WCT_HuoyueUi )->getUiLayer()->getChildByTag(4)->setVisible( true );
+	//	_guideState = GS_Valid;
+	//	m_bClickEvent = true;
+	//	m_nGuildeIdx++;
+	//	break;
+
+	//case GN_1103_3 :		// 结束
+	//	clear();
+	//	switchGuideWeakOrStrong(GS_Weak);
+	//	{
+	//		_guideState = GS_ACCEPT_QUEST;
+	//		m_nGuildeIdx++;
+	//		IsNewGuide = false;
+	//	}
+	//	break;
+	case GN_1119_1:  
+		//进阶引导
+		switchGuideWeakOrStrong(GS_Strong);
+		{
+
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1119);
+			if(e != QS_READY_FINISH && e != QS_GET)
+				return;
+			CLOSE_ALL_UI();
+			//判断玩家是否有对应装备，要检查装备页和背包，
+			LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+			if(!pLP)
+				return;
+			unsigned int dwItemID = 0;
+			if(pLP->getRoleType() == RT_MWARRIOR || pLP->getRoleType() == RT_WWARRIOR)
+				dwItemID = 9152030;
+			else if(pLP->getRoleType() == RT_MMAGE || pLP->getRoleType() == RT_WMAGE)
+				dwItemID = 9252030;
+			else
+				dwItemID = 9352030;
+			f_item* pItem = PackageManager::getInstance()->getItem(EICT_Bag, dwItemID, EIQ_Quality0);
+			CCString *tempStr = NULL;
+			if(pItem)
+			{
+				m_nGuildeIdx++;
+				tempStr = CCString::createWithFormat("%d", GN_1119_3);
+				RunNewPlayerGuilde(tempStr);
+				break;
+			}
+			pItem = PackageManager::getInstance()->getItem(EICT_Equip, dwItemID, EIQ_Quality0);
+			if (pItem)
+			{
+				m_nGuildeIdx++;
+				tempStr = CCString::createWithFormat("%d", GN_1119_5);
+				RunNewPlayerGuilde(tempStr);
+				break;
+			}
+			_guideState = GS_Valid;
+			m_nGuildeIdx = GN_1119_9;
+			RunNewPlayerGuilde();
+		}
+		break;
+	case GN_1119_2:
+		{
+			CLOSE_ALL_UI();
+			clear();
+			if(!GET_UI(SystemUi, WCT_SystemUi)->showState())
+			{//如果系统按钮没有显示，首先显示
+				ArrForHead();
+				CCString *tempStr = reinterpret_cast<CCString*>(tempArr);
+				m_nGuildeIdx = tempStr->intValue();
+				_guideState = GS_CLICK_HEAD;
+			}else
+			{
+				CCString *tempStr = reinterpret_cast<CCString*>(tempArr);
+				m_nGuildeIdx = tempStr->intValue();
+				RunNewPlayerGuilde();
+			}				
+		}
+		break;
+	case GN_1119_3:
+		{
+			//点开背包
+			clear(false);
+			runArrowsAnim(GET_UI(SystemUi, WCT_SystemUi)->getBtnPos(SystemUi::BT_Package));
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1119_4:
+		{
+			//引导点击物品
+			LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+			if(!pLP)
+				return;
+			unsigned int dwItemID = 0;
+			if(pLP->getRoleType() == RT_MWARRIOR || pLP->getRoleType() == RT_WWARRIOR)
+				dwItemID = 9152030;
+			else if(pLP->getRoleType() == RT_MMAGE || pLP->getRoleType() == RT_WMAGE)
+				dwItemID = 9252030;
+			else
+				dwItemID = 9352030;
+			f_item* pItem = PackageManager::getInstance()->getItem(EICT_Bag, dwItemID, EIQ_Quality0);
+			if(!pItem)
+				return;
+			GET_UI(Package, WCT_PACKAGEUI)->gotoIndexPage(pItem->get_pos());
+			const CCRect& rc = GET_UI(Package, WCT_PACKAGEUI)->getItemRect(pItem->get_pos());
+			if(rc.getMinX() == 0 && rc.getMaxX() == 0)
+				return;
+			DropDragDelegate::getInstance()->setDoubleClickEnble(false);
+			DropDragDelegate::getInstance()->setDragEnable(false);
+			clear(false);
+			runArrowsAnim(rc);
+			_guideState = GS_OPUI_NIL_UI_MGR;
+			m_nGuildeIdx = GN_1119_7;
+		}
+		break;
+	case GN_1119_5:	//强化 引导点击角色按钮
+		{
+			clear(false);
+			runArrowsAnim(GET_UI(SystemUi, WCT_SystemUi)->getBtnPos(SystemUi::BT_Role));
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1119_6: //进阶  引导点击左侧护腕
+		{
+			LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+			if(!pLP)
+				return;
+			unsigned int dwItemID = 0;
+			if(pLP->getRoleType() == RT_MWARRIOR || pLP->getRoleType() == RT_WWARRIOR)
+				dwItemID = 9152030;
+			else if(pLP->getRoleType() == RT_MMAGE || pLP->getRoleType() == RT_WMAGE)
+				dwItemID = 9252030;
+			else
+				dwItemID = 9352030;
+
+			CCRect rc;
+			PackageManager::ItemMap *itemMap = PackageManager::getInstance()->getItemMap(EICT_Equip);
+			if (itemMap)
+			{
+				f_item *item = NULL;
+				if(PackageManager::getInstance()->getItem(*itemMap, (short)EEP_Wrist1))
+				{
+					item = PackageManager::getInstance()->getItem(*itemMap, (short)EEP_Wrist1);
+					if (dwItemID == item->get_item_type_id())
+					{
+						 f_equipment *equip = dynamic_cast<f_equipment*>(item);
+						 if (equip)
+						 {
+							 if (equip->get_item_quality() == EIQ_Quality0)
+							 {
+								 rc = GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->getEquipBtnPos(EEP_Wrist1);
+							 }
+						 }
+					}
+				}
+				if (PackageManager::getInstance()->getItem(*itemMap, (short)EEP_Wrist2))
+				{
+					item = PackageManager::getInstance()->getItem(*itemMap, (short)EEP_Wrist2);
+					if (dwItemID == item->get_item_type_id())
+					{
+						f_equipment *equip = dynamic_cast<f_equipment*>(item);
+						if (equip)
+						{
+							if (equip->get_item_quality() == EIQ_Quality0)
+							{
+								rc = GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->getEquipBtnPos(EEP_Wrist2);
+							}
+						}
+					}
+				}
+			}
+			
+			if(rc.getMinX() == 0 && rc.getMaxX() == 0)
+				return;
+
+			DropDragDelegate::getInstance()->setDoubleClickEnble(false);
+			DropDragDelegate::getInstance()->setDragEnable(false);
+
+			clear(false);
+			runArrowsAnim(rc);
+			_guideState = GS_OPUI_NIL_UI_MGR;
+			m_nGuildeIdx++;
+		}
+	case GN_1119_7:
+		{
+			//引导点击tips的进阶
+			EquipTipUiLayer* pNode = (EquipTipUiLayer*)World::getInstance()->getScene()->getChildByTag(WCT_EQUIP_TIPS_UI_TAG);
+			if(!pNode)
+				return;
+			DropDragDelegate::getInstance()->setDoubleClickEnble(true);
+			DropDragDelegate::getInstance()->setDragEnable(true);
+			clear(false);
+			runArrowsAnim(pNode->GetBtnPos(4));
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1119_8:
+		{
+			//引导点击升阶按钮
+			EquipFusionUiLayer* pUI = getUiNodeByTag<EquipFusionUiLayer>(WCT_EquipFusionUi);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->GetBtnPos(102));
+				_guideState = GS_Valid;
+				m_bClickEvent = true;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1119_9:
+		clear();
+		switchGuideWeakOrStrong(GS_Weak);
+		{
+			_guideState = GS_Valid;
+			m_nGuildeIdx = GN_1065_6;
+			IsNewGuide = false;
+
+		}
+		break;
+////////////////////////////////////////////////////////////////////////////
+	case GN_1046_1:
+		{
+			//[bing] 弹出坐骑提示后 引导点击"我知道了"按钮
+			SystemTipUI* pUI = getUiNodeByTag<SystemTipUI>(WCT_SYSTEMTIPSUI);
+			if(pUI)
+			{
+				CLOSE_ALL_UI();
+
+				//[bing] 如果system界面显示为false要把它弄出来
+				if(GET_UI(SystemUi,WCT_SystemUi)->showState() == false)
+				{
+					GET_UI(SystemUi, WCT_SystemUi)->slotChangeShowState(); 
+				}
+
+				clear();
+				runArrowsAnim(pUI->GetBtnPos());
+				_guideState = GS_Valid;
+				m_bClickEvent = true;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1046_2:
+		{
+			//闪光系统界面坐骑按钮 并指引坐骑按钮
+			clear(false);
+			CCRect rc = GET_UI(SystemUi, WCT_SystemUi)->getBtnPos(SystemUi::BT_Ride);
+			CCPoint cp = ccp(rc.getMidX(), rc.getMidY());
+			runArrowsAnim(rc);
+			m_pEffectNode->setPosition(cp);
+			m_pEffectNode->BeginAction(0.1f);
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1046_3:
+		{
+			//[bing] 点击钻石培养
+			MountUiFrame* pUI = getUiNodeByTag<MountUiFrame>(WCT_MountUi);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->GetBtnPos(1001));
+				_guideState = GS_OPUI_NIL_UI_MGR;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1046_4:
+		{
+			//引导点击弹出框确定按钮
+			clear(false);
+			runArrowsAnim(MessageBoxUi::GetBtnPos(0));
+			m_bClickEvent = true;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1046_5:
+		{
+			//点击X按钮关闭坐骑界面
+			MountUiFrame* pUI = getUiNodeByTag<MountUiFrame>(WCT_MountUi);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->GetBtnPos(1002));
+				_guideState = GS_CLOSEUI;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1046_6:
+		{
+			//告个段落
+			clear();
+			_guideState = GS_SYS_TIPS_OPEN;
+			m_nGuildeIdx++;
+		}
+		break;
+// 	case GN_1047_1:
+// 		{
+// 			SystemTipUI* pUI = getUiNodeByTag<SystemTipUI>(WCT_SYSTEMTIPSUI);
+// 			if(pUI)
+// 			{
+// 				CLOSE_ALL_UI();
+// 
+// 				if(GET_UI(SystemUi,WCT_SystemUi)->showState() == false)
+// 				{
+// 					GET_UI(SystemUi, WCT_SystemUi)->slotChangeShowState(); 
+// 				}
+// 
+// 				clear();
+// 				runArrowsAnim(pUI->GetBtnPos());
+// 				_guideState = GS_OPENUI;
+// 				m_nGuildeIdx++;
+// 			}
+// 		}
+// 		break;
+// 	case GN_1047_2:
+// 		{
+// 			clear();
+// 			ArenaMainUi* pUI = GET_UI(ArenaMainUi, WCT_ARENAMAINUI);
+// 			if(pUI)
+// 			{
+// 				runArrowsAnim(pUI->GetChallagePos());
+// 				_guideState = GS_Valid;
+// 				m_nGuildeIdx++;
+// 				m_bClickEvent = true;
+// 				setTextClip(NULL, 6063, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 15), false, 0.6f, ccp(12.0f, -1.0f));
+// 				runAction();
+// 			}
+// 		}
+// 		break;
+// 	case GN_1047_3:
+// 		{
+// 			clear();
+// 			_guideState = GS_FINISH_QUEST;
+// 			m_nGuildeIdx++;
+// 		}
+// 		break;
+	case GN_1048_1:
+		{
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1048);
+			if(e != QS_READY_FINISH)
+				return;
+			MiniMapUi *ui = World::getInstance()->getMiniMapUi();
+			if(ui != NULL)
+			{
+				CLOSE_ALL_UI();
+				MiniMapUiLoaderLayer* pMiniMapLayer = (MiniMapUiLoaderLayer*)ui->getChildByTag(0);
+				if(pMiniMapLayer && !pMiniMapLayer->getMiniMapIsShow())
+				{
+					pMiniMapLayer->hidePressed(NULL, 0);
+				}
+
+				clear(false);
+				_guideState = GS_OPENUI;
+				CCRect rc = ui->GetMiniMapBtnPos(MiniMapUi::NT_ChongZhiActivityFarmeBtn);
+				SetClip(rc);
+				runArrowsAnim(rc);
+				m_nGuildeIdx++;
+				setTextClip(NULL, 6071, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 30), false, 0.6f, ccp(2.0f, -1.0f));
+				runAction();
+			}
+		}
+		break;
+	case GN_1048_2:
+		{
+			ChongZhiActivityFarmeUI* pUI = GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI);
+			if(pUI)
+			{
+				clear();
+				CCRect rc = pUI->getGuildPosition(CZA_Btn3);
+				runArrowsAnim(rc);
+				m_bClickEvent = true;
+				m_nGuildeIdx++;
+				setTextClip(NULL, 6072, ccp(_curRect.getMinX() + 300.0f, _curRect.getMinY() + 20), true, 1.0f, ccp(30.0f, -1.0f));
+				runAction();
+			}
+		}
+		break;
+	case GN_1048_3:
+		{
+			clear();
+			_guideState = GS_FINISH_QUEST;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1012_1:
+		{
+			//接取开启仓库
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1012);
+			if(e != QS_READY_FINISH && e != QS_GET)
+				return;
+			_guideState = GS_FINISH_QUEST;
+			m_nGuildeIdx += 3;
+		}
+		break;
+	case GN_1012_2:
+		{
+			//完成开启仓库任务 引导首冲
+			CCRect rc;
+			if(World::getInstance()->getTaskTraceUi()->getGuidePos(1012, rc))
+				return;
+
+			//如果元宝不为0，说明充值过
+			int myYuanbao = PackageManager::getInstance()->getTotalChargeYuanBao();
+			if (myYuanbao > 0)
+			{
+				m_nGuildeIdx += 2;
+				RunNewPlayerGuilde();
+				return;
+			}
+
+			//如果首冲按钮被点击过需要引导活按钮
+			rc = World::getInstance()->getpayIconPos();
+			if(rc.getMaxX() == 0 && rc.getMaxY() == 0)
+			{
+				m_nGuildeIdx += 3;
+				_guideState = GS_SYS_TIPS_OPEN;
+			}
+			else
+			{
+				CLOSE_ALL_UI();
+				clear();
+				SetClip(rc);
+				runArrowsAnim(rc);
+				_guideState = GS_OPENUI;
+				m_nGuildeIdx += 2;
+			}
+		}
+		break;
+	case GN_1012_3:
+		{
+			//引导点击首冲按钮
+			MiniMapUi *ui = World::getInstance()->getMiniMapUi();
+			if(ui != NULL)
+			{
+				clear(false);
+				_guideState = GS_OPENUI;
+				CCRect rc = ui->GetMiniMapBtnPos(5);
+				SetClip(rc);
+				runArrowsAnim(rc);
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1012_4:
+		{
+			//打开充值页面告一段落
+			clear();
+			_guideState = GS_SYS_TIPS_OPEN;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1018_1:
+		{
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1018);
+			if(e != QS_READY_FINISH && e != QS_GET)
+				return;
+			CLOSE_ALL_UI();
+			//如果system界面显示为true 跳过点击头像引导
+			if(GET_UI(SystemUi,WCT_SystemUi)->showState() == true)
+			{
+				clear();
+				_guideState = GS_Valid;
+				m_nGuildeIdx++;
+				RunNewPlayerGuilde();
+				return;
+			}
+
+			//点击左上角角色头像
+			ArrForHead();
+			_guideState = GS_CLICK_HEAD;
+		}
+		break;
+	case GN_1018_2:
+		{
+			clear(false);
+			CCRect rc = GET_UI(SystemUi, WCT_SystemUi)->getBtnPos(SystemUi::BT_Set);
+			CCPoint cp = ccp(rc.getMidX(), rc.getMidY());
+			runArrowsAnim(rc);
+			m_pEffectNode->setPosition(cp);
+			m_pEffectNode->BeginAction(0.1f);
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1018_3:
+		{
+			HookSetUi* pUI = GET_UI(HookSetUi, WCT_HookSetUi);
+			if (pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->getPosition(HookSetUi::GP_ProtectLab));
+				_guideState = GS_HOOK_SET;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1018_4:
+		{
+			HookSetUi* pUI = GET_UI(HookSetUi, WCT_HookSetUi);
+			if (pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->getPosition(HookSetUi::GP_SelBtn1));
+				_guideState = GS_HOOK_SET;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1018_5:
+		{
+			HookSetUi* pUI = GET_UI(HookSetUi, WCT_HookSetUi);
+			if (pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->getPosition(HookSetUi::GP_ListItem1));
+				_guideState = GS_HOOK_SET;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1018_6:
+		{
+			HookSetUi* pUI = GET_UI(HookSetUi, WCT_HookSetUi);
+			if (pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->getPosition(HookSetUi::GP_CLOSE));
+				_guideState = GS_CLOSEUI;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1019_1:
+		{
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1019);
+			if(e != QS_READY_FINISH)
+				return;
+			CLOSE_ALL_UI();
+			if(!GET_UI(SystemUi, WCT_SystemUi)->showState())
+			{//如果系统按钮没有显示，首先显示
+				ArrForHead();
+				_guideState = GS_CLICK_HEAD;
+			}
+			else
+			{
+				m_nGuildeIdx++;
+				RunNewPlayerGuilde();
+			}
+		}
+		break;
+	case GN_1019_2:
+		{
+			clear(false);
+			runArrowsAnim(GET_UI(SystemUi, WCT_SystemUi)->getBtnPos(SystemUi::BT_Package));
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1019_3:
+		{
+			LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+			if(!pLP)
+				return;
+			unsigned int dwItemID = 0;
+			if(pLP->getRoleType() == RT_MWARRIOR || pLP->getRoleType() == RT_WWARRIOR)
+				dwItemID = 9112020;
+			else if(pLP->getRoleType() == RT_MMAGE || pLP->getRoleType() == RT_WMAGE)
+				dwItemID = 9212020;
+			else
+				dwItemID = 9312020;
+			f_item* pItem = PackageManager::getInstance()->getItem(EICT_Bag, dwItemID); 
+			if(!pItem)
+				return;
+
+			GET_UI(Package, WCT_PACKAGEUI)->gotoIndexPage(pItem->get_pos());
+			const CCRect& rc = GET_UI(Package, WCT_PACKAGEUI)->getItemRect(pItem->get_pos());
+			if(rc.getMinX() == 0 && rc.getMaxX() == 0)
+				return;
+
+			DropDragDelegate::getInstance()->setDoubleClickEnble(false);
+			DropDragDelegate::getInstance()->setDragEnable(false);
+
+			clear(false);
+			runArrowsAnim(rc);
+			_guideState = GS_OPUI_NIL_UI_MGR;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1019_4:
+		{
+			EquipTipUiLayer* pNode = (EquipTipUiLayer*)World::getInstance()->getScene()->getChildByTag(WCT_EQUIP_TIPS_UI_TAG);
+			if(!pNode)
+				return;
+
+			DropDragDelegate::getInstance()->setDoubleClickEnble(true);
+			DropDragDelegate::getInstance()->setDragEnable(true);
+
+			clear(false);
+			CCRect rc = pNode->GetBtnPos(5);
+			runArrowsAnim(rc);
+			_guideState = GS_Valid;
+			m_nGuildeIdx++;
+			m_bClickEvent = true;
+		}
+		break;
+	case GN_1019_5:
+		{
+			clear(false);
+			runArrowsAnim(GET_UI(Package, WCT_PACKAGEUI)->getCloseBtnPos());
+			_guideState = GS_CLOSEUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1019_6:
+		{
+			//告一个段落
+			clear();
+			_guideState = GS_FINISH_QUEST;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1175_1:
+		{
+			//签到
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1175);
+			if(e != QS_READY_FINISH)
+				return;
+			CLOSE_ALL_UI();
+			MiniMapUi *ui = World::getInstance()->getMiniMapUi();
+			if(ui != NULL)
+			{
+				MiniMapUiLoaderLayer* pMiniMapLayer = (MiniMapUiLoaderLayer*)ui->getChildByTag(0);
+				if(pMiniMapLayer && !pMiniMapLayer->getMiniMapIsShow())
+				{
+					pMiniMapLayer->hidePressed(NULL, 0);
+				}
+
+				clear(false);
+				_guideState = GS_OPENUI;
+				CCRect rc = ui->GetMiniMapBtnPos(37);
+				if (rc.getMaxX() <= 0 || rc.getMaxY() <= 0)
+				{
+					if(!World::getInstance()->getMiniMapUi()->isActivityGroupShow())
+					{
+						MiniMapUi *ui = World::getInstance()->getMiniMapUi();
+						if(ui != NULL)
+						{
+							clear(false);
+							_guideState = GS_MINI_MAP_BTN_CLICK;
+							CCRect rc = ui->GetMiniMapBtnPos(MiniMapUi::NT_HuoBtn);
+							SetClip(rc);
+							runArrowsAnim(rc);
+							m_nGuildeIdx++;
+						}
+					}
+					else
+					{
+						MiniMapUi *ui = World::getInstance()->getMiniMapUi();
+						if(ui != NULL)
+						{
+							clear(false);
+							_guideState = GS_OPENUI;
+							CCRect rc = ui->GetMiniMapBtnPos(38);
+							SetClip(rc);
+							runArrowsAnim(rc);
+							m_nGuildeIdx += 2;
+							setTextClip(NULL, 6070, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 30), false, 1.0f);
+							runAction();
+						}
+					}
+				}
+				else
+				{
+					SetClip(rc);
+					runArrowsAnim(rc);
+					m_pEffectNode->setPosition(ccp(rc.getMidX(), rc.getMidY()));
+					m_pEffectNode->BeginAction(0.1f);
+					m_nGuildeIdx += 2;
+					_guideState = GS_OPENUI;
+					setTextClip(NULL, 6070, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 30), false, 1.0f);
+					runAction();
+				}
+			}
+		}
+		break;
+	case GN_1175_2:
+		{
+			MiniMapUi *ui = World::getInstance()->getMiniMapUi();
+			if(ui != NULL)
+			{
+				clear(false);
+				_guideState = GS_OPENUI;
+				CCRect rc = ui->GetMiniMapBtnPos(38);
+				SetClip(rc);
+				runArrowsAnim(rc);
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1175_3:
+		{
+			clear();
+			_guideState = GS_ACCEPT_QUEST;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1029_1:
+		{
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1029);
+			if(e != QS_READY_FINISH && e != QS_GET)
+				return;
+			clear();
+			_guideState = GS_SYS_TIPS_OPEN;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1029_2:
+		{
+			//[bing] 完成召见任务引导双修界面 引导点击"我知道了"按钮
+			SystemTipUI* pUI = getUiNodeByTag<SystemTipUI>(WCT_SYSTEMTIPSUI);
+			if(pUI)
+			{
+				CLOSE_ALL_UI();
+
+				clear();
+				runArrowsAnim(pUI->GetBtnPos());
+				_guideState = GS_OPUI_NIL_UI_MGR;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1029_3:
+		{
+			//打开一键加好友界面 引导点击加好友按钮
+			AreaPlayerUI* pUI = getUiNodeByTag<AreaPlayerUI>(WCT_AREA_PLAYER_UI);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->GetBtnPos(101));
+				_guideState = GS_Valid;
+				m_bClickEvent = true;
+				m_nGuildeIdx++;
+			}
+			else
+			{
+				//没打开页面可能是周围没有玩家这个界面弹不出来
+				m_nGuildeIdx += 2;
+				RunNewPlayerGuilde();
+			}
+		}
+		break;
+	case GN_1029_4:
+		{
+			//引导关闭界面
+			AreaPlayerUI* pUI = getUiNodeByTag<AreaPlayerUI>(WCT_AREA_PLAYER_UI);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->GetBtnPos(100));
+				_guideState = GS_Valid;
+				m_bClickEvent = true;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1029_5:
+		{
+			//关闭界面告一个段落
+			clear();
+			_guideState = GS_ACCEPT_QUEST;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1030_1:
+		{
+			//调查矿洞
+			//强化任务接取检查
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1030);
+			if(e != QS_READY_FINISH && e != QS_GET)
+				return;
+			QuestMgr::getInstance()->doNPCScript(1002008, -1);
+			TransmitMgr::getInstance()->doTransScript(1002008 , -1);
+			ExchangeMgr::getInstance()->doTransScript(1002008 , -1);
+			ShopMgr::getInstance()->onNpcTalk(1002008, -1);
+			UpMgr::getInstance()->doTransScript(1002008 , -1);
+			MarryMgr::getInstance()->doTransScript(1002008 , -1);
+			StoreMgr::getInstance()->doTransScript(1002008 , -1);
+			//FuncGuideMgr::getInstance()->doNPCScript(1002008, -1);//屏蔽
+			CLOSE_ALL_UI();
+			//找到第一项位置 指向点击
+			NPCTalkUi *ui = World::getInstance()->getNPCDialog();
+			if(ui != NULL)
+			{
+				clear();
+				_guideState = GS_OPENUI;
+				CCRect rc = ui->getItemByIdx(0);
+				SetClip(rc);
+				rc.origin.x -= 150.f;
+				runArrowsAnim(rc);
+				m_nGuildeIdx++;
+				LabelFT* pLabel = getLabelTTF();
+				setTextClip(pLabel, 6054, ccp(_curRect.getMinX(), _curRect.getMinY() + 15), false, 1.0f);
+				runAction();
+			}
+		}
+		break;
+	case GN_1030_2:
+		{
+			//引导点击多人副本进入按钮
+			FubenDuoRenUiLayer* pUI = getUiNodeByTag<FubenDuoRenUiLayer>(WCT_FubenDuoRenUI);
+			if (pUI)
+			{
+				const CCRect& cp = pUI->getEnterBtnPos();
+				if(cp.getMinX() == 0 && cp.getMaxX() == 0)
+					return;
+				clear(false);
+				runArrowsAnim(cp);
+			}
+			m_bClickEvent = true;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1030_3:
+		{
+			//点击X按钮 判断一下是否有队伍 否则可能会卡死
+			FubenDuoRenUiLayer* pUI = getUiNodeByTag<FubenDuoRenUiLayer>(WCT_FubenDuoRenUI);
+			if(pUI)
+			{
+				if (TeamMgr::getInstance()->is_inteam())
+				{
+					m_nGuildeIdx++;
+					RunNewPlayerGuilde();
+					break;
+				}
+
+				clear(false);
+				runArrowsAnim(pUI->getCloseBtnPos());
+				_guideState = GS_CLOSEUI;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1030_4:
+		{
+			//告一个段落
+			clear();
+			_guideState = GS_ACCEPT_QUEST;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1031_1:
+		{
+			//接取变得更强任务
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1031);
+			if(e != QS_READY_FINISH && e != QS_GET)
+				return;
+			_guideState = GS_FINISH_QUEST;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1031_2:
+		{
+			//完成变得更强任务触发引导 引导点击头像
+			CCRect rc;
+			if(World::getInstance()->getTaskTraceUi()->getGuidePos(1031, rc))
+				return;
+			CLOSE_ALL_UI();
+			if(!GET_UI(SystemUi, WCT_SystemUi)->showState())
+			{//如果系统按钮没有显示，首先显示
+				ArrForHead();
+				_guideState = GS_CLICK_HEAD;
+			}
+			else
+			{
+				m_nGuildeIdx++;
+				RunNewPlayerGuilde();
+			}
+		}
+		break;
+	case GN_1031_3:
+		{
+			//引导点击包裹
+			clear(false);
+			runArrowsAnim(GET_UI(SystemUi, WCT_SystemUi)->getBtnPos(SystemUi::BT_Package));
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1031_4:
+		{
+			//引导点击戒指
+			LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+			if(!pLP)
+				return;
+			unsigned int dwItemID = 0;
+			if(pLP->getRoleType() == RT_MWARRIOR || pLP->getRoleType() == RT_WWARRIOR)
+				dwItemID = 9129029;
+			else if(pLP->getRoleType() == RT_MMAGE || pLP->getRoleType() == RT_WMAGE)
+				dwItemID = 9229012;
+			else
+				dwItemID = 9329012;
+			f_item* pItem = PackageManager::getInstance()->getItem(EICT_Bag, dwItemID);
+			if(!pItem)
+				return;
+			GET_UI(Package, WCT_PACKAGEUI)->gotoIndexPage(pItem->get_pos());
+			const CCRect& rc = GET_UI(Package, WCT_PACKAGEUI)->getItemRect(pItem->get_pos());
+			if(rc.getMinX() == 0 && rc.getMaxX() == 0)
+				return;
+
+			DropDragDelegate::getInstance()->setDoubleClickEnble(false);
+			DropDragDelegate::getInstance()->setDragEnable(false);
+
+			clear(false);
+			runArrowsAnim(rc);
+			_guideState = GS_OPUI_NIL_UI_MGR;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1031_5:	//点击物品弹出tips 引导点击镶嵌按钮
+		{
+			EquipTipUiLayer* pNode = (EquipTipUiLayer*)World::getInstance()->getScene()->getChildByTag(WCT_EQUIP_TIPS_UI_TAG);
+			if(!pNode)
+				return;
+
+			DropDragDelegate::getInstance()->setDoubleClickEnble(true);
+			DropDragDelegate::getInstance()->setDragEnable(true);
+
+			clear(false);
+			runArrowsAnim(pNode->GetBtnPos(2));
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1031_7:
+		{
+			//当拖拽时引导拖拽到镶嵌格子上
+			InlayUiLayer* pUI = getUiNodeByTag<InlayUiLayer>(WCT_InlayUi);
+			if(!pUI)
+				return;
+			LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+			if(!pLP)
+				return;
+			unsigned int dwItemID = 0;
+			if(pLP->getRoleType() == RT_MWARRIOR || pLP->getRoleType() == RT_WWARRIOR)
+				dwItemID = 1242005;
+			else if(pLP->getRoleType() == RT_MMAGE || pLP->getRoleType() == RT_WMAGE)
+				dwItemID = 1243005;
+			else
+				dwItemID = 1244005;
+			short nIdx = pUI->GetItemIdx(dwItemID);
+			if(nIdx == -1)
+				return;
+			const CCRect& src_rc = pUI->GetGemPos(nIdx);
+			const CCRect& rc = pUI->GetInlayHolePos(0);
+			CCPoint cp1 = ccp((src_rc.getMaxX() - src_rc.getMinX()) / 2 + src_rc.getMinX(), (src_rc.getMaxY() - src_rc.getMinY()) / 2 + src_rc.getMinY());
+			CCPoint cp2 = ccp(rc.getMidX(), rc.getMidY());
+			clear();
+			_curRect = src_rc;
+			//_curRect = CCRect(src_rc.origin.x,src_rc.origin.y, 1.5 * src_rc.size.width, 1.5 * src_rc.size.height);
+			SetClip(rc, src_rc);
+			runArrowsMoveTo(cp1, cp2);
+			LabelFT* pLabel = getLabelTTF();
+			if (pLabel && m_pInfoLabel)
+			{
+				m_pInfoLabel->setVisible(true);
+				setTextClip(pLabel, 6032, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 25), true, 0.6f, ccp(35.0f, -1.0f));
+			}
+			runAction();
+
+			_guideState = GS_DRAG_DWON_ITEM;
+			m_bClickEvent = true;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1031_8:
+		{
+			//如果没镶嵌上去给个回退操作
+			InlayUiLayer* pUI = getUiNodeByTag<InlayUiLayer>(WCT_InlayUi);
+			if(!pUI)
+				return;
+			if(pUI->GetInlayHoleID(0) == -1)
+			{
+				CCLOG("RollBack %d", m_nGuildeIdx);
+				m_nGuildeIdx -= 1;
+				RunNewPlayerGuilde();
+				return;
+			}
+
+			LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+			if(!pLP)
+				return;
+			unsigned int dwItemID = 0;
+			if(pLP->getRoleType() == RT_MWARRIOR || pLP->getRoleType() == RT_WWARRIOR)
+				dwItemID = 9129029;
+			else if(pLP->getRoleType() == RT_MMAGE || pLP->getRoleType() == RT_WMAGE)
+				dwItemID = 9229012;
+			else
+				dwItemID = 9329012;
+			f_equipment* pEquip = (f_equipment*)PackageManager::getInstance()->getItem(EICT_Bag, dwItemID);
+			if(pEquip)
+			{
+				ImmediateEquipUi::getInstance()->open();
+				ImmediateEquipUi::getInstance()->setData(pEquip);
+			}
+
+			//镶嵌结束告个段落
+			DropDragDelegate::getInstance()->setDoubleClickEnble(true);
+			DropDragDelegate::getInstance()->setMoveDiffConEnble(true);
+			DropDragDelegate::getInstance()->setClickEnble(true);
+			clear();
+			_guideState = GS_ACCEPT_QUEST;
+			m_nGuildeIdx++;
+		}
+		break;
+// 	case GN_1033_1:
+// 		{
+// 			//接取突围任务
+// 			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1033);
+// 			if(e != QS_READY_FINISH && e != QS_GET)
+// 				return;
+// 			_guideState = GS_SYS_TIPS_OPEN;
+// 			m_nGuildeIdx++;
+// 		}
+// 		break;
+// 	case GN_1033_2:
+// 		{
+// 			//引导点击饮酒确定
+// 			SystemTipUI* pUI = getUiNodeByTag<SystemTipUI>(WCT_SYSTEMTIPSUI);
+// 			if(pUI)
+// 			{
+// 				CLOSE_ALL_UI();
+// 				//[bing] 如果system界面显示为false要把它弄出来
+// 				if(GET_UI(SystemUi,WCT_SystemUi)->showState() == false)
+// 				{
+// 					GET_UI(SystemUi, WCT_SystemUi)->slotChangeShowState();
+// 				}
+// 
+// 				clear();
+// 				runArrowsAnim(pUI->GetBtnPos());
+// 				_guideState = GS_Valid;
+// 				m_bClickEvent = true;
+// 				m_nGuildeIdx++;
+// 			}
+// 		}
+// 		break;
+// 	case GN_1033_3:
+// 		{
+// 			//引导点击包裹
+// 			clear(false);
+// 			CCRect rc = GET_UI(SystemUi, WCT_SystemUi)->getBtnPos(SystemUi::BT_Package);
+// 			runArrowsAnim(rc);
+// 			m_pEffectNode->setPosition(ccp(rc.getMidX(), rc.getMidY()));
+// 			m_pEffectNode->BeginAction(0.1f);
+// 			_guideState = GS_OPENUI;
+// 			m_nGuildeIdx++;
+// 		}
+// 		break;
+// 	case GN_1033_4:
+// 		{
+// 			//引导点击高粱酒
+// 			LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+// 			if(!pLP)
+// 				return;
+// 			unsigned int dwItemID = 1002012;	//高粱酒
+// 			f_item* pItem = PackageManager::getInstance()->getItem(EICT_Bag, dwItemID);
+// 			if(!pItem)
+// 				return;
+// 			GET_UI(Package, WCT_PACKAGEUI)->gotoIndexPage(pItem->get_pos());
+// 			const CCRect& rc = GET_UI(Package, WCT_PACKAGEUI)->getItemRect(pItem->get_pos());
+// 			if(rc.getMinX() == 0 && rc.getMaxX() == 0)
+// 				return;
+// 
+// 			DropDragDelegate::getInstance()->setDoubleClickEnble(false);
+// 			DropDragDelegate::getInstance()->setDragEnable(false);
+// 
+// 			clear(false);
+// 			runArrowsAnim(rc);
+// 			_guideState = GS_OPUI_NIL_UI_MGR;
+// 			m_nGuildeIdx++;
+// 		}
+// 		break;
+// 	case GN_1033_5:	//点击物品弹出tips 引导点击镶嵌按钮
+// 		{
+// 			ItemTipSprite* pNode = (ItemTipSprite*)World::getInstance()->getScene()->getChildByTag(WCT_ItemTip);
+// 			if(!pNode)
+// 				return;
+// 
+// 			DropDragDelegate::getInstance()->setDoubleClickEnble(true);
+// 			DropDragDelegate::getInstance()->setDragEnable(true);
+// 
+// 			clear(false);
+// 			runArrowsAnim(pNode->GetBtnPos(8));
+// 			m_bClickEvent = true;
+// 			_guideState = GS_Valid;
+// 			m_nGuildeIdx++;
+// 		}
+// 		break;
+// 	case GN_1033_6:
+// 		{
+// 			//告一个段落
+// 			clear();
+// 			_guideState = GS_ACCEPT_QUEST;
+// 			m_nGuildeIdx++;
+// 		}
+// 		break;
+	case GN_1039_1:
+		{
+			//接取焰火屠魔
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1039);
+			if(e != QS_READY_FINISH && e != QS_GET)
+				return;
+			CLOSE_ALL_UI();
+			QuestMgr::getInstance()->doNPCScript(1007001, -1);  //接取屠魔副本任务NPCID 因为该NPC同时也有传送选项 再运行一次脚本从新打开NPC
+			TransmitMgr::getInstance()->doTransScript(1007001 , -1);
+			ExchangeMgr::getInstance()->doTransScript(1007001 , -1);
+			ShopMgr::getInstance()->onNpcTalk(1007001, -1);
+			UpMgr::getInstance()->doTransScript(1007001 , -1);
+			MarryMgr::getInstance()->doTransScript(1007001 , -1);
+			StoreMgr::getInstance()->doTransScript(1007001 , -1);
+			//FuncGuideMgr::getInstance()->doNPCScript(1007001, -1);//屏蔽
+
+			//找到第一项位置 指向点击
+			NPCTalkUi *ui = World::getInstance()->getNPCDialog();
+			if(ui != NULL)
+			{
+				clear();
+				CCRect rc = ui->getItemByIdx(0);
+				SetClip(rc);
+				runArrowsAnim(rc);
+				m_bClickEvent = true;
+				m_nGuildeIdx++;
+				setTextClip(NULL, 6059, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 10), true, 1.0f, ccp(20.0f, -1.0f));
+				runAction();
+			}
+		}
+		break;
+	case GN_1039_2:
+		{
+			//进入屠魔副本告一段落
+			clear();
+			_guideState = GS_FINISH_QUEST;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1039_3:
+		{
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1039);
+			if(e != QS_READY_FINISH)
+				return;
+			if(!World::getInstance()->getMiniMapUi()->isActivityGroupShow())
+			{
+				MiniMapUi *ui = World::getInstance()->getMiniMapUi();
+				if(ui != NULL)
+				{
+					clear(false);
+					_guideState = GS_MINI_MAP_BTN_CLICK;
+					CCRect rc = ui->GetMiniMapBtnPos(MiniMapUi::NT_HuoBtn);
+					SetClip(rc);
+					runArrowsAnim(rc);
+					m_nGuildeIdx++;
+				}
+			}
+			else
+			{
+				MiniMapUi *ui = World::getInstance()->getMiniMapUi();
+				if(ui != NULL)
+				{
+					clear();
+					_guideState = GS_OPENUI;
+					CCRect rc = ui->GetMiniMapBtnPos(100);
+					SetClip(rc);
+					runArrowsAnim(rc);
+					m_nGuildeIdx += 2;
+				}
+			}
+		}
+		break;
+	case GN_1039_4: //接受踏上征途任务 引导点击神秘宝箱
+		{
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1039);
+			if(e != QS_READY_FINISH)
+				return;
+			MiniMapUi *ui = World::getInstance()->getMiniMapUi();
+			if(ui != NULL)
+			{
+				clear();
+				_guideState = GS_OPENUI;
+				CCRect rc = ui->GetMiniMapBtnPos(100);
+				SetClip(rc);
+				runArrowsAnim(rc);
+				m_nGuildeIdx ++;
+			}
+		}
+		break;
+	case GN_1039_5:
+		{
+			//引导点击购买按钮
+			/*MysteryBoxUiLayer* pUI = getUiNodeByTag<MysteryBoxUiLayer>(WCT_MysteryBoxUi);
+			if(!pUI)
+				return;
+			clear(false);
+			runArrowsAnim(pUI->getBuyBtnPos());
+			_guideState = GS_Valid;
+			m_bClickEvent = true;
+			m_nGuildeIdx++;*/
+		}
+		break;
+	case GN_1039_6: //完成领取神秘宝箱 暂时告一段落
+		{
+			clear();
+			_guideState = GS_SYS_TIPS_OPEN;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1028_1:
+		{
+			//接取提升任务
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1028);
+			if(e != QS_READY_FINISH && e != QS_GET)
+				return;
+			_guideState = GS_FINISH_QUEST;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1028_2:
+		{
+			//完成提升任务
+			CCRect rc;
+			if(World::getInstance()->getTaskTraceUi()->getGuidePos(1028, rc))
+				return;
+			CLOSE_ALL_UI();
+			if(!GET_UI(SystemUi, WCT_SystemUi)->showState())
+			{//如果系统按钮没有显示，首先显示
+				ArrForHead();
+				_guideState = GS_CLICK_HEAD;
+			}
+			else
+			{
+				m_nGuildeIdx++;
+				RunNewPlayerGuilde();
+			}
+		}
+		break;
+	case GN_1028_3:
+		{
+			//点开背包
+			clear(false);
+			runArrowsAnim(GET_UI(SystemUi, WCT_SystemUi)->getBtnPos(SystemUi::BT_Package));
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1028_4:
+		{
+			//引导点击物品
+			LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+			if(!pLP)
+				return;
+			unsigned int dwItemID = 0;
+			if(pLP->getRoleType() == RT_MWARRIOR || pLP->getRoleType() == RT_WWARRIOR)
+				dwItemID = 9112020;
+			else if(pLP->getRoleType() == RT_MMAGE || pLP->getRoleType() == RT_WMAGE)
+				dwItemID = 9212020;
+			else
+				dwItemID = 9312020;
+			f_item* pItem = PackageManager::getInstance()->getItem(EICT_Bag, dwItemID);
+			if(!pItem)
+				return;
+			GET_UI(Package, WCT_PACKAGEUI)->gotoIndexPage(pItem->get_pos());
+			const CCRect& rc = GET_UI(Package, WCT_PACKAGEUI)->getItemRect(pItem->get_pos());
+			if(rc.getMinX() == 0 && rc.getMaxX() == 0)
+				return;
+
+			DropDragDelegate::getInstance()->setDoubleClickEnble(false);
+			DropDragDelegate::getInstance()->setDragEnable(false);
+
+			clear(false);
+			runArrowsAnim(rc);
+			_guideState = GS_OPUI_NIL_UI_MGR;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1028_5:
+		{
+			//引导点击tips的升级
+			EquipTipUiLayer* pNode = (EquipTipUiLayer*)World::getInstance()->getScene()->getChildByTag(WCT_EQUIP_TIPS_UI_TAG);
+			if(!pNode)
+				return;
+			DropDragDelegate::getInstance()->setDoubleClickEnble(true);
+			DropDragDelegate::getInstance()->setDragEnable(true);
+			clear(false);
+			runArrowsAnim(pNode->GetBtnPos(3));
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1028_6:
+		{
+			//引导点击升级按钮
+			EquipLevelUpUiLayer* pUI = getUiNodeByTag<EquipLevelUpUiLayer>(WCT_EquipLevelUpUi);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->GetEquipLevelUpBtnPos());
+				_guideState = GS_OPUI_NIL_UI_MGR;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1028_7:
+		{
+			//引导点击确认框的确定按钮
+			clear(false);
+			runArrowsAnim(MessageBoxUi::GetBtnPos(0));
+			_guideState = GS_Valid;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1028_8:
+		{
+			LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+			if(!pLP)
+				return;
+			unsigned int dwItemID = 0;
+			if(pLP->getRoleType() == RT_MWARRIOR || pLP->getRoleType() == RT_WWARRIOR)
+				dwItemID = 9119030;
+			else if(pLP->getRoleType() == RT_MMAGE || pLP->getRoleType() == RT_WMAGE)
+				dwItemID = 9219030;
+			else
+				dwItemID = 9319030;
+			f_equipment* pEquip = (f_equipment*)PackageManager::getInstance()->getItem(EICT_Bag, dwItemID);
+			if(pEquip)
+			{
+				ImmediateEquipUi::getInstance()->open();
+				ImmediateEquipUi::getInstance()->setData(pEquip);
+			}
+
+			//引导点击关闭按钮
+			EquipLevelUpUiLayer* pUI = getUiNodeByTag<EquipLevelUpUiLayer>(WCT_EquipLevelUpUi);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->GetCloseBtnPos());
+				_guideState = GS_CLOSEUI;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1028_18:
+		{
+			//告个段落
+			clear();
+			_guideState = GS_ACCEPT_QUEST;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1032_1:
+		{
+			//接取任命任务
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1032);
+			if(e != QS_READY_FINISH && e != QS_GET)
+				return;
+
+			_guideState = GS_FINISH_QUEST;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1032_2:
+		{
+			//完成任命任务
+			CCRect rc;
+			if(World::getInstance()->getTaskTraceUi()->getGuidePos(1032, rc))
+				return;
+
+			//开启我要变强 引导点击
+			MiniMapUi *mUi = World::getInstance()->getMiniMapUi();
+			if(mUi)
+			{
+				CLOSE_ALL_UI();
+				clear();
+				CCRect rc = mUi->GetBaoDianBtnPos();
+				SetClip(rc);
+				runArrowsAnim(rc);
+				setTextClip(getLabelTTF(), 6058, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 20), true, 1.0f, ccp(20.0f, -1.0f));
+				runAction();
+				m_pEffectNode->setPosition(ccp(rc.getMidX(), rc.getMinY()));
+				_guideState = GS_OPENUI;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1032_4:
+		{
+			//点开日常界面告一段落
+			clear();
+			_guideState = GS_ACCEPT_QUEST;
+			m_nGuildeIdx++;
+		}
+		break;
+
+	case GN_1054_1:
+		{
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1054);
+			if(e != QS_READY_FINISH)
+				return;
+			//完成大杀四方任务弹出武学介绍 引导点击我知道了按钮
+			SystemTipUI* pUI = getUiNodeByTag<SystemTipUI>(WCT_SYSTEMTIPSUI);
+			if(pUI)
+			{
+				CLOSE_ALL_UI();
+
+				//[bing] 如果system界面显示为false要把它弄出来
+				if(GET_UI(SystemUi,WCT_SystemUi)->showState() == false)
+				{
+					GET_UI(SystemUi, WCT_SystemUi)->slotChangeShowState(); 
+				}
+
+				clear();
+				runArrowsAnim(pUI->GetBtnPos());
+				_guideState = GS_Valid;
+				m_bClickEvent = true;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1054_2:
+		{
+			//闪光系统界面武学按钮 并指引武学按钮
+			clear(false);
+			CCRect rc = GET_UI(SystemUi, WCT_SystemUi)->getBtnPos(SystemUi::BT_Consolid);
+			CCPoint cp = ccp(rc.getMidX(), rc.getMinY());
+			runArrowsAnim(rc);
+			m_pEffectNode->setPosition(cp);
+			m_pEffectNode->BeginAction(0.1f);
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1054_3:
+		{
+			//打开武学界面引导点击武学
+			LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+			if(!pLP)
+				return;
+			unsigned int dwItemID = 0;
+			if(pLP->getRoleType() == RT_MWARRIOR || pLP->getRoleType() == RT_WWARRIOR)
+				dwItemID = 9702001;
+			else if(pLP->getRoleType() == RT_MMAGE || pLP->getRoleType() == RT_WMAGE)
+				dwItemID = 9702002;
+			else
+				dwItemID = 9702003;
+			f_item* pItem = PackageManager::getInstance()->getItem(EICT_KungfuBag, dwItemID);
+			if(!pItem)
+				return;
+			WuXueUiLayer* pUI = getUiNodeByTag<WuXueUiLayer>(WCT_WUXUEUI);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->GetItemRect(pItem->get_pos()));
+				_guideState = GS_OPENUI;
+				m_nGuildeIdx++;
+
+				DropDragDelegate::getInstance()->setDragEnable(false);
+			}
+		}
+		break;
+	case GN_1054_4:
+		{
+			//引导点击功法tips的装备按钮
+			GongfaTipSprite* pUI = getUiNodeByTag<GongfaTipSprite>(WCT_GongfaTip);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->GetBtnPos(8));
+				_guideState = GS_Valid;
+				m_bClickEvent = true;
+				m_nGuildeIdx++;
+
+				DropDragDelegate::getInstance()->setDragEnable(true);
+			}
+		}
+		break;
+	case GN_1054_5:
+		{
+			//引导关闭武学页面
+			WuXueUiLayer* pUI = getUiNodeByTag<WuXueUiLayer>(WCT_WUXUEUI);
+			if(pUI)
+			{
+				clear(false);
+				runArrowsAnim(pUI->GetCloseBtnPos());
+				_guideState = GS_CLOSEUI;
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1054_6:
+		{
+			//告一个段落
+			clear();
+			_guideState = GS_ACCEPT_QUEST;
+			m_nGuildeIdx++;
+		}
+		break;
+
+	case GN_1063_1:
+		{
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1063);
+			if(e != QS_READY_FINISH && e != QS_GET)
+				return;
+
+			_guideState = GS_FINISH_QUEST;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1063_2:
+		{
+			CCRect rc;
+			if(World::getInstance()->getTaskTraceUi()->getGuidePos(1063, rc))
+				return;
+			_guideState = GS_SYS_TIPS_OPEN;
+			m_nGuildeIdx++;
+		}
+		break;
+// 	case GN_1064_8:
+// 		{
+// 			LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+// 			if(!pLP)
+// 				return;
+// 			unsigned int dwItemID = 0;
+// 			if(pLP->getRoleType() == RT_MWARRIOR || pLP->getRoleType() == RT_WWARRIOR)
+// 				dwItemID = 9172050;
+// 			else if(pLP->getRoleType() == RT_MMAGE || pLP->getRoleType() == RT_WMAGE)
+// 				dwItemID = 9272050;
+// 			else
+// 				dwItemID = 9372050;
+// 			f_equipment* pEquip = (f_equipment*)PackageManager::getInstance()->getItem(EICT_Bag, dwItemID);
+// 			if(pEquip)
+// 			{
+// 				ImmediateEquipUi::getInstance()->open();
+// 				ImmediateEquipUi::getInstance()->setData(pEquip);
+// 			}
+// 
+// 			_guideState = GS_ACCEPT_QUEST;
+// 			m_nGuildeIdx++;
+// 			clear();
+// 			EquipFusionUiLayer* pUI = getUiNodeByTag<EquipFusionUiLayer>(WCT_EquipFusionUi);
+// 			if(pUI)
+// 			{
+// 				CCRect _rc = pUI->GetBtnPos(101);
+// 				setTextClip(NULL, 6036, ccp(_rc.getMinX() - 350.0f, _rc.getMinY() - 100.0f), false, 1.0f);
+// 				runAction();
+// 			}
+// 		}
+// 		break;
+
+	case GN_1065_1:
+		{
+			//接取好心老板
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1065);
+			if(e != QS_READY_FINISH && e != QS_GET)
+				return;
+			_guideState = GS_FINISH_QUEST;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1065_2:
+		{
+			CCRect rc;
+			if(World::getInstance()->getTaskTraceUi()->getGuidePos(1065, rc))
+				return;
+			CLOSE_ALL_UI();
+			if(!World::getInstance()->getMiniMapUi()->isActivityGroupShow())
+			{
+				MiniMapUi *ui = World::getInstance()->getMiniMapUi();
+				if(ui != NULL)
+				{
+					clear(false);
+					_guideState = GS_MINI_MAP_BTN_CLICK;
+					CCRect rc = ui->GetMiniMapBtnPos(MiniMapUi::NT_HuoBtn);
+					SetClip(rc);
+					runArrowsAnim(rc);
+					m_nGuildeIdx++;
+				}
+			}
+			else
+			{
+				MiniMapUi *ui = World::getInstance()->getMiniMapUi();
+				if(ui != NULL)
+				{
+					clear();
+					_guideState = GS_OPENUI;
+					CCRect rc = ui->GetMiniMapBtnPos(200);
+					SetClip(rc);
+					runArrowsAnim(rc);
+					m_nGuildeIdx += 2;
+				}
+			}
+		}
+		break;
+	case GN_1065_3:
+		{
+			//完成好心老板 引导点击藏宝阁
+			CCRect rc;
+			if(World::getInstance()->getTaskTraceUi()->getGuidePos(1065, rc))
+				return;
+			MiniMapUi *ui = World::getInstance()->getMiniMapUi();
+			if(ui != NULL)
+			{
+				clear();
+				_guideState = GS_OPENUI;
+				CCRect rc = ui->GetMiniMapBtnPos(200);
+				SetClip(rc);
+				runArrowsAnim(rc);
+				m_nGuildeIdx++;
+			}
+		}
+		break;
+	case GN_1065_4:
+		{
+			//[bing] 打开藏宝阁界面
+			TreasureLoftUiLayer* pUI = getUiNodeByTag<TreasureLoftUiLayer>(WCT_TreasureLoftUi);
+			if(!pUI)
+				return;
+
+			clear(false);
+			CCRect rc = pUI->GetBtnPos(50);
+			SetClip(rc);
+			runArrowsAnim(rc);
+
+			//[bing] 背包满了直接跳
+			if( PackageManager::getInstance()->getBlankSpace(EICT_Bag) != -1 )
+			{
+				_guideState = GS_OPUI_NIL_UI_MGR;
+				m_nGuildeIdx++;
+			}
+			else
+			{
+				_guideState = GS_Valid;
+				m_nGuildeIdx += 2;
+				m_bClickEvent = true;
+			}
+		}
+		break;
+	case GN_1065_5:
+		{
+			//[bing] 引导点击确定开始
+			clear(false);
+			runArrowsAnim(MessageBoxUi::GetBtnPos(0));
+			_guideState = GS_ACCEPT_QUEST;
+			m_bClickEvent = true;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1065_6:
+		{
+			//[bing] 结束引导
+			clear();
+			_guideState = GS_Valid;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1096_1:
+		{
+			switchGuideWeakOrStrong(GS_Strong);
+			eQuestState e = QuestMgr::getInstance()->getNowQuestState(1096);
+			if(e != QS_READY_FINISH && e != QS_GET)
+				return;
+			CLOSE_ALL_UI();
+			NPCTalkUi* npcUi = World::getInstance()->getNPCDialog();
+			if (npcUi)
+			{
+				if (npcUi->isShow())
+				{
+					npcUi->show(false);
+				}
+			}
+
+			//如果system界面显示为true 跳过点击头像引导
+			if(GET_UI(SystemUi,WCT_SystemUi)->showState() == true)
+			{
+				clear();
+				_guideState = GS_Valid;
+				m_nGuildeIdx++;
+				RunNewPlayerGuilde();
+				return;
+			}
+
+			//点击左上角角色头像
+			ArrForHead();
+			runArrowsAnim();
+			_guideState = GS_CLICK_HEAD;
+		}
+		break;
+	case GN_1096_2:
+		{
+			//点开坐骑
+			clear(false);
+			runArrowsAnim(GET_UI(SystemUi, WCT_SystemUi)->getBtnPos(SystemUi::BT_Ride));
+			_guideState = GS_OPENUI;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1096_3:
+		{
+			LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+			if (player)
+			{
+				unsigned int rideLv = player->getUseRideLv();
+				if (rideLv == 0 || rideLv == (unsigned int)-1)
+				{
+					MountUiFrame* pUI = getUiNodeByTag<MountUiFrame>(WCT_MountUi);
+					if(pUI)
+					{
+						const CCRect& rc = pUI->GetBtnPos(MountUiFrame::NT_RideBtn);
+						if (rc.getMinX() != 0 || rc.getMaxX() != 0)
+						{
+							clear(false);
+							runArrowsAnim(rc);
+							_guideState = GS_Valid;
+							m_nGuildeIdx++;
+							m_bClickEvent = true;
+							return;
+						}
+					}
+				}
+			}
+			_guideState = GS_Valid;
+			m_nGuildeIdx++;
+			m_bClickEvent = true;
+			RunNewPlayerGuilde();
+		}
+		break;
+	case GN_1096_4:
+		{
+			MountUiFrame* pUI = getUiNodeByTag<MountUiFrame>(WCT_MountUi);
+			if(pUI)
+			{
+				const CCRect& rc = pUI->GetBtnPos(MountUiFrame::NT_JinBiPeiYang);
+				if (rc.getMinX() != 0 || rc.getMaxX() != 0)
+				{
+					clear(false);
+					runArrowsAnim(rc);
+					_guideState = GS_OPUI_NIL_UI_MGR;
+					m_nGuildeIdx++;
+					return;
+				}
+			}
+			clear();
+			m_bClickEvent = true;
+			_guideState = GS_Valid;
+			m_nGuildeIdx++;
+		}
+		break;
+	case GN_1096_5:
+		{
+			LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+			if (player)
+			{
+				unsigned int roleID = player->getId();
+				std::stringstream ss;
+				ss<<"set"<<"_"<<roleID;
+
+				int tip = ClientCfg::getInstance()->getInt(ss.str(), "goldTip", 0);
+				if(tip == 0)
+				{
+					clear(false);
+					runArrowsAnim(MessageBoxUi::GetBtnPos(0));
+					_guideState = GS_Valid;
+					m_bClickEvent = true;
+					m_nGuildeIdx++;
+					return;
+				}
+			}
+			_guideState = GS_Valid;
+			m_bClickEvent = true;
+			m_nGuildeIdx++;
+			RunNewPlayerGuilde();
+		}
+		break;
+	case GN_1096_6:
+		{
+			//引导点击关闭按钮
+			MountUiFrame* pUI = getUiNodeByTag<MountUiFrame>(WCT_MountUi);
+			if(pUI)
+			{
+				const CCRect& rc = pUI->GetBtnPos(MountUiFrame::NT_CloseBtn);
+				if (rc.getMinX() != 0 || rc.getMaxX() != 0)
+				{
+					clear(false);
+					runArrowsAnim(rc);
+					_guideState = GS_CLOSEUI;
+					m_nGuildeIdx++;
+					return;
+				}
+			}
+		}
+		break;
+	case GN_1096_7:
+		{
+			//告个段落
+			clear();
+			switchGuideWeakOrStrong(GS_Weak);
+			_guideState = GS_ACCEPT_QUEST;
+			m_nGuildeIdx++;
+			IsNewGuide = false;
+		}
+		break;
+	}
+}
+
+void NewPlayerGuider::RunSubNewGuide()
+{
+	if(m_nSubGuildeIdx != SG_NULL)
+	{
+		switch(m_nSubGuildeIdx)
+		{
+		case SG_HeroWorship_1:
+			{
+				switchGuideWeakOrStrong(GS_Weak);
+				clear();
+				CLOSE_ALL_UI();
+				World::getInstance()->getNPCDialog()->show(false);
+				unsigned int completeID = QuestMgr::getInstance()->getComNPCID((unsigned short)SQ_HeroWorship);
+				if(IS_VALID(completeID))
+				{
+					++m_nSubGuildeIdx;
+					m_subGuideState = GS_OPENUI;
+					QuestMgr::getInstance()->onSelectRunNpc(completeID);
+					LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+					if(lp){
+						lp->setAttackMonsterId(0);//雕像资源为-1，会因为任务设置为自动攻击
+					}
+				}
+			}
+			break;
+		case SG_HeroWorship_2:
+			{
+				StatueWorshipUiLayer* layer = getUiNodeByTag<StatueWorshipUiLayer>(WCT_STATUEWORSHIP);
+				if(layer){
+					if(ArrForWorship(true)){
+						++m_nSubGuildeIdx;
+						m_subGuideState = GS_Worship;
+					}
+				}
+			}
+			break;
+		case SG_HeroWorship_3:
+			{
+				if(ArrForWorship(false)){
+					m_subGuideState = GS_Worship;
+					++m_nSubGuildeIdx;
+				}
+			}
+			break;
+		case SG_HeroWorship_4:
+			{
+				m_nSubGuildeIdx = SG_NULL;
+				m_subGuideState = GS_Valid;
+				clear();
+			}
+			break;
+		case SG_DevilInstance_1:
+			{
+				switchGuideWeakOrStrong(GS_Weak);
+				clear();
+				CLOSE_ALL_UI();
+				World::getInstance()->getNPCDialog()->show(false);
+				unsigned int completeID = QuestMgr::getInstance()->getComNPCID((unsigned short)SQ_DevilInstance);
+				if(IS_VALID(completeID))
+				{
+					m_subGuideState = GS_Devil;
+					++m_nSubGuildeIdx;
+					QuestMgr::getInstance()->onSelectRunNpc(completeID);
+				}	
+			}
+			break;
+		case SG_DevilInstance_2:
+			{
+				if(ArrForDevil()){
+					++m_nSubGuildeIdx;
+					m_subGuideState = GS_Devil;
+				}
+			}
+			break;
+		case SG_DevilInstance_3:
+			{
+				m_nSubGuildeIdx = SG_NULL;
+				m_subGuideState = GS_Valid;
+				clear();
+			}
+			break;
+		case SG_DrinkWine_1:
+			{
+				CLOSE_ALL_UI();
+				switchGuideWeakOrStrong(GS_Weak);
+				clear();
+				World::getInstance()->getNPCDialog()->show(false);
+				CCScene *worldScene = World::getInstance()->getScene();
+				kuaijieshiyongUiLayer *autoItemTip = dynamic_cast<kuaijieshiyongUiLayer*>(worldScene->getChildByTag(WCT_ItemAutoUseDaojuTip));
+				if (autoItemTip)
+				{
+					runArrowsAnim(autoItemTip->getUseBtnPos());
+					runArrowsAnim();
+					LabelFT* pLabel = getLabelTTF();
+					setTextClip(pLabel, 9559, ccp(_curRect.getMinX() - 100.0f, _curRect.getMinY() + 10), false, 0.6f, ccp(10.0f, -1.0f));
+					runAction();
+					m_subGuideState = GS_DrinkWine;
+				}
+				++m_nSubGuildeIdx;
+			}
+			break;
+		case SG_DrinkWine_2:
+			{
+				m_nSubGuildeIdx = SG_NULL;
+				m_subGuideState = GS_Valid;
+				clear();
+			}
+			break;
+		default:
+			{
+				m_nSubGuildeIdx = SG_NULL;
+				m_subGuideState = GS_Valid;
+				clear();
+			}
+			break;
+		}
+
+		return;
+	}
+}
+
+bool NewPlayerGuider::ArrForTaskTrace(unsigned short questid)
+{
+	CCRect rc;
+	if(!World::getInstance()->getTaskTraceUi()->getGuidePos(questid, rc))
+		return false;
+	CLOSE_ALL_UI();
+	clear(false);
+	World::getInstance()->getTaskTraceUi()->froceShowUi(true);
+	runArrowsAnim(rc);
+	//SetClip(rc);
+	m_nGuildeIdx++;
+
+	return true;
+}
+
+bool NewPlayerGuider::ArrForNPCTalk(unsigned short questid, bool bIsAccept)
+{
+	if(!World::getInstance()->getNPCDialog()->isShow())
+		return false;
+
+	NPCTalkUi *ui = World::getInstance()->getNPCDialog();
+	if(ui == NULL)
+		return false;
+
+	if(questid != ui->GetSelectID())
+		return false;
+
+	CCRect rc;
+	if(bIsAccept)
+	{
+		if(!ui->getAcceptBtnPos(rc))
+			return false;
+	}
+	else
+	{
+		if(!ui->getFinishBtnPos(rc))
+			return false;
+	}
+	CLOSE_ALL_UI();
+	clear(false);
+	runArrowsAnim(rc);
+	//SetClip(rc);
+	m_nGuildeIdx++;
+
+	return true;
+}
+
+void NewPlayerGuider::onBeginQuestRunpath( unsigned int questId, const CCPoint &pos )
+{
+	if(_guideState == GS_MOVE_PATH_START)
+	{
+		disableClick();
+		_questDestPos = pos;
+
+		_guideState = GS_MOVE_PATH_END;
+		return;
+	}
+}
+
+void NewPlayerGuider::ArrForHead()
+{
+	RoleHeadUi *ui = World::getInstance()->getRoleHeadUi();
+	if(ui != NULL)
+	{
+		clear(false);
+		CCRect rc = ui->getRoleHeadGuidePos();
+		SetClip(rc);
+		runArrowsAnim(rc);
+		m_nGuildeIdx++;
+		//点击头像
+		if (m_nGuildeIdx == GN_1011_2 || m_nGuildeIdx == GN_1018_2 || m_nGuildeIdx == GN_1024_3 || 
+			m_nGuildeIdx == GN_1031_3 || m_nGuildeIdx == GN_1028_3 || m_nGuildeIdx == GN_1064_2 ||
+			m_nGuildeIdx == GN_1019_2 || m_nGuildeIdx == GN_1015_2 || m_nGuildeIdx == GN_1096_2)
+		{
+			LabelFT* pLabel = getLabelTTF();
+			setTextClip(pLabel, 6038, ccp(_curRect.getMinX() + 200.0f, _curRect.getMinY() + 30), true, 0.6f, ccp(35.0f, -1.0f));
+			runAction();
+		}
+	}
+}
+
+bool NewPlayerGuider::ArrForWorship(bool isNorClick)
+{
+	StatueWorshipUiLayer* layer = getUiNodeByTag<StatueWorshipUiLayer>(WCT_STATUEWORSHIP);
+	if(layer)
+	{
+		clear(false);
+		CCRect rc;
+		if(!layer->getBtnRect(isNorClick, rc)){
+			return false;
+		}
+		runArrowsAnim(rc);
+		LabelFT* pLabel = getLabelTTF();
+		m_pInfoLabel->setVisible(true);
+		if(isNorClick){
+			setTextClip(pLabel, 9556, ccp(_curRect.getMinX() - 80, _curRect.getMinY() + 18), false, 0.6f, ccp(-10.0f, -1.0f));
+		}else{
+			if(m_pHand)
+			{
+				m_pHand->StopAction(false, true);
+				m_pHand->stopAllActions();
+				m_pHand->setVisible(false);
+			}
+			setTextClip(pLabel, 9557, ccp(_curRect.getMinX() - 80, _curRect.getMinY() + 18), false, 0.6f, ccp(-10.0f, -1.0f));
+		}
+		runAction();
+
+		return true;
+	}
+
+	return false;
+}
+
+bool NewPlayerGuider::ArrForDevil()
+{
+	if(!World::getInstance()->getNPCDialog()->isShow())
+		return false;
+
+	NPCTalkUi *ui = World::getInstance()->getNPCDialog();
+	if(ui == NULL)
+		return false;
+
+	CCRect rc;
+	if(!ui->getFubenOneBtnPos(rc))
+		return false;
+	CLOSE_ALL_UI();
+	clear(false);
+	runArrowsAnim(rc);
+	LabelFT* pLabel = getLabelTTF();
+	setTextClip(pLabel, 9558, ccp(_curRect.getMinX() - 100, _curRect.getMinY() + 50), false, 0.6f, ccp(-10.0f, -1.0f));
+	runAction();
+
+	return true;
+}
+
+void NewPlayerGuider::onMessgaeBoxOpen()
+{
+	if(_guideState == GS_OPUI_NIL_UI_MGR)
+	{
+		CCLOG("onMessgaeBoxOpen");
+		RunNewPlayerGuilde();
+	}
+}
+
+void NewPlayerGuider::AddFirstQuest()
+{
+	if(QuestMgr::getInstance()->getMainQuest() == 1000)
+	{
+		WelcomeUi *ui = WelcomeUi::create();
+		World::getInstance()->getScene()->addChild(ui, WZ_POPUI, WCT_WELCOMEUI);
+	}
+}
+
+void NewPlayerGuider::runArrowsMoveTo( const CCPoint &srcpos, const CCPoint &descpos )
+{
+	CCMoveTo *moveTo = CCMoveTo::create(0.0f, srcpos);
+	CCMoveTo *moveTo2 = CCMoveTo::create(2.0f, descpos);
+	CCAction *action = CCRepeatForever::create(CCSequence::createWithTwoActions(moveTo, moveTo2));
+
+	if(!m_pMoveHand)
+	{
+		m_pMoveHand = CCSprite::create();
+		m_pMoveHand->initWithSpriteFrame(GameActionNode::getFrameByName( "NewGuide_00002", "ICON", "png" ));
+		_node->addChild(m_pMoveHand, 10);
+	}
+	else
+		m_pMoveHand->setVisible(true);
+	m_pMoveHand->runAction(action);
+
+	_IsGuide = true;
+
+	_SkipButton->setVisible(true);
+
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+
+	CCSize cs = _SkipButton->getContentSize();
+	CCPoint cp = ccp(winSize.width - cs.width / 2 - 30, cs.height / 2 + 30);	//右下角
+	CCRect rc = CCRect(cp.x, cp.y, cs.width, cs.height);
+	//[bing] 如果_SkipButton位置和引导冲突要换位置
+	if(_curRect.intersectsRect(rc) == true)
+	{
+		//放左下角
+		cp = ccp(cs.width / 2 + 30, cs.height / 2 + 30);
+	}
+	_SkipButton->setPosition(cp);
+}
+
+void NewPlayerGuider::onBagItemAdd( f_item* pItem )
+{
+	if(_guideState != GS_ADD_ITEM)
+		return;
+
+	CCLOG("onBagItemAdd");
+	RunNewPlayerGuilde(pItem);
+}
+
+void NewPlayerGuider::SetClip(const CCRect& rc )
+{
+	if(pClip)
+		pClip->removeFromParentAndCleanup(true);
+
+	CCSize vSize = CCDirector::sharedDirector()->getVisibleSize();
+	pClip = CCNode::create();
+	pClip->setContentSize(ccp(vSize.width, vSize.height));
+
+	int nMinX = (int)rc.getMinX();
+	int nMinY = (int)rc.getMinY();
+	int nMaxX = (int)rc.getMaxX();
+	int nMaxY = (int)rc.getMaxY();
+
+	float fWidth = abs(nMinX);
+	float fHeight = vSize.height;
+	CCLayerColor* pLeft = CCLayerColor::create(ccc4(0, 0, 0, 128), fWidth, fHeight);
+	pLeft->setPosition(ccp(0.0f, 0.0f));
+	pClip->addChild(pLeft);
+
+	fWidth = nMaxX - nMinX;
+	fHeight = abs((int)vSize.height - nMaxY);
+	CCLayerColor* pTop = CCLayerColor::create(ccc4(0, 0, 0, 128), fWidth, fHeight);
+	pTop->setPosition(ccp(nMinX, nMaxY));
+	pClip->addChild(pTop);
+
+	fWidth = nMaxX - nMinX;
+	fHeight = abs(nMinY);
+	CCLayerColor* pMid = CCLayerColor::create(ccc4(0, 0, 0, 128), fWidth, fHeight);
+	pMid->setPosition(ccp(nMinX, 0.0f));
+	pClip->addChild(pMid);
+
+	fWidth = abs((int)vSize.width - nMaxX);
+	fHeight = vSize.height;
+	CCLayerColor* pRight = CCLayerColor::create(ccc4(0, 0, 0, 128), fWidth, fHeight);
+	pRight->setPosition(ccp(nMaxX, 0.0f));
+	pClip->addChild(pRight);
+
+	/*
+	CCSize vSize = CCDirector::sharedDirector()->getVisibleSize();
+	pClip = CCClippingNode::create();
+	pClip->setContentSize(ccp(vSize.width, vSize.height));
+	pClip->setInverted(true);
+	pClip->setAlphaThreshold(1.0f);
+	CCLayerColor* pBack = CCLayerColor::create(ccc4(0, 0, 0, 128));
+	pClip->addChild(pBack);
+
+	float fMaxX = rc.getMaxX();
+	float fMaxY = rc.getMaxY();
+	float fMinX = rc.getMinX();
+	float fMinY = rc.getMinY();
+	float fMidX = rc.getMidX();
+	float fMidY = rc.getMidY();
+
+	float fWidth = fMaxX - fMinX;
+	float fHeight = fMaxY - fMinY;
+
+	CCDrawNode* pFront = CCDrawNode::create();
+	ccColor4F yellow = {5, 5, 0, 5};
+	CCPoint rect[4] = { ccp(0, 0), ccp(0, fHeight), ccp(fWidth, fHeight), ccp(fWidth, 0) };
+
+	pFront->drawPolygon(rect, 4, yellow, 0, yellow);
+	pFront->setPosition(ccp(fMinX, fMinY));
+	pClip->setStencil(pFront);
+
+	//CCSpriteFrame* pFrame = PackageManager::getInstance()->getIconFrameByName("clip_null");
+	//CCSprite* pNodedef = CCSprite::create();
+	//pNodedef->initWithSpriteFrame(pFrame);
+	//pNodedef->setContentSize(CCSize(fMaxX, fMaxY));
+	//pNodedef->setPosition(ccp(fMidX, fMidY));
+	//pClip->setStencil(pNodedef);
+	*/
+
+	_node->addChild(pClip, 0);
+}
+
+void NewPlayerGuider::SetClip( CCPoint& cp1, CCPoint& cp2 )
+{
+	/*
+	if(pClip)
+	pClip->removeFromParentAndCleanup(true);
+
+	CCSize vSize = CCDirector::sharedDirector()->getVisibleSize();
+	pClip = CCClippingNode::create();
+	pClip->setContentSize(ccp(vSize.width, vSize.height));
+	pClip->setInverted(true);
+	pClip->setAlphaThreshold(1.0f);
+	CCLayerColor* pBack = CCLayerColor::create(ccc4(0, 0, 0, 128));
+	pClip->addChild(pBack);
+
+	CCDrawNode* pFront = CCDrawNode::create();
+	ccColor4F yellow = {1, 1, 0, 1};
+	pFront->drawSegment(cp1, cp2, 22, yellow);
+	pClip->setStencil(pFront);
+
+	_node->addChild(pClip, 0);
+	*/
+}
+
+void NewPlayerGuider::SetClip( const CCRect& rc1, const CCRect& rc2 )
+{
+	/*
+	if(pClip)
+	pClip->removeFromParentAndCleanup(true);
+
+	CCSize vSize = CCDirector::sharedDirector()->getVisibleSize();
+	pClip = CCClippingNode::create();
+	pClip->setContentSize(ccp(vSize.width / 2, vSize.height));
+	pClip->setInverted(true);
+	pClip->setAlphaThreshold(1.0f);
+	CCLayerColor* pBack = CCLayerColor::create(ccc4(0, 0, 0, 128), vSize.width / 2, vSize.height);
+	pClip->addChild(pBack);
+
+	float fMaxX = rc1.getMaxX();
+	float fMaxY = rc1.getMaxY();
+	float fMinX = rc1.getMinX();
+	float fMinY = rc1.getMinY();
+	float fMidX = rc1.getMidX();
+	float fMidY = rc1.getMidY();
+
+	float fWidth = fMaxX - fMinX;
+	float fHeight = fMaxY - fMinY;
+
+	CCDrawNode* pFront = CCDrawNode::create();
+	ccColor4F yellow = {1, 1, 0, 1};
+	CCPoint rect[4] = { ccp(0, 0), ccp(0, fHeight), ccp(fWidth, fHeight), ccp(fWidth, 0) };
+
+	pFront->drawPolygon(rect, 4, yellow, 0, yellow);
+	pFront->setPosition(ccp(fMinX, fMinY));
+	pClip->setStencil(pFront);
+
+	CCClippingNode* pClip2 = CCClippingNode::create();
+	pClip2->setContentSize(ccp(vSize.width / 2, vSize.height));
+	pClip2->setPositionX( vSize.width / 2 );
+	pClip2->setInverted(true);
+	pClip2->setAlphaThreshold(1.0f);
+	pBack = CCLayerColor::create(ccc4(0, 0, 0, 128));
+	pClip2->addChild(pBack);
+
+	fMaxX = rc2.getMaxX();
+	fMaxY = rc2.getMaxY();
+	fMinX = rc2.getMinX();
+	fMinY = rc2.getMinY();
+	fMidX = rc2.getMidX();
+	fMidY = rc2.getMidY();
+
+	fWidth = fMaxX - fMinX;
+	fHeight = fMaxY - fMinY;
+
+	pFront = CCDrawNode::create();
+	CCPoint rect2[4] = { ccp(0, 0), ccp(0, fHeight), ccp(fWidth, fHeight), ccp(fWidth, 0) };
+
+	pFront->drawPolygon(rect2, 4, yellow, 0, yellow);
+	pFront->setPosition(ccp(fMinX - vSize.width / 2, fMinY));
+	pClip2->setStencil(pFront);
+
+	pClip->addChild(pClip2, 0);
+	_node->addChild(pClip, 0);
+	*/
+}
+
+void NewPlayerGuider::SystemTipUIOpen()
+{
+	if(_guideState != GS_SYS_TIPS_OPEN)
+		return;
+
+	CCLOG("SystemTipUI Open");
+	RunNewPlayerGuilde();
+}
+
+NewPlayerGuider::~NewPlayerGuider()
+{
+
+}
+
+void NewPlayerGuider::onServerUpdateQuest(unsigned short questId/* = 0*/)
+{
+	switch(questId)
+	{
+	case 1002:
+		m_nGuildeIdx = GN_1002_8;
+		_guideState = GS_UPDATE_QUEST;
+		break;
+	default:
+		break;
+	}
+	if(_guideState != GS_UPDATE_QUEST)
+		return;
+
+	CCLOG("onServerUpdateQuest");
+	RunNewPlayerGuilde();
+}
+
+void NewPlayerGuider::SkipNewGuide()
+{
+	clear();
+	m_bClickEvent = false;
+	switch((eGuideNode)m_nGuildeIdx)
+	{
+		
+		//以下GN_xxx均为强引导时的id，强引导时才会出现跳过按钮
+	case GN_1000_3:
+	case GN_1000_4:
+		m_nGuildeIdx = (unsigned int)GN_1001_1;
+		_guideState = GS_NPC_TALK;
+		break;
+	case GN_1001_1:
+	case GN_1001_2:
+// 	case GN_1001_4:
+// 	case GN_1001_5:
+		m_nGuildeIdx = (unsigned int)GN_1002_1;
+		_guideState = GS_FINISH_QUEST;
+		break;
+	case GN_1002_3:
+	case GN_1002_4:
+	case GN_1002_5:
+	case GN_1002_6:
+	case GN_1002_7:
+	case GN_1002_8:
+	/*case GN_1002_10:*/
+		m_nGuildeIdx = (unsigned int)GN_1008_1;
+		_guideState = GS_FINISH_QUEST;
+		break;
+	case GN_1008_1:
+	case GN_1008_2:
+	case GN_1008_3:
+	case GN_1008_4:
+	case GN_1008_5:
+	case GN_1008_6:
+	case GN_1008_7:
+		{
+			m_nGuildeIdx = (unsigned int)GN_1011_1;
+			_guideState = GS_FINISH_QUEST;
+		}
+		break;
+	case GN_1011_1:
+	case GN_1011_2:
+	case GN_1011_3:
+	case GN_1011_4:
+	case GN_1011_5:
+	case GN_1011_6:
+		m_nGuildeIdx = (unsigned int)GN_1020_1;
+		_guideState = GS_ACCEPT_QUEST;
+		NewSkillTipUI::setSkill();
+		break;
+	case GN_1020_1:
+	case GN_1020_2:
+	case GN_1020_3:
+	case GN_1020_4:
+	case GN_1020_5:
+	case GN_1020_6:
+	case GN_1020_7:
+	case GN_1020_8:
+	case GN_1020_9:
+	case GN_1020_10:
+	case GN_1020_11:
+		m_nGuildeIdx = (unsigned int)GN_1034_1;
+		_guideState = GS_FINISH_QUEST;
+		break;
+	case GN_1034_2:
+	case GN_1034_3:
+	case GN_1034_4:
+	case GN_1034_5:
+	case GN_1034_6:
+	case GN_1034_7:
+	//case GN_1034_8:
+		m_nGuildeIdx = (unsigned int)GN_1013_1;
+		_guideState = GS_FINISH_QUEST;
+		break;
+	case GN_1013_1:
+	case GN_1013_2:
+	case GN_1013_3:
+	case GN_1013_4:
+		m_nGuildeIdx = (unsigned int)GN_1047_1;
+		m_holdQuestMap[1047] = GN_1047_1;
+		_guideState = GS_ACCEPT_QUEST;
+		break;
+	case GN_1047_1:
+	case GN_1047_2:
+	case GN_1047_3:
+	case GN_1047_4:
+	case GN_1047_5:
+	case GN_1047_6:
+	case GN_1047_7:
+	case GN_1047_8:
+	case GN_1047_9:
+	case GN_1047_10:
+		m_nGuildeIdx = (unsigned int)GN_1056_1;
+		_guideState = GS_ACCEPT_QUEST;
+		break;
+	case GN_1056_1:
+	case GN_1056_2:
+	case GN_1056_3:
+	case GN_1056_4:
+	case GN_1056_5:
+//	case GN_1056_6:
+// 	case GN_1056_7:
+// 	case GN_1056_8:
+// 	case GN_1056_9:
+		m_nGuildeIdx = (unsigned int)GN_1064_1;
+		_guideState = GS_ACCEPT_QUEST;
+		break;
+	case GN_1064_1:
+	case GN_1064_2:
+	case GN_1064_3:
+	case GN_1064_4:
+	case GN_1064_5:
+	case GN_1064_6:
+	case GN_1064_7:
+	case GN_1064_8:
+		m_nGuildeIdx = (unsigned int)GN_1096_1;
+		_guideState = GS_FINISH_QUEST;
+		break;
+	case GN_1096_1:
+	case GN_1096_2:
+	case GN_1096_3:
+	case GN_1096_4:
+	case GN_1096_5:
+	case GN_1096_6:
+	case GN_1096_7:
+		m_nGuildeIdx = (unsigned int)GN_1099_1;
+		_guideState = GS_ACCEPT_QUEST;
+		break;
+	case GN_1099_1:
+	case GN_1099_2:
+	case GN_1099_3:
+	case GN_1099_4:
+	case GN_1099_5:
+	case GN_1099_6:
+	case GN_1099_7:
+	case GN_1099_8:
+	case GN_1099_9:
+	case GN_1099_10:
+		m_nGuildeIdx = (unsigned int)GN_1119_1;		// 开启今日目标引导则为 GN_1103_1
+		_guideState = GS_ACCEPT_QUEST;
+		break;
+	//case GN_1103_1:												// 今日目标
+	//case GN_1103_2:
+	//case GN_1103_3:
+	//	m_nGuildeIdx = (unsigned int)GN_1119_1;
+	//	_guideState = GS_ACCEPT_QUEST;
+	//	break;
+	case GN_1119_1:
+	case GN_1119_2:
+	case GN_1119_3:
+	case GN_1119_4:
+	case GN_1119_5:
+	case GN_1119_6:
+	case GN_1119_7:
+	case GN_1119_8:
+	case GN_1119_9:
+		m_nGuildeIdx = (unsigned int)GN_1065_1;
+		_guideState = GS_Valid;
+		break;
+//以下为未使用
+////////////////////////////////////////////////////////////////////////////////////////////////
+	case GN_1012_1:
+	case GN_1012_2:
+	case GN_1012_3:
+	case GN_1012_4:
+		m_nGuildeIdx = (unsigned int)GN_1013_1;
+		_guideState = GS_SYS_TIPS_OPEN;
+		break;
+	case GN_1170_1:
+	case GN_1170_2:
+		m_nGuildeIdx = (unsigned int)GN_1015_1;
+		_guideState = GS_ACCEPT_QUEST;
+		break;
+	case GN_1015_1:
+	case GN_1015_2:
+	case GN_1015_3:
+	case GN_1015_4:
+	case GN_1015_5:
+	case GN_1015_6:
+	case GN_1015_7:
+	case GN_1015_8:
+		m_nGuildeIdx = (unsigned int)GN_1018_1;
+		_guideState = GS_ACCEPT_QUEST;
+		break;
+	case GN_1018_1:
+	case GN_1018_2:
+	case GN_1018_3:
+	case GN_1018_4:
+	case GN_1018_5:
+	case GN_1018_6:
+	case GN_1018_7:
+	case GN_1018_8:
+	case GN_1018_9:
+	case GN_1018_10:
+	case GN_1018_11:
+	case GN_1018_12:
+	case GN_1018_13:
+	case GN_1018_14:
+	case GN_1018_15:
+		m_nGuildeIdx = (unsigned int)GN_1019_1;
+		_guideState = GS_FINISH_QUEST;
+		break;
+	case GN_1019_1:
+	case GN_1019_2:
+	case GN_1019_3:
+	case GN_1019_4:
+	case GN_1019_5:
+	case GN_1019_6:
+		m_nGuildeIdx = (unsigned int)GN_1175_1;
+		_guideState = GS_FINISH_QUEST;
+		break;
+	case GN_1175_1:
+	case GN_1175_2:
+	case GN_1175_3:
+		m_nGuildeIdx = (unsigned int)GN_1024_1;
+		_guideState = GS_ACCEPT_QUEST;
+		break;
+	case GN_1024_1:
+	case GN_1024_2:
+	case GN_1024_3:
+	case GN_1024_4:
+	case GN_1024_5:
+	case GN_1024_6:
+	case GN_1024_7:
+	case GN_1024_8:
+	case GN_1024_10:
+		m_nGuildeIdx = (unsigned int)GN_1028_1;
+		_guideState = GS_ACCEPT_QUEST;
+		break;
+	case GN_1028_1:
+	case GN_1028_2:
+	case GN_1028_3:
+	case GN_1028_4:
+	case GN_1028_5:
+	case GN_1028_6:
+	case GN_1028_7:
+	case GN_1028_8:
+	case GN_1028_18:
+		m_nGuildeIdx = (unsigned int)GN_1029_1;
+		_guideState = GS_ACCEPT_QUEST;
+		break;
+	case GN_1029_1:
+	case GN_1029_2:
+	case GN_1029_3:
+	case GN_1029_4:
+	case GN_1029_5:
+		m_nGuildeIdx = (unsigned int)GN_1030_1;
+		_guideState = GS_ACCEPT_QUEST;
+		break;
+	case GN_1030_1:
+	case GN_1030_2:
+	case GN_1030_3:
+	case GN_1030_4:
+		m_nGuildeIdx = (unsigned int)GN_1031_1;
+		_guideState = GS_ACCEPT_QUEST;
+		break;
+	case GN_1031_1:
+	case GN_1031_2:
+	case GN_1031_3:
+	case GN_1031_4:
+	case GN_1031_5:
+	case GN_1031_7:
+	case GN_1031_8:
+		m_nGuildeIdx = (unsigned int)GN_1032_1;
+		_guideState = GS_ACCEPT_QUEST;
+		break;
+	case GN_1032_1:
+	case GN_1032_2:
+	case GN_1032_4:
+		//m_nGuildeIdx = (unsigned int)GN_1033_1;
+		_guideState = GS_ACCEPT_QUEST;
+		break;
+	case GN_1039_1:
+	case GN_1039_2:
+	case GN_1039_3:
+	case GN_1039_4:
+	case GN_1039_5:
+	case GN_1039_6:
+		m_nGuildeIdx = (unsigned int)GN_1046_1;
+		_guideState = GS_SYS_TIPS_OPEN;
+		break;
+
+	case GN_1046_1:
+	case GN_1046_2:
+	case GN_1046_3:
+	case GN_1046_4:
+	case GN_1046_5:
+	case GN_1046_6:
+		m_nGuildeIdx = (unsigned int)GN_1047_1;
+		_guideState = GS_SYS_TIPS_OPEN;
+		break;
+// 	case GN_1047_1:
+// 	case GN_1047_2:
+// 	case GN_1047_3:
+// 		m_nGuildeIdx = (unsigned int)GN_1048_1;
+// 		_guideState = GS_FINISH_QUEST;
+		break;
+	case GN_1048_1:
+	case GN_1048_2:
+	case GN_1048_3:
+		m_nGuildeIdx = (unsigned int)GN_1054_1;
+		_guideState = GS_FINISH_QUEST;
+		break;
+	case GN_1054_1:
+	case GN_1054_2:
+	case GN_1054_3:
+	case GN_1054_4:
+	case GN_1054_5:
+	case GN_1054_6:
+		m_nGuildeIdx = (unsigned int)GN_1064_1;
+		_guideState = GS_ACCEPT_QUEST;
+		break;
+// 	case GN_1064_1:
+// 	case GN_1064_2:
+// 	case GN_1064_3:
+// 	case GN_1064_4:
+// 	case GN_1064_5:
+// 	case GN_1064_8:
+// 		m_nGuildeIdx = (unsigned int)GN_1065_1;
+// 		_guideState = GS_ACCEPT_QUEST;
+// 		break;
+	case GN_1065_1:
+	case GN_1065_2:
+	case GN_1065_3:
+	case GN_1065_4:
+	case GN_1065_5:
+	case GN_1065_6:
+		m_nGuildeIdx = (unsigned int)GN_1065_6 + 1;
+		_guideState = GS_ACCEPT_QUEST;
+		break;
+	}
+	if (m_isStrongGuide)
+	{
+		switchGuideWeakOrStrong(GS_Weak);
+	}
+
+	DropDragDelegate::getInstance()->setDoubleClickEnble(true);
+	DropDragDelegate::getInstance()->setMoveDiffConEnble(true);
+	DropDragDelegate::getInstance()->setDragEnable(true);
+	DropDragDelegate::getInstance()->setClickEnble(true);
+}
+
+void NewPlayerGuider::onHookSet()
+{
+	if (_guideState != GS_HOOK_SET)
+		return;
+	CCLOG("onHookSet");
+	RunNewPlayerGuilde();
+}
+
+void NewPlayerGuider::onNpcChatOver()
+{
+	if (_guideState != GS_NPC_CHAT)
+		return;
+	RunNewPlayerGuilde();
+}
+
+void NewPlayerGuider::onTaskTraceUiShow( bool isShow )
+{
+	if (isShow || m_isStrongGuide)
+		return;
+	clear();
+}
+
+void NewPlayerGuider::onSubUiShow(bool isShow)
+{
+	if(isShow || m_isStrongGuide)
+		return;
+
+	m_nSubGuildeIdx = SG_NULL;
+	clear();
+}
+
+void NewPlayerGuider::onClickWorship(bool isNormalClick)
+{
+	if(m_subGuideState == GS_Worship && m_nSubGuildeIdx != SG_NULL)
+	{
+		RunSubNewGuide();
+	}
+}
+
+void NewPlayerGuider::onClickDevil()
+{
+	if(m_subGuideState == GS_Devil && m_nSubGuildeIdx != SG_NULL)
+	{
+		RunSubNewGuide();
+	}
+}
+
+void NewPlayerGuider::onClickDrinkWine()
+{
+	if(m_subGuideState == GS_DrinkWine && m_nSubGuildeIdx != SG_NULL)
+	{
+		RunSubNewGuide();
+	}
+}
+
+/* SystemTipUI */
+
+SystemTipUI* SystemTipUI::Init(const char* pPicName, CCPoint* point)
+{
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("SystemTipUiLayer", UiLayerLoader<SystemTipUI>::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode * node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "systemtipui.ccbi").c_str());
+	ccbReader->release();
+
+	if(node)
+	{
+		SystemTipUI* pUI = (SystemTipUI*)node;
+
+		std::string uiDir = CFGReader::instance()->get_profile_string("Art", "ICON", "");
+		std::string FullFileName = uiDir + "SingleUI/" + pPicName;
+		pUI->m_MainFrame->initWithFile(FullFileName.c_str());
+
+		World::getInstance()->getScene()->addChild(node, WZ_WaitLoading, WCT_SYSTEMTIPSUI);
+
+		NewPlayerGuider::getInstance()->SystemTipUIOpen();
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_29);
+		if (point)
+			pUI->m_pClickBtn->setPosition(*point);
+		else
+			pUI->m_pClickBtn->setPosition(ccp(220.0f, 38.0f));
+		return pUI;
+	}
+
+	return NULL;
+}
+
+void SystemTipUI::onExit()
+{
+	//CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&SystemTipUI::DestroySelf), this);
+	//CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&SystemTipUI::BeginFadeOut), this);
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+
+bool SystemTipUI::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	CCPoint framePoint = m_MainFrame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = m_MainFrame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		return true;
+	}else if (m_uFunction == 10)
+	{
+		this->removeFromParentAndCleanup(true);
+	}
+	return false;
+}
+
+void SystemTipUI::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -7, true);
+	m_MainFrame = (CCSprite*)getChildByTag(0);
+
+	m_pClickBtn = CCControlButton::create();
+	m_pClickBtn->setBackgroundSpriteFrameForState(PackageManager::getInstance()->getIconFrameByName("SingleUI/ng_iknow_l"), CCControlStateSelected);
+	m_pClickBtn->setBackgroundSpriteFrameForState(PackageManager::getInstance()->getIconFrameByName("SingleUI/ng_iknow_d"), CCControlStateNormal);
+	m_pClickBtn->setPreferredSize(CCSize(189, 54));
+
+	m_pClickBtn->addTargetWithActionForControlEvents( this, cccontrol_selector(SystemTipUI::onCloseBtnPressed), CCControlEventTouchUpInside );
+	m_pClickBtn->setPosition(ccp(m_MainFrame->getContentSize().width / 2, 38.0f));
+	m_pClickBtn->setTouchPriority(-8);
+	m_MainFrame->addChild(m_pClickBtn, 100);
+
+	//CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&SystemTipUI::BeginFadeOut), this, 5.0f, false);
+}
+
+void SystemTipUI::FadeOutFrame(float fTick)
+{
+	//渐隐
+	CCActionInterval* FadeOut = CCFadeOut::create(fTick);
+	m_MainFrame->runAction(FadeOut);
+
+	CCArray *ChildrenArr = m_MainFrame->getChildren();
+	if(ChildrenArr)
+	{
+		for(size_t i = 0; i < ChildrenArr->count(); ++i)
+		{
+			CCSprite* pItem = dynamic_cast<CCSprite*>(ChildrenArr->objectAtIndex(i));
+			if(pItem)
+			{
+				CCActionInterval* FadeOut = CCFadeOut::create(fTick);
+				pItem->runAction(FadeOut);
+			}
+			else
+			{
+				ItemNode* pItemNode = dynamic_cast<ItemNode*>(ChildrenArr->objectAtIndex(i));
+				if(pItemNode)
+				{
+					pItemNode->FadeItemNode(fTick);
+				}
+			}
+		}
+	}
+
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&SystemTipUI::DestroySelf), this, fTick, false);
+}
+
+void SystemTipUI::DestroySelf( float fdt )
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&SystemTipUI::DestroySelf), this);
+	removeFromParentAndCleanup(true);
+}
+
+void SystemTipUI::BeginFadeOut( float fdt )
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&SystemTipUI::BeginFadeOut), this);
+	FadeOutFrame(0.3);
+}
+
+cocos2d::extension::SEL_CCControlHandler SystemTipUI::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+void SystemTipUI::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	switch(m_uFunction)
+	{
+// 	case 0:
+// 		//完成任务初试 开启坐骑
+// 		//OPEN_UI(WCT_MountUi);
+// 		break;
+// 	case 1:
+// 		//完成考试任务 开启送花，双修
+// 		AreaPlayerUI::Init();
+// 		break;
+// 	case 2:
+// 		//行会介绍
+// 		OPEN_UI(WCT_GuildListUi);
+// 		break;
+// 	case 3:
+// 		{
+// 			//师徒介绍
+// 			AreaPlayerUI* pUI = AreaPlayerUI::Init();
+// 			LocalPlayer* pLP = RoleManager::getInstance()->getLocalPlayer();
+// 			if(pUI)
+// 			{
+// 				if(pLP->getAttribute(RA_SEX) == 0)
+// 					pUI->SetTitleImgFile("teacherui_findgoodteacher");
+// 				else
+// 					pUI->SetTitleImgFile("teacherui_findbutteacher");
+// 			}
+// 		}
+// 		break;
+// 	case 4:
+// 		//饮酒介绍
+// 		//OPEN_UI(WCT_HuoyueUi);
+// 		break;
+// 	case 5:
+// 		//武学介绍
+// 		//OPEN_UI(WCT_CangJingGeUi);
+// 		break;
+// 	case 6:
+// 		//竞技场介绍
+// 		OPEN_UI(WCT_ARENAMAINUI);
+// 		break;
+// 	case 7:
+// 		//摆摊介绍
+// 		break;
+// 
+// 	case 8:
+// 		//装备融合介绍
+// 		break;
+// 	case 9:
+// 		//开启装备升星
+// 		break;
+	case 10:
+		//摇杆攻击引导
+		NewPlayerGuider::getInstance()->RunNewPlayerGuilde();
+		break;
+	}
+
+	setVisible(false);
+	removeFromParentAndCleanup(true);
+}
+
+cocos2d::CCRect SystemTipUI::GetBtnPos()
+{
+	CCPoint cp = m_pClickBtn->convertToWorldSpace(ccp(0.0f, 0.0f));
+	CCSize cs = m_pClickBtn->getContentSize();
+	return CCRect(cp.x, cp.y, cs.width, cs.height);
+}
+
+
+/* NewSkillTipUI */
+
+SkillData* NewSkillTipUI::m_skilldata = NULL;
+
+NewSkillTipUI* NewSkillTipUI::Init( SkillData *pSkillData )
+{
+	if(!pSkillData)
+		return NULL;
+	int id = pSkillData->proto->id;
+	if (1010201 == id || 1020201 == id || 1030201 == id)
+	{
+		m_skilldata = pSkillData;
+		return NULL;
+	}
+	//背景图
+	std::string name = "NewSkillTipBG";
+	CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(name.c_str());
+	if(spriteFrame == NULL)
+	{
+		std::string fileName = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "SingleUI/" + name + std::string(".png");
+		CCImage image;
+		image.initWithImageFile(fileName.c_str());
+		CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addUIImage(&image, name.c_str());
+		spriteFrame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(spriteFrame, name.c_str());
+	}
+
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+
+	NewSkillTipUI* pNewSkillTipUI = NewSkillTipUI::create();
+	pNewSkillTipUI->setContentSize(winSize);
+	pNewSkillTipUI->setPosition(ccp(0, 0));
+
+	pNewSkillTipUI->m_pBGSprite = CCSprite::createWithSpriteFrame(spriteFrame);
+	pNewSkillTipUI->m_pBGSprite->setPosition(ccp(winSize.width / 2, winSize.height / 2));
+	pNewSkillTipUI->addChild(pNewSkillTipUI->m_pBGSprite);
+
+	//122, 56
+	TTFConfig config;
+	config.fontFilePath=  FT_FONTFACE;
+	config.fontSize = 14;
+	config.outlineSize = 1;
+
+	pNewSkillTipUI->m_pName = LabelFT::createWithTTF(config,"");
+	pNewSkillTipUI->m_pName->setPosition(ccp(137.0f, 28.0f));
+	pNewSkillTipUI->m_pName->setString(pSkillData->proto->skillName.c_str());
+	pNewSkillTipUI->m_pName->setTextColor(Helper::converColor3B_2_4B(ccc3(0, 255, 0)));
+	pNewSkillTipUI->m_pBGSprite->addChild(pNewSkillTipUI->m_pName);
+
+	CCSpriteFrame *frame = PackageManager::getInstance()->getIconFrameByName(pSkillData->proto->iconFrameName);
+	pNewSkillTipUI->m_pSkillSprite = CCSprite::createWithSpriteFrame(frame);
+	pNewSkillTipUI->m_pSkillSprite->setPosition(ccp(winSize.width / 2 - 97, winSize.height / 2));
+	pNewSkillTipUI->addChild(pNewSkillTipUI->m_pSkillSprite);
+
+	pNewSkillTipUI->m_nSkillIndex = pSkillData->proto->orderingRule;
+	pNewSkillTipUI->m_isFly	= pSkillData->proto->isAtive == 1 ? true: false;
+	World::getInstance()->getScene()->addChild(pNewSkillTipUI, WZ_MESSAGEBOX);
+	FadeInFrameUI(pNewSkillTipUI, 0.3f, 1);
+
+	pNewSkillTipUI->m_byState = 0;
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&NewSkillTipUI::doEvent), pNewSkillTipUI, 3.3f, false);
+
+	return NULL;
+}
+
+void NewSkillTipUI::onExit()
+{
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("NewSkillTipBG");
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&NewSkillTipUI::doEvent), this);
+	CCLayer::onExit();
+}
+
+void NewSkillTipUI::doEvent( float fDT )
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&NewSkillTipUI::doEvent), this);
+
+	if(!m_isFly)
+	{ 
+	   m_byState++;
+	   ShortCutUiLayer *layer = getUiNodeByTag<ShortCutUiLayer>(WCT_ShorCutUi);
+	   if (layer)
+			layer->stopAllEffectAction();	 
+	}
+
+	switch(m_byState)
+	{
+		//[bing] 飞向技能快捷栏位1
+	case 0:
+		{
+			//渐隐背景层
+			FadeOutFrameUI(m_pBGSprite, 0.3f);
+
+			m_targetidx = 0;
+			for(; m_targetidx < MAX_SKILL_USE_NUM; ++m_targetidx)
+			{
+				if(GET_UI(ShortCutUi, WCT_ShorCutUi)->GetSkillId(m_targetidx) == 0)
+					break;
+			}
+			m_targetidx = m_targetidx == MAX_SKILL_USE_NUM ? rand() % MAX_SKILL_USE_NUM : m_targetidx;
+
+			const CCRect& rc = GET_UI(ShortCutUi, WCT_ShorCutUi)->GetSkillBtnPos(m_targetidx);
+			CCPoint cp = ccp(/*(rc.getMaxX() - rc.getMinX()) / 2 +*/ rc.getMidX(), /*(rc.getMaxY() - rc.getMinY()) / 2 +*/ rc.getMidY());
+
+			CCActionInterval* moveto = CCMoveTo::create(1.5, cp);
+			m_pSkillSprite->runAction(moveto);
+			m_byState++;
+
+			CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&NewSkillTipUI::doEvent), this, 1.5f, false);
+		}
+
+		break;
+		//[bing] 渐隐该UI
+	case 1:
+		{
+			//[bing] 设置技能ID到新技能
+
+			GET_UI(ShortCutUi, WCT_ShorCutUi)->SetSkillId(m_targetidx,m_nSkillIndex - 1);
+
+			m_byState++;
+			m_pBGSprite->setVisible(false);
+			FadeOutFrameUI(this, 0.3);
+			CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&NewSkillTipUI::doEvent), this, 0.4f, false);
+		}
+		break;
+		//关闭该界面
+	case 2:
+		removeFromParent();
+		break;
+	}
+}
+
+void NewSkillTipUI::setSkill()
+{
+	if (m_skilldata == NULL)
+		return;
+	if (IS_UI_OPEN(WCT_ShorCutUi))
+	{
+		GET_UI(ShortCutUi, WCT_ShorCutUi)->SetSkillId(0, m_skilldata->proto->orderingRule - 1);
+	}
+	m_skilldata = NULL;
+}
+
+
+/* BattleValUpUI */
+
+BattleValUpUI* BattleValUpUI::Init( int nBattleVal )
+{
+	BattleValUpUI* pUI = dynamic_cast<BattleValUpUI*>(World::getInstance()->getScene()->getChildByTag(WCT_ZHAN_DOU_LI));
+	if(pUI != NULL)
+	{
+		return NULL;
+		//先移除旧的
+		pUI->removeFromParent();
+	}
+
+	//背景图
+	std::string name = "BattleValUp";
+	CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(name.c_str());
+	if(spriteFrame == NULL)
+	{
+		std::string fileName = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "SingleUI/" + name + std::string(".png");
+		CCImage image;
+		image.initWithImageFile(fileName.c_str());
+		CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addUIImage(&image, name.c_str());
+		spriteFrame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(spriteFrame, name.c_str());
+	}
+
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+
+	BattleValUpUI* pBattleValUpUI = BattleValUpUI::create();
+	pBattleValUpUI->setContentSize(winSize);
+	pBattleValUpUI->setPosition(ccp(0, 0));
+
+	pBattleValUpUI->m_pBGSprite = CCSprite::createWithSpriteFrame(spriteFrame);
+	pBattleValUpUI->m_pBGSprite->setPosition(ccp(winSize.width / 2, 131.0f));
+	pBattleValUpUI->addChild(pBattleValUpUI->m_pBGSprite);
+
+	pBattleValUpUI->m_pValLabel = CCLabelBMFont::create("", fntName.c_str(), -1, kCCTextAlignmentLeft);
+	pBattleValUpUI->m_pValLabel->setPosition(ccp(200.0f, 35.0f));
+	pBattleValUpUI->m_pValLabel->setAnchorPoint(ccp(0.0f, 0.5f));
+	pBattleValUpUI->m_nNowBattleValue = 0;
+	pBattleValUpUI->m_nUpValue = nBattleVal;
+	pBattleValUpUI->m_pBGSprite->addChild(pBattleValUpUI->m_pValLabel);
+
+	World::getInstance()->getScene()->addChild(pBattleValUpUI, WZ_MESSAGEBOX, WCT_ZHAN_DOU_LI);
+	FadeInFrameUI(pBattleValUpUI, 0.3f, 1);
+	pBattleValUpUI->m_byState = 0;
+
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&BattleValUpUI::doEvent), pBattleValUpUI, 0.3f, false);
+
+	return NULL;
+}
+
+void BattleValUpUI::onExit()
+{
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFramesFromTexture(m_pBGSprite->getTexture());
+	unscheduleAllSelectors();
+	CCLayer::onExit();
+}
+
+void BattleValUpUI::doEvent( float fDT )
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&BattleValUpUI::doEvent), this);
+
+	switch(m_byState)
+	{
+	case 0:
+		{
+			m_nLessNum = 0;
+			int nTmpValue = m_nUpValue;
+			int i = 1;
+			do 
+			{
+				m_BattleValueList.push_front(nTmpValue % 10);
+				nTmpValue /= 10;
+				i *= 10;
+				m_nLessNum++;
+			} while ( i <= m_nUpValue );
+			schedule(schedule_selector(BattleValUpUI::update), 0.1f);
+		}
+		break;
+	case 1:
+		{
+			FadeOutFrameUI(m_pBGSprite, 1.3f);
+			m_byState = 2;
+			CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&BattleValUpUI::doEvent), this, 1.3f, false);
+		}
+		break;
+	case 2:
+		{
+			removeFromParentAndCleanup(true);
+		}
+		break;
+	}
+}
+
+void BattleValUpUI::update( float fDT )
+{
+	int nBSize = (int)m_BattleValueList.size();
+	if(nBSize == 0)
+	{
+		unschedule(schedule_selector(BattleValUpUI::update));
+		m_byState = 1;
+		doEvent(0.0f);
+		return;
+	}
+	//int nValue = 0;
+	unsigned char* pAdd = &m_BattleValueList.back();
+	while(*pAdd == 0)
+	{
+		m_BattleValueList.pop_back();
+		if(m_BattleValueList.size() == 0)
+		{
+			unschedule(schedule_selector(BattleValUpUI::update));
+			m_byState = 1;
+			doEvent(0.0f);
+			return;
+		}
+		pAdd = &m_BattleValueList.back();
+		nBSize -= 1;
+	}
+
+	*pAdd -= 1;
+	m_nNowBattleValue += ((int)pow( 10.0, (m_nLessNum - nBSize) ));
+	std::ostringstream ostr;
+	ostr << m_nNowBattleValue;
+	m_pValLabel->setString(ostr.str().c_str());
+}
+
+/* AreaPlayerUI */
+AreaPlayerUI* AreaPlayerUI::Init()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["TeacherUiLayer"] = UiLayerLoader<AreaPlayerUI>::loader();
+	std::set<std::string> _loadSpriteSheet;
+	CCNode* node = readUiFromCCBI("teacherui", nodeLoaders, _loadSpriteSheet);
+
+	/*
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("TeacherUiLayer", UiLayerLoader<AreaPlayerUI>::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode * node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "teacherui.ccbi").c_str());
+	ccbReader->release();
+	*/
+	AreaPlayerUI* pUI = NULL;
+	if(node)
+	{
+		pUI = (AreaPlayerUI*)node;
+		pUI->m_loadSpriteSheet = _loadSpriteSheet;
+		UiResourceMgr::getInstance()->retainPlistFile(pUI->m_loadSpriteSheet);
+
+		//若周围一个人都没有就不打开界面了
+		if(pUI->UpdatePlayer() != 0)
+			World::getInstance()->getScene()->addChild(node, WZ_MESSAGEBOX, WCT_AREA_PLAYER_UI);
+		else
+		{
+			//UiResourceMgr::getInstance()->releasePlistFile(_loadSpriteSheet);
+			//pUI->onExit();
+			//CC_SAFE_DELETE(pUI);
+			//pUI->release();
+			World::getInstance()->getScene()->addChild(pUI, WZ_MESSAGEBOX, WCT_AREA_PLAYER_UI);
+			pUI->removeFromParent();
+			pUI = NULL;
+		}
+	}
+
+	NewPlayerGuider::getInstance()->onMessgaeBoxOpen();
+
+	return pUI;
+}
+
+void AreaPlayerUI::onExit()
+{
+	UiResourceMgr::getInstance()->releasePlistFile(m_loadSpriteSheet);
+	CCLayer::onExit();
+}
+
+cocos2d::extension::SEL_CCControlHandler AreaPlayerUI::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", AreaPlayerUI::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOneKeyAddFriendBtnPressed", AreaPlayerUI::onOneKeyAddFriendBtnPressed);
+	return NULL;
+}
+
+void AreaPlayerUI::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_pTitleImg = (CCSprite*)getChildByTag(0)->getChildByTag(0);
+	_playerlist = (CCLayer*)getChildByTag(0)->getChildByTag(1);
+	_playerlist->setPositionX( _playerlist->getPositionX() - 20.0f );
+	//_itemScrollView = createScrollViewWithContent(pPlayerLayer);
+
+	//_itemContent = CCNode::create();
+	//_itemScrollView->setContainer(_itemContent);
+
+	//pPlayerLayer->addChild(_itemScrollView);
+}
+
+int AreaPlayerUI::UpdatePlayer()
+{
+	float fY = _playerlist->getContentSize().height;
+	fY += 5.0f;
+
+	//遍历玩家视野范围内的玩家信息
+	int count = 0;
+	RoleManager::RoleMap tmpRoleMap;
+	tmpRoleMap = RoleManager::getInstance()->getAllRemotePlayer();
+	RoleManager::RoleMap::iterator iter = tmpRoleMap.begin();
+	char vStr[128];
+	for(;iter!= tmpRoleMap.end(); ++iter)
+	{
+		Role* tmpRole = iter->second;
+		if (!tmpRole)
+			continue;
+
+		if(count == 5)
+			break;
+
+		m_vecRoleID.push_back(tmpRole->getId());
+
+		fY -= 22.0f;
+		//玩家名字
+		CCLabelTTF* pName = CCLabelTTF::create();
+		pName->setPosition(ccp(85.0f, fY));
+		pName->setFontSize(20.0f);
+		pName->setColor(ccc3(0, 255, 0));
+		memset(vStr, 0, sizeof(char) * 128);
+		Utf16ToUtf8(tmpRole->getName(), vStr, 128, 0);
+		pName->setString(vStr);
+		_playerlist->addChild(pName);
+		//职业
+		CCLabelTTF* pJob = CCLabelTTF::create();
+		pJob->setPosition(ccp(178.0f, fY));
+		pJob->setFontSize(20.0f);
+		pJob->setColor(ccc3(238, 238, 17));
+		switch((EClassType)(tmpRole->getAttribute(RA_ROLETYPE)))
+		{
+		case EV_Warrior:			// 战士
+			pJob->setString(GET_STR(8).c_str());
+			break;
+		case EV_Mage:			// 法师
+			pJob->setString(GET_STR(9).c_str());
+			break;
+		case EV_Taoist:		// 道士
+			pJob->setString(GET_STR(10).c_str());
+			break;
+		}
+		_playerlist->addChild(pJob);
+		//等级
+		CCLabelTTF* pLevel = CCLabelTTF::create();
+		pLevel->setPosition(ccp(232.0f, fY));
+		pLevel->setFontSize(20.0f);
+		pLevel->setString(CCString::createWithFormat("%d", tmpRole->getLevel())->getCString());
+		_playerlist->addChild(pLevel);
+		//性别
+		CCLabelTTF* pSex = CCLabelTTF::create();
+		pSex->setPosition(ccp(288.0f, fY));
+		pSex->setFontSize(20.0f);
+		if(tmpRole->getAttribute(RA_SEX) == 0)
+			pSex->setString("\xE5\xA5\xB3");
+		else
+			pSex->setString("\xE7\x94\xB7");
+		_playerlist->addChild(pSex);
+
+		count++;
+	}//end for
+
+	return count;
+}
+
+void AreaPlayerUI::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	removeFromParent();
+}
+
+void AreaPlayerUI::onOneKeyAddFriendBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if(m_vecRoleID.size() == 0)
+		return;
+	size_t nVecSize = m_vecRoleID.size();
+	for(size_t i = 0; i < nVecSize; ++i)
+	{
+		SocialMgr::getInstance()->onAddFriend(m_vecRoleID[i]);
+	}
+}
+
+cocos2d::CCRect AreaPlayerUI::GetBtnPos( int nTag )
+{
+	CCPoint cp = getChildByTag(0)->getChildByTag(nTag)->convertToWorldSpace(ccp(0.0f, 0.0f));
+	CCSize cs = getChildByTag(0)->getChildByTag(nTag)->getContentSize();
+	return CCRect(cp.x, cp.y, cs.width, cs.height);
+}
+
+void AreaPlayerUI::SetTitleImgFile( const char* pFile )
+{
+	_pTitleImg->initWithSpriteFrameName(pFile);
+}
+
+
+ChangeMapRemindUI* ChangeMapRemindUI::remindUI_init( const std::string &mapName )
+{
+	if(mapName.empty())
+		return NULL;
+	std::string bgName = "ng_mapnameremind";
+	CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(bgName.c_str());
+	if(spriteFrame == NULL)
+	{
+		std::string fileName = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "SingleUI/" + bgName + std::string(".png");
+		CCImage image;
+		image.initWithImageFile(fileName.c_str());
+		CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addUIImage(&image, bgName.c_str());
+		spriteFrame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(spriteFrame, bgName.c_str());
+	}
+
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+
+	ChangeMapRemindUI* pUI = ChangeMapRemindUI::create();
+	pUI->setContentSize(winSize);
+	pUI->setPosition(ccp(0, 0));
+
+	pUI->m_pBGSprite = CCSprite::createWithSpriteFrame(spriteFrame);
+	pUI->m_pBGSprite->setPosition(ccp(winSize.width / 2, winSize.height / 2 + 129));
+	pUI->addChild(pUI->m_pBGSprite);
+
+	TTFConfig config;
+	config.fontFilePath=  FT_FONTFACE;
+	config.fontSize = 20;
+	config.outlineSize = 1;
+
+	pUI->m_pMapName = LabelFT::createWithTTF(config,"");
+	pUI->m_pMapName->setPosition(ccp(118.0f, 14.0f));
+	pUI->m_pMapName->setAnchorPoint(ccp(0.5f,0.5f));
+	pUI->m_pMapName->setString(mapName.c_str());
+
+	int mapId = MapManager::getInstance()->getCurMapId();
+	//如果在安全地图
+	if(MapManager::getInstance()->mapDangerousValue(mapId) == Map_Safe)
+	{
+		pUI->m_pMapName->setTextColor(Helper::converColor3B_2_4B(ccc3(0x3f,0xd4,0x16)));
+	}
+	//如果在危险地图
+	else if(MapManager::getInstance()->mapDangerousValue(mapId) == Map_NoSafe)
+	{
+		//红色
+		int color = 0xff0000;
+		int r = (color >> 16) & 0xff;
+		int g = (color >> 8) & 0xff;
+		int b = color & 0xff;
+		pUI->m_pMapName->setTextColor(Helper::converColor3B_2_4B(ccc3(r, g,b)));
+	}
+	//否则为PK地图
+	else if(MapManager::getInstance()->mapDangerousValue(mapId) == Map_PK)
+	{
+		pUI->m_pMapName->setTextColor(Helper::converColor3B_2_4B(ccc3(0xe5, 0xc0, 0x04)));
+	}
+	pUI->m_pBGSprite->addChild(pUI->m_pMapName);
+
+	pUI->m_byState = 0;
+	World::getInstance()->getScene()->addChild(pUI, WZ_MESSAGEBOX);
+	FadeInFrameUI(pUI, 0.3f, 1);
+
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&ChangeMapRemindUI::doEvent), pUI, 3.3f, false);
+
+	return NULL;
+}
+
+void ChangeMapRemindUI::onExit()
+{
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("ng_mapnameremind");
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&ChangeMapRemindUI::doEvent), this);
+	CCLayer::onExit();
+}
+
+void ChangeMapRemindUI::doEvent( float ft )
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&ChangeMapRemindUI::doEvent), this);
+	switch(m_byState)
+	{
+	case 0:
+		{
+			FadeOutFrameUI(m_pBGSprite, 0.3f);
+			m_byState++;
+
+			CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&ChangeMapRemindUI::doEvent), this, 2.5f, false);
+		}
+		break;
+	case 1:
+		{
+			m_byState++;
+			m_pBGSprite->setVisible(false);
+			FadeOutFrameUI(this, 0.3);
+			CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&ChangeMapRemindUI::doEvent), this, 0.5f, false);
+		}
+		break;
+	case 2:
+		removeFromParent();
+		break;
+	}
+}

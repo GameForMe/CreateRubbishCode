@@ -1,0 +1,491 @@
+#include "RebateUi.h"
+#include "World.h"
+#include "CfgReader.h"
+#include "UiResourceMgr.h"
+#include "ChongZhiActivityFarmeUI.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "BaseDefine.h"
+#include "SQLCommand.h"
+#include "SQLTable.h"
+#include "DBMgr.h"
+#include "ItemNode.h"
+#include "PackageManager.h"
+#include "RewardMgr.h"
+#include "GameActionNode.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "StringMgr.h"
+#include "RebateMgr.h"
+#include "NoticeLayer.h"
+
+RebateUi * RebateUi::getInstance()
+{
+	static RebateUi instance;
+	return &instance;
+}
+
+RebateUi::RebateUi()
+{
+
+}
+
+RebateUi::~RebateUi()
+{
+
+}
+
+void RebateUi::open()
+{
+	if(isOpen())
+		return;
+
+	ChongZhiActivityFarmeUILayer *uiLayer = GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer();
+	if(uiLayer != NULL)
+	{
+		CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+		ccNodeLoaderLibrary->registerCCNodeLoader("RebateUiLayer", RebateUiLoader::loader());
+		cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+		CCNode *node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "rebateui.ccbi").c_str());
+		_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+		UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+		ccbReader->release();
+		if(node != NULL) {
+			node->setTag(CZA_XiaoFeiFanLi);
+			uiLayer->getChildByTag(0)->getChildByTag(0)->addChild(node,10);
+		}
+	}
+}
+
+void RebateUi::close()
+{
+	if(!isOpen())
+		return;
+
+	ChongZhiActivityFarmeUILayer *uiLayer = GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->getChildByTag(0)->getChildByTag(0)->removeChildByTag(CZA_XiaoFeiFanLi);
+	}
+
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+}
+
+bool RebateUi::isOpen()
+{
+	return (getUiLayer() != NULL);
+}
+
+RebateUiLayer * RebateUi::getUiLayer()
+{
+	ChongZhiActivityFarmeUILayer *uiLayer = GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer();
+	if(uiLayer != NULL)
+	{
+		RebateUiLayer *uiNode = dynamic_cast<RebateUiLayer*>(uiLayer->getChildByTag(0)->getChildByTag(0)->getChildByTag(CZA_XiaoFeiFanLi));
+		if(uiNode != NULL)
+			return uiNode;
+	}
+	return NULL;
+}
+
+void RebateUi::updateDisplay()
+{
+/*
+	JuhuasuanUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateData();
+	}*/
+	RebateUiLayer* uiLayer = this->getUiLayer();
+	if (uiLayer != NULL)
+		uiLayer->updateUiDisplay();
+}
+
+void RebateUi::setVisible(bool isVisible)
+{
+	if (isOpen())
+	{
+		getUiLayer()->setVisible(isVisible);
+		getUiLayer()->setTouchEnabled(isVisible);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler RebateUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler RebateUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChongZhiBtnPressed", RebateUiLayer::onChongZhiBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRechargeRewaredBtnPressed", RebateUiLayer::onRechargeRewaredBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHelp", RebateUiLayer::onHelp);
+	return NULL;
+}
+
+bool RebateUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	//CCPoint uiPoint = _uiBgSp->convertTouchToNodeSpace(pTouch);
+	//const CCSize uiSize = _uiBgSp->getContentSize();
+	//CCRect uiRect(0.f, 0.f, uiSize.width, uiSize.height);
+	//if (uiRect.containsPoint(uiPoint))						//点击到界面内
+	//{
+	//	return false;
+	//}
+	//if (isTouchOnNodeContent(_content,pTouch))
+	//{
+	//	return false;
+	//}
+
+	if(isTouchOnNodeContent(_containNode, pTouch))
+	{
+		return true;
+	}
+	else
+	{
+		CLOSE_UI(WCT_ChongZhiActivityFarmeUI);//关闭充值活动界面
+		return false;
+	}
+	return true;
+}
+
+void RebateUiLayer::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (isTouchOnNodeContent(_content,pTouch))
+	{
+		for (int i = 0; i < 5; ++i)
+		{
+			if(isTouchOnNodeContent(_rechargeItem[i]->_uiFrame,pTouch))
+			{
+				_rechargeItem[i]->_uiFrame->ccTouchEnded(pTouch,pEvent);
+			}
+		}
+	}
+}
+
+void RebateUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_nNeedYB = 0;
+	m_nCostYB = 0;
+	m_cRewardIdx = 0;
+	_itemNodeCount = 0;
+	m_bCanGetReward = true;
+	memset(_rechargeItem, 0, sizeof(_rechargeItem));
+	m_nCostYB = PackageManager::getInstance()->GetToalConsumeYB();
+	m_nNeedYB = PackageManager::getInstance()->getConsumeRewardNeedCost(0);		//用来记录领奖需要消费掉的元宝
+	_uiBgSp = dynamic_cast<CCSprite*>(this->getChildByTag(RUIT_UIBackground));
+	_xiaoFeiSp = dynamic_cast<CCSprite*>(_uiBgSp->getChildByTag(RUIT_Xiaofei));
+	_tuHaoSp = dynamic_cast<CCSprite*>(_uiBgSp->getChildByTag(RUIT_Tuhao));
+	_containNode = dynamic_cast<CCNode*>(getChildByTag(4));
+	_containNode->setVisible(false);
+	_remainTimeLabel = dynamic_cast<CCLabelTTF*>(_uiBgSp->getChildByTag(5));
+	_remainTimeLabel->setColor(ccc3(255, 255, 0));
+	_remainTimeLabel->setString("00\xE5\xA4\xA9 00\xE6\x97\xB6 00\xE5\x88\x86 00\xE7\xA7\x92");
+	
+	//消费返利提示文字
+	_chargeTipLabelLeft = dynamic_cast<CCLabelBMFont*>(_uiBgSp->getChildByTag(6));
+	_chargeTipLabelLeft->setPosition(ccp(_chargeTipLabelLeft->getPositionX() - 5, _chargeTipLabelLeft->getPositionY()));
+	_chargeTipLabelLeft->setString(GET_STR(7270).c_str());                                   //7270:再消费
+	_chargeTipLabelCenter = _uiBgSp->getChildByTag(1);
+	_chargeTipLabelCenter->setVisible(false);
+	_chargeTipLabelRight = dynamic_cast<CCLabelBMFont*>(_uiBgSp->getChildByTag(7));
+	_chargeTipLabelRight->setString(GET_STR(7271).c_str());                                 //7271:元宝，可获得返利大礼
+	
+
+	//元宝字图
+	_fightNumBLabel = CCLabelBMFont::create();//add by vvv 2015.01.05   元宝艺术字
+	_fightNumBLabel->setFntFile("Art/Scene/fontrebate.fnt");
+	_fightNumBLabel->setPosition(_chargeTipLabelCenter->getPosition());
+	_fightNumBLabel->setAnchorPoint(ccp(0.0f, 0.0f));
+	_fightNumBLabel->setScale(1.0f);
+	_uiBgSp->addChild(_fightNumBLabel, RZN_EFFECT+1);
+	_fightNumBLabel->setTag(34);
+
+	_content = _uiBgSp->getChildByTag(RUIT_Content);
+	CC_ASSERT(_content != NULL);
+	_scrollView =  CCScrollView::create(_content->getContentSize());
+	_scrollView->setAnchorPoint(ccp(0.0f,1.0f));
+	_content->addChild(_scrollView);
+
+	_container = CCNode::create();
+	//_container->retain();
+	_container->setContentSize(CCSize(_content->getContentSize().width,EIP_interval * 5));
+
+	_scrollView->setContainer(_container);
+	_scrollView->setTouchEnabled(true);
+	_scrollView->setBounceable(true);
+	_scrollView->setContentSize(_container->getContentSize());
+	_scrollView->setDirection(kCCScrollViewDirectionVertical);
+	_scrollView->setContentOffset(_scrollView->minContainerOffset());
+	
+	_textNoticeLayer = NULL;
+	scheduleUpdate();
+	updateXiaoFei();
+	//this->updateUiDisplay();
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+	setAllChildernButtonPriority(this,-1);
+}
+
+void RebateUiLayer::onChongZhiBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);//vv
+	int yuanbaoNum=PackageManager::getInstance()->getTotalChargeYuanBao();
+	if (yuanbaoNum<=0)
+	{
+		OPEN_UI(WCT_ShouChongUi);
+	}
+	else
+	{
+		OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+	}
+}
+
+void RebateUiLayer::onRechargeRewaredBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_20);//vv
+	RewardMgr::getInstance()->getYBConsumeReplyReward(m_cRewardIdx);
+}
+
+void RebateUiLayer::onHelp( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_20);//vv
+	CCLog("onHelp pressed");
+	CCLog("onhelp_lastTime:%d", _lastTime);
+	_textNoticeLayer = NoticeLayer::getInstance();
+	_textNoticeLayer->setIsLimitsWinSize(false);
+	_textNoticeLayer->setTextWithoutTitleAndColor(GET_STR(7282).c_str());    //7282：这是一个消费送福利的活动
+	_textNoticeLayer->setTextWithoutTitleAndColor(GET_STR(7283).c_str());    //7283：只要在截止日期前达到消费元宝数即可领取额外奖励，过时不可领取
+	_textNoticeLayer->updatePt();
+	CCControlButton *testButton = dynamic_cast<CCControlButton*>(_uiBgSp->getChildByTag(9));
+	_textNoticeLayer->show(testButton->getParent()->convertToWorldSpace(testButton->getPosition()));
+}
+
+
+
+void RebateUiLayer::showRewardItems( int boxIdx )
+{
+
+}
+
+void RebateUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	this->schedule(SEL_SCHEDULE(&RebateUiLayer::updateRemainTime), 1.0f);
+
+	float labelScale = 0.9f;
+	_chargeTipLabelLeft->setScale(labelScale);
+	//_fightNumBLabel->setScale(labelScale);
+	_chargeTipLabelRight->setScale(labelScale);
+	CCPoint pointLeft = _chargeTipLabelLeft->getPosition();
+	_fightNumBLabel->setPosition(ccp(pointLeft.x + _chargeTipLabelLeft->boundingBox().size.width, pointLeft.y));
+	CCPoint pointCenter = _fightNumBLabel->getPosition();
+	_chargeTipLabelRight->setPosition(ccp(pointCenter.x + _fightNumBLabel->boundingBox().size.width, pointCenter.y)); 
+}
+
+void RebateUiLayer::onExit()
+{
+	for (int i =0;i<5;++i)
+	{
+		if (_rechargeItem[i])
+		{
+			delete _rechargeItem[i];
+			_rechargeItem[i] = NULL;
+		}
+	}
+	if (_textNoticeLayer != NULL)
+	{
+		//_textNoticeLayer->removeFromParent();
+		_textNoticeLayer->hide();
+	}
+	_container->removeAllChildrenWithCleanup(true);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("Art/ICON/icon_havegot.png");
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	this->unschedule(SEL_SCHEDULE(&RebateUiLayer::updateRemainTime));
+	CCLayer::onExit();
+}
+
+void RebateUiLayer::updateUiDisplay()
+{
+	m_nCostYB = PackageManager::getInstance()->GetToalConsumeYB();
+	m_nNeedYB = PackageManager::getInstance()->getConsumeRewardNeedCost(0);		//用来记录领奖需要消费掉的元宝
+	int maxNeedYB = PackageManager::getInstance()->getConsumeRewardNeedCost(REWARDBOXNUM);
+	if (m_nCostYB >= maxNeedYB)
+	{
+		_fightNumBLabel->setVisible(false);
+		_xiaoFeiSp->setVisible(false);
+		_tuHaoSp->setVisible(true);
+	}
+	CCString* needYBStr;
+	if (m_nCostYB < m_nNeedYB)				//充值过少，一个也领不了
+	{
+		needYBStr = CCString::createWithFormat("%d", (m_nNeedYB - m_nCostYB));
+		_fightNumBLabel->setString(needYBStr->getCString());
+		return;
+	}
+	else
+	{
+		for (int i = 0; i < REWARDBOXNUM; ++i)
+		{
+			m_nNeedYB = PackageManager::getInstance()->getConsumeRewardNeedCost(i);	
+			
+			if (PackageManager::getInstance()->CanGetConsumeReplyReward(i))			//可领奖
+			{
+				RechargeitemUiLayer* rechargeItem = (RechargeitemUiLayer*)_container->getChildByTag(RUIT_Level1Box + i);
+				if (rechargeItem)
+				{
+					rechargeItem->runRewardEffect();
+				}
+				continue;	
+			}
+			else if ((m_nCostYB >= m_nNeedYB) && !PackageManager::getInstance()->CanGetConsumeReplyReward(i))	//已领取
+			{
+				RechargeitemUiLayer* rechargeItem = (RechargeitemUiLayer*)_container->getChildByTag(RUIT_Level1Box + i);
+				if (rechargeItem)
+				{
+					rechargeItem->setEnabled(false);
+					rechargeItem->runRewardEffect(false);
+				}
+				continue;
+			}
+			else//不可领,现在断定一定是充值元宝不够相应等级才会进来	`
+			{
+				needYBStr = CCString::createWithFormat("%d", m_nNeedYB - m_nCostYB);//设置下一级奖励提示文字
+				_fightNumBLabel->setString(needYBStr->getCString());
+				return;
+			}
+		}
+	}
+}
+
+void RebateUiLayer::updateXiaoFei()
+{
+	m_nCostYB = PackageManager::getInstance()->GetToalConsumeYB();
+	m_nNeedYB = PackageManager::getInstance()->getConsumeRewardNeedCost(0);		//用来记录领奖需要消费掉的元宝
+	int maxNeedYB = PackageManager::getInstance()->getConsumeRewardNeedCost(REWARDBOXNUM - 1);
+	if (m_nCostYB >= maxNeedYB)
+	{
+		_fightNumBLabel->setVisible(false);
+		_xiaoFeiSp->setVisible(false);
+		_tuHaoSp->setVisible(true);
+	}
+	CCString* needYBStr;
+	if (m_nCostYB < m_nNeedYB)				//充值过少，一个也领不了
+	{
+		needYBStr = CCString::createWithFormat("%d", (m_nNeedYB - m_nCostYB));
+		_fightNumBLabel->setString(needYBStr->getCString());
+		return;
+	}
+	else
+	{
+		for (int i = 0; i < REWARDBOXNUM; ++i)
+		{
+			m_nNeedYB = PackageManager::getInstance()->getConsumeRewardNeedCost(i);	
+			if (PackageManager::getInstance()->CanGetConsumeReplyReward(i))			//可领奖
+			{
+				continue;	
+			}
+			else if ((m_nCostYB >= m_nNeedYB) && !PackageManager::getInstance()->CanGetConsumeReplyReward(i))	//已领取
+			{
+				continue;
+			}
+			else//不可领,现在断定一定是充值元宝不够相应等级才会进来	`
+			{
+				needYBStr = CCString::createWithFormat("%d", m_nNeedYB - m_nCostYB);//设置下一级奖励提示文字
+				_fightNumBLabel->setString(needYBStr->getCString());
+				return;
+			}
+		}
+	}
+}
+
+void RebateUiLayer::update( float dt )
+{
+	for (int i = 0;i < 4; ++i)
+	{
+		if (_itemNodeCount < 5)
+		{
+			RechargeitemUiLayer* rechargeItemLayer = (RechargeitemUiLayer*)_container->getChildByTag(RUIT_Level1Box + _itemNodeCount);
+			if (!rechargeItemLayer)
+			{
+				_rechargeItem[_itemNodeCount] = new RechargeItem;
+				_rechargeItem[_itemNodeCount]->setRebateData(_itemNodeCount + 1);
+				_rechargeItem[_itemNodeCount]->setTag(RUIT_Level1Box + _itemNodeCount);
+				_rechargeItem[_itemNodeCount]->setPosition(ccp( - EIP_width, EIP_height - _itemNodeCount * EIP_interval));
+				_container->addChild(_rechargeItem[_itemNodeCount]->_uiFrame);
+				updataButtonState(_itemNodeCount);
+				++_itemNodeCount;
+			}
+		}
+		else
+		{
+			unscheduleUpdate();
+		}
+	}
+}
+
+void RebateUiLayer::updateRemainTime(float dt)
+{
+	if (RebateMgr::getInstance()->getActivityRemainTime() == 0)
+	{
+		CCNotificationCenter::sharedNotificationCenter()->postNotification("HIDEREBATEBUTTON",NULL);
+		return;
+	}
+	_lastTime = RebateMgr::getInstance()->getActivityRemainTime();	
+	long seconds = _lastTime % 60;
+	long minuts = _lastTime / 60 % 60;
+	long hourss = _lastTime /60 /60 %24;
+	long days = _lastTime /60 /60 / 24;
+	CCString *remainTimeString = CCString::createWithFormat("%02d%s %02d%s %02d%s %02d%s", days, "\xE5\xA4\xA9", hourss, "\xE6\x97\xB6",minuts, "\xE5\x88\x86",seconds, "\xE7\xA7\x92");
+	CCLog("RebateUI remainTimeString:%s   dt:%f   _lastTime:%ld", remainTimeString->getCString(), dt, _lastTime);
+	_remainTimeLabel->setString(remainTimeString->getCString());
+}
+
+void RebateUiLayer::updataButtonState( int index )
+{
+	m_nNeedYB = PackageManager::getInstance()->getConsumeRewardNeedCost(index);	
+	if (PackageManager::getInstance()->CanGetConsumeReplyReward(index))			//可领奖
+	{
+		RechargeitemUiLayer* rechargeItem = (RechargeitemUiLayer*)_container->getChildByTag(RUIT_Level1Box + index);
+		if (rechargeItem)
+		{
+			rechargeItem->runRewardEffect();
+			return;
+		}
+	}
+	else if ((m_nCostYB >= m_nNeedYB) && !PackageManager::getInstance()->CanGetConsumeReplyReward(index))	//已领取
+	{
+		RechargeitemUiLayer* rechargeItem = (RechargeitemUiLayer*)_container->getChildByTag(RUIT_Level1Box + index);
+		if (rechargeItem)
+		{
+			rechargeItem->setEnabled(false);
+			rechargeItem->runRewardEffect(false);
+			return;
+		}
+	}
+}
+
+void RebateUiLayer::setTouchEnabled( bool value )
+{
+	CCLayer::setTouchEnabled(value);
+	if (value)
+	{
+		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this,1,true);
+	}
+	else
+	{
+		CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	}
+	for (int i = 0; i < 5; i++)
+	{
+		if (_rechargeItem[i])
+		{
+			//_rechargeItem[i]->setTouchEnable(value);
+			//_rechargeItem[i]->_uiFrame->setTouchEnable(value);
+		}
+	}
+}
+

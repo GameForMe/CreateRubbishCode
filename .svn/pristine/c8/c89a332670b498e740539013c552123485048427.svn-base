@@ -1,0 +1,332 @@
+#include "WaitRespQueue.h"
+#include "CommonDefine.h"
+#include "TeamProto.h"
+#include "TCPClient.h"
+#include "Helper.h"
+#include "StringMgr.h"
+#include "f_string_util.h"
+#include "NameMgr2.h"
+#include "GameEventDefine.h"
+#include "f_string_table.h"
+#include "FMBManager.h"
+#include "TeamMgr.h"
+
+WaitRespQueue::WaitRespQueue()
+	:mfAcce(0.0f)
+{
+	REG_NAME_CB(this,&WaitRespQueue::onGetName);
+}
+
+WaitRespQueue::~WaitRespQueue()
+{
+	UNREG_NAME_CB(this,&WaitRespQueue::onGetName);
+
+}
+
+void WaitRespQueue::clear()
+{
+	mQueue.clear();
+	mNameReqQueue.clear();
+}
+
+void WaitRespQueue::add( int type,stParamTag& param )
+{
+	//RespItem* item = NULL;
+	if (NameMgr2::getInstance()->queryName(param.dwID,param.strName))
+	{
+		if (type == RespItem::EApply)
+		{
+			mQueue.push_back(boost::shared_ptr<RespItem>(new Apply(param)));
+
+			RespViewAdd evt;
+			SEND_EVENT(&evt);
+		}
+		else if (type  == RespItem::EInvitation)
+		{
+			bool BOOST_LOCAL_FUNCTION(boost::shared_ptr<RespItem> const& one,bind param)
+			{
+				return one->mParam.dwID == param.dwID && one->mParam.dwID2 == param.dwID2;
+			}BOOST_LOCAL_FUNCTION_NAME(Finder);
+
+			BOOST_AUTO(iter, boost::range::find_if(mQueue,Finder));
+			if (iter== mQueue.end())
+			{
+				mQueue.push_back(boost::shared_ptr<RespItem>(new Invitation(param)));
+
+				RespViewAdd evt;
+				SEND_EVENT(&evt);
+			}
+		}
+		else if (type == RespItem::EApplyFormTeammate)
+		{
+			bool BOOST_LOCAL_FUNCTION(boost::shared_ptr<RespItem> const& one,bind param)
+			{
+				return one->mParam.dwID == param.dwID && one->mParam.dwID2 == param.dwID2;
+			}BOOST_LOCAL_FUNCTION_NAME(Finder);
+
+			BOOST_AUTO(iter, boost::range::find_if(mQueue,Finder));
+			if (iter== mQueue.end())
+			{
+				mQueue.push_back(boost::shared_ptr<RespItem>(new ApplyFromTeammate(param)));
+
+				RespViewAdd evt;
+				SEND_EVENT(&evt);
+			}
+		}
+		else if (type == RespItem::EWarApply)
+		{
+			mQueue.push_back(boost::shared_ptr<RespItem>(new WarApplyAdd(param)));
+
+			RespViewAdd evt;
+			SEND_EVENT(&evt);
+		}
+		else if (type == RespItem::EWarLeave)
+		{
+			mQueue.push_back(boost::shared_ptr<RespItem>(new WarLeaveLeave(param)));
+
+			RespViewAdd evt;
+			SEND_EVENT(&evt);
+		}
+		else
+		{
+			CC_ASSERT("can not reach here!");
+		}
+
+	}
+	else
+	{
+		if (type == RespItem::EApply)
+		{
+			mNameReqQueue.push_back(boost::shared_ptr<RespItem>(new Apply(param)));
+		}
+		else if (type  == RespItem::EInvitation)
+		{
+			mNameReqQueue.push_back(boost::shared_ptr<RespItem>(new Invitation(param)));
+		}
+		else if (type == RespItem::EApplyFormTeammate)
+		{
+			mNameReqQueue.push_back(boost::shared_ptr<RespItem>(new ApplyFromTeammate(param)));
+		}
+		else if (type == RespItem::EWarApply)
+		{
+			mNameReqQueue.push_back(boost::shared_ptr<RespItem>(new WarApplyAdd(param)));
+		}
+		else if (type == RespItem::EWarLeave)
+		{
+			mNameReqQueue.push_back(boost::shared_ptr<RespItem>(new WarLeaveLeave(param)));
+		}
+	}
+
+}
+//逻辑触发
+void WaitRespQueue::removeByType( int type )
+{
+	//boost::erase_remo
+	bool BOOST_LOCAL_FUNCTION(boost::shared_ptr<RespItem> const& one,bind type)
+	{
+		return one->getType() == type;
+	}BOOST_LOCAL_FUNCTION_NAME(Deleter);
+
+	boost::remove_erase_if(mQueue,Deleter);
+
+	//视图刷新
+}
+//视图触发
+void WaitRespQueue::remove( boost::shared_ptr<RespItem>const& itemPtr )
+{
+	boost::remove_erase(mQueue,itemPtr);
+}
+
+void WaitRespQueue::onGetName( unsigned int id,string const& name )
+{
+	//把所有的需要名字查询的item找到，设置上名字,把它放到常规队列里
+	BOOST_FOREACH(boost::shared_ptr<RespItem> const& one,mNameReqQueue)
+	{
+		if(one->mParam.dwID == id)
+		{
+			one->mParam.strName = name;
+
+			mQueue.push_back(one);
+
+			RespViewAdd evt;
+			SEND_EVENT(&evt);
+		}
+	}
+	
+	//删掉查询名字队列
+	bool BOOST_LOCAL_FUNCTION(boost::shared_ptr<RespItem> const& one,bind id)
+	{
+		return one->mParam.dwID == id;
+	}BOOST_LOCAL_FUNCTION_NAME(Deleter);
+
+	boost::remove_erase_if(mNameReqQueue,Deleter);
+}
+
+int const KEEP_TIME = 5*60;
+
+void WaitRespQueue::update(float fdt)
+{
+	mfAcce +=fdt;
+	if (mfAcce >=1.0f)
+		mfAcce =0.0f;
+	else
+		return;
+
+	if (mQueue.empty())
+	{
+		return;
+	}
+
+	bool BOOST_LOCAL_FUNCTION(boost::shared_ptr<RespItem> const& one)
+	{
+		tagDWORDTime now  =ServerTime::getInstance()->cal_current_server_dword_time();
+		int nPass = CalcTimeDiff(now,one->tTime);
+		return  (nPass > KEEP_TIME);
+		
+	}BOOST_LOCAL_FUNCTION_NAME(Finder);
+
+	BOOST_AUTO(iter,boost::range::find_if(mQueue,Finder));
+	if (iter != mQueue.end())
+	{
+		RemoveRespDataToView evt;
+		evt.data = *iter;
+		SEND_EVENT(&evt);
+
+		mQueue.erase(iter);
+	}
+}
+
+void Apply::OK()
+{
+	NET_SIC_apply_join_team_reply cmd;
+	cmd.dwDestRoleID = this->mParam.dwID;
+	cmd.bApply = 1;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+}
+
+void Apply::Cancel()
+{
+	NET_SIC_apply_join_team_reply cmd;
+	cmd.dwDestRoleID = this->mParam.dwID;
+	cmd.bApply = 0;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+}
+
+string Apply::getContext()
+{
+	string strBase = GET_STR(9027);
+	string strSexPic = Helper::getSexPic(mParam.bMale);
+	string strLv;
+	safe_sprintf(strLv,GET_STR(9028).c_str(),mParam.nLv);
+	
+	string strClass = Helper::getHeroClassByType(mParam.nClass);
+
+	string strRet;
+	safe_sprintf(strRet,strBase.c_str(),strSexPic,mParam.strName,strLv,strClass);
+	return strRet;
+}
+
+void Invitation::OK()
+{
+	TeamMgr::getInstance()->deal_with_team_apply(mParam.dwID, mParam.dwID2, 1);
+}
+
+void Invitation::Cancel()
+{
+	TeamMgr::getInstance()->deal_with_team_apply(mParam.dwID, mParam.dwID2, 0);
+}
+
+string Invitation::getContext()
+{
+	string strBase = GET_STR(9026);
+	string strSexPic = Helper::getSexPic(mParam.bMale);
+	string strLv;
+	safe_sprintf(strLv,GET_STR(9028).c_str(),mParam.nLv);
+
+	string strClass = Helper::getHeroClassByType(mParam.nClass);
+
+	string strRet;
+	safe_sprintf(strRet,strBase.c_str(),strSexPic,mParam.strName,strLv,strClass);
+	return strRet;
+}
+
+void ApplyFromTeammate::OK()
+{
+	NET_SIC_member_invite_join_team_replay cmd;
+	cmd.dwDestRoleID = mParam.dwID;
+	cmd.dwTeamMemID = mParam.dwID2;
+	cmd.bAgree = 1;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+}
+
+void ApplyFromTeammate::Cancel()
+{
+	NET_SIC_member_invite_join_team_replay cmd;
+	cmd.dwDestRoleID = mParam.dwID;
+	cmd.dwTeamMemID = mParam.dwID2;
+	cmd.bAgree = 0;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+}
+
+string ApplyFromTeammate::getContext()
+{
+	string strBase = GET_STR(9025);
+	string strSexPic = Helper::getSexPic(mParam.bMale);
+	string strLv;
+	safe_sprintf(strLv,GET_STR(9028).c_str(),mParam.nLv);
+
+	string strClass = Helper::getHeroClassByType(mParam.nClass);
+
+	string strRet;
+	safe_sprintf(strRet,strBase.c_str(),strSexPic,mParam.strName,strLv,strClass);
+	return strRet;
+} 
+
+void WarApplyAdd::OK()
+{
+	FMBManager::getInstance()->set_is_show_red(true);
+	FMBManager::getInstance()->send_get_team_info(this->mParam.dwID2);
+}
+
+void WarApplyAdd::Cancel()
+{
+	FMBManager::getInstance()->send_refuse_apply(this->mParam.dwID);
+}
+
+string WarApplyAdd::getContext()
+{
+	string strBase = STRING_TABLE["fmb_cue_1"];
+	string strSexPic = Helper::getSexPic(mParam.bMale);
+	string strLv;
+	safe_sprintf(strLv,GET_STR(9028).c_str(),mParam.nLv);
+
+	string strClass = Helper::getHeroClassByType(mParam.nClass);
+
+	string strRet;
+	safe_sprintf(strRet,strBase.c_str(),strSexPic,mParam.strName,strLv,strClass);
+	return strRet;
+}
+
+void WarLeaveLeave::OK()
+{
+	FMBManager::getInstance()->send_get_team_info(this->mParam.dwID2);
+}
+
+void WarLeaveLeave::Cancel()
+{
+
+}
+
+string WarLeaveLeave::getContext()
+{
+	string strBase = STRING_TABLE["fmb_cue_2"];
+	string strSexPic = Helper::getSexPic(mParam.bMale);
+	string strLv;
+	safe_sprintf(strLv,GET_STR(9028).c_str(),mParam.nLv);
+
+	string strClass = Helper::getHeroClassByType(mParam.nClass);
+
+	string strRet;
+	safe_sprintf(strRet,strBase.c_str(),strSexPic,mParam.strName,strLv,strClass);
+	return strRet;
+}

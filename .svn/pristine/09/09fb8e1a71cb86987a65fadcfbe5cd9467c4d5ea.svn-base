@@ -1,0 +1,572 @@
+/**
+ *	@file		AnswerUI.cpp
+ *	@author		shenyaoyan
+ *	@date		2016/06/07
+ *	@version	
+ *	@brief		趣味答题的界面
+ */
+
+#include "AnswerUI.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "GameEventDefine.h"
+#include "AnswerManager.h"
+#include "f_string_util.h"
+#include "CommonClient.h"
+#include "CoverButton.h"
+#include "f_string_table.h"
+#include "f_string_util.h"
+#include "ChatMgr.h"
+#include "ToolTip.h"
+
+AnswerUI::AnswerUI()
+{
+
+}
+
+AnswerUI::~AnswerUI()
+{
+
+}
+
+CCNode* AnswerUI::openUi()
+{
+	std::map<std::string,CCNodeLoader*> nodeLoaders;
+	nodeLoaders["AnswerUiLayer"] = UiLayerLoader <AnswerUiLayer>::loader();
+	nodeLoaders["ItemNode"] = UiNodeLoader <ItemNode>::loader();
+	nodeLoaders["CoverButton"] = UiNodeLoader <CoverButton>::loader();
+	CCNode* uiNode = readUiFromCCBI("dati",nodeLoaders,_loadSpriteSheet);
+	return uiNode;
+}
+
+
+///////////////////////////////////////////////////////////
+
+
+AnswerUiLayer::AnswerUiLayer()
+	: m_examCount(NULL)
+	, m_examTime(NULL)
+	, m_titleShow(NULL)
+	, m_allExp(NULL)
+	, m_curExp(NULL)
+	, m_answerALabel(NULL)
+	, m_answerBLabel(NULL)
+	, m_answerCLabel(NULL)
+	, m_answerDLabel(NULL)
+	, m_guildHelpButton(NULL)
+	, m_luckyStarButton(NULL)
+	, m_reward10(NULL)
+	, m_reward20(NULL)
+	, m_loadingSprite(NULL)
+	, m_selectIndex(0)
+	, m_coverButton1(NULL)
+	, m_coverButton2(NULL)
+	, m_coverButton3(NULL)
+	, m_coverButton4(NULL)
+	, m_rewardItem(NULL)
+	, m_rewardLabel(NULL)
+	, m_rewardSprite(NULL)
+	, m_isFirstShow(true)
+	, m_titleLabel(NULL)
+	, m_isLockButton(false)
+{
+	for ( int i=0 ; i<3 ; ++i )
+	{
+		m_luckyStar[i] = NULL;
+		m_guildHelp[i] = NULL;
+	}
+	for ( int i=0 ; i<4 ; ++i )
+	{
+		m_coverButton[i] = NULL;
+	}
+}
+
+AnswerUiLayer::~AnswerUiLayer()
+{
+
+}
+
+bool AnswerUiLayer::onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode)
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*,m_guildHelpButton);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*,m_luckyStarButton);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_answerALabel);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_answerBLabel);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_answerCLabel);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_answerDLabel);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(ItemNode*,m_reward10);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(ItemNode*,m_reward20);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,m_overNode);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CoverButton*,m_coverButton1);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CoverButton*,m_coverButton2);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CoverButton*,m_coverButton3);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CoverButton*,m_coverButton4);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_rewardSprite);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(ItemNode*,m_rewardItem);
+	return false;
+}
+
+SEL_CCControlHandler AnswerUiLayer::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGuildHelpBtnPressed" ,AnswerUiLayer::onGuildHelpBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLuckyStarBtnPressed" ,AnswerUiLayer::onLuckyBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSelectABtnPressed" ,AnswerUiLayer::onAnserABtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSelectBBtnPressed" ,AnswerUiLayer::onAnserBBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSelectCBtnPressed" ,AnswerUiLayer::onAnserCBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSelectDBtnPressed" ,AnswerUiLayer::onAnserDBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed" ,AnswerUiLayer::onClosedBtnPressed);
+	return NULL;
+}
+
+void AnswerUiLayer::onNodeLoaded(CCNode* pNode,CCNodeLoader* pNodeLoader)
+{
+	CCNode* m_frame = getChildByTag(0);
+	CC_ASSERT(m_frame);
+
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(NT_ExamTime_Label)));
+	m_titleLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(NT_Title_Lable)));
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(NT_Reward_Small)));
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(NT_Reward_Big)));
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_overNode->getChildByTag(1)));
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_rewardSprite->getChildByTag(NT_ExamTime_Label)));
+	m_rewardLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_rewardSprite->getChildByTag(NT_ExamCount_Label)));
+	m_examCount = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(NT_ExamCount_Label)));
+	m_examTime = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(NT_ExamTime_Show)));
+	m_titleShow = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(NT_Title_Show)));
+	m_allExp = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(NT_AllExp_Label)));
+	m_curExp = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(NT_CurExp_Label)));
+	m_answerA = Helper::replaceLabelTTFWithLabelFTAndRemove(m_answerALabel);
+	m_answerB = Helper::replaceLabelTTFWithLabelFTAndRemove(m_answerBLabel);
+	m_answerC = Helper::replaceLabelTTFWithLabelFTAndRemove(m_answerCLabel);
+	m_answerD = Helper::replaceLabelTTFWithLabelFTAndRemove(m_answerDLabel);
+
+	for ( int i=0 ; i<3 ; ++i )
+	{
+		m_luckyStar[i] = dynamic_cast<CCSprite*>(m_frame->getChildByTag(NT_Lucky_Star_1+i));
+		m_guildHelp[i] = dynamic_cast<CCSprite*>(m_frame->getChildByTag(NT_GuildHelp_1+i));
+	}
+
+	m_coverButton[0] = m_coverButton1;
+	m_coverButton[1] = m_coverButton2;
+	m_coverButton[2] = m_coverButton3;
+	m_coverButton[3] = m_coverButton4;
+
+	m_reward10->hideItemOpBtn();
+	m_reward10->setClickable(true);
+	m_reward20->setClickable(true);
+	m_reward20->hideItemOpBtn();
+ 	setLoadingImage();
+ 	m_loadingSprite->setVisible(true);
+	m_rewardSprite->setVisible(false);
+	m_rewardSprite->setZOrder(50);
+}
+
+void AnswerUiLayer::onEnter()
+{
+	setAllChildernButtonPriority(this,2);
+	setTouchPriority(2);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+	REGISTER_EVENT(refresh_question_info,AnswerUiLayer,getRefresh);
+	REGISTER_EVENT(get_right_answer,AnswerUiLayer,getRightAnswer);
+	REGISTER_EVENT(answer_over,AnswerUiLayer,getAnswerOver);
+	REGISTER_EVENT(refresh_lucky_star,AnswerUiLayer,usedLuckyStar);
+	REGISTER_EVENT(refresh_guild_help,AnswerUiLayer,usedGuildHelp);
+	system_ui_hide trans;
+	SEND_EVENT(&trans);
+}
+
+void AnswerUiLayer::onExit()
+{
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&AnswerUiLayer::timeCount),this);
+	UNREGISTER_EVENT(refresh_question_info,AnswerUiLayer,getRefresh);
+	UNREGISTER_EVENT(get_right_answer,AnswerUiLayer,getRightAnswer);
+	UNREGISTER_EVENT(answer_over,AnswerUiLayer,getAnswerOver);
+	UNREGISTER_EVENT(refresh_lucky_star,AnswerUiLayer,usedLuckyStar);
+	UNREGISTER_EVENT(refresh_guild_help,AnswerUiLayer,usedGuildHelp);
+}
+
+bool AnswerUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if ( !isVisible() || !hasVisibleParents() || !isRunning())
+	{
+		return false;
+	}
+	if (m_rewardSprite->isVisible())
+	{
+		m_rewardSprite->setVisible(false);
+		return true;
+	}
+// 	if ( isTouchOnNodeContent(m_reward10,pTouch) || isTouchOnNodeContent(m_reward20,pTouch) )
+// 	{
+// 		//return false;
+// 	}
+// // 	if ( isTouchOnNodeContent(m_rewardSprite,pTouch))
+// // 	{
+// // 		m_rewardSprite->setVisible(false);
+// // 	}
+// 	m_rewardSprite->setVisible(false);
+	return true;
+}
+
+void AnswerUiLayer::close()
+{
+	UiMgr::getInstance()->closeUi(WCT_ANSWER_UI,false);
+}
+
+void AnswerUiLayer::updateUI()
+{
+	for ( int i=0 ; i<4 ; ++i )
+	{
+		CCNode* newNode =  m_coverButton[i]->getCover();
+		CCSprite* newSprite = dynamic_cast<CCSprite*>(newNode->getChildByTag(3));
+		newSprite->setVisible(false);
+	}
+	int curExam = AnswerManager::get_singleton_ptr()->getCurNumber();
+	int allExam = AnswerManager::get_singleton_ptr()->getAllNumber();
+	int rightExam = AnswerManager::get_singleton_ptr()->getRightNumber();
+	std::string countStr ;
+	safe_sprintf(countStr,STRING_TABLE["answer_number_count"],curExam+1,allExam,rightExam);
+	m_examCount->setString(countStr.c_str());
+
+	if (AnswerManager::get_singleton_ptr()->getRemainTime()!=0)
+	{
+		CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&AnswerUiLayer::timeCount),this);
+		CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&AnswerUiLayer::timeCount),this,1,false);
+	}
+
+	std::string allExp;
+	safe_sprintf(allExp,"%d",AnswerManager::get_singleton_ptr()->getAllGainExp());
+	m_allExp->setString(allExp.c_str());
+
+	m_curExp->setVisible(false);
+
+	m_reward10->setDataId(AnswerManager::get_singleton_ptr()->getRewardID(0));
+	m_reward10->setClickable(true,3);
+	m_reward20->setDataId(AnswerManager::get_singleton_ptr()->getRewardID(1));
+	m_reward20->setClickable(true,3);
+	randAnswerLabel();
+	setLuckyStar();
+	setGuildHelp();
+	m_isLockButton = false;
+}
+
+void AnswerUiLayer::onGuildHelpBtnPressed(CCObject* pSender,CCControlEvent pCCControlEvent)
+{
+	if (!canTouch())
+	{
+		return;
+	}
+	AnswerManager::get_singleton_ptr()->sendGuildHelp();
+}
+
+void AnswerUiLayer::onAnserABtnPressed(CCObject* pSender,CCControlEvent pCCControlEvent)
+{
+	if (!canTouch())
+	{
+		return;
+	}
+	AnswerManager::get_singleton_ptr()->setSelectAnswer(titleNumber[0]);
+	m_selectIndex = 0;
+	m_isLockButton = true;
+}
+
+void AnswerUiLayer::onAnserBBtnPressed(CCObject* pSender,CCControlEvent pCCControlEvent)
+{
+	if (!canTouch())
+	{
+		return;
+	}
+	AnswerManager::get_singleton_ptr()->setSelectAnswer(titleNumber[1]);
+	m_selectIndex = 1;
+	m_isLockButton = true;
+}
+
+void AnswerUiLayer::onAnserCBtnPressed(CCObject* pSender,CCControlEvent pCCControlEvent)
+{
+	if (!canTouch())
+	{
+		return;
+	}
+	AnswerManager::get_singleton_ptr()->setSelectAnswer(titleNumber[2]);
+	m_selectIndex = 2;
+	m_isLockButton = true;
+}
+
+void AnswerUiLayer::onAnserDBtnPressed(CCObject* pSender,CCControlEvent pCCControlEvent)
+{
+	if (!canTouch())
+	{
+		return;
+	}
+	AnswerManager::get_singleton_ptr()->setSelectAnswer(titleNumber[3]);
+	m_selectIndex = 3;
+	m_isLockButton = true;
+}
+
+void AnswerUiLayer::onLuckyBtnPressed(CCObject* pSender,CCControlEvent pCCControlEvent)
+{
+	if (!canTouch())
+	{
+		return;
+	}
+	AnswerManager::get_singleton_ptr()->onUesdLuckyStar();
+}
+
+void AnswerUiLayer::onClosedBtnPressed(CCObject* pSender,CCControlEvent pCCControlEvent)
+{
+	close();
+}
+
+void AnswerUiLayer::timeCount(float dt)
+{
+	unsigned int remainTime = AnswerManager::get_singleton_ptr()->getRemainTime();
+	if ( 0 == remainTime )
+	{
+		CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&AnswerUiLayer::timeCount),this);
+	}
+	else
+	{
+		AnswerManager::get_singleton_ptr()->setRemainTime(--remainTime);
+		setTime(remainTime);
+	}
+}
+
+void AnswerUiLayer::setTime(unsigned int time)
+{
+	unsigned int hour=time/3600;
+	unsigned int minute=time%3600/60;
+	unsigned int sec=time%60;
+	std::string timeStr;
+	safe_sprintf(timeStr,"%02u:%02u:%02u",hour,minute,sec);
+	m_examTime->setString(timeStr);
+}
+
+void AnswerUiLayer::setLuckyStar()
+{
+	int luckyStar = AnswerManager::get_singleton_ptr()->getLuckyStar();
+	if ( 0 == luckyStar ) //不可点击
+	{
+		m_luckyStarButton->setGray();
+		m_luckyStarButton->setEnabled(false);
+	}
+	else  //可点击
+	{
+		m_luckyStarButton->delGray();
+		m_luckyStarButton->setEnabled(true);
+	}
+	for ( int i=0 ; i<3 ; ++i )
+	{
+		if (i<luckyStar)//亮
+		{
+			m_luckyStar[i]->delGray();
+		}
+		else            //灰
+		{
+			m_luckyStar[i]->setGray();
+		}
+	}
+}
+
+void AnswerUiLayer::setGuildHelp()
+{
+	int guildHelp = AnswerManager::get_singleton_ptr()->getGuildHelp();
+	if ( 0 == guildHelp ) //不可点击
+	{
+		m_guildHelpButton->setGray();
+		m_guildHelpButton->setEnabled(false);
+	}
+	else  //可点击
+	{
+		m_guildHelpButton->delGray();
+		m_guildHelpButton->setEnabled(true);
+	}
+	for ( int i=0 ; i<3 ; ++i )
+	{
+		if (i<guildHelp)//亮
+		{
+			m_guildHelp[i]->delGray();
+		}
+		else            //灰
+		{
+			m_guildHelp[i]->setGray();
+		}
+	}
+}
+
+void AnswerUiLayer::getRefresh(refresh_question_info* trans)
+{
+	updateUI();
+	m_loadingSprite->setVisible(false);
+}
+
+void AnswerUiLayer::getRightAnswer(get_right_answer* trans)
+{
+	if (trans->rightAnswer == AnswerManager::get_singleton_ptr()->getSelectAnswer())
+	{
+		CCSprite* rightSprite = dynamic_cast<CCSprite*>(m_coverButton[m_selectIndex]->getCover()->getChildByTag(3));
+		rightSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("dati_dui"));
+		rightSprite->setVisible(true);
+		if (AnswerManager::get_singleton_ptr()->getRightNumber() == 9 )
+		{
+			if (m_isFirstShow)
+			{
+				m_rewardSprite->setVisible(true);
+				m_rewardItem->setDataId(AnswerManager::get_singleton_ptr()->getRewardID(0));
+				m_rewardItem->runAnimation("E1_201");
+				std::string rewardStr;
+				safe_sprintf(rewardStr,STRING_TABLE["right_answer_reward"],10,10);
+				m_rewardLabel->setString(rewardStr);
+				m_isFirstShow = false;
+			}
+		}
+		else if ( AnswerManager::get_singleton_ptr()->getRightNumber() == 19 )
+		{
+			m_rewardSprite->setVisible(true);
+			m_rewardItem->setDataId(AnswerManager::get_singleton_ptr()->getRewardID(1));
+			m_rewardItem->runAnimation("E1_201");
+			std::string rewardStr;
+			safe_sprintf(rewardStr,STRING_TABLE["right_answer_reward"],20,20);
+			m_rewardLabel->setString(rewardStr);
+		}
+		else
+		{
+			m_rewardSprite->setVisible(false);
+		}
+	}
+	else
+	{
+		for ( int i=0 ; i<4 ; ++i )
+		{
+			if (titleNumber[i]==trans->rightAnswer-1)
+			{
+				CCSprite* rightSprite = dynamic_cast<CCSprite*>(m_coverButton[i]->getCover()->getChildByTag(3));
+				rightSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("dati_dui"));
+				rightSprite->setVisible(true);
+			}
+		}
+		CCSprite* rightSprite = dynamic_cast<CCSprite*>(m_coverButton[m_selectIndex]->getCover()->getChildByTag(3));
+		rightSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("dati_cuo"));
+		rightSprite->setVisible(true);
+	}
+	AnswerManager::get_singleton_ptr()->setAllGainExp(AnswerManager::get_singleton_ptr()->getAllGainExp()+AnswerManager::get_singleton_ptr()->getCurExp());
+	std::string expStr;
+	safe_sprintf(expStr,STRING_TABLE["get_exp_number"],AnswerManager::get_singleton_ptr()->getCurExp());
+	ToolTip::getInstance()->push(expStr);
+	std::string curExp;
+	safe_sprintf(curExp,"+%d",AnswerManager::get_singleton_ptr()->getCurExp());
+	m_curExp->setString(curExp.c_str());
+	m_curExp->setVisible(true);
+	this->scheduleOnce(schedule_selector(AnswerUiLayer::askNextQuestion),1);
+}
+
+void AnswerUiLayer::setLoadingImage()
+{
+	if (NULL == getChildByTag(0))
+	{
+		return;
+	}
+	CCSize size = getChildByTag(0)->getContentSize();
+	if ( NULL == m_loadingSprite )
+	{
+		m_loadingSprite = CCSprite::create("Art/ICON/SingleUI/loading.png");
+		m_loadingSprite->setPosition(ccp(size.width/2,size.height/2));
+		m_loadingSprite->setAnchorPoint(ccp(0.5,0.5));
+
+		CCRotateBy* rotate = CCRotateBy::create(2,360);
+		m_loadingSprite->runAction(CCRepeatForever::create(rotate));
+		m_loadingSprite->setVisible(false);
+		getChildByTag(0)->addChild(m_loadingSprite);
+	}
+}
+
+void AnswerUiLayer::randAnswerLabel()
+{
+	for ( int i=0 ; i<4 ; ++i )
+	{
+		titleNumber[i] = i;
+	}
+	for ( int i=3 ; i>0 ; --i )
+	{
+		int index = rand()%i;
+		if (index<i)
+		{
+			int temp = titleNumber[index];
+			titleNumber[index] = titleNumber[i];
+			titleNumber[i] = temp;
+		}
+	}
+	m_titleShow->setString(AnswerManager::get_singleton_ptr()->getQuestionStr());
+	m_answerA->setString(AnswerManager::get_singleton_ptr()->getAnswerStr(titleNumber[0]));
+	m_answerB->setString(AnswerManager::get_singleton_ptr()->getAnswerStr(titleNumber[1]));
+	m_answerC->setString(AnswerManager::get_singleton_ptr()->getAnswerStr(titleNumber[2]));
+	m_answerD->setString(AnswerManager::get_singleton_ptr()->getAnswerStr(titleNumber[3]));
+}
+
+void AnswerUiLayer::askNextQuestion(float dt)
+{
+	AnswerManager::get_singleton_ptr()->askNextQuestion();
+}
+
+void AnswerUiLayer::getAnswerOver(answer_over* trans)
+{
+	this->scheduleOnce(schedule_selector(AnswerUiLayer::answerOver),1);
+}
+
+void AnswerUiLayer::usedLuckyStar(refresh_lucky_star* trans)
+{
+	setLuckyStar();
+}
+
+void AnswerUiLayer::usedGuildHelp(refresh_guild_help* trans)
+{
+	std::string askStr;
+	std::string questionStr;
+	std::string answerAStr;
+	std::string answerBStr;
+	std::string answerCStr;
+	std::string answerDStr;
+	AnswerManager* answerManager = AnswerManager::get_singleton_ptr();
+	safe_sprintf(questionStr,"%s",answerManager->getQuestionStr());
+	safe_sprintf(answerAStr,"%s",answerManager->getAnswerStr(titleNumber[0]));
+	safe_sprintf(answerBStr,"%s",answerManager->getAnswerStr(titleNumber[1]));
+	safe_sprintf(answerCStr,"%s",answerManager->getAnswerStr(titleNumber[2]));
+	safe_sprintf(answerDStr,"%s",answerManager->getAnswerStr(titleNumber[3]));
+	safe_sprintf(askStr,STRING_TABLE["guild_help_answer"],questionStr,answerAStr,answerBStr,answerCStr,answerDStr);
+	ChatMgr::getInstance()->Send_Chat(askStr, ESCC_Guild);
+	setGuildHelp();
+}
+
+bool AnswerUiLayer::canTouch()
+{
+	if (m_rewardSprite->isVisible())
+	{
+		m_rewardSprite->setVisible(false);
+		return false;
+	}
+	if (m_isLockButton)
+	{
+		return false;
+	}
+	if (AnswerManager::get_singleton_ptr()->getRemainTime() == 0)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["answer_has_end"]);
+		return false;
+	}
+	return true;
+}
+
+void AnswerUiLayer::answerOver(float dt)
+{
+	m_overNode->setVisible(true);
+	for ( int i=0 ; i<4 ; ++i )
+	{
+		m_coverButton[i]->setVisible(false);
+	}
+	m_titleShow->setVisible(false);
+	m_titleLabel->setVisible(false);
+	m_examCount->setVisible(false);
+	m_curExp->setVisible(false);
+}

@@ -1,0 +1,151 @@
+#include "NewStallMgr.h"
+#include "cocos2d.h"
+#include "cocos-ext.h"
+#include "DBMgr.h"
+#include <algorithm>
+
+using namespace cocos2d;
+using namespace cocos2d::extension;
+
+NewStallMgr::NewStallMgr()
+{
+	m_ExChangedUseCount = 0;
+	m_dwTotlePrice = 0;
+	memset(m_buyitemArray, 0, sizeof(m_buyitemArray));
+	InitData();
+}
+
+NewStallMgr::~NewStallMgr()
+{
+	cleardata();
+}
+
+void NewStallMgr::InitData()
+{
+	f_data_set data_set;
+	std::list<std::string> fields;
+	bool ret =data_set.load("Config/db/MallTrad.xml","id",&fields);
+	CC_ASSERT(ret);
+	std::for_each(	fields.begin(),
+					fields.end(),
+					[&](std::string const& one)
+	{
+		unsigned int type_id = data_set.get_int("id",one.c_str());
+		unsigned int price = data_set.get_int("price",one.c_str());
+
+		m_ExChangeItemMap[type_id] = price;
+	});
+
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM MallTrad");
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	//如果能在表里找到
+// 	while(table->retrieve_row())
+// 	{
+// 		//装备typeid
+// 		unsigned int idx = table->get_index("id");
+// 		unsigned int nTypeId = table->get_integer32(idx);
+// 
+// 		//价格
+// 		idx = table->get_index("price");
+// 		unsigned int nPrice = table->get_integer32(idx);
+// 
+// 		m_ExChangeItemMap[nTypeId] = nPrice;
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+}
+
+void NewStallMgr::cleardata()
+{
+	map<unsigned char, S_StallItem*>::iterator IT = m_StallItemMap.begin();
+	while(IT != m_StallItemMap.end())
+	{
+		CC_SAFE_DELETE(IT->second);
+		IT++;
+	}
+	m_StallItemMap.clear();
+
+	//m_ExChangeItemMap.clear();
+
+	m_ExChangedUseCount = 0;
+	m_dwTotlePrice = 0;
+}
+
+void NewStallMgr::AddItem( unsigned char byIdx, S_StallItem* pStallItem, bool bUpdate /*= false*/ )
+{
+	if(byIdx < 0 || byIdx >= MAX_STALLITEM_COUNT)
+	{
+		CCString* pStr = CCString::createWithFormat("idx错误 idx = %d", byIdx);
+		CCAssert(0, pStr->getCString());
+		return;
+	}
+	map<unsigned char, S_StallItem*>::iterator IT = m_StallItemMap.find(byIdx);
+	if(IT != m_StallItemMap.end())
+	{
+		//有物品了删除后添加新的
+		S_StallItem* pData = (S_StallItem*)IT->second;
+		CC_SAFE_DELETE(pData);
+		m_StallItemMap.erase(IT);
+	}
+
+	m_StallItemMap.insert(make_pair(byIdx, pStallItem));
+
+	if(bUpdate)
+		UpdateData();
+}
+
+void NewStallMgr::DelItem( unsigned char byIdx, bool bUpdate /*= false*/ )
+{
+	map<unsigned char, S_StallItem*>::iterator IT = m_StallItemMap.find(byIdx);
+	if(IT == m_StallItemMap.end())
+		return;
+	
+	S_StallItem* pData = (S_StallItem*)IT->second;
+	CC_SAFE_DELETE(pData);
+	m_StallItemMap.erase(IT);
+
+	if(bUpdate)
+		UpdateData();
+}
+
+void NewStallMgr::UpdateData()
+{
+	m_ExChangedUseCount = 0;
+	m_dwTotlePrice = 0;
+
+	map<unsigned char, S_StallItem*>::iterator IT = m_StallItemMap.begin();
+	while(IT != m_StallItemMap.end())
+	{
+		S_StallItem* pStallItem = IT->second;
+		pStallItem->dwAllPrice = 0;
+		
+		def_stallitem::iterator ExChangeIT = pStallItem->ExChangeItemMap.begin();
+		while(ExChangeIT != pStallItem->ExChangeItemMap.end())
+		{
+			map<unsigned int, unsigned int>::iterator ExChangeInfoIT = m_ExChangeItemMap.find(ExChangeIT->first);
+			if(ExChangeInfoIT == m_ExChangeItemMap.end())
+			{
+				CCString* pStr = CCString::createWithFormat("贩卖物品数据错误 ItemIdx = %d, typeid = %d", IT->first, ExChangeIT->first);
+				CCAssert(0, pStr->getCString());
+				return;
+			}
+			pStallItem->dwAllPrice += (ExChangeInfoIT->second * ExChangeIT->second);	//单价x数量
+
+			ExChangeIT++;
+		}
+
+		m_ExChangedUseCount += (short)pStallItem->ExChangeItemMap.size();
+		m_dwTotlePrice += pStallItem->dwAllPrice;
+
+		IT++;
+	}
+}
+
+S_StallItem* NewStallMgr::GetStallItem( unsigned char byIdx )
+{
+	map<unsigned char, S_StallItem*>::iterator IT = m_StallItemMap.find(byIdx);
+	if(IT != m_StallItemMap.end())
+		return IT->second;
+
+	return NULL;
+}

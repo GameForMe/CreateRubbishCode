@@ -1,0 +1,473 @@
+#include "BossSkillManager.h"
+#include "AnimationCache.h"
+#include "tools.h"
+#include "DBMgr.h"
+#include "MapManager.h"
+#include "BSAnimate.h"
+#include "RoleManager.h"
+#include "UiTools.h"
+#include "AudioPlayer.h"
+
+BossSkillAnim::BossSkillAnim()
+	:_bHasEffect(false)
+{
+
+}
+
+BossSkillAnim::~BossSkillAnim()
+{
+	for(std::vector<CCSprite*>::iterator iter = _sprites.begin(); iter != _sprites.end(); ++iter)
+	{
+		CCNode *node = *iter;
+		node->removeFromParent();
+		CC_SAFE_RELEASE(node);
+	}
+	_sprites.clear();
+
+	AnimationCache::getInstance()->releaseAnims(_usedAnim);
+}
+
+void BossSkillAnim::run( const CCPoint &pos,const CCPoint &targetPos,  eOctDir dir, const BossSkillData&data )
+{
+	if(RoleManager::getInstance()->isHideOtherEffect())
+		return;
+
+	//读取动画
+	//AnimationCache::AnimateList anims;
+	//	if(data.fileType == 1)
+	//{
+	//AnimationCache::createDefList(1, anims);
+	//AnimationCache::getInstance()->getSinEffect(0, data.animFile.c_str(), anims);
+	//_usedAnim.push_back(AnimsUsed(AT_Sin, data.animFile));
+	//}
+	//else 
+	//if(data.fileType == 8)
+	//{
+	//	AnimationCache::createDefList(5, anims);
+	//	AnimationCache::getInstance()->getOctEffect(0, data.animFile.c_str(), anims);
+	//	_usedAnim.push_back(AnimsUsed(AT_Oct, data.animFile));
+	//}
+	//else if(data.fileType != 1)
+	//{
+	//	CC_ASSERT(0);
+	//}
+	_bHasEffect = (data.animFile!="0");
+	if (!_bHasEffect)
+	{
+		return;
+	}
+	//生成sprite
+	CCNode *tmxMap = MapManager::getInstance()->getMap();
+	CC_ASSERT(tmxMap != NULL);
+	for(int i = 0; i < data.type; i ++)
+	{
+		CCSprite *sprite = CCSprite::create();
+		sprite->setScale((float)data.scale / 100.f);
+		sprite->retain();
+		//sprite->setAnchorPoint(ccp(0.f, 1.0f));
+		_sprites.push_back(sprite);
+		tmxMap->addChild(sprite);
+	}
+
+	float offestX = 0.0f;
+	float offestY = 0.0f;
+	getModelOffest(data.animFile, offestX, offestY);
+
+	if (data.aroundType==0)
+	{
+		if(data.type == 1)
+		{//一个方向的技能
+			if(data.fileType == 1)
+			{
+				AnimationCache::AnimateList anims1;
+				AnimationCache::createDefList(1, anims1);
+				AnimationCache::getInstance()->getSinEffect(0, data.animFile.c_str(), anims1);
+				_usedAnim.push_back(AnimsUsed(AT_Sin, data.animFile));
+				CCNode *node = _sprites[0];
+				CCPoint newPos = getPosFromDir(pos, convertDir(eFourDirEx(dir)), data.radiu);
+
+				newPos.x += offestX;
+				newPos.y += offestY;
+				newPos.y -= 1;	//[bing] 让特效打在人前面
+
+				node->setPosition(newPos);
+				tmxMap->reorderChild(node, MapManager::getInstance()->getZOrderAtPoint(newPos));
+				BSAnimate *animate = anims1[0];
+				CCAction *action = CCSequence::createWithTwoActions(animate, CCCallFuncND::create(BossSkillCallback::getInstance(), SEL_CallFuncND(&BossSkillCallback::animationCallback), this));
+				node->runAction(action);
+			}
+			else if(data.fileType == 8)
+			{
+				AnimationCache::AnimateList anims;
+				AnimationCache::createDefList(5, anims);
+				AnimationCache::getInstance()->getOctEffect(0, data.animFile.c_str(), anims);
+				_usedAnim.push_back(AnimsUsed(AT_Oct, data.animFile));
+				CCSprite *sprite = _sprites[0];
+				CCPoint newPos = getPosFromDir(pos, convertDir(eFourDirEx(dir)), data.radiu);
+
+				newPos.x += offestX;
+				newPos.y += offestY;
+				newPos.y -= 1;	//[bing] 让特效打在人前面
+
+				sprite->setPosition(newPos);
+				tmxMap->reorderChild(sprite, MapManager::getInstance()->getZOrderAtPoint(newPos));
+				std::vector<CCSprite*> sprites;
+				sprites.push_back(sprite);
+				flipOctDirSprite(convertDir(eFourDirEx(dir)), sprites);
+				eOctDir newDir = flipOctDir(convertDir(eFourDirEx(dir)));
+				BSAnimate *animate = anims[newDir];
+				CCAction *action = CCSequence::createWithTwoActions(animate, CCCallFuncND::create(BossSkillCallback::getInstance(), SEL_CallFuncND(&BossSkillCallback::animationCallback), this));
+				sprite->runAction(action);
+			}
+		}
+		else if(data.type == 4)
+		{//4方向技能
+			if(data.fileType == 1)
+			{
+				for(int i = 0; i < 4; i ++)
+				{
+					AnimationCache::AnimateList anims1;
+					AnimationCache::createDefList(1, anims1);
+					AnimationCache::getInstance()->getSinEffect(0, data.animFile.c_str(), anims1);
+					_usedAnim.push_back(AnimsUsed(AT_Sin, data.animFile));
+					eOctDir srcDir = (eOctDir)(i * 2);
+					CCSprite *sprite = _sprites[i];
+					CCPoint newPos = getPosFromDir(pos, srcDir, data.radiu);
+
+					newPos.x += offestX;
+					newPos.y += offestY;
+					newPos.y -= 1;	//[bing] 让特效打在人前面
+
+					sprite->setPosition(newPos);
+					tmxMap->reorderChild(sprite, MapManager::getInstance()->getZOrderAtPoint(newPos));
+					BSAnimate *animate = anims1[0];
+					CCAction *action = CCSequence::createWithTwoActions(animate, CCCallFuncND::create(BossSkillCallback::getInstance(), SEL_CallFuncND(&BossSkillCallback::animationCallback), this));
+					sprite->runAction(action);
+				}
+			}
+			else if(data.fileType == 8)
+			{
+				AnimationCache::AnimateList anims1;
+				AnimationCache::createDefList(5, anims1);
+				AnimationCache::getInstance()->getOctEffect(0, data.animFile.c_str(), anims1);
+				_usedAnim.push_back(AnimsUsed(AT_Oct, data.animFile));
+				AnimationCache::AnimateList anims2;
+				AnimationCache::createDefList(5, anims2);
+				AnimationCache::getInstance()->getOctEffect(0, data.animFile.c_str(), anims2);
+				_usedAnim.push_back(AnimsUsed(AT_Oct, data.animFile));
+				for(int i = 0; i < 4; i ++)
+				{
+					eOctDir srcDir = (eOctDir)(i * 2);
+					CCSprite *sprite = _sprites[i];
+					CCPoint newPos = getPosFromDir(pos, srcDir, data.radiu);
+
+					newPos.x += offestX;
+					newPos.y += offestY;
+					newPos.y -= 1;	//[bing] 让特效打在人前面
+
+					sprite->setPosition(newPos);
+					tmxMap->reorderChild(sprite, MapManager::getInstance()->getZOrderAtPoint(newPos));
+					std::vector<CCSprite*> sprites;
+					sprites.push_back(sprite);
+					flipOctDirSprite(srcDir, sprites);
+					eOctDir newDir = flipOctDir(srcDir);
+					BSAnimate *animate = NULL;
+					if(newDir == srcDir)
+						animate = anims1[newDir];
+					else
+						animate = anims2[newDir];
+					CCAction *action = CCSequence::createWithTwoActions(animate, CCCallFuncND::create(BossSkillCallback::getInstance(), SEL_CallFuncND(&BossSkillCallback::animationCallback), this));
+					sprite->runAction(action);
+				}
+			}
+		}
+		else if(data.type == 8)
+		{//8方向技能
+			if(data.fileType == 1)
+			{
+				for(int i = 0; i < 8; i ++)
+				{
+					AnimationCache::AnimateList anims1;
+					AnimationCache::createDefList(1, anims1);
+					AnimationCache::getInstance()->getSinEffect(0, data.animFile.c_str(), anims1);
+					_usedAnim.push_back(AnimsUsed(AT_Sin, data.animFile));
+					eOctDir srcDir = (eOctDir)i;
+					CCSprite *sprite = _sprites[i];
+					CCPoint newPos = getPosFromDir(pos, srcDir, data.radiu);
+
+					newPos.x += offestX;
+					newPos.y += offestY;
+					newPos.y -= 1;	//[bing] 让特效打在人前面
+
+					sprite->setPosition(newPos);
+					tmxMap->reorderChild(sprite, MapManager::getInstance()->getZOrderAtPoint(newPos));
+					BSAnimate *animate = anims1[0];
+					CCAction *action = CCSequence::createWithTwoActions(animate, CCCallFuncND::create(BossSkillCallback::getInstance(), SEL_CallFuncND(&BossSkillCallback::animationCallback), this));
+					sprite->runAction(action);
+				}
+			}
+			else if(data.fileType == 8)
+			{
+				AnimationCache::AnimateList anims1;
+				AnimationCache::createDefList(5, anims1);
+				AnimationCache::getInstance()->getOctEffect(0, data.animFile.c_str(), anims1);
+				_usedAnim.push_back(AnimsUsed(AT_Oct, data.animFile));
+				AnimationCache::AnimateList anims2;
+				AnimationCache::createDefList(5, anims2);
+				AnimationCache::getInstance()->getOctEffect(0, data.animFile.c_str(), anims2);
+				_usedAnim.push_back(AnimsUsed(AT_Oct, data.animFile));
+				for(int i = 0; i < 8; i ++)
+				{
+					eOctDir srcDir = (eOctDir)i;
+					CCSprite *sprite = _sprites[i];
+					CCPoint newPos = getPosFromDir(pos, srcDir, data.radiu);
+
+					newPos.x += offestX;
+					newPos.y += offestY;
+					newPos.y -= 1;	//[bing] 让特效打在人前面
+
+					sprite->setPosition(newPos);
+					tmxMap->reorderChild(sprite, MapManager::getInstance()->getZOrderAtPoint(newPos));
+					std::vector<CCSprite*> sprites;
+					sprites.push_back(sprite);
+					flipOctDirSprite(srcDir, sprites);
+					eOctDir newDir = flipOctDir(srcDir);
+					BSAnimate *animate = NULL;
+					if(newDir == srcDir)
+						animate = anims1[newDir];
+					else
+						animate = anims2[newDir];
+					CCAction *action = CCSequence::createWithTwoActions(animate, CCCallFuncND::create(BossSkillCallback::getInstance(), SEL_CallFuncND(&BossSkillCallback::animationCallback), this));
+					sprite->runAction(action);
+				}
+			}
+		}
+	}
+	else
+	{
+		CCPoint ptNewPos = data.effectType==0?pos:targetPos;
+		if(data.fileType == 1)
+		{
+			AnimationCache::AnimateList anims1;
+			AnimationCache::createDefList(1, anims1);
+			AnimationCache::getInstance()->getSinEffect(0, data.animFile.c_str(), anims1);
+			_usedAnim.push_back(AnimsUsed(AT_Sin, data.animFile));
+			CCNode *node = _sprites[0];
+			CC_ASSERT(node);
+
+			node->setPosition(ptNewPos);
+
+			BSAnimate *animate = anims1[0];
+			CCAction *action = CCSequence::createWithTwoActions(animate, CCCallFuncND::create(BossSkillCallback::getInstance(), SEL_CallFuncND(&BossSkillCallback::animationCallback), this));
+			node->runAction(action);
+		}
+		else if(data.fileType == 8)
+		{
+			AnimationCache::AnimateList anims;
+			AnimationCache::createDefList(8, anims);
+			AnimationCache::getInstance()->getOctEffect(0, data.animFile.c_str(), anims);
+			_usedAnim.push_back(AnimsUsed(AT_Oct, data.animFile));
+			CCSprite *sprite = _sprites[0];
+			CC_ASSERT(sprite);
+
+			//std::vector<CCSprite *> sprites;
+			//sprites.push_back(sprite);
+			//flipSprites(sprite,false);
+			sprite->setPosition(ptNewPos);
+
+
+			BSAnimate *animate = anims[dir];
+			CCAction *action = CCSequence::createWithTwoActions(animate, CCCallFuncND::create(BossSkillCallback::getInstance(), SEL_CallFuncND(&BossSkillCallback::animationCallback), this));
+			sprite->runAction(action);
+		}
+	}
+
+	//[bing] 播个怪物技能音效
+	AudioPlayer::getSigletonPtr()->playerEffect(data.soundFile);
+}
+
+void BossSkillAnim::animationCallback( CCNode *node )
+{
+	if (!_bHasEffect)
+	{
+		return;
+	}
+
+	for(std::vector<CCSprite*>::iterator iter = _sprites.begin(); iter != _sprites.end(); ++ iter)
+	{
+		if(node == *iter)
+		{
+			node->removeFromParent();
+			_sprites.erase(iter);
+			CC_SAFE_RELEASE(node);
+			break;
+		}
+	}
+
+	if(_sprites.empty())
+	{
+		BossSkillManager::getInstance()->removeSkillAnim(this);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+BossSkillManager * BossSkillManager::getInstance()
+{
+	static BossSkillManager instance;
+	return &instance;
+}
+
+BossSkillManager::BossSkillManager()
+{
+	initSkillData();
+}
+
+BossSkillManager::~BossSkillManager()
+{
+	_skillDataMap.clear();
+}
+
+BossSkillData const* BossSkillManager::getBossSkillData( int skillId )
+{
+	auto iter = _skillDataMap.find(skillId);
+	if(iter != _skillDataMap.end())
+		return iter->second.get();
+
+	return NULL;
+}
+
+void BossSkillManager::initSkillData()
+{
+	//m_equip_suit_data.clear();
+
+	f_data_set dataset;
+	std::list<std::string> fields;
+	bool ret =dataset.load("Config/db/BossSkill.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(	fields.begin(),
+					fields.end(),
+					[&](std::string const& one)
+					{
+						std::shared_ptr<BossSkillData> data_ptr(new BossSkillData);
+						BossSkillData& data = *data_ptr;
+
+						data.id = dataset.get_int("id",one.c_str());
+						data.type = dataset.get_int("type",one.c_str(),0);
+						data.scale = dataset.get_int("scale",one.c_str(),100);
+						data.radiu = dataset.get_int("radiu",one.c_str(),0);
+						data.animFile = dataset.get_string("animFile",one.c_str(),"");
+						data.fileType = dataset.get_int("fileType",one.c_str(),0);
+						data.soundFile = dataset.get_string("sound",one.c_str(),"");
+						data.aroundType = dataset.get_int("aroundType",one.c_str(),0);
+						data.effectType = dataset.get_int("effectType",one.c_str(),0);
+						
+						_skillDataMap[data.id] = data_ptr;
+					});
+
+	/*
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM BossSkill");
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		BossSkillData data;
+		unsigned int idx = table->get_index("id");
+		data.id = table->get_integer32(idx);
+		idx = table->get_index("type");
+		data.type = table->get_integer32(idx);
+		idx = table->get_index("scale");
+		data.scale = table->get_integer32(idx);
+		idx = table->get_index("radiu");
+		data.radiu = table->get_integer32(idx);
+		idx = table->get_index("animFile");
+		data.animFile = table->get_text(idx);
+		idx = table->get_index("fileType");
+		data.fileType = table->get_integer32(idx);
+		idx = table->get_index("sound");
+		data.soundFile = table->get_text(idx);
+		idx = table->get_index("aroundType");
+		data.aroundType = table->get_integer32(idx);
+		idx = table->get_index("effectType");
+		data.effectType = table->get_integer32(idx);
+		_skillDataMap[data.id] = data;
+	}
+
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	*/
+}
+
+/*
+void BossSkillManager::runSkillAnimation( int skillId, const CCPoint &pos, const CCPoint *targetPos, eFourDirEx dir )
+{
+	const BossSkillData &skillData = getBossSkillData(skillId);
+	if(skillData.id != -1 && !skillData.animFile.empty())
+	{
+		if (skillData.effectType == 1)
+		{
+			if (targetPos)
+			{
+				BossSkillAnim *anim = new BossSkillAnim;
+				_skillAnims.push_back(anim);
+				anim->run(pos, *targetPos,convertDir(dir), skillData);
+			}
+		}
+		else
+		{
+			BossSkillAnim *anim = new BossSkillAnim;
+			_skillAnims.push_back(anim);
+			anim->run(pos, targetPos?*targetPos:ccp(0,0),convertDir(dir), skillData);
+		}
+	}
+}
+*/
+void BossSkillManager::runSkillAnimation( int skillId, const CCPoint &pos, const CCPoint *targetPos,eOctDir dir )
+{
+	BossSkillData const* skill_data_ptr = getBossSkillData(skillId);
+	if (skill_data_ptr)
+	{
+		BossSkillData const& skillData = *skill_data_ptr;
+		if(skillData.id != -1 && !skillData.animFile.empty())
+		{
+			if (skillData.effectType == 1)
+			{
+				if (targetPos)
+				{
+					BossSkillAnim *anim = new BossSkillAnim;
+					_skillAnims.push_back(anim);
+					anim->run(pos, *targetPos,dir, skillData);
+				}
+			}
+			else
+			{
+				BossSkillAnim *anim = new BossSkillAnim;
+				_skillAnims.push_back(anim);
+				anim->run(pos, targetPos?*targetPos:ccp(0,0),dir, skillData);
+			}
+		}
+	}
+
+}
+
+void BossSkillManager::removeSkillAnim( BossSkillAnim *anim )
+{
+	for(std::vector<BossSkillAnim*>::iterator iter = _skillAnims.begin(); iter != _skillAnims.end(); ++ iter)
+	{
+		if(anim == *iter)
+		{
+			delete anim;
+			_skillAnims.erase(iter);
+			return;
+		}
+	}
+}
+
+void BossSkillManager::destroyAll()
+{
+	for(std::vector<BossSkillAnim*>::iterator iter = _skillAnims.begin(); iter != _skillAnims.end(); ++ iter)
+	{
+		delete *iter;
+	}
+	_skillAnims.clear();
+}

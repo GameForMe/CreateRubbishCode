@@ -1,0 +1,379 @@
+#ifndef ITEMTIP_H
+#define ITEMTIP_H
+
+#include "cocos2d.h"
+#include "cocos-ext.h"
+#include "Signals.h"
+#include "RewardProto.h"
+#include "RoleEquipUi.h"
+using namespace cocos2d;
+using namespace cocos2d::extension;
+
+class ItemTipSprite;
+class SpecialStoreItemTipSprite;
+class MonthCardItemTipSprite;
+class MonthCardItemTip;
+class ItemNode;
+class f_item;
+
+#define TipsAllRightBtnX 47 //tips除了使用之外放在右边的按钮的X坐标
+#define EQUIPBOX 1102206 //装备宝箱typeid
+#define BOXCONSUME 100000 //开启装备宝箱消耗金币数
+
+#define CLASSIC_UPPER_TYPE_ID 1102328 //怀旧经典衣服的typeid
+#define CLASSIC_WEAPON_TYPE_ID 1102324 //限量版怀旧武器的typeid
+#define CLASSIC_MONTH_CARD_TYPE_ID 1102313 //月卡的ID
+
+enum enumShowTipsButtonType
+{
+	ESTBT_null,	//不显示
+	ESTBT_1,	//使用
+	ESTBT_2,	//合成
+	ESTBT_3,	//使用+合成
+	ESTBT_4,	//使用+批量使用
+	ESTBT_5,	//使用+ 显示
+	ESTBT_6,	//使用+批量使用 + 显示
+	ESTBT_7,	//学习按钮
+	ESTBT_8,	//
+	ESTBT_9,	//前往获取
+	ESTBT_10,	//合成加前往获取
+	ESTBT_11,	//学习加展示
+	ESTBT_12,	//突破加展示
+	ESTBT_13,	//使用加展示
+	ESTBT_14,	//合成加展示
+	ESTBT_15,	//展示
+	ESTBT_16,	//前往获取加展示
+	ESTBT_17,    //使用+合成+显示（快捷使用）
+};
+
+struct GotoGetData
+{
+	unsigned int itemId;//物品种类id
+	int itemYuanbao;
+	int itemConut;
+	int iconId;
+	int fubenNum;//副本章节
+	int fubenTag;//副本章节内的tag
+	int isHero;//是否是精英副本
+	int fubenId;//副本id
+
+	GotoGetData()
+		: itemId(0)
+		, itemYuanbao(0)
+		, itemConut(0)
+		, iconId(0)
+		, fubenNum(0)
+		, fubenTag(0)
+		, isHero(false)
+		, fubenId(0)
+	{
+
+	}
+};
+
+class ItemTip
+{
+public:
+	static ItemTip *getInstace();
+	void open();//加载ccbi
+	void close();//关闭提示框
+	bool isOpen();
+	ItemTipSprite *getUiLayer();
+	void setDataId(unsigned int id);
+	void setData(f_item *item,bool bisShowShortCut = false);
+	void setPosition(const CCPoint &pos);
+	void hideOpBtn();
+	void showVIPTime(int vipLevel);
+	void showTipsButton( int nIndex ); //根据类型显示tipsButton
+	void showTypeButton(eWroldChildTag showType = WCT_Null);
+	std::set<std::string> getUsedPlistFile() { return _usedPlistFile; }
+
+	inline void setOpenUiId(eWroldChildTag id){ _openUiId = id; }
+	inline eWroldChildTag getOpenUiId(){ return _openUiId; }
+	inline GotoGetData getGotoGetData(){ return gotoGetData; };
+	void initGotoGetData();  //获得前往获取的副本数据，当显示前往获取时调用
+	void onCloseEvent();
+	inline void setSwitchUiTag(eWroldChildTag tag){
+		_uiTag=tag;
+	}
+	inline eWroldChildTag getSwitchUiTag(){
+		return _uiTag;
+	}
+	void hideAllTipsButton();
+	
+	void show_buy_btn(bool);
+private:
+	std::set<std::string> _usedPlistFile;
+	GotoGetData gotoGetData;
+	eWroldChildTag _uiTag;
+	eWroldChildTag _openUiId;//打开界面UI
+};
+
+class ItemTipSprite
+	: public CCSprite
+	, public cocos2d::extension::CCBSelectorResolver
+	, public cocos2d::extension::CCBMemberVariableAssigner
+	, public cocos2d::extension::CCNodeLoaderListener
+	, public CCTouchDelegate
+{
+	friend class ItemTip;
+
+	enum eNodeTag
+	{
+		NT_Icon = 0,
+		NT_Name = 1,
+		NT_State = 2,
+		NT_Desc = 3,
+		NT_Price = 4,
+		NT_UseLevel = 5,
+		NT_UseTimes = 6,
+		NT_SpeDesc = 7,
+		NT_UseBtn = 8,
+		NT_SynBtn = 9, //合成按钮
+		NT_ItemNode = 10,
+		NT_UseTimesLine = 11,
+		NT_speDescLine = 12,
+		NT_DescLine = 13,
+		NT_PriceLine = 14,
+		NT_VIPTime = 15,
+		NT_AllUseBtn = 16, //批量使用
+		NT_MaiChuBtn = 22,
+		NT_LearnSkill = 23,	//學習按鈕
+		NT_GotoAchieve = 24, //前往获得
+		NT_priceName = 26,//售价
+		NT_Inlay = 27, //镶嵌按钮
+		NT_Delay = 28, //摘除按钮
+		NT_ZhanShi = 29, //展示按钮
+		NT_Buy,	//购买
+		NT_UseLevelName = 31,//使用等级
+	};
+
+public:
+	ItemTipSprite() : n64ItemId(-1),_learnSkillbutton(NULL),_flearnSkillBtnPosX(0.0f),_cache_item_model_id(0) {}
+	CCB_STATIC_NEW_AUTORELEASE_OBJECT_WITH_INIT_METHOD(ItemTipSprite, create);
+	virtual cocos2d::SEL_MenuHandler onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName);
+	virtual cocos2d::extension::SEL_CCControlHandler onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName);//按钮项
+	virtual bool onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode);
+	virtual void onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader);//节点load
+	void onUseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onAllUseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent); //批量使用 add by XSea 2014.09.24
+	void onSynthenticBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onxuexiBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);	//学习按钮
+	void ongotoBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);  //前往获取
+	void onInlayBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent); //镶嵌按钮
+	void onDelayBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent); //摘除宝石按钮
+	void onZhanShiBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent); //展示按钮
+	void on_pressed_buy(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);	//快捷购买按钮
+	virtual void onExit();
+	virtual void onEnter();
+	virtual bool ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent);
+
+	//void onCloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onmaichuBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+
+	CCRect GetBtnPos(int nTag);
+	//增加一个处理合成物品的接口
+	void onComPoundPro();
+	//增加使用前确认的接口
+	void showConfirmUseUi(int id);
+	void onConfirmUseBtnPressed();//确认使用按钮
+	void onCancelUseBtnPressed();//取消使用按钮);
+	void setInlayButtonShow(bool state); //设置是否显示镶嵌按钮
+	void setDelayButtonShow(bool state);//设置是否显示摘除按钮
+protected:
+	void setDataId(unsigned int dataId,bool bisShowShortCut = false);
+	void setName(const std::string &name , int itemColorType);
+	void setBind(bool state);
+	void setDesc(const std::string &desc);
+	void setPrice(int price);
+   //新加道具中tips功能;
+	void setUseLevel(int level);
+	void setUseTimes(int times, int maxTimes);
+	void setStoreUseTime(int times);
+	void setSpecialDesc(const std::string &spedesc);
+	void setData(f_item* item,bool bisShowShortCut = false);
+	void hideOpBtn();
+	void showVIPTime(int vipLevel);
+	void showTipsButton( int nIndex ); //根据类型显示tipsButton
+	void hideAllTipsButton(); //隐藏tips按钮
+	ccColor3B getChangeColor(int colorType);//转换成颜色
+	void showTypeButton( eWroldChildTag showType = WCT_Null);
+	LabelFT* getLabelFTByTag(CCNode* node, int tag);//通过此方法获得LabelFT
+	void showLearnSkillBtn(bool needDispaly = false);
+
+	void show_buy_btn(bool show);
+protected:
+	CCControlButton* _usebutton; //使用按钮
+	CCControlButton* _learnSkillbutton; //学习技能
+	CCControlButton* _synbutton; //合成按钮
+	CCControlButton* _allUsebutton; //全部使用按钮
+	CCControlButton* _maichubutton; //卖出按钮
+	CCControlButton* _gotoAchieveButton; //前往获得按钮
+	CCControlButton* _inlayButton;  //镶嵌按钮
+	CCControlButton* _delayButton; //摘除宝石按钮
+	CCControlButton* _zhanshiButton; //展示按钮
+
+	CCControlButton* _buy_btn;	//购买按钮
+	INT64 n64ItemId;
+	float _fSrcUseBtnPosX; //使用按钮原始X位置
+	float _fSrcSynBtnPosX; //合成按钮原始X位置
+	float _fSrcAllUseBtnPosX; //批量使用按钮原始X位置
+	float _flearnSkillBtnPosX; //使用按钮原始X位置
+	f_item* _currentItem;
+	bool isFragmenting;
+	eWroldChildTag _showType;
+	unsigned int _cache_item_model_id;
+	//std::map<int,LabelFT*>  _labelFTMap;//Label集合
+};
+
+
+// 特定商品在商城展示的专用Tip界面
+class SpecialStoreItemTip
+{
+public:
+	static SpecialStoreItemTip * getInstance();
+	void open(unsigned int id,int price);//加载ccbi
+	void close();//关闭提示框
+	bool isOpen();
+	SpecialStoreItemTipSprite *getUiLayer();
+
+	unsigned int getTypeId()		{return _GoodsTypeId;}
+	int getPrice()		{return _GoodsPrice;}
+private:
+	unsigned int _GoodsTypeId;
+	int _GoodsPrice;
+};
+
+class SpecialStoreItemTipSprite
+	: public CCSprite
+	, public cocos2d::extension::CCBSelectorResolver
+	, public cocos2d::extension::CCBMemberVariableAssigner
+	, public cocos2d::extension::CCNodeLoaderListener
+	, public CCTouchDelegate
+{
+
+	friend class SpecialStoreItemTip;
+
+	enum eNodeTag
+	{
+		NT_All = 0,
+		NT_Content = 1,
+
+		NT_Avatar = 1,
+		NT_Title,
+		NT_ItemIcon,
+		NT_ItemName,
+		NT_Description1,
+		NT_Description2,
+		NT_Description3,
+		NT_Description4,
+		NT_Jin_Xu,
+		NT_Price,
+		NT_Huo_De,
+
+	};
+
+public:
+	SpecialStoreItemTipSprite();
+	CCB_STATIC_NEW_AUTORELEASE_OBJECT_WITH_INIT_METHOD(SpecialStoreItemTipSprite, create);
+	virtual cocos2d::SEL_MenuHandler onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName);
+	virtual cocos2d::extension::SEL_CCControlHandler onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName);//按钮项
+	virtual bool onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode);
+	virtual void onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader);//节点load
+	virtual void onEnter();
+	virtual void onExit();
+	virtual bool ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent);
+
+	unsigned int findEquipment(unsigned int GoodsItemID);		// 获得商品对应的装备
+private:
+	CCNode * _frame;
+	RoleDisplayNode * _RoleDisplayNode;
+	ItemNode * _itemNode;
+
+	unsigned int _GoodsItemID;
+	unsigned int _EquipmentItemID;	// 实际买的装备
+	unsigned int _UpperItemID;		// 怀旧衣服
+	unsigned int _WeaponItemID;		// 怀旧武器
+
+	typedef int sex;	// 性别
+	typedef int pro;	// 职业
+	typedef unsigned int EquipID;	// 装备typeid
+	std::map<pro,EquipID> _ClassicWeaponIDs;
+	std::map<pro,std::map<sex,EquipID> > _ClassicUpperIDs;
+
+};
+
+
+// 特定商品在商城展示的专用Tip界面
+class MonthCardItemTip
+{
+public:
+	static MonthCardItemTip * getInstance();
+	void open();//加载ccbi
+	void close();//关闭提示框
+	bool isOpen();
+	MonthCardItemTipSprite *getUiLayer();
+
+	void setPosition( const CCPoint &point );
+};
+
+#define NUM_MONTH_CARD_ITEM 3
+class MonthCardItemTipSprite
+	: public CCSprite
+	, public cocos2d::extension::CCBSelectorResolver
+	, public cocos2d::extension::CCBMemberVariableAssigner
+	, public cocos2d::extension::CCNodeLoaderListener
+	, public CCTouchDelegate
+{
+	friend class MonthCardItemTip;
+	enum eNodeTag
+	{
+		NT_ItemNode1 = 1,
+		NT_ItemNode2,
+		NT_ItemNode3,
+		NT_TitleLabel
+	};
+
+	struct ItemInfo
+	{
+		int silverNum;
+		int diamond;
+		int itemId;
+		int itemNum;
+		ItemInfo()
+		{
+			clear();
+		}
+		void clear()
+		{
+			silverNum = 0;
+			diamond = 0;
+			itemId = 0;
+			itemNum = 0;
+		}
+	};
+
+public:
+	MonthCardItemTipSprite();
+	CCB_STATIC_NEW_AUTORELEASE_OBJECT_WITH_INIT_METHOD(MonthCardItemTipSprite, create);
+	virtual cocos2d::SEL_MenuHandler onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName);
+	virtual cocos2d::extension::SEL_CCControlHandler onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName);//按钮项
+	virtual bool onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode);
+	virtual void onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader);//节点load
+	virtual void onEnter();
+	virtual void onExit();
+	virtual bool ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent);
+
+	void initItemData();
+	void initTipUI();
+
+private:
+	LabelFT* m_pDesLabel;//Desc
+	CCNode* m_pItem[NUM_MONTH_CARD_ITEM];//Item位置Node
+	ItemInfo m_st_info;
+
+	ItemNode* m_pItemNode1;//钻石Item对应邮件奖励表中的diamond
+	ItemNode* m_pItemNode2;//金币Item对应邮件奖励表中的silver
+	ItemNode* m_pItemNode3;//物品Item对应邮件奖励表中的Item1;
+};
+#endif //ITEMTIP_H

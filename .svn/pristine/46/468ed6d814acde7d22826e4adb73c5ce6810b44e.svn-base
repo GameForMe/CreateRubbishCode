@@ -1,0 +1,531 @@
+#include "ShouChongUi.h"
+#include "World.h"
+#include "UiResourceMgr.h"
+#include "CfgReader.h"
+#include "UiLoader.h"
+#include "BaseDefine.h"
+#include "ItemNode.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "DBMgr.h"
+#include "PackageManager.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ItemTip.h"
+#include "EquipTipUi.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "VIPUi.h"
+#include "ChongZhiActivityFarmeUI.h"
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+#include "wzolJni.h"
+#endif
+
+CCNode * ShouChongUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["ShouChongUiFrame"] = UiSpriteLoader<ShouChongUiFrame>::loader();
+	CCNode *uiNode = readUiFromCCBI("shouchongui", nodeLoaders, _loadSpriteSheet);
+	if(uiNode != NULL)
+	{
+		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+		//uiNode->setPosition(ccp(winSize.width / 2.0f , winSize.height / 2.0f + 25.0f));
+	}
+	return uiNode;
+}
+
+ShouChongUiFrame * ShouChongUi::getUiLayer()
+{
+	return getUiNodeByTag<ShouChongUiFrame>(WCT_ShouChongUi);
+}
+
+void ShouChongUi::updateData()
+{
+	ShouChongUiFrame *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		ui->updateDisplay();
+	}
+}
+
+//////////////////////////////////////////////////////
+
+
+ShouChongUiFrame::ShouChongUiFrame()
+	:_statnode(NULL)
+	, _heartnode(NULL)
+{
+
+}
+
+ShouChongUiFrame::~ShouChongUiFrame()
+{
+
+}
+
+cocos2d::SEL_MenuHandler ShouChongUiFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler ShouChongUiFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", ShouChongUiFrame::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChongZhiBtnPressed", ShouChongUiFrame::onChongZhiBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onViptequanBtnPressed", ShouChongUiFrame::onViptequanBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGengduoBtnPressed", ShouChongUiFrame::onGengduoBtnPressed);
+	return NULL;
+}
+
+void ShouChongUiFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+	std::string sSESurround = sSEDir + "E1_39.plist";
+	_plist.insert(sSESurround);
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSESurround.c_str());
+
+	/*_statnode = getChildByTag(10);
+	CC_ASSERT(_statnode != NULL);
+	_heartnode = getChildByTag(11);
+	CC_ASSERT(_heartnode != NULL);
+
+	CCSprite *Anim1 = CCSprite::create();
+	Anim1->setTag(NT_StarEffect);
+	Anim1->setAnchorPoint(ccp(0.0f, 1.0f));
+	addChild(Anim1, 1);
+
+	CCSprite *Anim2 = CCSprite::create();
+	Anim2->setTag(NT_HeartEffect);
+	Anim2->setAnchorPoint(ccp(0.0f, 1.0f));
+	addChild(Anim2, 1);*/
+	_frame=dynamic_cast<CCSprite*>(getChildByTag(0));
+	CC_ASSERT(_frame != NULL);
+	for(int i = NT_ItemBegin + 1; i < NT_ItemEnd; i ++)   //界面修改，第一个itemNode不在使用，故i的初始值为 NT_ItemBegin + 1 [2015.7.9]
+	{
+		CCNode* n = _frame->getChildByTag(i);
+		CC_ASSERT(n != NULL);
+		_itemPos[i] = n->getPosition();
+
+		ItemNode * node = ItemNode::create();
+		node->setPosition(_itemPos[i]);
+		node->setTag(NT_ItemNodeBegin + i);
+		node->setBlank();
+		//node->setAnchorPoint(ccp(0.5f,0.5f));
+		_frame->addChild(node,1);
+		node->getSurroundSE("E1_39");
+		node->setClickable(true);
+		node->hideItemOpBtn();
+		// 
+	}
+
+	//itemName_1 = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_ITEMNAME_1)); //界面修改，itemName_1不在使用
+	itemName_2 = (CCLabelTTF*)(_frame->getChildByTag(NT_ITEMNAME_2));
+	itemName_3 = (CCLabelTTF*)(_frame->getChildByTag(NT_ITEMNAME_3));
+	itemName_4 = (CCLabelTTF*)(_frame->getChildByTag(NT_ITEMNAME_4));
+	itemName_5 = (CCLabelTTF*)(_frame->getChildByTag(NT_ITEMNAME_5));
+
+	_bagInfo = getChargeInfoByIndex(0);
+
+	updateDisplay();
+
+	_selectSprite = CCSprite::createWithSpriteFrameName("shouchongui_selectrect");
+	_frame->addChild(_selectSprite,0);
+	_selectSprite->setVisible(false);
+
+	//runAnimation();
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+
+	//添加翅膀特效
+	//CCSize size = CCDirector::sharedDirector()->getWinSize();
+// 	//加载特效资源
+// 	std::string _profilePath = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_157.plist";
+// 	GameActionNode *_eNode = GameActionNode::create();
+// 	_eNode->InitWithPList(_profilePath.c_str(), "E1_157");
+// 	_eNode->setPosition(wingNode->getPosition());
+// 	_frame->addChild(_eNode);
+// 	_eNode->BeginAction(0.2, true);
+
+	runWingAct();
+	runZhanAct();
+	runFaAct();
+	runDaoAct();
+}
+
+void ShouChongUiFrame::onExit()
+{
+	AnimationCache::getInstance()->releaseSinEffect("E1_157",true);
+	AnimationCache::getInstance()->releaseSinEffect("E1_158",true);
+	AnimationCache::getInstance()->releaseSinEffect("E1_159",true);
+	AnimationCache::getInstance()->releaseSinEffect("E1_160",true);
+	CCSprite::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+}
+
+bool ShouChongUiFrame::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+ 	CCPoint framePoint = this->convertTouchToNodeSpace(pTouch);
+ 	const CCSize &frameSize = this->getContentSize();
+ 	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+ 	if(frameRect.containsPoint(framePoint))
+	{
+//  		int index = getItemUnderPoint(framePoint);
+// 		if (index >= NT_ItemBegin && index < NT_ItemNum)
+// 		{
+// 			CCSize size = CCDirector::sharedDirector()->getWinSize();
+// 			setItemSelect(index);
+// 			if(MIsEquipment(_bagInfo.ItemId[index]))
+// 			{
+// 				EquipTipUiLayer *ui = EquipTipUi::create();
+// 				ui->showUi(framePoint,_bagInfo.ItemId[index]);
+// 			}
+// 			else
+// 			{
+// 				ItemTip::getInstace()->open();
+// 				ItemTip::getInstace()->setPosition(_itemPos[index]);
+// 				ItemTip::getInstace()->setDataId(_bagInfo.ItemId[index]);
+// 				ItemTip::getInstace()->hideOpBtn();
+// 			}
+// 		}
+ 		return true;
+ 	}
+	return false;
+}
+std::string ShouChongUiFrame::getRewardItemName(unsigned int itemId)
+{
+	std::string itemName = "";
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM PackageData WHERE typeId = ?1");
+	//c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM ItemTipData WHERE id = ?1");
+	cmd->set_integer32(1 , itemId);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("Name");
+		itemName = table->get_text(idx);
+	}
+
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	return itemName;
+	
+}
+
+
+void ShouChongUiFrame::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//stopAnimation();
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_ShouChongUi);
+	//World::getInstance()->getMiniMapUi()->setPay(true);
+	//World::getInstance()->movePayIconAction();
+}
+
+void ShouChongUiFrame::onChongZhiBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+}
+
+int ShouChongUiFrame::getItemUnderPoint( const CCPoint &point )
+{
+	for(int i =NT_ItemBegin + 1; i <NT_ItemNum; i ++) //界面修改，第一个itemNode不在使用，故i的初始值为 NT_ItemBegin + 1 [2015.7.9]
+	{
+		float x = _itemPos[i].x;
+		float y = _itemPos[i].y;
+		CCRect rect(x - ITEMNODE_CONTENTWIDTH / 2, y - ITEMNODE_CONTENTHEIGHT / 2, ITEMNODE_CONTENTWIDTH, ITEMNODE_CONTENTHEIGHT);
+		if(rect.containsPoint(point))
+		{
+			return i;
+		}
+	}
+	return -1;
+}
+
+void ShouChongUiFrame::updateDisplay()
+{
+	for (int i = NT_ItemBegin + 1; i < NT_ItemEnd ;  i++) //界面修改，第一个itemNode不在使用，故i的初始值为 NT_ItemBegin + 1 [2015.7.9]
+	{
+		ItemNode * node =dynamic_cast<ItemNode *>(_frame->getChildByTag(NT_ItemNodeBegin + i));
+		CC_ASSERT(node != NULL);
+		node->stopAnimation();
+		node->setDataId(_bagInfo.ItemId[i]);
+		node->setPosition(_itemPos[i]);
+		node->setNum(_bagInfo.ItenNum[i]); //显示礼包中某些物品所需个数;
+		//node->runAnimation("qianghua15");
+		node->setVisible(true);
+	}
+	//itemName_1->setString(getRewardItemName(_bagInfo.ItemId[0]).c_str());  //界面修改，itemName_1不在使用
+	itemName_2->setString(getRewardItemName(_bagInfo.ItemId[1]).c_str());
+	itemName_3->setString(getRewardItemName(_bagInfo.ItemId[2]).c_str());
+	itemName_4->setString(getRewardItemName(_bagInfo.ItemId[3]).c_str());
+	itemName_5->setString(getRewardItemName(_bagInfo.ItemId[4]).c_str());
+}
+
+bool ShouChongUiFrame::setItemSelect( int index )
+{
+	if (index < NT_ItemBegin || index > NT_ItemNum )
+		return false;
+	_selectSprite->setPosition(_itemPos[index]);
+	if (!_selectSprite->isVisible())
+		_selectSprite->setVisible(true);
+
+	_selectindex = index;
+	return true;
+}
+
+ShouChongChargeInfo ShouChongUiFrame::getChargeInfoByIndex( int index )
+{
+	ShouChongChargeInfo retInfo;
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return retInfo;
+	if (index < 0 || index > MAX_CHARGE_LEVEL)//防止异常
+	{
+		return retInfo;
+	}
+	int classType = 0;
+	int sex = 0;
+	if ( ploc->getRoleType() == RT_MWARRIOR || ploc->getRoleType() == RT_WWARRIOR)
+	{
+		classType  = 1;
+	}
+	else if (ploc->getRoleType() == RT_MMAGE || ploc->getRoleType() == RT_WMAGE)
+	{
+		classType = 2;
+	}
+	else if (ploc->getRoleType() == RT_MTAOIST || ploc->getRoleType() == RT_WTAOIST)
+	{
+		classType = 3;
+	}
+	else
+	{
+		return retInfo;
+	}
+
+	if ( ploc->getAttribute(RA_SEX) == 1)
+	{
+		sex  = 1;
+	}
+	else
+	{
+		sex = 0;
+	}
+
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM ChargeInfo WHERE Sex = ?1 AND Class = ?2 AND Level = ?3");
+	cmd->set_integer32(1,sex);
+	cmd->set_integer32(2,classType);
+	cmd->set_integer32(3,index);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("Yuanbao");
+
+		retInfo.yuanbao = table->get_integer32(idx);
+		idx = table->get_index("Class");
+
+		retInfo.classtype= table->get_integer32(idx);
+		idx = table->get_index("Sex");
+
+		retInfo.sex = table->get_integer32(idx);
+		idx = table->get_index("item_1");
+
+		retInfo.ItemId[0] = table->get_integer32(idx);
+		idx = table->get_index("num_1");
+
+		retInfo.ItenNum[0] = table->get_integer32(idx);
+		idx = table->get_index("item_2");
+
+		retInfo.ItemId[1] = table->get_integer32(idx);
+		idx = table->get_index("num_2");
+
+		retInfo.ItenNum[1] = table->get_integer32(idx);
+		idx = table->get_index("item_3");
+
+		retInfo.ItemId[2] = table->get_integer32(idx);
+		idx = table->get_index("num_3");
+
+		retInfo.ItenNum[2] = table->get_integer32(idx);
+		idx = table->get_index("item_4");
+
+		retInfo.ItemId[3] = table->get_integer32(idx);
+		idx = table->get_index("num_4");
+
+		retInfo.ItenNum[3] = table->get_integer32(idx);
+		idx = table->get_index("item_5")
+			;
+		retInfo.ItemId[4] = table->get_integer32(idx);
+		idx = table->get_index("num_5");
+
+// 		retInfo.ItenNum[4] = table->get_integer32(idx);
+// 		idx = table->get_index("item_6");
+// 		retInfo.ItemId[5] = table->get_integer32(idx);
+// 		idx = table->get_index("num_6");
+// 		retInfo.ItenNum[5] = table->get_integer32(idx);
+// 		idx = table->get_index("item_7");
+// 		retInfo.ItemId[6] = table->get_integer32(idx);
+// 		idx = table->get_index("num_7");
+// 		retInfo.ItenNum[6] = table->get_integer32(idx);
+// 		idx = table->get_index("item_8");
+// 		retInfo.ItemId[7] = table->get_integer32(idx);
+// 		idx = table->get_index("num_8");
+		retInfo.ItenNum[4] = table->get_integer32(idx);
+		idx = table->get_index("Description");
+		retInfo.desc = table->get_text(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	return retInfo;
+}
+
+void ShouChongUiFrame::runAnimation()
+{
+	AnimationCache::AnimateList animateList;
+	AnimationCache::createDefList(2, animateList);
+	AnimationCache::getInstance()->getSpecialEffect(0x3000,"diyicichongzhijiemian", animateList);
+	BSAnimate *animste = animateList[0];
+	CCSize size = CCDirector::sharedDirector()->getWinSize();
+	getChildByTag(NT_HeartEffect)->setPosition(_statnode->getPosition());
+	getChildByTag(NT_HeartEffect)->runAction(CCRepeatForever::create(animste));
+	BSAnimate *animste2 = animateList[1];
+	CCSize size2 = getChildByTag(NT_StarEffect)->getContentSize();
+	getChildByTag(NT_StarEffect)->setPosition(_heartnode->getPosition());
+	getChildByTag(NT_StarEffect)->runAction(CCRepeatForever::create(animste2));
+}
+
+void ShouChongUiFrame::stopAnimation()
+
+{
+
+	CCNode *startNode = _frame->getChildByTag(NT_StarEffect);
+	CCNode *heartNode =_frame->getChildByTag(NT_HeartEffect);
+	if(startNode != NULL)
+	{
+		startNode->stopAllActions();
+		startNode->removeFromParent();
+	}
+	if (heartNode != NULL)
+	{
+		heartNode->stopAllActions();
+		heartNode->removeFromParent();
+	}
+}
+
+void ShouChongUiFrame::onViptequanBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	VIPUi* pUI = (VIPUi*)OPEN_UI(WCT_VIPUI);
+	if (pUI)
+	{
+		pUI->setshowShouchongUi(true);
+	}
+}
+
+void ShouChongUiFrame::onGengduoBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	ChongZhiActivityFarmeUI* pUi=(ChongZhiActivityFarmeUI*)OPEN_UI(WCT_ChongZhiActivityFarmeUI);//开启充值活动界面
+	if (pUi)
+	{
+		pUi->setShowShouChong(true);
+	}
+}
+
+void ShouChongUiFrame::runWingAct()
+{
+	CCSprite* wingNode = dynamic_cast<CCSprite*>(_frame->getChildByTag(NT_BgNode));
+	if (wingNode)
+	{
+		AnimationCache::AnimateList anims;
+		AnimationCache::createDefList(1, anims);
+		AnimationCache::getInstance()->getSinEffect(0, "E1_157", anims);
+		BSAnimate *animate = anims[0];
+		float offestX = 0.0f;
+		float offestY = 0.0f;
+		getModelOffest("E1_157", offestX, offestY);
+		wingNode->stopAllActions();
+		wingNode->runAction(CCRepeatForever::create(animate));
+
+// 		std::string _profilePath = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_157.plist";
+// 		GameActionNode *_eNode = GameActionNode::create();
+// 		_eNode->InitWithPList(_profilePath.c_str(), "E1_157");
+// 		//_eNode->setAnchorPoint(ccp(0.5f,0.5f));
+// 		//_eNode->setPosition(ccp(0.0f,0.0f));
+// 		_eNode->setPosition(wingNode->getPosition());
+// 		_frame->addChild(_eNode);
+// 		_eNode->BeginAction(0.2, true);
+	}
+}
+
+void ShouChongUiFrame::runZhanAct()
+{
+	CCSprite* zhanNode = dynamic_cast<CCSprite*>(_frame->getChildByTag(NT_ZhanNode));
+	if (zhanNode)
+	{
+		AnimationCache::AnimateList anims;
+		AnimationCache::createDefList(1, anims);
+		AnimationCache::getInstance()->getSinEffect(0, "E1_158", anims);
+		BSAnimate *animate = anims[0];
+		float offestX = 0.0f;
+		float offestY = 0.0f;
+		getModelOffest("E1_158", offestX, offestY);
+		zhanNode->stopAllActions();
+		zhanNode->runAction(CCRepeatForever::create(animate));
+
+// 		std::string _profilePath = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_158.plist";
+// 		GameActionNode *_eNode = GameActionNode::create();
+// 		_eNode->InitWithPList(_profilePath.c_str(), "E1_158");
+// 		_eNode->setPosition(zhanNode->getPosition());
+// 		_frame->addChild(_eNode);
+// 		_eNode->BeginAction(0.2, true);
+	}
+}
+
+void ShouChongUiFrame::runFaAct()
+{
+	CCSprite* faNode = dynamic_cast<CCSprite*>(_frame->getChildByTag(NT_FaNode));
+	if (faNode)
+	{
+		AnimationCache::AnimateList anims;
+		AnimationCache::createDefList(1, anims);
+		AnimationCache::getInstance()->getSinEffect(0, "E1_160", anims);
+		BSAnimate *animate = anims[0];
+		float offestX = 0.0f;
+		float offestY = 0.0f;
+		getModelOffest("E1_160", offestX, offestY);
+		faNode->stopAllActions();
+		faNode->runAction(CCRepeatForever::create(animate));
+
+// 		std::string _profilePath = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_159.plist";
+// 		GameActionNode *_eNode = GameActionNode::create();
+// 		_eNode->InitWithPList(_profilePath.c_str(), "E1_159");
+// 		_eNode->setPosition(faNode->getPosition());
+// 		_frame->addChild(_eNode);
+// 		_eNode->BeginAction(0.03, true);
+	}
+}
+
+void ShouChongUiFrame::runDaoAct()
+{
+	CCSprite* daoNode = dynamic_cast<CCSprite*>(_frame->getChildByTag(NT_DaoNode));
+	if (daoNode)
+	{
+		AnimationCache::AnimateList anims;
+		AnimationCache::createDefList(1, anims);
+		AnimationCache::getInstance()->getSinEffect(0, "E1_159", anims);
+		BSAnimate *animate = anims[0];
+		float offestX = 0.0f;
+		float offestY = 0.0f;
+		getModelOffest("E1_159", offestX, offestY);
+		daoNode->stopAllActions();
+		daoNode->runAction(CCRepeatForever::create(animate));
+
+// 		std::string _profilePath = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_160.plist";
+// 		GameActionNode *_eNode = GameActionNode::create();
+// 		_eNode->InitWithPList(_profilePath.c_str(), "E1_160");
+// 		daoNode->addChild(_eNode);
+// 		_eNode->BeginAction(0.03, true);
+	}
+}
+

@@ -1,0 +1,171 @@
+#include "MovingBackground.h"
+#include "CfgReader.h"
+#include "BaseDefine.h"
+
+#define BACK_IMG_WIDTH 1424.f
+#define BACK_IMG_MVOESPEED 50.f
+
+MovingBackGround::MovingBackGround()
+	: _versionLab(NULL)
+{
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	std::string back1Str = uiDir + "login1.jpg";
+	_back1 = CCSprite::create(back1Str.c_str());
+	
+	_back1->retain();
+	_back1->setAnchorPoint(ccp(0.f, 0.0f));
+	const CCSize& uiEffectSize = _back1->getContentSize();
+	float scale_Value = winSize.width / uiEffectSize.width;
+	_back1->setScaleX(scale_Value);
+	_back1->setScaleY(scale_Value);
+	
+	//加载两边球的特效
+	std::string uiDirBall = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string uiDirPathBall = uiDirBall + "login_e_ball.plist";
+
+#if (CC_TARGET_PLATFORM != CC_PLATFORM_IOS)
+	//球的特效
+	m_BallLiftEffect = GameActionNode::create();
+	_back1->addChild(m_BallLiftEffect,0);
+	m_BallLiftEffect->setPosition(ccp(_back1->getPosition().x + _back1->getContentSize().width * 0.241,_back1->getPosition().y + _back1->getContentSize().height * 0.83));
+	m_BallLiftEffect->setScale(1 / scale_Value);
+	m_BallRightEffect = GameActionNode::create();
+	_back1->addChild(m_BallRightEffect,0);
+	m_BallRightEffect->setPosition(ccp(_back1->getPosition().x + _back1->getContentSize().width * 0.77,_back1->getPosition().y + _back1->getContentSize().height * 0.83));
+	m_BallRightEffect->setScale(1 / scale_Value);
+	m_BallLiftEffect->InitWithPList(uiDirPathBall.c_str(), "login_e_ball");
+	m_BallRightEffect->InitWithPList(uiDirPathBall.c_str(), "login_e_ball");
+
+	m_BallLiftEffect->BeginAction(0.05f, true);
+	m_BallRightEffect->BeginAction(0.05f, true);
+#endif
+	
+	_callback = new MoveBackCallback;
+
+//	CCAction *action1 = CCSequence::createWithTwoActions(move1, CCCallFuncND::create(_callback, SEL_CallFuncND(&MoveBackCallback::moveCallback), this));
+//	CCAction *action2 = CCSequence::createWithTwoActions(move2, CCCallFuncND::create(_callback, SEL_CallFuncND(&MoveBackCallback::moveCallback), this));
+
+	//_back1->runAction(action1);
+	//_back2->runAction(action2);
+
+//win32
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_WIN32)
+	setVersion("1.0.1");//test
+#endif
+
+//andriod;
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+	setVersion("1.0.1");
+#endif
+
+//ios;
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	setVersion("1.0.1");
+#endif
+}
+
+MovingBackGround::~MovingBackGround()
+{
+	_back1->release();
+//	_back2->release();
+	_versionLab->release();
+	delete _callback;
+}
+
+void MovingBackGround::moveCallback( CCNode *node )
+{
+	CCNode *tmpNode = NULL;
+/*
+	if(node == _back1)
+	{
+		tmpNode = _back2;
+	}
+	else if(node == _back2)
+	{
+		tmpNode = _back1;
+	}
+*/
+
+	float posX = tmpNode->getPositionX() + BACK_IMG_WIDTH;
+	float dis = posX + BACK_IMG_WIDTH;
+	node->setPositionX(posX);
+
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+
+	CCMoveTo *move = CCMoveTo::create(dis / BACK_IMG_MVOESPEED, ccp(-BACK_IMG_WIDTH, (winSize.height - UI_HEIGHT) / 2.0f));
+	CCAction *action = CCSequence::createWithTwoActions(move, CCCallFuncND::create(_callback, SEL_CallFuncND(&MoveBackCallback::moveCallback), this));
+
+	node->runAction(action);
+
+
+	float posX2 = tmpNode->getPositionX();
+	float dis2 = posX2 + BACK_IMG_WIDTH;
+
+	CCMoveTo *move2 = CCMoveTo::create(dis2 / BACK_IMG_MVOESPEED, ccp(-BACK_IMG_WIDTH, (winSize.height - UI_HEIGHT) / 2.0f));
+	CCAction *action2 = CCSequence::createWithTwoActions(move2, CCCallFuncND::create(_callback, SEL_CallFuncND(&MoveBackCallback::moveCallback), this));
+	tmpNode->stopAllActions();
+	tmpNode->runAction(action2);
+
+}
+
+void MovingBackGround::addToParent( CCNode *parent )
+{
+	CC_ASSERT(parent != NULL);
+	if(parent != NULL)
+	{
+		parent->addChild(_back1);
+		//	parent->addChild(_back2);
+		parent->addChild(_versionLab);
+	}
+	
+}
+
+void MovingBackGround::removeFromParent( )
+{
+	_back1->removeFromParent();
+//	_back2->removeFromParent();
+	_versionLab->removeFromParent();
+}
+
+void MovingBackGround::setVersion( const std::string &ver )
+{
+	if(_versionLab == NULL)
+	{
+		std::ostringstream ostr;
+		ostr << "\xE7\x89\x88\xE6\x9C\xAC\xE5\x8F\xB7\xEF\xBC\x9A" << ver;//版本号
+		_versionLab = CCLabelTTF::create();
+		_versionLab->retain();
+		_versionLab->setFontSize(16.f);
+		_versionLab->setString(ostr.str().c_str());
+		CCSize labSize = _versionLab->getContentSize();
+		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+		_versionLab->setPositionX(winSize.width - labSize.width / 2.0f - 20.f);
+		_versionLab->setPositionY(winSize.height - labSize.height / 2.0f - 10.f);
+	_versionLab->setVisible(false);
+	}
+}
+void MovingBackGround::setRoleAnim(GameActionNode* actionNode,float tickDick /*= 0.1f*/,bool isPlaye /*= true*/,int Tag /*=0*/,float xScale /*= 0.0f*/,float yScale /*= 0.0f*/)
+{
+	CC_ASSERT(actionNode != NULL);
+	if(actionNode == NULL)
+	{
+		return;
+	}
+	GameActionNode* acNode = dynamic_cast<GameActionNode*>(_back1->getChildByTag(ROLE_ANIM));
+	if(acNode == NULL)
+	{
+		actionNode->setTag(ROLE_ANIM);
+		_back1->addChild(actionNode);
+	}
+	actionNode->setPosition(ccp(_back1->getPositionX() + _back1->getContentSize().width * 0.5,_back1->getPositionY() + _back1->getContentSize().height * 0.35));
+	const CCSize& winSize = CCDirector::sharedDirector()->getWinSize();
+	const CCSize& uiEffectSize = _back1->getContentSize();
+	actionNode->setScale(uiEffectSize.width / winSize.width);
+	actionNode->BeginAction(tickDick,isPlaye);
+	CCNode* node = actionNode->getChildByTag(Tag);
+	if(node != NULL)
+	{
+		node->setPosition(ccp(actionNode->getPositionX() * xScale,actionNode->getPositionY() * yScale));
+	}
+}

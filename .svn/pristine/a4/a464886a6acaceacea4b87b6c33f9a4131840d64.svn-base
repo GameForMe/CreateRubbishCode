@@ -1,0 +1,295 @@
+#include "TradingEquipData.h"
+#include "tools.h"
+ 
+TradingEquipData::TradingEquipData()
+{
+	initEquipBaseAttrName();
+	initEquipIndentifyAttName();
+}
+
+TradingEquipData::~TradingEquipData()
+{
+
+}
+
+void TradingEquipData::initEquipBaseAttrName()
+{
+	if(m_mBaseAttrNameStr.empty())
+	{
+		m_mBaseAttrNameStr[ERA_MaxHP] = "\xE7\x94\x9F\xE5\x91\xBD\xEF\xBC\x9A";
+		m_mBaseAttrNameStr[ERA_MaxMP] = "\xE9\xAD\x94\xE5\x8A\x9B\xEF\xBC\x9A";
+		m_mBaseAttrNameStr[ERA_ExAttackMin] = "\xE7\x89\xA9\xE6\x94\xBB\xEF\xBC\x9A";
+		m_mBaseAttrNameStr[ERA_ExAttackMax] = "\xE7\x89\xA9\xE6\x94\xBB\xEF\xBC\x9A";
+		m_mBaseAttrNameStr[ERA_InAttackMin] = "\xE9\xAD\x94\xE6\x94\xBB\xEF\xBC\x9A";
+		m_mBaseAttrNameStr[ERA_InAttackMax] = "\xE9\xAD\x94\xE6\x94\xBB\xEF\xBC\x9A";
+		m_mBaseAttrNameStr[ERA_ArmorIn] = "\xE9\x81\x93\xE6\x94\xBB\xEF\xBC\x9A";
+		m_mBaseAttrNameStr[ERA_ArmorEx] = "\xE9\x81\x93\xE6\x94\xBB\xEF\xBC\x9A";
+		m_mBaseAttrNameStr[ERA_ExMinDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xEF\xBC\x9A";
+		m_mBaseAttrNameStr[ERA_ExMaxDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xEF\xBC\x9A";
+		m_mBaseAttrNameStr[ERA_InMinDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xEF\xBC\x9A";
+		m_mBaseAttrNameStr[ERA_InMaxDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xEF\xBC\x9A";
+		m_mBaseAttrNameStr[ERA_HitRate] = "\xE5\x91\xBD\xE4\xB8\xAD\xEF\xBC\x9A";
+		m_mBaseAttrNameStr[ERA_Dodge] = "\xE9\x97\xAA\xE9\x81\xBF\xEF\xBC\x9A";
+		m_mBaseAttrNameStr[ERA_Crit_Rate] = "\xE6\x9A\xB4\xE5\x87\xBB\xEF\xBC\x9A";
+		m_mBaseAttrNameStr[ERA_UnCrit_Rate] = "\xE5\x85\x8D\xE6\x9A\xB4\xEF\xBC\x9A";
+		m_mBaseAttrNameStr[ERA_UnCrit_Amount] = "\xE5\x85\x8D\xE7\x88\x86\xEF\xBC\x9A";
+		m_mBaseAttrNameStr[ERA_Luck] = "\xE5\xB9\xB8\xE8\xBF\x90\xEF\xBC\x9A";
+	}
+}
+
+
+EquipTipData *TradingEquipData::createEquipBaseAttrItem(const char *attrName, int v1, int v2 /*= -1*/, const char *split/* = "-"*/)
+{
+	//CCString *str = NULL;
+	CCString* valueStr;
+	EquipTipData *item = new EquipTipData;
+	item->str1 = attrName;
+	
+	valueStr = CCString::createWithFormat("%d %s %d", v1, split, v2);
+	item->str2 = valueStr->getCString();
+
+	return item;
+}
+
+void TradingEquipData::clearEquipBaseAttr()
+{
+	for(AttrItemList::iterator iter = m_EquipbaseAttr.begin(); iter != m_EquipbaseAttr.end(); ++ iter)
+	{
+		delete *iter;
+	}
+	m_EquipbaseAttr.clear();
+}
+
+void TradingEquipData::addEquipBaseAttr(const char *attrName, int v1, int v2/* = -1*/, const char *split/* = "-"*/)
+{
+	if(strlen(attrName) > 0)
+	{
+		EquipTipData *item = createEquipIndentifyAttrItem(attrName, v1, v2, split);
+		m_EquipbaseAttr.push_back(item);
+	}
+}
+
+void TradingEquipData::initEqupBaseAttr(f_item *item)
+{
+	f_equipment* equip = dynamic_cast<f_equipment*>(item);
+	if (NULL == equip)
+		return ;
+
+	for(int i = 0; i < MAX_BASE_ATT; i ++)
+	{//基础属性;
+		ERoleAttribute attr = equip->m_equipex.EquipAttitionalAtt[i].eRoleAtt;
+
+		if(attr != ERA_Null)
+		{
+			if(attr != ERA_Luck)
+			{
+				m_mBaseEquipAttrMap[attr] = equip->m_equipex.EquipAttitionalAtt[i].nValue + getConsolidateAtt(equip->m_equipex.EquipAttitionalAtt[i].nValue,equip->get_equip_consolidate_level());
+				m_vBaseEquipAttrVector.push_back(attr);
+			}
+		}
+	}
+}
+
+void TradingEquipData::initEqiupIdentifyAttr(f_item *item)
+{
+	f_equipment* equip = dynamic_cast<f_equipment*>(item);
+	if (NULL == equip)
+		return ;
+
+	bool isNoEra = true;
+	for(int i = MAX_BASE_ATT; i < MAX_ADDITIONAL_EFFECT; i ++)
+	{//进阶属性;
+		if (equip->m_equipex.EquipAttitionalAtt[i].eRoleAtt == ERA_UNKNOW)
+		{
+			m_IdentifyEquipMap[equip->m_equipex.EquipAttitionalAtt[i].eRoleAtt] = ERA_UNKNOW;
+			m_IdentifyEquipVector.push_back(equip->m_equipex.EquipAttitionalAtt[i].eRoleAtt);
+		}
+		else if(equip->m_equipex.EquipAttitionalAtt[i].eRoleAtt != ERA_Null)
+		{
+			m_IdentifyEquipMap[equip->m_equipex.EquipAttitionalAtt[i].eRoleAtt] = equip->m_equipex.EquipAttitionalAtt[i].nValue;
+			m_IdentifyEquipVector.push_back(equip->m_equipex.EquipAttitionalAtt[i].eRoleAtt);
+			isNoEra = false;
+		}
+	}
+	if (isNoEra)
+	{
+		addEquipIndentifyAttr(GET_STR(9034).c_str(), -1, -1, "-");  // 9034 未进阶
+	}
+}
+
+
+void TradingEquipData::parseEqupBaeAttr()
+{
+	for(std::vector<ERoleAttribute>::iterator iter = m_vBaseEquipAttrVector.begin(); iter != m_vBaseEquipAttrVector.end(); ++ iter)
+	{
+		int iterValue = m_mBaseEquipAttrMap[*iter];
+		if(iterValue == -1)
+			continue;
+
+		switch(*iter)
+		{
+		case ERA_ExAttackMin:
+			{
+				int v1 = iterValue;
+				int v2 = m_mBaseEquipAttrMap[ERA_ExAttackMax];
+				m_mBaseEquipAttrMap[ERA_ExAttackMax] = -1;
+				addEquipBaseAttr(m_mBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExAttackMax:
+			{
+				int v2 = iterValue;
+				int v1 = m_mBaseEquipAttrMap[ERA_ExAttackMin];
+				m_mBaseEquipAttrMap[ERA_ExAttackMin] = -1;
+				addEquipBaseAttr(m_mBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InAttackMin:
+			{
+				int v1 = iterValue;
+				int v2 = m_mBaseEquipAttrMap[ERA_InAttackMax];
+				m_mBaseEquipAttrMap[ERA_InAttackMax] = -1;
+				addEquipBaseAttr(m_mBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InAttackMax:
+			{
+				int v2 = iterValue;
+				int v1 = m_mBaseEquipAttrMap[ERA_InAttackMin];
+				m_mBaseEquipAttrMap[ERA_InAttackMin] = -1;
+				addEquipBaseAttr(m_mBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ArmorEx:
+			{
+				int v1 = iterValue;
+				int v2 = m_mBaseEquipAttrMap[ERA_ArmorIn];
+				m_mBaseEquipAttrMap[ERA_ArmorIn] = -1;
+				addEquipBaseAttr(m_mBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ArmorIn:
+			{
+				int v2 = iterValue;
+				int v1 = m_mBaseEquipAttrMap[ERA_ArmorEx];
+				m_mBaseEquipAttrMap[ERA_ArmorEx] = -1;
+				addEquipBaseAttr(m_mBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExMaxDefense:
+			{
+				int v2 = iterValue;
+				int v1 = m_mBaseEquipAttrMap[ERA_ExMinDefense];
+				m_mBaseEquipAttrMap[ERA_ExMinDefense] = -1;
+				addEquipBaseAttr(m_mBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExMinDefense:
+			{
+				int v1 = iterValue;
+				int v2 = m_mBaseEquipAttrMap[ERA_ExMaxDefense];
+				m_mBaseEquipAttrMap[ERA_ExMaxDefense] = -1;
+				addEquipBaseAttr(m_mBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InMaxDefense:
+			{
+				int v2 = iterValue;
+				int v1 = m_mBaseEquipAttrMap[ERA_InMinDefense];
+				m_mBaseEquipAttrMap[ERA_InMinDefense] = -1;
+				addEquipBaseAttr(m_mBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InMinDefense:
+			{
+				int v1 = iterValue;
+				int v2 = m_mBaseEquipAttrMap[ERA_InMaxDefense];
+				m_mBaseEquipAttrMap[ERA_InMaxDefense] = -1;
+				addEquipBaseAttr(m_mBaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		default:
+			addEquipBaseAttr(m_mBaseAttrNameStr[*iter].c_str(), iterValue);
+			break;
+		}
+	}
+}
+
+void TradingEquipData::parseEqiupIdentifyAttr()
+{
+	for(std::vector<ERoleAttribute>::iterator iter = m_IdentifyEquipVector.begin(); iter != m_IdentifyEquipVector.end(); ++ iter)
+	{
+		if (m_IdentifyEquipMap[*iter] == ERA_UNKNOW)
+		{
+			addEquipIndentifyAttr(GET_STR(9034).c_str(), 1,-1,"-");
+		}
+		else
+		{
+			addEquipIndentifyAttr(m_IdentifyEquipAttrStr[*iter].c_str(),m_IdentifyEquipMap[*iter]);
+		}
+	}
+}
+
+void TradingEquipData::addEquipIndentifyAttr(const char *attrName, int v1, int v2/* = -1*/, const char *split/* = "-"*/)
+{
+	if(strlen(attrName) > 0)
+	{
+		EquipTipData *item = createEquipIndentifyAttrItem(attrName, v1, v2, split);
+		m_IdentifyEquipAttr.push_back(item);
+	}
+}
+
+
+EquipTipData * TradingEquipData::createEquipIndentifyAttrItem( const char *attrName, int v1, int v2 /*= -1*/, const char *split /*= "-"*/)
+{
+	CCString *str = NULL;
+	if(v2 < 0)
+		str = CCString::createWithFormat("%d",v1);
+	else
+		str = CCString::createWithFormat("%d %s %d", v1, split, v2);
+
+	EquipTipData *item = new EquipTipData;
+	item->str1 = CCString::createWithFormat("%s",attrName)->getCString();
+	item->str2 = (0 == str->compare("-1") ? "" : str->getCString());
+
+	return item;
+}
+
+void TradingEquipData::initEquipIndentifyAttName()
+{
+	if(m_IdentifyEquipAttrStr.empty())
+	{
+		m_IdentifyEquipAttrStr[ERA_ExAttackMax] = "\xE7\x89\xA9\xE6\x94\xBB\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";//物攻上限：
+		m_IdentifyEquipAttrStr[ERA_ExAttackMin] = "\xE7\x89\xA9\xE6\x94\xBB\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";//物攻下限：
+		m_IdentifyEquipAttrStr[ERA_ExMaxDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";//物防上限：
+		m_IdentifyEquipAttrStr[ERA_ExMinDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";//物防下限：
+		m_IdentifyEquipAttrStr[ERA_InAttackMax] = "\xE9\xAD\x94\xE6\x94\xBB\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";//魔攻上限：
+		m_IdentifyEquipAttrStr[ERA_InAttackMin] = "\xE9\xAD\x94\xE6\x94\xBB\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";//魔攻下限：
+		m_IdentifyEquipAttrStr[ERA_ArmorIn] = "\xE9\x81\x93\xE6\x94\xBB\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";//道攻上限：
+		m_IdentifyEquipAttrStr[ERA_ArmorEx] = "\xE9\x81\x93\xE6\x94\xBB\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";//道攻下限：
+		m_IdentifyEquipAttrStr[ERA_InMaxDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";//魔防上限：
+		m_IdentifyEquipAttrStr[ERA_InMinDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";//魔防下限：
+		m_IdentifyEquipAttrStr[ERA_HitRate] = "\xE5\x91\xBD\xE4\xB8\xAD\xEF\xBC\x9A";//命中
+		m_IdentifyEquipAttrStr[ERA_Dodge] = "\xE9\x97\xAA\xE9\x81\xBF\xEF\xBC\x9A";//闪避
+		m_IdentifyEquipAttrStr[ERA_Crit_Rate] = "\xE6\x9A\xB4\xE5\x87\xBB\xEF\xBC\x9A";//暴击
+		m_IdentifyEquipAttrStr[ERA_UnCrit_Rate] = "\xE5\x85\x8D\xE6\x9A\xB4\xEF\xBC\x9A";//免暴
+		m_IdentifyEquipAttrStr[ERA_UnCrit_Amount] = "\xE5\x85\x8D\xE7\x88\x86\xEF\xBC\x9A";//免爆
+		m_IdentifyEquipAttrStr[ERA_MaxHP] = "\xE7\x94\x9F\xE5\x91\xBD\xE5\x80\xBC\xEF\xBC\x9A";//生命值：
+		m_IdentifyEquipAttrStr[ERA_MaxMP] = "\xE9\xAD\x94\xE5\x8A\x9B\xE5\x80\xBC\xEF\xBC\x9A";//魔力值：
+	}
+}
+
+void TradingEquipData::clearEquipindentifyAttr()
+{
+	for(AttrItemList::iterator iter = m_IdentifyEquipAttr.begin(); iter != m_IdentifyEquipAttr.end(); ++ iter)
+	{
+		delete *iter;
+	}
+
+	m_IdentifyEquipAttr.clear();
+}
+
+
+
+
+

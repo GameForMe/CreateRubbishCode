@@ -1,0 +1,239 @@
+#ifdef _WIN32
+#include <windows.h>
+#include <tchar.h>
+#include <io.h>
+//#include "resource.h"
+#include "xzip.h"
+#include "DbgHelp.h"
+#include <queue>
+#include <fstream>
+//#include "..\NETLib\ftp\FTPClient.h"
+//#include "DxDiagReport.h"
+#pragma comment( lib, "dbghelp.lib" )
+
+#ifdef _UNICODE
+typedef std::wstring tstring;
+#else
+typedef std::string tstring;
+
+#endif
+
+namespace 
+{
+const TCHAR* g_szOutputDir               = _T("log");
+const TCHAR* g_szOutputDumpFileName      = _T("log\\Crash.dmp");
+const TCHAR* g_szOutputCrashInfoFileName = _T("log\\Crash.txt");
+const TCHAR* g_szCrashReportFileName     = _T("log\\Crash%s.zip");
+const TCHAR* g_szDeviceInfoFilename		 = _T("log\\DeviceInfo.txt");
+
+void TryUploadDumpFile(tstring const& strDumpFile)
+{	
+// 	if ( !_taccess( strDumpFile.c_str(), 0 ) )
+// 	{		
+// 		tstring strRemoteFile = strDumpFile.substr( strDumpFile.find_last_of(_T('\\')) + 1 );
+// 
+// 		net::nsFTP::CFTPClient ftpClient;
+// 		net::nsFTP::CLogonInfo logonInfo(_T("dump.ssplay.com"), 21, _T("dump"), _T("ssplay666"));
+// 
+// 		if( ftpClient.Login(logonInfo) )
+// 		{
+//             ULONG t1; USHORT t2;
+//             ftpClient.Passive( t1, t2 );
+// 			ftpClient.UploadFile(strDumpFile, strRemoteFile);
+// 			ftpClient.Logout();
+// 		}
+// 	}
+}
+
+INT_PTR CALLBACK CrashDialogProc(HWND hwndDlg,
+    UINT uMsg,
+    WPARAM wParam,
+    LPARAM lParam
+)
+{
+    switch ( uMsg )
+    {
+    case WM_INITDIALOG:
+        // 窗口居中
+        RECT rtWorkspace;
+        RECT rtDialog;
+        SystemParametersInfo( SPI_GETWORKAREA, 0, &rtWorkspace, 0 );	// 得到工作区的大小(不含任务栏的区域)
+        GetWindowRect( hwndDlg, &rtDialog );
+
+        SetWindowPos( hwndDlg, HWND_TOP, 
+            (rtWorkspace.right - rtWorkspace.left) / 2 - (rtDialog.right - rtDialog.left) / 2,
+            (rtWorkspace.bottom - rtWorkspace.top) / 2 - (rtDialog.bottom - rtDialog.top) / 2,
+            0,
+            0, SWP_NOSIZE );
+        break;
+//     case WM_COMMAND:
+//         if ( LOWORD(wParam) == IDC_BTN_SEND ||
+// 			 LOWORD(wParam) == IDC_BTN_CANCEL )
+//         {
+//             std::ofstream fs( g_szOutputCrashInfoFileName, std::ios_base::out );
+//             if ( fs )
+//             {
+//                 // 写入计算机名和IP地址
+//                 char host_name[MAX_PATH] = {0};
+//                 if ( !gethostname( host_name, sizeof(host_name) ) )
+//                 {
+//                     fs  << "计算机名:\n"
+//                         << host_name << "\n\n";
+//                 }
+// 
+//                 // 写入用户操作描述
+//                 HWND hInputText = GetDlgItem( hwndDlg, IDC_TEXT );
+//                 if ( hInputText )
+//                 {
+//                     TCHAR szText[1024] = {0};
+//                     int len = GetWindowText( hInputText, szText, sizeof(szText)/sizeof(TCHAR) );
+//                     if ( len > 0 )
+//                     {
+//                         fs  << "用户操作描述:\n" 
+//                             << szText << "\n";
+//                     }
+//                 }
+//             }
+//             EndDialog( hwndDlg, TRUE );
+//         }
+        /*else if (LOWORD(wParam) == IDC_BTN_CANCEL )
+        {
+            EndDialog( hwndDlg, FALSE );
+        }*/
+        break;
+    }
+
+    return FALSE;
+}
+
+////! 生成设备信息文件.
+//bool GenenrateDeviceInfoFile() 
+//{
+//	CDxDiagInfo info;
+//	if( SUCCEEDED( info.Init( FALSE ) ) ) 
+//	{
+//		if( SUCCEEDED( info.QueryDxDiagViaDll() ) ) {
+//			return info.WriteToFile( Tang::f_util::get_absolute_path(g_szDeviceInfoFilename).c_str() );
+//		}
+//	}
+//	return false;
+//}
+
+LONG WINAPI MyUnhandledExceptionFilter(
+  __in          struct _EXCEPTION_POINTERS* pExp
+)
+{
+    TCHAR szFileName[1024];
+    TCHAR szTime[MAX_PATH];
+
+    FILETIME CurrentTime;
+    GetSystemTimeAsFileTime(&CurrentTime);
+	szTime[0] = _T('\0');
+	WORD wDate, wTime;
+	if (FileTimeToLocalFileTime(&CurrentTime, &CurrentTime) &&
+		FileTimeToDosDateTime(&CurrentTime, &wDate, &wTime))
+	{
+		// 年月日以及时分秒和进程id
+        wsprintf(szTime, _T("[%04d-%02d-%02d %02d-%02d-%02d %04d]"),
+			(wDate / 512) + 1980, (wDate / 32) & 15, wDate & 31, 
+			(wTime >> 11), (wTime >> 5) & 0x3F, (wTime & 0x1F) * 2, rand() % 10000 );
+	}
+
+    _sntprintf( szFileName, sizeof(szFileName)/sizeof(TCHAR),
+        g_szCrashReportFileName, szTime );
+
+    // 准备好目录
+	CreateDirectory( g_szOutputDir, NULL );
+
+    // 生成Dump文件
+	HANDLE hFile = ::CreateFile(g_szOutputDumpFileName, GENERIC_WRITE, 
+		FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+
+	MINIDUMP_EXCEPTION_INFORMATION MiniDumpExceptionInfo;
+	MiniDumpExceptionInfo.ThreadId = GetCurrentThreadId();
+	MiniDumpExceptionInfo.ExceptionPointers = pExp;
+	MiniDumpExceptionInfo.ClientPointers = FALSE;
+	MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), hFile,  MiniDumpNormal , 
+		&MiniDumpExceptionInfo, NULL, NULL);
+
+	// 先检查log文件是否存在
+	DWORD dwSize = ::GetFileSize(hFile, NULL);
+	::CloseHandle(hFile);
+	if( dwSize == 0 || dwSize == -1 )
+		return EXCEPTION_EXECUTE_HANDLER;
+
+	HZIP hZip = NULL;
+	hZip = CreateZip((LPVOID)(LPCTSTR)szFileName, 0, ZIP_FILENAME);
+	if( !hZip )
+		return EXCEPTION_EXECUTE_HANDLER;
+
+	// zip is open, add file
+	ZRESULT zr = ZipAdd(hZip, _T("CrashMe.dmp"), (LPVOID)g_szOutputDumpFileName, 0, ZIP_FILENAME);
+	if( zr != ZR_OK )
+		return EXCEPTION_EXECUTE_HANDLER;
+
+//     BOOL bSendCrashReport = FALSE;
+//     if ( TRUE == ::DialogBox( GetModuleHandle(NULL),
+//         MAKEINTRESOURCE(IDD_CRASH),
+// 		NULL,
+//         CrashDialogProc ) )
+//     {
+//         bSendCrashReport = TRUE;
+// 
+//         // 用户输入错误描述信息
+//         ZipAdd(hZip, _T("CrashInfo.txt"),  (LPVOID)g_szOutputCrashInfoFileName, 0, ZIP_FILENAME);
+//     }
+
+	////! 收集硬件信息.
+	//if( GenenrateDeviceInfoFile() ) {
+	//	ZipAdd( hZip, _T("DeviceInfo.txt"), (LPVOID)Tang::f_util::get_absolute_path(g_szDeviceInfoFilename).c_str(), 0, ZIP_FILENAME );
+	//}
+    CloseZip( hZip );
+
+//     if ( bSendCrashReport )
+//         TryUploadDumpFile( szFileName );
+
+    // 删除原文件
+	::DeleteFile( g_szOutputDumpFileName );
+    ::DeleteFile( g_szOutputCrashInfoFileName );
+	::DeleteFile( g_szDeviceInfoFilename );
+
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+} // namespace 
+
+
+#ifndef _M_IX86
+#error "The following code only works for x86!"
+#endif
+
+void DisableSetUnhandledExceptionFilter()
+{
+	void *addr = (void*)GetProcAddress(LoadLibrary(_T("kernel32.dll")),
+		"SetUnhandledExceptionFilter");
+	if (addr) 
+	{
+		unsigned char code[16];
+		int size = 0;
+		//xor eax,eax;
+		code[size++] = 0x33;
+		code[size++] = 0xC0;
+		//ret 4
+		code[size++] = 0xC2;
+		code[size++] = 0x04;
+		code[size++] = 0x00;
+
+		DWORD dwOldFlag, dwTempFlag;
+		VirtualProtect(addr, size, PAGE_READWRITE, &dwOldFlag);
+		WriteProcessMemory(GetCurrentProcess(), addr, code, size, NULL);
+		VirtualProtect(addr, size, dwOldFlag, &dwTempFlag);
+	}
+}
+
+
+void InitCrashReport()
+{
+    SetUnhandledExceptionFilter( MyUnhandledExceptionFilter );
+	DisableSetUnhandledExceptionFilter();
+}
+#endif // #ifdef _WIN32

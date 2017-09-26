@@ -1,0 +1,387 @@
+#include "ItemAutoUseDaojuTip.h"
+#include "World.h"
+#include "CfgReader.h"
+#include "UiLoader.h"
+#include "PackageManager.h"
+#include "SimpleAudioEngine.h"
+#include "UiResourceMgr.h"
+
+#include "ShortCutUi.h"
+#include "CommonMsgDefine.h"
+#include "DBMgr.h"
+#include "NewPlayerGuide.h"
+
+
+//单例 1
+ItemAutoUseDaojuTip * ItemAutoUseDaojuTip::getInstace()
+{
+	static ItemAutoUseDaojuTip instance;
+	return &instance;
+}
+//自动使用道具
+void ItemAutoUseDaojuTip::open()
+{
+	if(isOpen() || IS_UI_OPEN(WCT_PACKAGEUI))
+		return;
+
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		//CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary(); 
+		CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+		ccNodeLoaderLibrary->registerCCNodeLoader("kuaijieshiyongUiLayer", UiLayerLoader<kuaijieshiyongUiLayer>::loader());
+		cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+		//CCNode *node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "itemAutousedaojutipsprite.ccbi").c_str());  buysetui
+		CCNode *node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "kuaijieshiyong.ccbi").c_str());
+	
+		_usedPlistFile = ccbReader->getLoadedSpriteSheet();  //未用到
+		UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);  //未用到
+		ccbReader->release();
+		if(node != NULL) {
+			scene->addChild(node, WZ_POPUI, WCT_ItemAutoUseDaojuTip);//所在层数和tag值
+			m_pAutoItemMap.clear();
+			//CCSize size = CCDirector::sharedDirector()->getWinSize();
+			//node->setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+		}
+	}
+}
+//关闭提示框 1
+void ItemAutoUseDaojuTip::close()
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);//音效
+	if(!isOpen())
+		return;
+	m_pAutoItemMap.clear();
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		scene->removeChildByTag(WCT_ItemAutoUseDaojuTip);//所在层数和tag值
+	}
+}
+//是否已打开过 1
+bool ItemAutoUseDaojuTip::isOpen()
+{
+	return (getUiLayer() != NULL);
+}
+//设置id
+void ItemAutoUseDaojuTip::setDataId( f_item* pItem,int num /*= 1*/,bool isNew /*= false*/ )
+{
+	updateItem(pItem,num,isNew);
+}
+
+kuaijieshiyongUiLayer * ItemAutoUseDaojuTip::getUiLayer()//被isopen调用
+{
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		kuaijieshiyongUiLayer *uiNode = dynamic_cast<kuaijieshiyongUiLayer*>(scene->getChildByTag(WCT_ItemAutoUseDaojuTip));//所在层数和tag值
+		if(uiNode != NULL)
+			return uiNode;
+	}
+
+	return NULL;
+}
+
+INT64 ItemAutoUseDaojuTip::getDataId()
+{
+	kuaijieshiyongUiLayer * pLayer = getUiLayer();
+	if (pLayer)
+	{
+		return pLayer->getDataId();
+	}
+	return 0;
+}
+
+void ItemAutoUseDaojuTip::updateItem( f_item* pItem,int num,bool isNew )
+{
+	autoItem temp(pItem,num);
+	if (isNew == false)
+	{
+		for (std::list<autoItem>::iterator iter = m_pAutoItemMap.begin();iter != m_pAutoItemMap.end();++iter)
+		{
+			if (iter->item->get_item_id() == pItem->get_item_id())
+			{
+				//如果已经在最前面就不需要删除在插入了
+				if (iter == m_pAutoItemMap.begin())
+				{
+					iter->num += temp.num;
+					kuaijieshiyongUiLayer *uiLayer = getUiLayer();
+					if(uiLayer != NULL)
+					{
+						uiLayer->setDataId(pItem,iter->num);
+					}
+					return;
+				}
+				temp.num += iter->num;
+				m_pAutoItemMap.erase(iter);
+				break;
+			}
+		}
+	}
+	m_pAutoItemMap.push_front(temp);
+	kuaijieshiyongUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setDataId(pItem,temp.num);
+	}
+}
+
+autoItem* ItemAutoUseDaojuTip::getMapFront()
+{
+	if (m_pAutoItemMap.size() == 0)
+	{
+		return NULL;
+	}
+	return &m_pAutoItemMap.front();
+}
+
+void ItemAutoUseDaojuTip::delMapFront()
+{
+	m_pAutoItemMap.pop_front();
+}
+
+void ItemAutoUseDaojuTip::clearMap()
+{
+	m_pAutoItemMap.clear();
+}
+
+bool ItemAutoUseDaojuTip::onUseItem( INT64 n64_serial )
+{
+
+	for ( std::list<autoItem>::iterator iter = m_pAutoItemMap.begin(); iter != m_pAutoItemMap.end(); ++iter )
+	{
+		if ( iter->item->get_item_id() == n64_serial )
+		{
+			iter->num -= 1;
+			if ( iter->num == 0 )
+			{
+				m_pAutoItemMap.erase(iter);
+			}
+			return true;
+		}
+	}
+
+	return false;
+
+}
+
+//---------------------------------
+
+INT64 kuaijieshiyongUiLayer::_n64ItemId = 0;
+
+cocos2d::SEL_MenuHandler kuaijieshiyongUiLayer::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+cocos2d::extension::SEL_CCControlHandler kuaijieshiyongUiLayer::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onshiyongBtnPressed", kuaijieshiyongUiLayer::onUseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", kuaijieshiyongUiLayer::onCloseBtnPressed);
+	return NULL;
+}
+bool kuaijieshiyongUiLayer::onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode)
+{
+	return false;
+}
+//节点
+
+void kuaijieshiyongUiLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)//node加载
+{
+	_itemNode = NULL;
+	_bg = dynamic_cast<CCNode*>(getChildByTag(0));
+	CCNode *node = _bg->getChildByTag(1);
+	
+	CC_ASSERT(node != NULL);
+
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -1, true);//同级防止击穿
+	//setAllChildernButtonPriority(this, -1);
+	
+
+	_lbName =dynamic_cast<CCLabelTTF*> (node->getChildByTag(1));	
+	_node =dynamic_cast<CCNode*> (node->getChildByTag(2));	
+	_usebutton = dynamic_cast<CCControlButton*>(node->getChildByTag(3));
+	_closebutton = dynamic_cast<CCControlButton*>(node->getChildByTag(4));
+
+}
+
+//点击按钮事件
+void kuaijieshiyongUiLayer::onUseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_15);//音效
+	
+	//点击使用按钮事件
+	PackageManager::getInstance()->useBagItem(_n64ItemId);//使用物品
+	//新手引导弱引导时，使用后要去除新手引导的蒙版
+	NewPlayerGuider::getInstance()->onClickDrinkWine();
+}
+
+void kuaijieshiyongUiLayer::onExit()
+{
+	/*
+	ShortCutUiLayer *layer = getUiNodeByTag<ShortCutUiLayer>(WCT_ShorCutUi);
+	if (layer)
+	{
+		layer->stopAllEffectAction();
+	}
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);	*/
+	CCLayer::onExit();
+	//新手引导弱引导时，使用后要去除新手引导的蒙版
+	NewPlayerGuider::getInstance()->onClickDrinkWine();
+}
+void kuaijieshiyongUiLayer::onEnter()
+{
+	this->setTouchEnabled(true);
+	this->setTouchMode(kCCTouchesOneByOne);
+	this->setTouchPriority(1);
+
+	_usebutton->setTouchPriority(-8);
+	_closebutton->setTouchPriority(-8);
+
+	CCLayer::onEnter();
+}
+//触摸
+
+bool kuaijieshiyongUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	_bg = dynamic_cast<CCNode*>(getChildByTag(0));
+	CCNode *node = _bg->getChildByTag(1);
+	if (isTouchOnNodeContent(node,pTouch))
+		return true;
+	return false;
+}
+
+//关闭按钮
+void kuaijieshiyongUiLayer::onCloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);//vv音效
+	ItemAutoUseDaojuTip::getInstace()->close();
+}
+
+void kuaijieshiyongUiLayer::setDataId( f_item* pItem,int num /*= 1*/ )
+{
+	unsigned int dataId = pItem->get_item_type_id();
+	_n64ItemId = pItem->get_item_id();
+	int autoUseDaoju = -1;
+	//_pItem = pItem;
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM PackageData WHERE typeId = ?1");
+// 	cmd->set_integer32(1 , dataId);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("quality");//物品的品质
+// 		int colorType = table->get_integer32(idx);
+// 		idx = table->get_index("tipsBtnIdx");
+// 		autoUseDaoju = table->get_integer32(idx);
+// 		idx = table->get_index("Name");
+// 		setName(table->get_text(idx),colorType);//
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	const ItemTypeData& itemTypeData = PackageManager::getInstance()->getItemTypeData(dataId);
+	setName(itemTypeData.name,itemTypeData.byQuality);//
+	//图标
+	if (_itemNode == NULL)
+	{
+		_itemNode = ItemNode::create();
+		_node->addChild(_itemNode);
+		_itemNode->setClickable(false);
+		_itemNode->setAnchorPoint(ccp(0,0));
+		_itemNode->setPosition(ccp(0,0));
+	}
+	_itemNode->setDataId(dataId);
+	_itemNode->setNum(num);
+	CCSpriteFrame *normalSpriteFrame = NULL;
+	CCSpriteFrame *highlightedSpriteFrame = NULL;
+	if (autoUseDaoju == 7)
+	{
+		normalSpriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("zidongshiyong_xuexibtnn");
+		highlightedSpriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("zidongshiyong_xuexibtnh");
+	}
+	else
+	{
+		normalSpriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("zidongshiyong_shiyongbtnn");
+		highlightedSpriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("zidongshiyong_shiyongbtnh");
+	}
+	if (normalSpriteFrame && highlightedSpriteFrame)
+	{
+		_usebutton->setBackgroundSpriteFrameForState(normalSpriteFrame, CCControlStateNormal);
+		_usebutton->setBackgroundSpriteFrameForState(highlightedSpriteFrame, CCControlStateHighlighted);
+	}
+	NewPlayerGuider::getInstance()->onUiOpen(WCT_ItemAutoUseDaojuTip);
+}
+
+//设置名字
+void kuaijieshiyongUiLayer::setName(const std::string &name , int itemColorType)
+{	
+	_lbName->setColor(getChangeColor(itemColorType));
+	_lbName->setString(name.c_str());	
+}
+//转换label颜色
+ccColor3B kuaijieshiyongUiLayer::getChangeColor(int colorType)
+{
+	ccColor3B color;
+	switch(colorType)
+	{
+	case 0:
+		color = ccc3(255,255,255);//白
+		break;
+	case 1:
+		color = ccc3(0,176,80);//绿
+		break;
+	case 2:
+		color = ccc3(0,112,192);//蓝
+		break;
+	case 3:
+		color = ccc3(112,48,160);//紫
+		break;
+	case 4:
+		color = ccc3(255,192,0);//橙
+		break;
+	case 5:
+		color = ccc3(255,215,0);//金
+		break;
+	default:
+		color = ccc3(0xff,0xf3,0xb3);//默认
+		break;
+	}
+	return color;
+}
+
+void kuaijieshiyongUiLayer::setNum( int num )
+{
+	if (_itemNode)
+	{
+		_itemNode->setNum(num);
+	}
+}
+
+cocos2d::CCRect kuaijieshiyongUiLayer::getUseBtnPos()
+{
+	CCPoint cp = _usebutton->convertToWorldSpace(ccp(0.0f, 0.0f));
+	CCSize cs = _usebutton->getContentSize();
+	return CCRect(cp.x, cp.y, cs.width, cs.height);
+}
+
+void kuaijieshiyongUiLayer::onUseItem( INT64 n64_serial )
+{
+
+	autoItem * pItem = ItemAutoUseDaojuTip::getInstace()->getMapFront();
+	if ( pItem == NULL )
+		return;
+
+	if ( ItemAutoUseDaojuTip::getInstace()->onUseItem( n64_serial ) )			// 调用该函数重新计算道具数量
+	{
+		if ( pItem != ItemAutoUseDaojuTip::getInstace()->getMapFront() )		// 如果刚才最上方的道具使用完了
+		{
+			autoItem * pNewItem = ItemAutoUseDaojuTip::getInstace()->getMapFront();
+			if ( pNewItem )
+				setDataId( pNewItem->item,pNewItem->num );
+			else
+				ItemAutoUseDaojuTip::getInstace()->close();
+		}
+		else
+			setNum( pItem->num );
+	}
+}

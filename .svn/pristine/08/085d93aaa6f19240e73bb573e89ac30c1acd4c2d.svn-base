@@ -1,0 +1,146 @@
+#include "UiTools.h"
+#include "itemTip.h"
+#include "TradingUI.h"
+#include "CfgReader.h"
+#include "EquipTipUi.h"
+#include "ListControl.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "CommonClient.h"
+#include "PackageManager.h"
+#include "TradingBuyRightFinalItemList.h"
+
+cocos2d::CCSprite* TradingBuyRightFinalItemList::m_pItemOldSelect = NULL;
+INT64 TradingBuyRightFinalItemList::m_n64_serial = 0;
+DWORD TradingBuyRightFinalItemList::m_itemTypeId = 0;
+int TradingBuyRightFinalItemList::m_itemPriceNum = 0;
+int TradingBuyRightFinalItemList::m_itemNumber = 0;
+TradingBuyRightFinalItemList::TradingBuyRightFinalItemList()
+	:m_pItemCCNode(NULL)
+	,m_pItemName(NULL)
+	,m_pPriceNum(NULL)
+	,m_pPricemySelf(NULL)
+	,m_pItemnode(NULL)
+	,m_pFItem(NULL)
+	,m_pItemSelect(NULL)
+	,m_pNewItemName(NULL)
+	,m_pNewPriceNum(NULL)
+{
+
+}
+
+TradingBuyRightFinalItemList::~TradingBuyRightFinalItemList()
+{
+	CC_SAFE_DELETE(m_pFItem);
+}
+
+cocos2d::extension::SEL_CCControlHandler TradingBuyRightFinalItemList::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingBuyRightFinalItemList,OnRightFinalClick);
+	return NULL;
+}
+
+bool TradingBuyRightFinalItemList::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,m_pItemCCNode)
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_pItemName)
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_pPriceNum)
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_pItemSelect)
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_pPricemySelf)
+
+	return false;
+}
+
+void TradingBuyRightFinalItemList::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_pNewItemName = Helper::replaceLabelTTFWithLabelFTAndRemove(m_pItemName);
+	CC_ASSERT(NULL != m_pNewItemName);
+
+	m_pNewPriceNum = Helper::replaceLabelTTFWithLabelFTAndRemove(m_pPriceNum);
+	CC_ASSERT(NULL != m_pNewPriceNum);
+}
+
+void TradingBuyRightFinalItemList::OnRightFinalClick( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(m_pItemOldSelect != m_pItemSelect)
+	{
+		if(NULL != m_pItemSelect)
+			m_pItemSelect->setVisible(true);
+
+		if(NULL != m_pItemOldSelect)
+			m_pItemOldSelect->setVisible(false);
+	}
+
+	m_pItemOldSelect = m_pItemSelect;
+
+	m_n64_serial = m_item.m_ItemInfo.n64_serial;
+	m_itemTypeId = m_item.m_ItemInfo.dw_data_id;
+	m_itemPriceNum = m_item.nUnitPrice;
+	m_itemNumber = m_item.nNumber;
+}
+
+void TradingBuyRightFinalItemList::hideCompose(bool value)
+{
+	if(NULL != m_pItemnode)
+		m_pItemnode->hideCompose(value);
+}
+
+void TradingBuyRightFinalItemList::refreshData(const tagTradingItemDataMsg item)
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if ( NULL == player)
+		return ;
+
+	m_item = item;
+
+	const ItemTypeData &itemData = PackageManager::getInstance()->getItemTypeData(item.m_ItemInfo.dw_data_id);
+
+	if(NULL == m_pFItem)
+	{
+		if(MIsEquipment(item.m_ItemInfo.dw_data_id))
+			m_pFItem = new f_equipment(item.m_ItemInfo);
+		else
+			m_pFItem = new f_item(item.m_ItemInfo);
+	}
+
+	if(item.dwUpRoleID == player->getId())
+		m_pPricemySelf->setVisible(true);
+	else
+		m_pPricemySelf->setVisible(false);
+
+	if(NULL == m_pItemnode)
+		m_pItemnode = ItemNode::create();
+
+	CC_ASSERT(NULL != m_pItemnode);
+	CC_ASSERT(NULL != m_pItemCCNode);
+	m_pItemnode->hideItemOpBtn();
+	m_pItemnode->setPosition(ccp(m_pItemCCNode->getContentSize().width /2,m_pItemCCNode->getContentSize().height /2));
+	m_pItemnode->initWithItem(static_cast<f_item*>(m_pFItem));
+	
+	if(!MIsEquipment(m_pFItem->get_item_type_id()))
+		m_pItemnode->setNum(item.nNumber);
+
+	m_pItemnode->setClickable(true);
+	m_pItemCCNode->addChild(m_pItemnode);
+
+	m_pNewItemName->setString(itemData.name.c_str());
+
+	std::stringstream oss;
+	oss << item.nUnitPrice * item.nNumber;
+	m_pNewPriceNum->setString(oss.str().c_str());
+}
+
+TradingBuyRightFinalItemList* TradingBuyRightFinalItemList::createItem( const char* szFile,CCObject*pOwner,UiInterface* holder )
+{
+	CCNodeLoaderLibrary* lib  = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string strFullPath  = CFGReader::instance()->get_ui_ccbi_filepath(szFile);
+	CCNode* node = reader->readNodeGraphFromFile(strFullPath.c_str(),pOwner);
+	TradingBuyRightFinalItemList* item = dynamic_cast<TradingBuyRightFinalItemList*>(node);
+
+	if (holder)
+		holder->mergeSheet(reader->getLoadedSpriteSheet());
+
+	return item;
+}

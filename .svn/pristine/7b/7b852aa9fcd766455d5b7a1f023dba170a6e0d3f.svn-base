@@ -1,0 +1,158 @@
+#ifndef MALLMGR_H
+#define MALLMGR_H
+/**
+ *	@file		MallMgr.h
+ *	@author		gx
+ *	@date		2013/6/13
+ *	@version	
+ *	@brief		商城管理类
+ */
+#include <map>
+#include "MallProto.h"
+
+//单个物品定义
+struct Tag_MallItemInfo
+{
+	unsigned int	dwID;
+	unsigned int	uItemTypeID;	//商品的type-id
+	signed char		typeIndex;		//商品类型,标识具体位于哪个sheet
+	int				nPrice;					//定价
+	int				nSalePrice;				//促销价
+	unsigned int	dwTimeSaleStart;				// 促销开始时间
+	unsigned int	dwTimeSaleEnd;					// 促销截止时间
+	unsigned int	dwSaleBegin;					// 上架时间
+	unsigned int	dwSaleEnd;						// 下架时间
+	unsigned char	byIndexInServer;//该商品在服务器中的位置
+	bool			bPromote;				//该商品是否处于促销期内
+	bool			bShowIconPlist;
+	Tag_MallItemInfo():uItemTypeID(INVALID)
+		,typeIndex(INVALID)
+		,nPrice(INVALID)
+		,nSalePrice(INVALID)
+		,dwTimeSaleStart(INVALID)
+		,dwTimeSaleEnd(INVALID)
+		,dwSaleBegin(INVALID)
+		,dwSaleEnd(INVALID)
+		,byIndexInServer(0)
+		,bPromote(false)
+		,dwID(INVALID)
+		,bShowIconPlist(false)
+	{
+	}
+	Tag_MallItemInfo(const Tag_MallItemInfo& info)
+	{
+		copy(info);
+	}
+	const Tag_MallItemInfo& operator = (const Tag_MallItemInfo& info)
+	{
+		if (this != &info)
+			copy(info);
+		return *this;
+	}
+private:
+	void copy(const Tag_MallItemInfo& info)
+	{
+		dwID = info.dwID;
+		uItemTypeID = info.uItemTypeID;
+		typeIndex = info.typeIndex;
+		nPrice = info.nPrice;
+		nSalePrice = info.nSalePrice;
+		dwTimeSaleStart = info.dwTimeSaleStart;
+		dwTimeSaleEnd = info.dwTimeSaleEnd;
+		dwSaleBegin = info.dwSaleBegin;
+		dwSaleEnd = info.dwSaleEnd;
+		byIndexInServer = info.byIndexInServer;
+		bPromote = info.bPromote;
+		bShowIconPlist = info.bShowIconPlist;
+	}
+public:
+	bool isInPromote() const//该商品是否促销
+	{
+		bool bRet = false;
+		tagDWORDTime time = ServerTime::getInstance()->cal_current_server_dword_time();//获取服务器当前时间
+		if (dwTimeSaleStart != INVALID && dwTimeSaleEnd != INVALID)
+		{
+			if ((unsigned int)time > dwTimeSaleStart && (unsigned int)time < dwTimeSaleEnd)
+			{
+				bRet = true;
+			}
+		}
+		return bRet;
+	}
+	bool isNewGoods() const//该商品是否是限时商品
+	{
+		bool bRet = false;
+		tagDWORDTime time = ServerTime::getInstance()->cal_current_server_dword_time();//获取服务器当前时间
+		if (dwSaleBegin != INVALID && dwSaleEnd != INVALID)
+		{
+			if ((unsigned int)time > dwSaleBegin && (unsigned int)time < dwSaleEnd)
+			{
+				bRet = true;
+			}
+		}
+		return bRet;
+	}
+};
+
+enum PayMode{ //支付方式
+	Silver, //元宝
+	Diamond //钻石
+};
+class MallMgr
+{
+public:
+	typedef std::map<unsigned int,Tag_MallItemInfo> Mall_SingleItem_Map;
+	
+	//typedef std::map<signed char,Mall_SingleItem_Map > Mall_Item_Map;
+	
+	MallMgr();
+	~MallMgr();
+	static MallMgr* getInstance();
+	void Destroy();
+	void OpenMall();//向服务器请求商城物品信息
+	unsigned int onServerGetMallAllItem(s_net_cmd *cmd);
+	unsigned int onServerGetMallAllPack(s_net_cmd *cmd);
+	void BuyProduct(signed char typeIndex,unsigned int typeID,short buyNum);//购物
+	void ToCharge();//充值
+	unsigned int onServerBuyMallItem(s_net_cmd *cmd);
+	unsigned int onServerUpdateMall(s_net_cmd *cmd);
+
+	//inline Mall_SingleItem_Map GetHotItems() {return m_MallHotItems_Map;}
+	const Mall_SingleItem_Map* GetSheetItemsByIndex(char index);//根据索引获取某个sheet页的内容
+	const Mall_SingleItem_Map* GetNotSaleItems(); //获取商城不出售的商品
+	bool isInit() const { return _init; }
+	bool CanShowInShell(const Tag_MallItemInfo& tag_info,unsigned int dwCurTime);//该商品是否可以在商城中显示，考虑限时商品
+	//const Tag_MallItemInfo& getTagMallItemInfo(unsigned int typeID);
+	Tag_MallItemInfo const* get_mall_item_info_ptr_by_itemid(unsigned int model_id)const;
+	Tag_MallItemInfo const* get_mall_item_info_ptr_by_id(unsigned int goods_id)const;
+	Tag_MallItemInfo const* get_mall_item_info_ptr_by_kind(unsigned int model_id,int kind)const;
+
+	bool have_this_goods(unsigned int goods_id)const{return get_mall_item_info_ptr_by_id(goods_id)!= NULL;}
+	//从服务器加载充值元宝的配置
+	void sendLoadChargeMoney();
+	unsigned int onLoadChargeMoney(s_net_cmd* cmd);
+	unsigned int onCpOreder(s_net_cmd* cmd);
+
+	void on_buy(bool ok,int num,int type,unsigned int goods_id);
+protected:
+	void clearMallInfo();
+private:				
+	Mall_SingleItem_Map m_MallItemsInfo_Array[MAX_MALL_SHEETS];//存放商城所有待购单件物品的信息
+	Mall_SingleItem_Map m_MallItemsInfo_NotSale; //存放商城所有不出售的商品
+	//Mall_SingleItem_Map m_MallHotItems_Map;//热销商品
+	bool _init;
+	bool _bNeedReload;//是否需要重新加载商城信息
+public:
+	inline bool GetNeedReload() { return _bNeedReload;}
+	void ReloadMallData();
+
+	//...充值档数据  [2/17/2017 Catch_y]
+public:
+	typedef struct
+	{
+		float m_Value;
+		float m_Scale;
+	} recharge_files;
+	vector<recharge_files> _chargemoney;
+};
+#endif

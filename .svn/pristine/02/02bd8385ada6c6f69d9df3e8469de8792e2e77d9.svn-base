@@ -1,0 +1,361 @@
+#include "CfgReader.h"
+#include "cocos2d.h"
+//#include "FileInputStream.h"
+
+using namespace cocos2d;
+
+CFGReader::CFGReader()
+{
+	std::map<std::string , std::string> ArtBlock;
+	ArtBlock.insert(std::make_pair("Effect" , "Art/Effect/"));
+	ArtBlock.insert(std::make_pair("Portrait" , "Art/Portrait/"));
+	ArtBlock.insert(std::make_pair("Monster" , "Art/Monster/"));
+	ArtBlock.insert(std::make_pair("Role" , "Art/Role/"));
+	ArtBlock.insert(std::make_pair("Scene" , "Art/Scene/"));
+	ArtBlock.insert(std::make_pair("UI" , "Art/UI/"));
+	ArtBlock.insert(std::make_pair("NPC", "Art/NPC/"));
+	ArtBlock.insert(std::make_pair("ICON", "Art/ICON/"));
+	ArtBlock.insert(std::make_pair("Weapon", "Art/Weapon/"));
+	ArtBlock.insert(std::make_pair("Movie", "Art/Movie/"));
+	m_sc_map.insert(std::make_pair("Art" , ArtBlock));
+
+	std::map<std::string , std::string> AudioBlock;
+	AudioBlock.insert(std::make_pair("Background" , "Audio/Background/"));
+	AudioBlock.insert(std::make_pair("SoundEft" , "Audio/SoundEft/"));
+	AudioBlock.insert(std::make_pair("soundScene" , "Audio/soundScene/"));
+	AudioBlock.insert(std::make_pair("SoundUI" , "Audio/SoundUI/"));
+	AudioBlock.insert(std::make_pair("Soundnpc","Audio/Soundnpc/"));
+	AudioBlock.insert(std::make_pair("SoundMonster","Audio/SoundMonster/"));
+	m_sc_map.insert(std::make_pair("Audio" , AudioBlock));
+
+	std::map<std::string , std::string> SchemeBlock;
+	SchemeBlock.insert(std::make_pair("Script" , "Script/"));
+	m_sc_map.insert(std::make_pair("Scheme" , SchemeBlock));
+}
+//--------------------------------------------------------
+CFGReader::~CFGReader()
+{
+	m_sc_map.clear();
+}
+//--------------------------------------------------------
+std::string CFGReader::get_profile_string(const std::string& section_, const std::string& key_, const std::string& defstr_) const
+{
+	if(key_ == "ICON")
+	{
+		int a = 1;
+		a++;
+	}
+
+	std::map<std::string , std::map<std::string , std::string> >::const_iterator iter;
+	iter = m_sc_map.find(section_);
+	if(iter == m_sc_map.end())
+		return defstr_;
+	std::map<std::string , std::string>::const_iterator iter1 = iter->second.find(key_);
+	if(iter1 == iter->second.end())
+		return defstr_;
+	return iter1->second;
+}
+//--------------------------------------------------------
+void CFGReader::_prase(const unsigned char* buf_)
+{
+}
+
+void CFGReader::trim( std::string& str )
+{
+}
+
+void CFGReader::tokenize( const std::string& str_ , const std::string& lif, std::vector<std::string>& ret )
+{
+}
+
+CFGReader * CFGReader::instance()
+{
+	static CFGReader reader;
+	return &reader;
+}
+
+std::string CFGReader::get_ui_ccbi_filepath( const std::string& filename )
+{
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	std::string uiFile = uiDir + filename + ".ccbi";
+
+	return uiFile;
+}
+
+//////////////////////////////////////////////////////////////////////////
+CFGReader2::CFGReader2( const char* filename_ )
+{
+	if(!filename_)
+		return;
+	FILE* cfg = fopen(filename_ , "rb");
+	if(!cfg)
+		return;
+	fseek(cfg , 0 , SEEK_END);
+	size_t sz = ftell(cfg);
+	fseek(cfg , 0 , SEEK_SET);
+	unsigned char* buf = (unsigned char*)malloc(sz*sizeof(unsigned char)+1);
+	fread(buf , sizeof(unsigned char) , sz , cfg);
+	buf[sz] = 0;
+	_prase(buf);
+	free(buf);
+	fclose(cfg);
+}
+
+CFGReader2::~CFGReader2()
+{
+	m_sc_map.clear();
+}
+
+
+std::string CFGReader2::get_profile_string( const std::string& section_, const std::string& key_, const std::string& defstr_ ) const
+{
+	std::map<std::string , std::map<std::string , std::string> >::const_iterator iter = m_sc_map.find(section_);
+	if(iter == m_sc_map.end())
+		return defstr_;
+	std::map<std::string , std::string>::const_iterator iter1  = iter->second.find(key_);
+	if(iter1 == iter->second.end())
+		return defstr_;
+	return iter1->second;
+}
+
+void tokenize(const std::string& src , const std::string& white , std::vector<std::string>& ret)
+{
+	char* ptr = (char*)src.c_str();
+	char* token;
+	while (NULL != (token = strtok(ptr, white.c_str())))
+	{
+		ret.push_back(token);
+		ptr = NULL;
+	}
+}
+
+
+void CFGReader2::_prase( const unsigned char* buf_ )
+{
+	std::string all((char*)buf_);
+	std::vector<std::string> temp1;
+	tokenize(all , "[" , temp1);
+	for(std::vector<std::string>::iterator iter1 = temp1.begin() ; iter1 != temp1.end() ; ++iter1)
+	{
+		std::vector<std::string> temp2;
+		tokenize(*iter1 , "]" , temp2);
+		std::string section = temp2[0];
+		std::vector<std::string> temp3;
+		tokenize(temp2[1] , "\n" , temp3);
+		std::map<std::string , std::string> item;
+		for(std::vector<std::string>::iterator iter3 = temp3.begin() ; iter3!=temp3.end() ; ++iter3)
+		{
+			if(iter3->length()<3)
+				continue;
+			std::vector<std::string> temp4;
+			tokenize(*iter3 , "=" , temp4);
+			if(temp4.size() < 2)
+				continue;
+			std::string key = temp4[0];
+			std::string value = temp4[1];
+			item[key] = value;
+		}
+		m_sc_map[section] = item;
+	}
+}
+
+void CFGReader2::write( const char* filename_ )
+{
+	FILE* fp = fopen(filename_, "wb");
+	if(!fp)
+		return;
+	std::map<std::string , std::map<std::string , std::string> >::iterator iter = m_sc_map.begin();
+	for(; iter != m_sc_map.end()  ; ++iter)
+	{
+		const char* sec = (const char*)iter->first.c_str();
+		fwrite("[" , sizeof(unsigned char) , 1 , fp);
+		fwrite(sec , sizeof(unsigned char) , iter->first.length() , fp);
+		fwrite("]" , sizeof(unsigned char) , 1 , fp);
+		fwrite("\n" , sizeof(unsigned char) , 1 , fp);
+		std::map<std::string , std::string>::iterator iters = iter->second.begin();
+		for(;iters!= iter->second.end() ; ++iters)
+		{
+			const char* key = (const char*)iters->first.c_str();
+			fwrite(key , sizeof(unsigned char) , iters->first.length() , fp);
+			fwrite("=" , sizeof(unsigned char) , 1 , fp);
+			const char* val = (const char*)iters->second.c_str();
+			fwrite(val , sizeof(unsigned char) , iters->second.length() , fp);
+			fwrite("\n" , sizeof(unsigned char) , 1 , fp);
+		}
+	}
+	fclose(fp);
+}
+
+void CFGReader2::set_profile_string( const std::string& section_ , const std::string& key_, const std::string& value_ )
+{
+	std::map<std::string , std::map<std::string , std::string> >::iterator iters = m_sc_map.find(section_);
+	if(iters == m_sc_map.end())
+	{
+		std::map<std::string , std::string> tmp;
+		tmp[key_] = value_;
+		m_sc_map[section_] = tmp;
+	}
+	else
+	{
+		std::map<std::string , std::string>::iterator iterk = iters->second.find(key_);
+		if(iterk == iters->second.end())
+		{
+			iters->second[key_] = value_;
+		}
+		else
+		{
+			iterk->second = value_;
+		}
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////
+CFGReader3::CFGReader3( const char* filename_ )//读取数值文件ini
+{
+	CCLog("CFGReader3::CFGReader3(--------------1  %s", filename_);
+	/*if(!filename_)
+		return;
+	FILE* cfg2 = fopen(filename_ , "rb");
+	if(!cfg2)
+		return;*/
+	
+	
+	/*fseek(cfg2 , 0 , SEEK_END);
+	size_t sz = ftell(cfg2);
+	fseek(cfg2 , 0 , SEEK_SET);
+	unsigned char* buf = (unsigned char*)malloc(sz*sizeof(unsigned char)+1);
+	
+	fread(buf , sizeof(unsigned char) , sz , cfg2);
+	CCLog("CFGReader3::CFGReader3(--------------3  %s", buf);
+	buf[sz] = 0;
+	_prase(buf);
+	free(buf);
+	fclose(cfg2);*/
+
+	CCString* file_content = CCString::createWithContentsOfFile(filename_);
+	if(file_content)
+		_prase(file_content->getCString());
+	else
+		CCLog("reader3 can not load file!!!");
+// 	FileInputStream script(filename_);
+// 	size_t sz = script.getSize();
+// 	if (sz==0)
+// 	{
+// 		CCLog("reader3 can not load file!!!");
+// 		return;
+// 	}
+// 	char* mem = (char*)malloc(sz + 1);
+// 	script.readBlock(mem , sz);
+// 	mem[sz]  = 0;
+// 
+// 	_prase((unsigned char*)(mem));
+// 	free(mem);
+}
+
+CFGReader3::~CFGReader3()
+{
+	m_sc_map.clear();
+}
+
+
+std::string CFGReader3::get_profile_string( const std::string& section_, const std::string& key_, const std::string& defstr_ ) const
+{
+	std::map<std::string , std::map<std::string , std::string> >::const_iterator iter = m_sc_map.find(section_);
+	if(iter == m_sc_map.end())
+		return defstr_;
+	std::map<std::string , std::string>::const_iterator iter1  = iter->second.find(key_);
+	if(iter1 == iter->second.end())
+		return defstr_;
+	return iter1->second;
+}
+
+void CFGReader3::tokenize(const std::string& src , const std::string& white , std::vector<std::string>& ret)
+{
+	char* ptr = (char*)src.c_str();
+	char* token;
+	while (NULL != (token = strtok(ptr, white.c_str())))
+	{
+		ret.push_back(token);
+		ptr = NULL;
+	}
+}
+
+
+void CFGReader3::_prase( const char* buf_ )
+{
+	std::string all(buf_);
+	std::vector<std::string> temp1;
+	tokenize(all , "[" , temp1);
+	for(std::vector<std::string>::iterator iter1 = temp1.begin() ; iter1 != temp1.end() ; ++iter1)
+	{
+		std::vector<std::string> temp2;
+		tokenize(*iter1 , "]" , temp2);
+		std::string section = temp2[0];
+		std::vector<std::string> temp3;
+		tokenize(temp2[1] , "\n" , temp3);
+		std::map<std::string , std::string> item;
+		for(std::vector<std::string>::iterator iter3 = temp3.begin() ; iter3!=temp3.end() ; ++iter3)
+		{
+			if(iter3->length()<3)
+				continue;
+			std::vector<std::string> temp4;
+			tokenize(*iter3 , "=" , temp4);
+			if(temp4.size() < 2)
+				continue;
+			std::string key = temp4[0];
+			std::string value = temp4[1];
+			item[key] = value;
+		}
+		m_sc_map[section] = item;
+	}
+}
+
+void CFGReader3::write( const char* filename_ )
+{
+	FILE* fp = fopen(filename_, "wb");
+	if(!fp)
+		return;
+	std::map<std::string , std::map<std::string , std::string> >::iterator iter = m_sc_map.begin();
+	for(; iter != m_sc_map.end()  ; ++iter)
+	{
+		const char* sec = (const char*)iter->first.c_str();
+		fwrite("[" , sizeof(unsigned char) , 1 , fp);
+		fwrite(sec , sizeof(unsigned char) , iter->first.length() , fp);
+		fwrite("]" , sizeof(unsigned char) , 1 , fp);
+		fwrite("\n" , sizeof(unsigned char) , 1 , fp);
+		std::map<std::string , std::string>::iterator iters = iter->second.begin();
+		for(;iters!= iter->second.end() ; ++iters)
+		{
+			const char* key = (const char*)iters->first.c_str();
+			fwrite(key , sizeof(unsigned char) , iters->first.length() , fp);
+			fwrite("=" , sizeof(unsigned char) , 1 , fp);
+			const char* val = (const char*)iters->second.c_str();
+			fwrite(val , sizeof(unsigned char) , iters->second.length() , fp);
+			fwrite("\n" , sizeof(unsigned char) , 1 , fp);
+		}
+	}
+	fclose(fp);
+}
+
+void CFGReader3::set_profile_string( const std::string& section_ , const std::string& key_, const std::string& value_ )
+{
+	std::map<std::string , std::map<std::string , std::string> >::iterator iters = m_sc_map.find(section_);
+	if(iters == m_sc_map.end())
+	{
+		std::map<std::string , std::string> tmp;
+		tmp[key_] = value_;
+		m_sc_map[section_] = tmp;
+	}
+	else
+	{
+		std::map<std::string , std::string>::iterator iterk = iters->second.find(key_);
+		if(iterk == iters->second.end())
+		{
+			iters->second[key_] = value_;
+		}
+		else
+		{
+			iterk->second = value_;
+		}
+	}
+}

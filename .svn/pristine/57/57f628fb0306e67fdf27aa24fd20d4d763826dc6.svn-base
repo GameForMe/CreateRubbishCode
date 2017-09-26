@@ -1,0 +1,779 @@
+#include "StoreRechargeUi.h"
+#include "CfgReader.h"
+#include "World.h"
+#include "BaseDefine.h"
+#include "UiResourceMgr.h"
+#include "InputMessageBox.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "UiLoader.h"
+#include "RechargeUi.h"
+#include "PackageManager.h"
+#include "LocalPlayer.h"
+#include "DBMgr.h"
+#include "RoleManager.h"
+#include "VIPMgr.h"
+#include "KaifuHuodongMgr.h"
+#include "MallMgr.h"
+#include "f_util.h"
+#include "TCPClient.h"
+#ifdef _USE_SDK
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+#include "wzolJni.h"
+#endif
+#include "ClientCfg.h"
+#include "GuildMgr.h"
+#endif
+
+StoreRechargUiItem::StoreRechargUiItem()
+	:_uiFrame(NULL)
+{
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("StoreRechargeUiItemFrame", StoreRechargeUiItemLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	_uiFrame = dynamic_cast<StoreRechargeUiItemFrame*>(ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "storerechargeuiitem.ccbi").c_str()));
+	_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+	UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+	ccbReader->release();
+	if(_uiFrame != NULL)
+	{
+		_uiFrame->retain();
+		_uiFrame->_item = this;
+		//CCPoint pt = _uiFrame->getChildByTag(SRUT_Title)->getPosition();
+		//CCLabelTTF* label = CCLabelTTF::create();
+		//label->setPosition(ccp(pt.x + 200,pt.y));
+		//label->setFontSize(16);
+		//label->setVisible(true);
+		//_uiFrame->addChild(label,10,SRUT_Text);
+		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(_uiFrame, 2, true);
+	}
+}
+
+StoreRechargUiItem::~StoreRechargUiItem()
+{
+	if(_uiFrame != NULL)
+	{
+		CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(_uiFrame);
+		_uiFrame->release();
+		_uiFrame = NULL;
+	}
+
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+}
+
+cocos2d::CCSize StoreRechargUiItem::getContentSize()
+{
+	if(_uiFrame != NULL)
+	{
+		return _uiFrame->getContentSize();
+	}
+	return CCSize();
+}
+
+void StoreRechargUiItem::setData(int tag)
+{
+	_moneytag = tag;
+	if (tag != -1)
+	{
+		setTitle(chargetitle[tag]
+		, MallMgr::getInstance()->_chargemoney[tag].m_Value
+		, MallMgr::getInstance()->_chargemoney[tag].m_Scale);
+		setSprite(chargesprite[tag]);
+		setMoney(MallMgr::getInstance()->_chargemoney[tag].m_Value);
+	}
+}
+
+void StoreRechargUiItem::setPosition( const CCPoint &pos )
+{
+	CC_ASSERT(_uiFrame != NULL);
+	_uiFrame->setPosition(pos);
+}
+
+void StoreRechargUiItem::setTitle( const std::string &name, float money, float scale)
+{
+	if(_uiFrame != NULL)
+	{
+		CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_uiFrame->getChildByTag(SRUT_Title));
+		//CCLabelTTF *text = dynamic_cast<CCLabelTTF*>(_uiFrame->getChildByTag(SRUT_Text));
+		if(label != NULL)
+		{
+			std::ostringstream ostr;
+			ostr << money * scale <<"\xE5\x85\x83\xE5\xAE\x9D";
+			label->setString(ostr.str().c_str());
+		}
+		//if (text)
+		//{
+		//	std::ostringstream oss;
+		//	oss <<"\xE5\x85\x83\xE5\xAE\x9D";
+		//	text->setString(oss.str().c_str());
+		//}
+	}
+}
+
+void StoreRechargUiItem::setSprite( const std::string &frameName )
+{
+	if(_uiFrame != NULL)
+	{
+		CCSprite *imageSprite = dynamic_cast<CCSprite*>(_uiFrame->getChildByTag(SRUT_ImageSprite));
+		if(imageSprite != NULL)
+		{
+			imageSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName.c_str()));
+		}
+	}
+}
+
+void StoreRechargUiItem::setMoney( float money )
+{
+
+/*
+	//label->setColor(ccc3(0xff,0xe4,0x56));
+	//const char *str = "\xE4\xBD\xBF\xE7\x94\xA8\xE7\xAD\x89\xE7\xBA\xA7\xEF\xBC\x9A";
+	std::ostringstream ostr;
+	ostr<< level;//ostr<< str << level;//add by vvv 2014.11.14
+	label->setString(ostr.str().c_str());
+*/
+
+
+	if(_uiFrame != NULL)
+	{
+		CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_uiFrame->getChildByTag(SRUT_Money));
+		if(label != NULL)
+		{
+			std::ostringstream ostr;
+			ostr << "\xE8\xB4\xAD\xE4\xB9\xB0" << money <<"\xE5\x85\x83";
+			//CCString *str = CCString::createWithFormat("%d", money);//元
+// 			const char *str1 = "\xE5\x85\x83";
+// 			std::ostringstream ostr;
+// 			ostr<< str << str1;
+			label->setString(ostr.str().c_str());
+		}
+	}
+}
+
+/////////////////////////////////////////////////////////////////
+cocos2d::SEL_MenuHandler StoreRechargeUiItemFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler StoreRechargeUiItemFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onStoreRechargeBtnPressed", StoreRechargeUiItemFrame::onStoreRechargeBtnPressed);
+	return NULL;
+}
+
+void StoreRechargeUiItemFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	setAllChildernButtonPriority(this,-1);
+	if(PackageManager::getInstance()->getTotalChargeYuanBao() > 0)//如果该账户已充过值
+	{
+		CCSprite* sprite = dynamic_cast<CCSprite*>(getChildByTag(4));
+		if(sprite)
+		{
+			sprite->setVisible(false);
+		}
+	}
+}
+
+void StoreRechargeUiItemFrame::onStoreRechargeBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//调用平台充值接口;
+    int tag = _item->getMoneyTag();
+	if(tag >= 0 && tag < MallMgr::getInstance()->_chargemoney.size())
+	{
+#ifdef _USE_SDK
+		//[bing] 先调用JniRoleInfo 发送给SDK玩家信息 因为有些平台例如小米在充值时需要
+		VIPMgr* pVIPMgr = VIPMgr::getInstance();
+		LocalPlayer* LP = RoleManager::getInstance()->getLocalPlayer();
+		if(LP && pVIPMgr)
+		{
+			char vStr[128];
+			memset(vStr, 0, sizeof(char) * 128);
+			Utf16ToUtf8(LP->getName(), vStr, 128, 0);
+
+			//std::string strKey = "";
+			//ClientCfg::getInstance()->getString("general", "area", strKey);
+			extern std::string g_zonename;
+			wchar_t vStrZoneName[256] = {'\0'};
+			memset(vStrZoneName, 0, sizeof(vStrZoneName));
+			Utf8ToUtf16(g_zonename.c_str(), vStrZoneName, 256,0);
+			unsigned int world_crc = f_util::get_crc(vStrZoneName);
+
+			CCLOG("----------- 1. %s 2. %d 3. %s 4. %d 5. %d 6. %s 7. %u"
+				, vStr
+				, LP->getLevel()
+				, g_zonename.c_str()
+				, (int)PackageManager::getInstance()->getYuanBao()
+				, pVIPMgr->getVIPLv()
+				, GuildMgr::getInstance()->getGuildDesc().guild_name.c_str()
+				, world_crc);
+
+			WzolJni::getInstance()->JniRoleInfo(
+					vStr
+					, LP->getLevel()
+					, g_zonename.c_str()
+					, (int)PackageManager::getInstance()->getYuanBao()
+					, pVIPMgr->getVIPLv()
+					, GuildMgr::getInstance()->getGuildDesc().guild_name.c_str()
+					, world_crc);
+		}
+
+		//修改为游戏里的值 xueyu
+		//WzolJni::getInstance()->payJni(WzolJni::getInstance()->getChargeValue(tag));
+		WzolJni::getInstance()->payJni(
+			MallMgr::getInstance()->_chargemoney[tag].m_Value,
+			MallMgr::getInstance()->_chargemoney[tag].m_Scale);
+#if CC_TARGET_PLATFORM == CC_PLATFORM_IOS
+		NET_C2S_ASK_CP_ORDER cmd;
+		cmd.pay = MallMgr::getInstance()->_chargemoney[tag].m_Value;
+		cmd.payScale = MallMgr::getInstance()->_chargemoney[tag].m_Scale;
+		cmd.channle = WzolJni::getInstance()->getPlatformType();
+		cmd.subchannle = 0;
+		TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+#endif
+#endif
+	}
+}
+
+///////////////////////////////////////////////
+
+StoreRechargeUi * StoreRechargeUi::getInstance()
+{
+	static StoreRechargeUi instance;
+	return &instance;
+}
+
+StoreRechargeUi::StoreRechargeUi()
+{
+
+}
+
+StoreRechargeUi::~StoreRechargeUi()
+{
+
+}
+
+void StoreRechargeUi::open()
+{
+	if(isOpen())
+		return;
+	ChongZhiActivityFarmeUILayer *uiLayer = GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer();
+	if(uiLayer != NULL)
+	{
+		CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+		ccNodeLoaderLibrary->registerCCNodeLoader("StoreRechargeUiLayer", StoreRechargeUiLoader::loader());
+		cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+		CCNode *node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "storerechargeui.ccbi").c_str());
+		_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+		UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+		ccbReader->release();
+		if(node != NULL) {
+			StoreRechargeUiLayer *storeLayer = dynamic_cast<StoreRechargeUiLayer*>(node);
+			CC_ASSERT(storeLayer != NULL);
+			storeLayer->updateData();
+			storeLayer->updateDisplay();
+
+			node->setTag(CZA_ChongZhi);
+			uiLayer->getChildByTag(0)->getChildByTag(0)->addChild(node,10);
+		}
+	}
+}
+
+void StoreRechargeUi::close()
+{
+	if(!isOpen())
+		return;
+
+	ChongZhiActivityFarmeUILayer *uiLayer = GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->getChildByTag(0)->getChildByTag(0)->removeChildByTag(CZA_ChongZhi);
+	}
+
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+}
+
+bool StoreRechargeUi::isOpen()
+{
+	return (getUiLayer() != NULL);
+}
+
+StoreRechargeUiLayer * StoreRechargeUi::getUiLayer()
+{
+	ChongZhiActivityFarmeUILayer *uiLayer = GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer();
+	if(uiLayer != NULL)
+	{
+		StoreRechargeUiLayer *uiNode = dynamic_cast<StoreRechargeUiLayer*>(uiLayer->getChildByTag(0)->getChildByTag(0)->getChildByTag(CZA_ChongZhi));
+		if(uiNode != NULL)
+			return uiNode;
+	}
+	return NULL;
+}
+
+void StoreRechargeUi::updateDisplay()
+{
+/*
+	JuhuasuanUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateData();
+	}*/
+	StoreRechargeUiLayer* uiLayer = getUiLayer();
+	if (uiLayer != NULL)
+		uiLayer->updateDisplay();
+}
+
+void StoreRechargeUi::setVisible(bool isVisible)
+{
+	if (isOpen())
+	{
+		getUiLayer()->setVisible(isVisible);
+		getUiLayer()->setTouchEnabled(isVisible);
+	}
+}
+
+//旧充值页面，为单独页面
+// CCNode * StoreRechargeUi::openUi()
+// {
+// 	std::map<std::string, CCNodeLoader*> nodeLoaders;
+// 	nodeLoaders["StoreRechargeUiLayer"] = UiLayerLoader<StoreRechargeUiLayer>::loader();
+// 	CCNode *uiNode = readUiFromCCBI("storerechargeui", nodeLoaders, _loadSpriteSheet);
+// 	if(uiNode!= NULL)
+// 	{
+// 		StoreRechargeUiLayer *uiLayer = dynamic_cast<StoreRechargeUiLayer*>(uiNode);
+// 		CC_ASSERT(uiLayer != NULL);
+// 		 uiLayer->updateData();
+// 		 uiLayer->updateDisplay();
+// 	}
+// 	return uiNode;
+// }
+// 
+// StoreRechargeUiLayer * StoreRechargeUi::getUiLayer()
+// {
+// 	return getUiNodeByTag<StoreRechargeUiLayer>(WCT_ChongZhiActivityFarmeUI);
+// }
+// 
+// void StoreRechargeUi::updateData()
+// {
+// 	StoreRechargeUiLayer *uiLayer = getUiLayer();
+// 	if(uiLayer != NULL)
+// 	{
+// 		uiLayer->updateData();
+// 	}
+// }
+// 
+// void StoreRechargeUi::updateDisplay()
+// {
+// 	StoreRechargeUiLayer *uiLayer = getUiLayer();
+// 	if(uiLayer != NULL)
+// 	{
+// 		uiLayer->updateDisplay();
+// 	}
+// }
+
+///////////////////////////////////////////////////////
+
+StoreRechargeUiLayer::StoreRechargeUiLayer()
+	:_moneyProgress(NULL)
+{
+
+}
+
+StoreRechargeUiLayer::~StoreRechargeUiLayer()
+{
+	if(_moneyProgress != NULL)
+		delete _moneyProgress;
+	removeAllItem();
+}
+
+void StoreRechargeUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_nextVIPLvSp = NULL;
+
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(SRUT_Frame));
+	CC_ASSERT(_frame != NULL);
+
+	_nextVIPLvSp = dynamic_cast<CCSprite*>(_frame->getChildByTag(17)->getChildByTag(SRUI_NextLv));
+	_nextVIPLvAry = CCArray::create();
+	_nextVIPLvAry->retain();
+	for (int i=1; i<17; ++i)
+	{
+		CCString* VIPIconStr = CCString::createWithFormat("storerechargeui_VIP%d", i);
+		CCSpriteFrame* VIPIconFram = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(VIPIconStr->getCString());
+		_nextVIPLvAry->addObject(VIPIconFram);
+	}
+
+	_contentLayer = dynamic_cast<CCLayer*>(_frame->getChildByTag(SRUT_ContentLayer));
+	CC_ASSERT(_contentLayer != NULL);
+
+	_scrollView = CCScrollView::create(_contentLayer->getContentSize());
+	_contentLayer->addChild(_scrollView);
+
+	_container = CCNode::create();
+	//_container->retain();
+	_container->setContentSize(_contentLayer->getContentSize());
+	_scrollView->setContainer(_container);
+	_scrollView->setTouchEnabled(true);
+	_scrollView->setBounceable(true);
+	_scrollView->setContentSize(_container->getContentSize());
+	_scrollView->setDirection(kCCScrollViewDirectionVertical);
+	_scrollView->setContentOffset(_scrollView->minContainerOffset());
+	CC_ASSERT(_container != NULL && _scrollView != NULL);
+
+// 	CCSprite *moneySpritebar = dynamic_cast<CCSprite*>(_frame->getChildByTag(SRUI_ProgressBar));
+// 	CC_ASSERT(moneySpritebar != NULL);
+// 	_moneyProgress = new ProgressBar;
+// 	_moneyProgress->initBarWithSprite(moneySpritebar,16);
+// 	_moneyProgress->addToParent(_frame);
+
+	if (KaifuHuodongMgr::getInstance()->getIosShowRecharge() == false && _frame)
+	{
+		CCSprite* sprite = dynamic_cast<CCSprite*>(_frame->getChildByTag(15));
+		if (sprite)
+		{
+			CCSpriteFrame* spFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("storerechargeui_topbottom1");
+			if (spFrame)
+			{
+				sprite->setDisplayFrame(spFrame);
+			}
+		}
+	}
+
+//	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+	setAllChildernButtonPriority(this,-1);
+}
+
+cocos2d::SEL_MenuHandler StoreRechargeUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+cocos2d::extension::SEL_CCControlHandler StoreRechargeUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", StoreRechargeUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLookAwardBtnPressed", StoreRechargeUiLayer::onLookAwardBtnPressed);
+	return NULL;
+}
+
+void StoreRechargeUiLayer::onEnter()
+{
+	setTouchPriority(0);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+}
+
+void StoreRechargeUiLayer::onExit()
+{
+	CC_SAFE_RELEASE(_nextVIPLvAry);
+//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	removeAllItem();
+	CCLayer::onExit();
+}
+
+bool StoreRechargeUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		return true;
+	}
+	return false;
+}
+
+void StoreRechargeUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_ChongZhiActivityFarmeUI);
+}
+
+void StoreRechargeUiLayer::onLookAwardBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);//暂时屏蔽vip入口(2015.09.12版本_测)
+
+}
+
+void StoreRechargeUiLayer::addContentItem( CCNode *item )
+{
+	CC_ASSERT(_container != NULL && item != NULL);
+	_container->addChild(item);
+}
+
+void StoreRechargeUiLayer::removeContentItem( CCNode *item )
+{
+	CC_ASSERT(_container != NULL && item != NULL);
+	_container->removeChild(item);
+}
+
+float StoreRechargeUiLayer::getContentLayerHeight()
+{
+	if(_contentLayer != NULL)
+	{
+		return _contentLayer->getContentSize().height;
+	}
+	return 0;
+}
+
+CCNode * StoreRechargeUiLayer::getContainer()
+{
+	return _container;
+}
+
+void StoreRechargeUiLayer::resetScrollPosition()
+{
+	if(_scrollView != NULL)
+	{
+		_scrollView->setContentOffset(_scrollView->minContainerOffset());
+	}
+}
+
+void StoreRechargeUiLayer::addItem( StoreRechargUiItem *item )
+{
+	if(item != NULL)
+	{
+		addContentItem(item->getUiFrame());
+		_items.push_back(item);
+	}
+}
+
+void StoreRechargeUiLayer::removeAllItem()
+{
+	for(StoreRechargUiItemList::iterator iter = _items.begin(); iter != _items.end(); ++ iter)
+	{
+		StoreRechargUiItem *item = *iter;
+		removeContentItem(item->getUiFrame());
+		delete item;
+	}
+	_items.clear();
+}
+
+void StoreRechargeUiLayer::updateList()
+{
+	CCNode *container = getContainer();
+	if(container == NULL)
+		return;
+
+	//得到总高度;
+	int itemCount = _items.size();
+	int lineCount = itemCount / 3 + (itemCount % 3 == 0 ? 0 : 1);
+	float height = STORERECHARGE_ITEM_HEIGHT * lineCount + STORERECHARGE_ITEM_SPACE * (lineCount - 1) + 10.0;
+	if(height < getContentLayerHeight())
+		height = getContentLayerHeight();
+
+	CCSize containerSize = container->getContentSize();
+	container->setContentSize(CCSize(containerSize.width, height));
+
+	int index = 0;
+	for(StoreRechargUiItemList::iterator iter = _items.begin(); iter != _items.end(); ++ iter)
+	{
+		StoreRechargUiItem *item = *iter;
+		int posX = (index % 3) * (STORERECHARGE_ITEM_WIDTH + STORERECHARGE_ITEM_SPACE);
+		int posY = height - (index / 3) * (STORERECHARGE_ITEM_HEIGHT + STORERECHARGE_ITEM_SPACE);
+		item->setPosition(ccp(posX, posY));
+		index ++;
+	}
+	_scrollView->setContentSize(container->getContentSize());
+	resetScrollPosition();
+}
+
+void StoreRechargeUiLayer::updateData()
+{
+		_container->removeAllChildren();
+		for(size_t i = 0; i < MallMgr::getInstance()->_chargemoney.size(); ++i )
+		{
+			StoreRechargUiItem *item = new StoreRechargUiItem; //内存泄露 2014.12.27
+			item->setData(i);
+			addItem(item);
+		}
+		updateList();
+}
+
+void StoreRechargeUiLayer::setMoneyPross( int money, int maxMoney )
+{
+	return ;
+
+	CC_ASSERT(_moneyProgress != NULL);
+	_moneyProgress->setProgress(money, maxMoney);
+	//_moneyProgress->setFontSize(16.0f);
+	_moneyProgress->setFontColor(0xfe, 0xf8, 0xd8);
+}
+
+void StoreRechargeUiLayer::updateDisplay()
+{
+	int myYuanbao = PackageManager::getInstance()->getTotalChargeYuanBao();
+
+	//【Ji：】   设置下一等级VIP图标显示和需要元宝
+	int nNowVipLv = VIPMgr::getInstance()->getVIPLv();
+	unsigned int dwNowYuanbao = VIPMgr::getInstance()->getVIPExperience();
+	//unsigned int dwNowLvYuanbao = VIPMgr::getInstance()->GetVipDataByIndex(nNowVipLv, NEEDYUANBAO);
+	unsigned int dwNextLvYuanbao = VIPMgr::getInstance()->GetVipDataByIndex(nNowVipLv+1, NEEDYUANBAO);
+	if (0 <= nNowVipLv && 16 > nNowVipLv)
+	{
+		_nextVIPLvSp->setDisplayFrame(dynamic_cast<CCSpriteFrame*>(_nextVIPLvAry->objectAtIndex(nNowVipLv)));
+	}
+	else
+	{
+		_frame->getChildByTag(SRUI_BottomLine1)->setVisible(true);//add by vvv 2014.12.27当升级到16级时，显示一览众山小
+		//_frame->getChildByTag(SRUI_BottomLine2)->setVisible(false);
+		_frame->getChildByTag(SRUI_BottomText)->setVisible(false);
+		_frame->getChildByTag(17)->getChildByTag(SRUI_ContinueMoney)->setVisible(false);
+		_nextVIPLvSp->setVisible(false);
+
+	}
+	unsigned int dwNeedMoney = dwNextLvYuanbao - dwNowYuanbao;
+	this->setNeedMoney(dwNeedMoney);
+
+	for (int i = 0; i < 12; i++)
+	{
+		_allchargeinfo[i] = getChargeInfoByIndex(i);
+		if (myYuanbao < _allchargeinfo[i].yuanbao)
+		{
+			if ( i == 0)
+			{
+				setMyLibao("");
+//				setNeedMoney(_allchargeinfo[i].yuanbao);
+			}
+			else
+			{
+				setMyLibao(_allchargeinfo[i - 1].desc);
+//				setNeedMoney(_allchargeinfo[i].yuanbao - myYuanbao);
+			}
+			setNextLiBao(_allchargeinfo[i].desc);
+			setMoneyPross(myYuanbao,_allchargeinfo[i].yuanbao);
+			return;
+		}
+	}
+}
+
+chargeInfo StoreRechargeUiLayer::getChargeInfoByIndex( int index )
+{
+	chargeInfo retInfo;
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return retInfo;
+	if (index < 0 || index > MAX_CHARGE_LEVEL)//防止异常
+	{
+		return retInfo;
+	}
+	int classType = 0;
+	int sex = 0;
+	if ( ploc->getRoleType() == RT_MWARRIOR || ploc->getRoleType() == RT_WWARRIOR)
+	{
+		classType  = 1;
+	}
+	else if (ploc->getRoleType() == RT_MMAGE || ploc->getRoleType() == RT_WMAGE)
+	{
+		classType = 2;
+	}
+	else if (ploc->getRoleType() == RT_MTAOIST || ploc->getRoleType() == RT_WTAOIST)
+	{
+		classType = 3;
+	}
+	else
+	{
+		return retInfo;
+	}
+
+	if ( ploc->getAttribute(RA_SEX) == 1)
+	{
+		sex  = 1;
+	}
+	else
+	{
+		sex = 0;
+	}
+
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM ChargeInfo WHERE Sex = ?1 AND Class = ?2 AND Level = ?3");
+	cmd->set_integer32(1,sex);
+	cmd->set_integer32(2,classType);
+	cmd->set_integer32(3,index);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("Yuanbao");
+		retInfo.yuanbao = table->get_integer32(idx);
+		idx = table->get_index("Class");
+		retInfo.classtype= table->get_integer32(idx);
+		idx = table->get_index("Sex");
+		retInfo.sex = table->get_integer32(idx);
+		idx = table->get_index("item_1");
+		retInfo.ItemId[0] = table->get_integer32(idx);
+		idx = table->get_index("num_1");
+		retInfo.ItenNum[0] = table->get_integer32(idx);
+		idx = table->get_index("item_2");
+		retInfo.ItemId[1] = table->get_integer32(idx);
+		idx = table->get_index("num_2");
+		retInfo.ItenNum[1] = table->get_integer32(idx);
+		idx = table->get_index("item_3");
+		retInfo.ItemId[2] = table->get_integer32(idx);
+		idx = table->get_index("num_3");
+		retInfo.ItenNum[2] = table->get_integer32(idx);
+		idx = table->get_index("item_4");
+		retInfo.ItemId[3] = table->get_integer32(idx);
+		idx = table->get_index("num_4");
+		retInfo.ItenNum[3] = table->get_integer32(idx);
+		idx = table->get_index("item_5");
+		retInfo.ItemId[4] = table->get_integer32(idx);
+		idx = table->get_index("num_5");
+		retInfo.ItenNum[4] = table->get_integer32(idx);
+		idx = table->get_index("item_6");
+		retInfo.ItemId[5] = table->get_integer32(idx);
+		idx = table->get_index("num_6");
+		retInfo.ItenNum[5] = table->get_integer32(idx);
+		idx = table->get_index("item_7");
+		retInfo.ItemId[6] = table->get_integer32(idx);
+		idx = table->get_index("num_7");
+		retInfo.ItenNum[6] = table->get_integer32(idx);
+		idx = table->get_index("item_8");
+		retInfo.ItemId[7] = table->get_integer32(idx);
+		idx = table->get_index("num_8");
+		retInfo.ItenNum[7] = table->get_integer32(idx);
+		idx = table->get_index("Box_name");
+		retInfo.desc = table->get_text(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	return retInfo;
+}
+
+void StoreRechargeUiLayer::setMyLibao( const std::string &desc )
+{
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(SRUI_LiBaoTips));
+	if(label != NULL)
+	{
+		if (!desc.empty())
+		{
+			label->setString(CCString::createWithFormat("%s%s", "\xE6\x82\xA8\xE5\x8F\xAF\xE9\xA2\x86\xE5\x8F\x96",desc.c_str())->getCString());
+		}
+		else
+		{
+			label->setString("\xE6\x97\xA0\xE7\xA4\xBC\xE5\x8C\x85\xE5\x8F\xAF\xE9\xA2\x86");
+		}
+	}
+}
+
+void StoreRechargeUiLayer::setNeedMoney( unsigned int money )
+{
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(17)->getChildByTag(SRUI_ContinueMoney));
+	if(label != NULL)
+	{
+		CCString *str = CCString::createWithFormat("%u", money);
+		label->setString(str->getCString());
+	}
+}
+
+void StoreRechargeUiLayer::setNextLiBao( const std::string &desc )
+{
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(SRUI_NextLiBaoTips));
+	if(label != NULL)
+	{
+		label->setString(desc.c_str());
+	}
+}
+
+

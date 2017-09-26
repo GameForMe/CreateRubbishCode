@@ -1,0 +1,275 @@
+/**
+ *	@file		SBKShenDianUI.cpp
+ *	@author		shenyaoyan
+ *	@date		2016/07/28
+ *	@version	
+ *	@brief		沙巴克神殿界面
+ */
+
+#include "SBKShenDianUI.h"
+#include "UiLoader.h"
+#include "CommonClient.h"
+#include "ItemNode.h"
+#include "ListControl.h"
+#include "UiTools.h"
+#include "SBKSDManager.h"
+#include "UiManager.h"
+#include "CfgReader.h"
+#include "GameEventDefine.h"
+
+SBKShenDianUI::SBKShenDianUI()
+{
+
+}
+
+SBKShenDianUI::~SBKShenDianUI()
+{
+
+}
+
+CCNode* SBKShenDianUI::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["SBKShenDianUI"] = UiLayerLoader<SBKShenDianUILayer>::loader();
+	nodeLoaders["ItemNode"] = UiNodeLoader<ItemNode>::loader();
+	nodeLoaders["ListControl"] = ListControlLoader::loader();
+	CCNode* uiNode = readUiFromCCBI("sbkfuben",nodeLoaders,_loadSpriteSheet);
+	return uiNode;
+}
+
+//////////////////////////////////////////////////////
+
+SBKShenDianUILayer::SBKShenDianUILayer()
+	: m_list(NULL)
+	, m_frame(NULL)
+	, m_guildName(NULL)
+	, m_maxCheck(NULL)
+	, m_timeLabel(NULL)
+{
+	for ( int i = 0 ; i < MAYDROPITEMMAX ; ++i )
+	{
+		m_itemNode[i] = NULL;
+	}
+}
+
+SBKShenDianUILayer::~SBKShenDianUILayer()
+{
+
+}
+
+SEL_MenuHandler SBKShenDianUILayer::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+SEL_CCControlHandler SBKShenDianUILayer::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onCloseBtnPressed",SBKShenDianUILayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onteamenterBtnPressed",SBKShenDianUILayer::onTeamEnterBtnPressed);
+	return NULL;
+}
+
+bool SBKShenDianUILayer::onAssignCCBMemberVariable(CCObject* pTarget,const char* pMemberVariableName, CCNode* pNode)
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*, m_frame);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(ListControl*, m_list);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*, m_descTitle);
+	return false;
+}
+
+void SBKShenDianUILayer::onNodeLoaded(CCNode* pNode,CCNodeLoader* pNodeLoader)
+{
+	CC_ASSERT(m_frame);
+
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(ENT_GuildTitle)));
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(ENT_CheckTitle)));
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_descTitle));
+	m_guildName = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(ENT_GuildName)));
+	m_maxCheck  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(ENT_CheckNum)));
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(ENT_DropLabel)));
+	m_timeLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(ENT_TimeLabel)));
+
+	for ( int i = 0 ; i < MAYDROPITEMMAX ; ++i )
+	{
+		m_itemNode[i] = dynamic_cast<ItemNode*>(m_frame->getChildByTag(ENT_ItemNode1+i));
+	}
+	setData();
+}
+
+void SBKShenDianUILayer::onEnter()
+{
+	NormalLayer::onEnter();
+}
+
+void SBKShenDianUILayer::onExit()
+{
+	NormalLayer::onExit();
+}
+
+void SBKShenDianUILayer::setData()
+{
+	SBKSDManager* sdManager = SBKSDManager::get_singleton_ptr();
+	m_guildName->setString(sdManager->getGuildName());
+	int maxCheck = sdManager->getMaxCheck();
+	std::string checkStr;
+	safe_sprintf(checkStr,"%d",maxCheck);
+	m_maxCheck->setString(checkStr);
+	
+	int todayTime = sdManager->getEnterCounts();
+	safe_sprintf(checkStr,"%d",1-todayTime);
+	m_timeLabel->setString(checkStr);
+
+	for ( int i = 0 ; i < MAYDROPITEMMAX ; ++i )
+	{
+		m_itemNode[i]->setDataId(sdManager->getDropItem(i));
+		m_itemNode[i]->hideItemOpBtn();
+		m_itemNode[i]->setClickable(true);
+	}
+
+	CCNode* listNode = ShenDianItem::getShenDianItem();
+	CC_ASSERT(listNode);
+	m_list->add_item(listNode);
+	if (maxCheck == 0 || maxCheck == 1 || maxCheck == 2)
+	{
+		m_list->scroll_to_bottom();
+	}
+	else if (maxCheck == 9 || maxCheck == 10 )
+	{
+		m_list->scroll_to_top();
+	}
+	else
+	{
+		maxCheck -= 2;
+		CCPoint point = listNode->getContentSize();
+		point.y = -point.y*((maxCheck*1.0f)/SHEN_DIAN_GATE_COUNT);
+		point.x = 0.0;
+		m_list->setContentOffset(point);
+	}
+}
+
+void SBKShenDianUILayer::onCloseBtnPressed(CCObject* pSender,CCControlEvent pCCControlEvent)
+{
+	CLOSE_UI(WCT_ShenDian_Enter_UI);
+}
+
+void SBKShenDianUILayer::onTeamEnterBtnPressed(CCObject* pSender, CCControlEvent pCCControlEvent)
+{
+	SBKSDManager::get_singleton_ptr()->send_Team_Enter();
+}
+
+///////////////////////////////////////////////////////////////////////
+
+
+ShenDianItem::ShenDianItem()
+	: checkPoint(0)
+{
+
+}
+
+ShenDianItem::~ShenDianItem()
+{
+
+}
+
+CCNode* ShenDianItem::getShenDianItem()
+{
+	CCNodeLoaderLibrary *ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("ShenDianItem",UiNodeLoader<ShenDianItem>::loader());
+	cocos2d::extension::CCBReader *ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	std::string strFullPath = CFGReader::instance()->get_ui_ccbi_filepath("sbkfubenitem");
+	CCNode *node = ccbReader->readNodeGraphFromFile(strFullPath.c_str());
+	ShenDianItem* item = dynamic_cast<ShenDianItem*>(node);
+	CC_ASSERT(item);
+	ccbReader->autorelease();
+	return node;
+}
+
+SEL_MenuHandler ShenDianItem::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+SEL_CCControlHandler ShenDianItem::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onCheckBtn1Pressed",ShenDianItem::onCheckBtn1Pressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onCheckBtn2Pressed",ShenDianItem::onCheckBtn2Pressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onCheckBtn3Pressed",ShenDianItem::onCheckBtn3Pressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onCheckBtn4Pressed",ShenDianItem::onCheckBtn4Pressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onCheckBtn5Pressed",ShenDianItem::onCheckBtn5Pressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onCheckBtn6Pressed",ShenDianItem::onCheckBtn6Pressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onCheckBtn7Pressed",ShenDianItem::onCheckBtn7Pressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onCheckBtn8Pressed",ShenDianItem::onCheckBtn8Pressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onCheckBtn9Pressed",ShenDianItem::onCheckBtn9Pressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onCheckBtn10Pressed",ShenDianItem::onCheckBtn10Pressed);
+	return NULL;
+}
+
+void ShenDianItem::onNodeLoaded(CCNode * pNode, CCNodeLoader * pNodeLoader)
+{
+	
+}
+
+void ShenDianItem::onCheckBtn1Pressed(CCObject* pSender, CCControlEvent pCCControlEvent)
+{
+	checkPoint = 1;
+	showTips();
+}
+
+void ShenDianItem::onCheckBtn2Pressed(CCObject* pSender, CCControlEvent pCCControlEvent)
+{
+	checkPoint = 2;
+	showTips();
+}
+
+void ShenDianItem::onCheckBtn3Pressed(CCObject* pSender, CCControlEvent pCCControlEvent)
+{
+	checkPoint = 3;
+	showTips();
+}
+
+void ShenDianItem::onCheckBtn4Pressed(CCObject* pSender, CCControlEvent pCCControlEvent)
+{
+	checkPoint = 4;
+	showTips();
+}
+
+void ShenDianItem::onCheckBtn5Pressed(CCObject* pSender, CCControlEvent pCCControlEvent)
+{
+	checkPoint = 5;
+	showTips();
+}
+
+void ShenDianItem::onCheckBtn6Pressed(CCObject* pSender, CCControlEvent pCCControlEvent)
+{
+	checkPoint = 6;
+	showTips();
+}
+
+void ShenDianItem::onCheckBtn7Pressed(CCObject* pSender, CCControlEvent pCCControlEvent)
+{
+	checkPoint = 7;
+	showTips();
+}
+
+void ShenDianItem::onCheckBtn8Pressed(CCObject* pSender, CCControlEvent pCCControlEvent)
+{
+	checkPoint = 8;
+	showTips();
+}
+
+void ShenDianItem::onCheckBtn9Pressed(CCObject* pSender, CCControlEvent pCCControlEvent)
+{
+	checkPoint = 9;
+	showTips();
+}
+
+void ShenDianItem::onCheckBtn10Pressed(CCObject* pSender, CCControlEvent pCCControlEvent)
+{
+	checkPoint = 10;
+	showTips();
+}
+
+void ShenDianItem::showTips()
+{
+	SBKSDManager::get_singleton_ptr()->send_View_Defender(checkPoint);
+}

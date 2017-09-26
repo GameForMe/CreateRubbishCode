@@ -1,0 +1,136 @@
+#include "TimeCardNodeUi.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "PackageManager.h"
+#include "tagDWORDTime.h"
+#include "ServerTime.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+CCNode* TimeCardNodeUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["DianKaUiLayer"] = UiLayerLoader<TimeCardNodeUiLayer>::loader();
+	CCNode* uiNode = readUiFromCCBI("dianka",nodeLoaders,_loadSpriteSheet);
+	if(!IS_UI_OPEN(WCT_STOREUI))
+	{
+		CLOSE_ALL_UI();
+	}
+	return uiNode;
+}
+TimeCardNodeUiLayer *TimeCardNodeUi::getUiLayer()
+{
+	return getUiNodeByTag<TimeCardNodeUiLayer>(WCT_TimeCardNodeUi);
+}
+TimeCardNodeUiLayer :: TimeCardNodeUiLayer()
+{
+
+}
+TimeCardNodeUiLayer :: ~TimeCardNodeUiLayer()
+{
+
+}
+cocos2d::SEL_MenuHandler TimeCardNodeUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler TimeCardNodeUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", TimeCardNodeUiLayer::onReturnBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", TimeCardNodeUiLayer::onBuyBtnPressed);
+	return NULL;
+}
+void TimeCardNodeUiLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	_frameNode = getChildByTag(NodeCardPlaneTag);
+	showTimeMessage();
+}
+void TimeCardNodeUiLayer::onEnter()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	CCLayer::onEnter();
+}
+void TimeCardNodeUiLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+void TimeCardNodeUiLayer::onBuyBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)//确认购买按钮
+{ 
+	const MallMgr::Mall_SingleItem_Map *mallDataMap = MallMgr::getInstance()->GetSheetItemsByIndex(0);
+	if(mallDataMap != NULL)
+	{
+		//先得到服务器当前时间
+		Tag_MallItemInfo data;
+		tagDWORDTime cur_time = ServerTime::getInstance()->cal_current_server_dword_time();
+		for(MallMgr::Mall_SingleItem_Map::const_iterator iter = mallDataMap->begin(); iter != mallDataMap->end(); ++ iter)
+		{
+			const Tag_MallItemInfo &dataInfo = iter->second;
+			if(dataInfo.uItemTypeID == _cardId)
+			{
+				data = dataInfo;
+				break;
+			}
+		}
+		MallMgr::getInstance()->BuyProduct(data.typeIndex, data.dwID, 1);
+	}
+	CLOSE_UI(WCT_TimeCardNodeUi);
+}
+void TimeCardNodeUiLayer::onReturnBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)//返回按钮
+{ 
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_TimeCardNodeUi);
+}
+bool TimeCardNodeUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	CCPoint framePoint = _frameNode->convertTouchToNodeSpace(pTouch);
+	const CCSize& framesize = _frameNode->getContentSize();
+	CCRect framerect(0.0f, 0.0f, framesize.width, framesize.height);
+	if(framerect.containsPoint(framePoint))
+	{
+		return true;
+	}
+	return false;
+}
+void TimeCardNodeUiLayer::setData(const char* strName,unsigned int itemId)
+{
+	CCNode* node = _frameNode->getChildByTag(NodeCardIcon);
+	CCSprite* m_time_card_icon = dynamic_cast<CCSprite*>(_frameNode->getChildByTag(NodeCardIcon)); //点卡图标
+	m_time_card_icon->initWithSpriteFrameName(strName);
+	_cardId = itemId;
+}
+void TimeCardNodeUiLayer::showTimeMessage()
+{
+	CCSprite* m_time_card_time = dynamic_cast<CCSprite*>(_frameNode->getChildByTag(NodeCardLessLabel));//点卡剩余时长
+	CCLabelTTF* m_time_card_time_num = dynamic_cast<CCLabelTTF*>(_frameNode->getChildByTag(NodeCardLessNumber));;//点卡剩余时长大小
+	if(isShowLeftTime())
+	{
+		m_time_card_time->setVisible(true);
+		m_time_card_time_num->setVisible(true);
+		tagDWORDTime nowTime = ServerTime::getInstance()->cal_current_server_dword_time();
+		tagDWORDTime cardDeadLine = RoleManager::getInstance()->getLocalPlayer()->getCardDeadLine();
+		unsigned int leftTime = CalcTimeDiff(cardDeadLine, nowTime);
+		if((0 < leftTime) &&(leftTime < ONE_DAY_SECONDS))
+		{
+			ostringstream ostr;
+			ostr << (leftTime / ONE_DAY_SECONDS + 1);
+			string str = ostr.str();
+			m_time_card_time_num->setString(str.c_str());
+		}
+		else if(leftTime >= ONE_DAY_SECONDS)
+		{
+			ostringstream ostr;
+			ostr << (leftTime / ONE_DAY_SECONDS);
+			string str = ostr.str();
+			m_time_card_time_num->setString(str.c_str());
+		}
+	}
+	else
+	{
+		m_time_card_time->setVisible(false);
+		m_time_card_time_num->setVisible(false);
+	}
+}

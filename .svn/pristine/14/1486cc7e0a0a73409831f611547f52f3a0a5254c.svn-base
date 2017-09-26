@@ -1,0 +1,140 @@
+#ifndef __SECOND_VERIFY_MGR__
+#define __SECOND_VERIFY_MGR__
+
+#include "CmdAdapter.h"
+#include "GameEventDefine.h"
+#include "protocol/safelock_protocol.h"
+#define SECOND_VERIFY_OPEN_LEVEL 1
+#define SECOND_VERIFY_TRY_TIMES 5
+#define SECOND_VERIFY_FORCE_UNLOCK_DAY 7
+#define SECOND_VERIFY_REMIND_LV 30
+// #define NEW_VERIFY_DATA(classname,tar,func) new VerfiyDataBase<classname>(tar,func)
+// 
+// typedef void (*second_verify_callfunc)(bool isSucess);
+
+// class VerfiyDataBase
+// {
+// public:
+// 	virtual void processFunc(bool isSucess) = 0;
+// protected:
+// 	second_verify_callfunc m_pVerifyProcessFunc;//成功处理函数
+// };
+// 
+// template<class T>
+// class VerifyProcessData : public VerfiyDataBase
+// {
+// public: 
+// 	VerifyProcessData(T* pTar,second_verify_callfunc pProcessFunc);
+// 	void processFunc(bool isSucess);
+// private:
+// 	T*	m_pTarget;
+// };
+#define SEND_SAFE_VERIFY_WORLD_MESSAGE(worldMsg,priority) std::function<void(bool)> func = [worldMsg](bool isSuccess)\
+		{ if(isSuccess) TCP_CLIENT->send_net_cmd((const s_net_cmd*)worldMsg.contents(), priority, false);};\
+		SecondVerifyMgr::getInstance()->try_request_safe_verify(func);;
+#define SEND_SAFE_VERIFY_NEW_MESSAGE(cmd,priority) std::function<void(bool)> func = [cmd](bool isSuccess)\
+		{ if(isSuccess) TCP_CLIENT->send_net_cmd(&cmd, priority, false);};\
+		SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+
+
+typedef std::function<void(bool)> process_result_func;
+#define NEW_VERIFY_DATA(func) new VerifyProcessData(func)
+class VerifyProcessData
+{
+public: 
+	VerifyProcessData(process_result_func pProcessFunc);
+	void processFunc(bool isSucess);
+private:
+	process_result_func	m_callFunc;
+};
+
+enum SecondVerifyState
+{
+	SV_Verify_Null,
+	SV_Verify_UnSet,
+	SV_Verify_Seted,//设置了 但是么有验证
+	SV_Verify_Success,//验证成功
+	SV_Verify_SysLocked,//系统冻结
+	SV_Verify_ForceUnLock,//强解 但是未验证
+	SV_Verify_ServerProtectedTime,//系统在强解后一天保护时间
+	SV_Verify_ForceAndVerifyed,//强解 验证过了
+	SV_Verify_ForceAndSysLocked//强解 冻结了
+};
+
+enum e_SVTipType{
+	SV_Tip_Null = -1,
+	SV_Tip_SetPwd,
+	SV_Tip_SetSafeQes,
+	SV_Tip_ResetPwd,
+	SV_Tip_ForceUnlock,
+	SV_Tip_VerifyPwd,
+	SV_Tip_LockedSys,//系统冻结
+	SV_Tip_CancelForceUnlock,
+};
+
+struct SetSVData
+{
+	string m_sPwd1;
+	string m_sPwd2;
+	string m_sFatherName;
+	string m_sMotherName;
+};
+struct ResetSVPwdData
+{
+	string oldPwd;
+	string newPwd1;
+	string newPwd2;
+};
+
+class SecondVerifyTipUiLayer;
+class SecondVerifyMgr
+{ 
+private:
+	SecondVerifyMgr();
+
+public:
+	
+	static SecondVerifyMgr* getInstance();
+	void Init();
+	void Destroy();
+	
+	void openVerifyTipUIByType(e_SVTipType pType);
+	void closeVerifyTipUI();
+	void refershVerifyTipUI();
+	void openVerifyUI();
+	int getInputErrrorCount(){ return m_pSafeLockedInfo.safeLockInputCount;};
+	void send_request_second_verify(VerifyProcessData* pData);//请求验证信息
+	void destroyRequsetVerityData();//如果注册者 被干掉，在被干掉前通知验证管理，删除注册数据
+
+	bool try_request_safe_verify(process_result_func pProcessFunc);
+
+	SecondVerifyState getSecondVerifyState() { return m_eVerifyState;};
+
+	tagDWORDTime getRequestForceUnlockTime() { return m_pSafeLockedInfo.safeLockDropTime;};
+	tagDWORDTime getSuccessForceUnlockTime();
+	int getSysLockedSurplusTime();
+	bool isShowRedPointOnUi();
+	bool isVerifyServerOpen(){ return m_isServerOpen;}
+public:
+	unsigned int on_server_recv_verify_result(s_net_cmd *cmd);//回复验证消息
+	unsigned int on_server_recv_error_code(s_net_cmd *cmd);//回复错误码
+	unsigned int on_server_recv_reset_success(s_net_cmd *cmd);//回复错误码
+
+	
+	void send_request_set_verify(SetSVData pData);
+	void send_request_verify_pwd(string pstr);//发送验证密码
+	void send_request_reset_verify_pwd(ResetSVPwdData pData);
+	void send_request_force_unlock();//发送解锁安全锁
+	void send_Request_cancel_force_unlock();//取消强制解锁安全锁
+
+private:
+	tagSafeLock m_pSafeLockedInfo;
+
+	VerifyProcessData* m_pVerfiyData;//当前处理
+	SecondVerifyState m_eVerifyState;
+	e_SVTipType	m_eCurrentSVTipType;
+	bool m_isFirstShow;
+	bool m_isServerOpen;//服务器是否开启安全锁
+};
+
+#endif

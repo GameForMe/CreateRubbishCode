@@ -1,0 +1,250 @@
+/**
+ *	@file		ZZZTitleTipsUI.cpp
+ *	@author		shenyaoyan
+ *	@date		2016/05/13
+ *	@version	
+ *	@brief		主宰者称号的tips界面
+ */
+
+#include "ZZZTitleTipsUI.h"
+#include "CfgReader.h"
+#include "CommonClient.h"
+#include "World.h"
+#include "UiLoader.h"
+#include "CommonView.h"
+#include "ItemNode.h"
+#include "PackageManager.h"
+
+ZZZTitleTipsUI::ZZZTitleTipsUI()
+	: m_itemID(0)
+	, m_spriteFrame(NULL)
+	, m_titleShow(NULL)
+	, m_titlePro(NULL)
+	, m_titleTime(NULL)
+	, m_titleContinue(NULL)
+{
+	for(int i = 0; i<MAX_LABEL_NUMBER ; ++i )
+	{
+		m_titleLabel[i] = NULL;
+		m_titleNumber[i] = NULL;
+	}
+}
+
+ZZZTitleTipsUI::~ZZZTitleTipsUI()
+{
+
+}
+
+bool ZZZTitleTipsUI::onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode)
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*, m_spriteFrame);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*, m_titlePro);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*, m_titleTime);
+	return f_btn_func_component::onAssignCCBMemberVariable(pTarget,pMemberVariableName,pNode);
+}
+
+cocos2d::SEL_MenuHandler ZZZTitleTipsUI::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler ZZZTitleTipsUI::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onusedBtnPressed" , ZZZTitleTipsUI::onUsedBtnPressed);
+	return f_btn_func_component::onResolveCCBCCControlSelector(pTarget,pSelectorName);
+}
+
+void ZZZTitleTipsUI::onNodeLoaded(CCNode * pNode, CCNodeLoader * pNodeLoader)
+{
+	CC_ASSERT(m_spriteFrame);
+	this->setContentSize(m_spriteFrame->getContentSize());
+	this->setAnchorPoint(m_spriteFrame->getAnchorPoint());
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_titlePro);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_titleTime);
+
+	m_titleShow = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_spriteFrame->getChildByTag(ZZZ_LABEL_Show)));
+	m_titleContinue = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_spriteFrame->getChildByTag(ZZZ_LABEL_Continue)));
+
+	for( int i = 0 ; i<MAX_LABEL_NUMBER ; ++i )
+	{
+		m_titleLabel[i] = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_spriteFrame->getChildByTag(ZZZ_LABEL_1+i)));
+		m_titleNumber[i] = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_spriteFrame->getChildByTag(ZZZ_NUMBER_1+i)));
+	}
+
+	set_close_fn(std::bind(&ZZZTitleTipsUI::close,this));
+}
+
+ZZZTitleTipsUI* ZZZTitleTipsUI::getInstance()
+{
+	static ZZZTitleTipsUI instance;
+	return &instance;
+}
+
+ZZZTitleTipsUI* ZZZTitleTipsUI::open()
+{
+	CCScene* scene = World::getInstance()->getScene();
+	if (scene)
+	{
+		CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+		cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+		std::string fileName = CFGReader::instance()->get_profile_string("Art", "UI", "") + "zhuzaizhetitle.ccbi";
+		CCNode *node = ccbReader->readNodeGraphFromFile(fileName.c_str());
+		ccbReader->release();
+		if(node != NULL) 
+		{
+			scene->addChild(node, WZ_POPUI, WCT_ZZZ_ITEM_TIPS_UI);
+		}
+		ZZZTitleTipsUI* tipsUI = dynamic_cast<ZZZTitleTipsUI*>(node);
+		return tipsUI;
+	}
+	return NULL;
+}
+
+void ZZZTitleTipsUI::close()
+{
+	CCScene* scene = World::getInstance()->getScene();
+	if (scene)
+	{
+		scene->removeChildByTag(WCT_ZZZ_ITEM_TIPS_UI);
+	}
+}
+
+void ZZZTitleTipsUI::onEnter()
+{
+	setTouchPriority(-1);
+	setTouchEnabled(true);
+	setAllChildernButtonPriority(m_spriteFrame,-1);
+	CCLayer::onEnter();
+}
+
+void ZZZTitleTipsUI::onExit()
+{
+	CCLayer::onExit();
+}
+
+bool ZZZTitleTipsUI::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (isTouchOnNodeContent(this,pTouch))
+	{
+		return true;
+	}
+	close();
+	return false;
+}
+
+void ZZZTitleTipsUI::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+	
+}
+
+void ZZZTitleTipsUI::setData(unsigned int id,short index)
+{
+	if (m_itemID != id)
+	{
+		m_itemID = id;
+	}
+	m_idx = index;
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM ItemTipData WHERE id = ?");
+	cmd->set_integer32(1 , m_itemID);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("desc");
+		setDesc(table->get_text(idx));
+		idx = table->get_index("sdesc");
+		setPro(table->get_text(idx));
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+}
+
+void ZZZTitleTipsUI::setDesc(const std::string& desc)
+{
+	int dev = desc.find_first_of("\\");
+	if (dev != std::string::npos)
+	{
+		std::string titleShow = desc.substr(0,dev);
+		std::string titleContinue = desc.substr(dev+1,desc.length());
+		m_titleShow->setString(titleShow.c_str());
+		m_titleContinue->setString(titleContinue.c_str());
+	}
+	else
+	{
+		m_titleShow->setString(desc.c_str());
+	}
+}
+
+void ZZZTitleTipsUI::setPro(const std::string& pro)
+{
+	std::vector<std::string> titleProperty = split_str(pro,'\\');
+	int number = 0;
+	for (std::vector<std::string>::iterator itor = titleProperty.begin(); itor != titleProperty.end(); ++itor,++number)
+	{
+		int dev = (*itor).find_first_of("+");
+		std::string descStr = (*itor).substr(0,dev);
+		std::string conStr = (*itor).substr(dev,(*itor).length());
+		m_titleLabel[number]->setString(descStr.c_str());
+		m_titleLabel[number]->setVisible(true);
+		m_titleNumber[number]->setString(conStr.c_str());
+		m_titleNumber[number]->setVisible(true);
+	}
+	for ( ; number!=MAX_LABEL_NUMBER ; ++number )
+	{
+		m_titleLabel[number]->setVisible(false);
+		m_titleNumber[number]->setVisible(false);
+	}
+}
+
+void ZZZTitleTipsUI::setPlace(const CCPoint &point)
+{
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+
+	bool putLeft = false;
+	bool putBottom = false;
+	if(point.x > winSize.width / 2.0f)
+		putLeft = true;
+	if(point.y > winSize.height / 2.0f)
+		putBottom = true;
+
+	CCSize uiSize = this->getContentSize();
+
+	float posX = 0;
+	float posY = 0;
+	if(putLeft)
+	{
+		posX = point.x - uiSize.width - ITEMNODE_CONTENTWIDTH / 2.0f;
+		if(posX < 0.f)
+			posX = 0.f;
+	}
+	else
+	{
+		posX =abs(point.x) + ITEMNODE_CONTENTWIDTH / 2.0f;//vv 2014.10.6 修改物品tips显示位置
+		if(posX + uiSize.width > winSize.width)
+			posX = winSize.width - uiSize.width;
+	}
+
+	if(putBottom)
+	{
+		posY = point.y + ITEMNODE_CONTENTHEIGHT / 2.0f - uiSize.height;
+		if(posY < 0.f)
+			posY = 0.f;
+	}
+	else
+	{
+		posY = point.y - ITEMNODE_CONTENTHEIGHT / 2.0f;
+		if(posY + uiSize.height > winSize.height)
+			posY = winSize.height - uiSize.height;
+	}
+	this->setPosition(ccp(posX, posY));
+}
+
+void ZZZTitleTipsUI::setButtonVisible(bool isShow)
+{
+	set_btn_type(isShow?eUseBtn:eHideAll);
+}
+
+void ZZZTitleTipsUI::onUsedBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	PackageManager::getInstance()->useBagItem((short)m_idx);
+	close();
+}

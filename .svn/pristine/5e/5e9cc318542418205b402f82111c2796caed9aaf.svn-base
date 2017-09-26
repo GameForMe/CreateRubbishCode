@@ -1,0 +1,314 @@
+/**
+ *	@file		WingManager.cpp
+ *	@author		guantiejun
+ *	@date		2016/04/18
+ *	@version	
+ *	@brief		³á°ò¹ÜÀíÀà
+ */
+
+#include "WingManager.h"
+#include "WingProtocol.h"
+#include "CommonClient.h"
+#include "TCPClient.h"
+#include "ToolTip.h"
+#include "PackageProto.h"
+#include "f_string_table.h"
+#include "item.h"
+#include "Base.h"
+#include "GameEventDefine.h"
+#include "client_common_define.h"
+
+WingManager::WingManager()
+{
+
+}
+
+WingManager::~WingManager()
+{
+	m_role_base_att.clear();
+	m_wing_evolve_data.clear();
+	m_wing_fly_up_data.clear();
+}
+
+void WingManager::Init()
+{
+	TCP_CLIENT->register_net_cmd("NET_SIS_Equip_Evolve", this, &WingManager::on_server_evolve);
+	TCP_CLIENT->register_net_cmd("NET_SIS_Equip_Fly_Upgrade", this, &WingManager::on_server_fly_up);
+}
+
+void WingManager::Destroy()
+{
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Equip_Evolve", this, &WingManager::on_server_evolve);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Equip_Fly_Upgrade", this, &WingManager::on_server_fly_up);
+}
+
+WingManager* WingManager::getInstance()
+{
+	static WingManager Mgr;
+	return &Mgr;
+}
+
+void WingManager::send_evolve(INT64 wing_id)
+{
+	NET_SIC_Equip_Evolve send;
+	send.n64_serial = wing_id;
+	TCP_CLIENT->send_net_cmd(&send,NP_NORMAL,false);
+}
+
+void WingManager::send_fly_up(INT64 wing_id, bool is_use_gold)
+{
+	NET_SIC_Equip_Fly_Upgrade send;
+	send.n64_serial = wing_id;
+	send.bUseYuanbao = is_use_gold;
+	TCP_CLIENT->send_net_cmd(&send,NP_NORMAL,false);
+}
+
+unsigned int WingManager::on_server_evolve(s_net_cmd *cmd)
+{
+	NET_SIS_Equip_Evolve* msg = (NET_SIS_Equip_Evolve*)cmd;
+	CC_ASSERT(msg);
+
+	if(msg->dwError != E_Success)
+	{
+		show_error_info(msg->dwError);
+		return 0;
+	}
+
+	evolve_success_event event;
+	event.equip_id = msg->n64_serialNew;
+	SEND_EVENT(&event);
+
+	return 0;
+}
+
+unsigned int WingManager::on_server_fly_up(s_net_cmd *cmd)
+{
+	NET_SIS_Equip_Fly_Upgrade* msg = (NET_SIS_Equip_Fly_Upgrade*)cmd;
+	CC_ASSERT(msg);
+
+	if(msg->dwError != E_Success)
+	{
+		fly_up_back_event event;
+		event.is_success = false;
+		event.crit = msg->byCrit;
+		event.exp = msg->nExp;
+		SEND_EVENT(&event);
+
+		show_error_info(msg->dwError);
+		return 0;
+	}
+
+	fly_up_back_event event;
+	event.is_success = true;
+	event.crit = msg->byCrit;
+	event.exp = msg->nExp;
+	SEND_EVENT(&event);
+
+	return 0;
+}
+
+int WingManager::get_add_base_att_by_equip(f_equipment* equip)
+{
+	if(!IS_VALID_PTR(equip))
+		return 0;
+
+	int level = equip->get_equip()->nLevel;
+	return get_add_base_att_by_level(level);
+}
+
+int WingManager::get_add_base_att_by_level(int level)
+{
+	map_wing_fly_up::iterator iter = m_wing_fly_up_data.find(level);
+	if (iter != m_wing_fly_up_data.end())
+	{
+		return iter->second.amplification;
+	}
+	return 0;
+}
+
+int WingManager::get_add_dodge_by_equip(f_equipment* equip)
+{
+	if(!IS_VALID_PTR(equip))
+		return 0;
+
+	int level = equip->get_equip()->nLevel;
+	return get_add_dodge_by_level(level);
+}
+
+int WingManager::get_add_dodge_by_level(int level)
+{
+	map_wing_fly_up::iterator iter = m_wing_fly_up_data.find(level);
+	if (iter != m_wing_fly_up_data.end())
+	{
+		return iter->second.agile;
+	}
+	return 0;
+}
+
+float WingManager::get_buff_time_by_type_id(DWORD type_id)
+{
+	map_wing_evolve_att::iterator iter = m_wing_evolve_data.find(type_id);
+	if (iter != m_wing_evolve_data.end())
+	{
+		return iter->second.buff_time;
+	}
+	return 0;
+}
+
+DWORD WingManager::get_buff_id_by_type_id(DWORD type_id)
+{
+	map_wing_evolve_att::iterator iter = m_wing_evolve_data.find(type_id);
+	if (iter != m_wing_evolve_data.end())
+	{
+		return iter->second.buff_id;
+	}
+	return INVALID;
+}
+
+const WingEvolve& WingManager::get_one_wing_evolve_data(DWORD type_id)
+{
+	map_wing_evolve_att::iterator iter = m_wing_evolve_data.find(type_id);
+	if (iter != m_wing_evolve_data.end())
+	{
+		const WingEvolve& data = iter->second;
+		return data;
+	}
+	const WingEvolve& temp_data = m_wing_evolve_data.begin()->second;
+	return temp_data;
+}
+
+const WingFlyUp& WingManager::get_one_wing_fly_up_data(int level)
+{
+	map_wing_fly_up::iterator iter = m_wing_fly_up_data.find(level);
+	if (iter != m_wing_fly_up_data.end())
+	{
+		const WingFlyUp& data = iter->second;
+		return data;
+	}
+	const WingFlyUp& temp_data = m_wing_fly_up_data.begin()->second;
+	return temp_data;
+}
+
+const RoleBaseAtt& WingManager::get_att_base_value_level(int level)
+{
+	map_role_base_att::iterator iter = m_role_base_att.find(level);
+	if (iter != m_role_base_att.end())
+	{
+		const RoleBaseAtt& data = iter->second;
+		return data;
+	}
+	const RoleBaseAtt& temp_data = m_role_base_att.begin()->second;
+	return temp_data;
+}
+
+void WingManager::show_error_info(DWORD error)
+{
+	int temp = int(error);
+	std::stringstream ss;
+	ss<<"wing_error_"<<temp;
+	ToolTip::getInstance()->push(STRING_TABLE[ss.str().c_str()]);
+}
+
+void WingManager::init_table_info()
+{
+	init_role_att_table();
+	init_evolve_table();
+	init_fly_up_table();
+}
+
+bool WingManager::init_role_att_table()
+{
+	m_role_base_att.clear();
+
+	f_data_set dataset;
+	std::list<std::string> fields;
+	bool ret =dataset.load("Config/RoleLevelUp.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		RoleBaseAtt data;
+
+		data.id = dataset.get_int("id",one.c_str(),0);
+		data.wuli_min = dataset.get_int("wuli_min",one.c_str(),0);
+		data.wuli_max = dataset.get_int("wuli_max",one.c_str(),0);
+		data.mofa_min = dataset.get_int("mofa_min",one.c_str(),0);
+		data.mofa_max = dataset.get_int("mofa_max",one.c_str(),0);
+		data.daoshu_min = dataset.get_int("daoshu_min",one.c_str(),0);
+		data.daoshu_max = dataset.get_int("daoshu_max",one.c_str(),0);
+		data.hp = dataset.get_int("hp",one.c_str(),0);
+		data.mp = dataset.get_int("mp",one.c_str(),0);
+		data.wufang_min = dataset.get_int("wufang_min",one.c_str(),0);
+		data.wufang_max = dataset.get_int("wufang_max",one.c_str(),0);
+		data.mofang_min = dataset.get_int("mofang_min",one.c_str(),0);
+		data.mofang_max = dataset.get_int("mofang_max",one.c_str(),0);
+
+		m_role_base_att.insert(std::make_pair(data.id, data));
+	});
+
+	return true; 
+}
+
+bool WingManager::init_evolve_table()
+{
+	m_wing_evolve_data.clear();
+
+	f_data_set dataset;
+	std::list<std::string> fields;
+	bool ret =dataset.load("Config/WingEvolutionInfo.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		WingEvolve data;
+
+		data.id = dataset.get_int("id",one.c_str(),0);
+		data.source_id = dataset.get_int("Source_Equip_Id",one.c_str(),0);
+		data.target_id = dataset.get_int("Target_Equip_Id",one.c_str(),0);
+		data.need_item_id = dataset.get_int("Need_Item_Id",one.c_str(),0);
+		data.need_item_num = dataset.get_int("Need_Item_Num",one.c_str(),0);
+		data.buff_id = dataset.get_int("BuffId",one.c_str(),0);
+		data.buff_time = dataset.get_float("buff_time",one.c_str(),0);
+		data.upper_limit = dataset.get_float("Upper_Limit",one.c_str(),0);
+		data.effect_name = dataset.get_string("effect_name",one.c_str(),"");
+		data.placard_index = dataset.get_float("client_sign",one.c_str(),0);
+		data.dest_1 = dataset.get_string("variable1",one.c_str(),"");
+		data.dest_2 = dataset.get_string("variable2",one.c_str(),"");
+		data.equip_type = dataset.get_float("type",one.c_str(),0);
+
+		m_wing_evolve_data.insert(std::make_pair(data.source_id, data));
+	});
+
+	return true;
+}
+
+bool WingManager::init_fly_up_table()
+{
+	m_wing_fly_up_data.clear();
+
+	f_data_set dataset;
+	std::list<std::string> fields;
+	bool ret =dataset.load("Config/wingInfo.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		WingFlyUp data;
+
+		data.id = dataset.get_int("id",one.c_str(),0);
+		data.amplification = dataset.get_float("ampliFication",one.c_str(),0);
+		data.agile = dataset.get_int("agile",one.c_str(),0);
+		data.need_item_id = dataset.get_int("need_Item",one.c_str(),0);
+		data.need_item_num = dataset.get_int("itemNum",one.c_str(),0);
+		data.item_exp = dataset.get_int("item_exp",one.c_str(),0);
+		data.need_exp = dataset.get_int("need_exp",one.c_str(),0);
+		data.buff_id = dataset.get_int("buffId",one.c_str(),0);
+		data.add_agile = dataset.get_int("add_agile",one.c_str(),0);
+		data.need_gold = dataset.get_int("yuanbao",one.c_str(),0);
+		data.add_amplification = dataset.get_float("add_ampliFication",one.c_str(),0);
+
+		m_wing_fly_up_data.insert(std::make_pair(data.id, data));
+	});
+
+	return true;
+}

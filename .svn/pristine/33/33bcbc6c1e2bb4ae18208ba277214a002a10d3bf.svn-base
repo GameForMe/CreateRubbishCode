@@ -1,0 +1,2734 @@
+#include "CmdAdapter.h"
+#include "RoleHeadUi.h"
+#include "CfgReader.h"
+#include "ActionProto.h"
+#include "TCPClient.h"
+#include "NewPlayerGuide.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "ItemTip.h"
+#include "PackageManager.h"
+#include "ItemNode.h"
+#include "CfgReader.h"
+#include "ClientCfg.h"
+#include "UiManager.h"
+#include "BattlefieldUi.h"
+#include "UiTools.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "UiResourceMgr.h"
+#include "NewPlayerGuide.h"
+#include "BattleModeUiLayer.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "PackageProto.h"
+#include "SonghuaUi.h"
+#include "World.h"
+#include "SQLCommand.h"
+#include "DBMgr.h"
+#include "InstanceMgr.h"
+#include "SocialMgr.h"
+#include "ChatDefine.h"
+#include "QuestProto.h"
+#include "QuestMgr.h"
+#include "f_string_util.h"
+#include "ItemDefine.h"
+#include "StoreUi.h"
+#include "MessageDispatcher.h"
+#include "CrossSceneUI.h"
+#include "Helper.h"
+#include "TimeCardNodeUi.h"
+#include "GameEventDefine.h"
+#include "FMBattleMgr.h"
+#include "ShopMgr.h"
+#include "tools.h"
+#include "BloodFightMgr.h"
+#include "f_string_table.h"
+#include "SkillAnimManager.h"
+
+using namespace cocos2d::extension;
+
+const int wear_cue_value = 5;
+
+RoleHeadUi::RoleHeadUi()
+	: _hpProgress(NULL)
+	, _mpProgress(NULL)
+	, _expProgress(NULL)
+	, _zhandouli(NULL)
+	, m_nTypeId(-1)
+	, pFPNode(NULL)
+	,m_SpriteEffectOne(NULL)
+    ,m_SpriteEffectTwo(NULL)
+	,_FramProgress(NULL)
+	,m_wear_effect_time(0.0)
+{
+	schedule(schedule_selector(RoleHeadUi::update), 0.1f);
+	//m_anims.clear();
+	//m_anims1.clear();
+	//LoadEffectHead();
+}
+
+RoleHeadUi::~RoleHeadUi()
+{
+	CC_SAFE_DELETE(_hpProgress);
+	CC_SAFE_DELETE(_mpProgress);
+	CC_SAFE_DELETE(_expProgress);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_change_pk_state" , this , &RoleHeadUi::onServerBattleModeChanged);
+	stopRechargeAnimation();
+	unscheduleAllSelectors();
+}
+
+bool RoleHeadUi::init()
+{
+	m_bIsAdd = true;
+	m_nLessNum = 0;
+	m_nNowBattleValue = 0;
+	m_nSaveBattleValue = 0;
+	_hp = NULL;
+	_mp = NULL;
+	_level = NULL;
+	_rechargeBtn = NULL;
+	_rechargeEffect = NULL;
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+
+	if(!CCLayer::init())
+		return false;
+
+	
+	TCP_CLIENT->register_net_cmd("NET_SIS_change_pk_state" , this , &RoleHeadUi::onServerBattleModeChanged);
+
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("RoleHeadUiLoaderLayer", RoleHeadUiLoader::loader());
+	ccNodeLoaderLibrary->registerCCNodeLoader("TouchSprite", TouchSpriteLoader::loader());
+	ccNodeLoaderLibrary->registerCCNodeLoader("CDButton", CDButtonLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	RoleHeadUiLoaderLayer * node = (RoleHeadUiLoaderLayer*)ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "roleHeadUi.ccbi").c_str());
+	m_pLayer = node;
+	ccbReader->autorelease();
+	if(node != NULL) {
+		node->setZOrder(6);
+		setZOrder(6);
+		addChild(node);
+		frame=dynamic_cast<CCLayer*>(node->getChildByTag(0));
+		_vipFrame = (CCSprite*)frame->getChildByTag(0);
+		_head = (TouchSprite*)frame->getChildByTag(1);
+		_headNew = (TouchSprite*)frame->getChildByTag(207);
+
+		_vip = (TouchSprite*)frame->getChildByTag(15);
+		if(_vip != NULL)
+		{
+			CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_vipAu");
+			CC_ASSERT(spriteFrame != NULL);
+			_vip->setDisplayFrame(spriteFrame);
+			_vip->setVisible(false);
+		}
+		//_level = (CCLabelTTF*)frame->getChildByTag(3);
+		_level = Helper::replaceLabelTTFWithLabelFTAndRemove((CCLabelTTF*)frame->getChildByTag(3));
+
+		_name =  Helper::replaceLabelTTFWithLabelFTAndRemove((CCLabelTTF*)frame->getChildByTag(4));
+
+		_prepaidBtn = frame->getChildByTag(5);
+		
+		_exp = (CCSprite*)frame->getChildByTag(12);
+		_FramProgress = (CCSprite*)frame->getChildByTag(210);
+		_hp = (CCSprite*)_FramProgress->getChildByTag(7);
+		_mp = (CCSprite*)_FramProgress->getChildByTag(8);
+		m_SpriteEffectOne = (CCSprite*)frame->getChildByTag(208);
+		m_SpriteEffectTwo = (CCSprite*)frame->getChildByTag(209);
+//		_zhandouli = (CCLabelTTF*)frame->getChildByTag(13);
+		_zhandouli = CCLabelBMFont::create();
+		_zhandouli->setFntFile("Art/Scene/fontNum.fnt");
+		frame->addChild(_zhandouli, RZN_EFFECT+1);
+		_zhandouli->setPosition(frame->getChildByTag(13)->getPosition());
+		_zhandouli->setAnchorPoint(ccp(0.0f, 0.5f));
+		_zhandouli->setScale(0.5f);
+		_rechargeBtn = (CCControlButton*)frame->getChildByTag(30);
+		_backGroundSprite=(CCSprite*)frame->getChildByTag(35);
+		_battleMode = (CCControlButton*)frame->getChildByTag(9);
+		//_petHp = (CCSprite*)node->getChildByTag(9);
+		//_petHead = (CCSprite*)node->getChildByTag(10);
+		_hpProgress = new ProgressBar;
+		_mpProgress = new ProgressBar;
+		_expProgress = new ProgressBar;
+		_hpProgress->initBarWithSprite(_hp,12,true,false,true);
+		_mpProgress->initBarWithSprite(_mp,12,true,false,true);
+		_hpProgress->setVisible(false);
+		_mpProgress->setVisible(false);
+		CCPoint pt = _mp->getPosition();
+		_mpProgress->setPosition(ccp(pt.x+_mp->getContentSize().width/2,pt.y));
+		_hpProgress->setPosition(ccp(pt.x-_mp->getContentSize().width/2,pt.y));
+
+		_expProgress->initBarWithSprite(_exp, 12,true, false);
+
+		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+		if(winSize.width > UI_WIDTH)
+		{
+			frame->getChildByTag(16)->setScaleX(winSize.width / UI_WIDTH);
+			_exp->setScaleX(winSize.width / UI_WIDTH);
+			_expProgress->setScaleX(winSize.width / UI_WIDTH);
+		}
+		
+		//_petHpProgress = initHProgressBar(_petHp);
+		_hpProgress->addToParent(_FramProgress);
+		_mpProgress->addToParent(_FramProgress);
+		//_mpProgress->setPosition(ccp(100,100));
+		_expProgress->addToParent(frame);
+		//node->addChild(_petHpProgress, _petHp->getZOrder());
+		//_petHp->setVisible(false);
+		_headNew->signalTouched.connect(this, &RoleHeadUi::onRoleHeadPressed);
+		//_vip->signalTouched.connect(this, &RoleHeadUi::onVIPPressed);
+
+
+		/*
+		_buffhpBtn = (CDButton *)frame->getChildByTag(20);
+		CC_ASSERT(_buffhpBtn != NULL);
+		_buffhpBtn->setVisible(false);
+		_buffhpBtn->setVisibleWhenStoped(false);
+		_buffmpBtn = (CDButton *)frame->getChildByTag(21);
+		CC_ASSERT(_buffmpBtn != NULL);
+		_buffmpBtn->setVisible(false);
+		_buffmpBtn->setVisibleWhenStoped(false);
+		_buffexpBtn = (CDButton *)frame->getChildByTag(22);
+		CC_ASSERT(_buffexpBtn != NULL);
+		_buffexpBtn->setVisible(false);
+		_buffexpBtn->setVisibleWhenStoped(false);
+		
+		_bufffangBtn = (CDButton *)frame->getChildByTag(23);
+		CC_ASSERT(_bufffangBtn != NULL);
+		_bufffangBtn->setVisible(false);
+		_bufffangBtn->setVisibleWhenStoped(false);
+
+		_buffXuanYunBtn = (CDButton *)frame->getChildByTag(25);
+		CC_ASSERT(_buffXuanYunBtn != NULL);
+		_buffXuanYunBtn->setVisible(false);
+		_buffXuanYunBtn->setVisibleWhenStoped(false);
+
+		_buffZengYiBtn=(CDButton *)frame->getChildByTag(33);
+		CC_ASSERT(_buffZengYiBtn !=NULL);
+		_buffZengYiBtn->setVisible(false);
+		_buffZengYiBtn->setVisibleWhenStoped(false);
+		*/
+
+		initBuffBtn();
+		_buffframe = (CCSprite *)frame->getChildByTag(24);
+		CC_ASSERT(_buffframe != NULL);
+		_buffframe->setVisible(false);
+
+		_xiaomiBtn = dynamic_cast<CCControlButton*>(frame->getChildByTag(BM_XiaomiBtn));
+		setXiaomiShow(false);
+
+// 		_buffhpBtn->signalClicked.connect(this, &RoleHeadUi::onBuffHpBtnPressed);
+// 		_buffmpBtn->signalClicked.connect(this, &RoleHeadUi::onBuffMpBtnPressed);
+// 		_buffexpBtn->signalClicked.connect(this, &RoleHeadUi::onBuffExpBtnPressed);
+// 		_bufffangBtn->signalClicked.connect(this, &RoleHeadUi::onBuffFangBtnPressed);
+
+		runPerpaidEffect(10);
+		updateBattleMode();
+		setZhandouli(lp->getAttribute(RA_BATTLE_POINT));
+		setHead();
+		pFPNode = (CCControlButton*)frame->getChildByTag(BM_FightPromote);
+		if (pFPNode)
+		{
+			pFPNode->setVisible(false);
+		}
+		//runRechargeAnimation();
+		UiResourceMgr::getInstance()->retainPlistFile(ccbReader->getLoadedSpriteSheet());
+		this->setPlist(ccbReader->getLoadedSpriteSheet());
+		RunHeadEffect();
+		return true;
+	}
+
+	return false;
+}
+
+
+void RoleHeadUi::LoadEffectHead()
+{
+}
+void RoleHeadUi::RunHeadEffect()
+{
+	AnimationCache::AnimateList anims;
+	AnimationCache::AnimateList anims1;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::createDefList(1, anims1);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_208", anims);	
+	AnimationCache::getInstance()->getSinEffect(0, "E1_209", anims1);	
+	BSAnimate *animate = anims[0];
+	BSAnimate *animate1 = anims1[0];
+	m_SpriteEffectOne->stopAllActions();
+	m_SpriteEffectOne->setVisible(true);
+	m_SpriteEffectTwo->stopAllActions();
+	m_SpriteEffectTwo->setVisible(true);
+	m_SpriteEffectOne->runAction(CCRepeatForever::create(animate));
+	m_SpriteEffectTwo->runAction(CCRepeatForever::create(animate1));
+	//m_SpriteEffectTwo->setPosition(ccp(33,33));
+	/*CCSprite *sprite = CCSprite::create();
+	sprite->setPosition(ccp(0,0));
+	sprite->runAction(CCRepeatForever::create(animate));
+	m_SpriteEffectOne->addChild(sprite);
+	CCSprite *sprite1 = CCSprite::create();
+	sprite1->setPosition(ccp(0,0));
+	sprite1->runAction(CCRepeatForever::create(animate1));
+	m_SpriteEffectTwo->addChild(sprite1);*/
+	
+}
+void RoleHeadUi::setLevel( int level )
+{
+	CCString *le = CCString::createWithFormat("%d", level);
+	_level->setString(le->getCString());
+}
+//
+//void RoleHeadUi::setHp( float hp )
+//{
+//	CC_ASSERT(_hpProgress != NULL);
+//	_hpProgress->setPercentage(hp);
+//}
+//
+//void RoleHeadUi::setMp( float mp )
+//{
+//	CC_ASSERT(_mpProgress != NULL);
+//	_mpProgress->setPercentage(mp);
+//}
+
+void RoleHeadUi::setExp( float exp )
+{
+	CC_ASSERT(_expProgress != NULL);
+	_expProgress->setProgress(exp, 100.0f);
+}
+
+void RoleHeadUi::setRoleName( const char *name )
+{
+	_name->setString(name);
+}
+
+void RoleHeadUi::setRoleName( const wchar_t *name )
+{
+	char roleName[128];
+	memset(roleName, 0, sizeof(char) * 128);
+	Utf16ToUtf8(name, roleName, 128, 0);
+	setRoleName(roleName);
+}
+
+//void RoleHeadUi::setPetHead( CCSpriteFrame *frame )
+//{
+//	CC_ASSERT(frame != NULL);
+//	_petHead->setDisplayFrame(frame);
+//}
+
+void RoleHeadUi::setHead()
+{
+	eRoleType eroleType=RoleManager::getInstance()->getLocalPlayer()->getRoleType();
+	std::string icon="";
+	switch(eroleType)
+	{
+	case RT_MWARRIOR:
+		icon= "rendui_minirolezhanshiman";//vv 人物角色头像
+		break;
+	case RT_WWARRIOR:
+		icon=  "rendui_minirolezhanshiwoman";
+		break;
+	case RT_MMAGE:
+		icon=  "rendui_minirolefashiman";
+		break;
+	case RT_WMAGE:
+		icon=  "rendui_minirolefashiwoman";
+		break;
+	case RT_WTAOIST:
+		icon=  "rendui_miniroledaoshiwoman";
+		break;
+	case RT_MTAOIST:
+		icon=  "rendui_miniroledaoshiman";
+		break;
+	}
+	CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(icon.c_str());
+	CC_ASSERT(frame != NULL);
+	_head->setDisplayFrame(frame);
+}
+
+void RoleHeadUi::runPerpaidEffect( int times /*= 5*/ )
+{
+	//BtnEffect *btnEffect = BtnEffect::create(1, 5);
+	//btnEffect->setPosition(_prepaidBtn->getPosition());
+	//addChild(btnEffect, _prepaidBtn->getZOrder());
+}
+
+void RoleHeadUi::onHpChanged( int hp , int mhp )
+{
+	_hpProgress->setCircleProgress(hp, mhp);
+}
+
+void RoleHeadUi::onMpChanged( int mp , int mmp )
+{
+	_mpProgress->setCircleProgress(mp, mmp);
+}
+
+void RoleHeadUi::onRoleHeadPressed(TouchSprite *touchSprite, bool touched)
+{
+	//if(NewPlayerGuide::openBag)
+	//{
+	//	NewPlayerGuide::getInstance()->guide(NewPlayerGuide::getInstance()->BAG_STATE);
+	//	NewPlayerGuide::openBag = false;
+	//}
+	//
+	////gx add 2013.11.12 摆摊，交易，双修状态锁死
+	//LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	//if (!ploc)
+	//	return;
+	//if (ploc->isRoleInStaticState())
+	//	return;
+	if(IS_UI_OPEN(WCT_ROLEEQUIPUI)||IS_UI_OPEN(WCT_PACKAGEUI)||IS_UI_OPEN(WCT_SKILLUI))
+	{
+		return;
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	//signalHeadPressed.emit();
+
+	RoleHeadPressed evt;
+	SEND_EVENT(&evt);
+}
+
+void RoleHeadUi::onVIPPressed( TouchSprite *TouchSprite, bool touched )
+{
+	//LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if(!isShowLeftTime())//跳转到商城
+	{
+		m_pLayer->gotoStoreUi();
+	}
+	else//跳转到点卡界面
+	{
+		OPEN_UI(WCT_TimeCardNodeUi);
+		TimeCardNodeUiLayer* timeCard = GET_UI(TimeCardNodeUi,WCT_TimeCardNodeUi)->getUiLayer();
+		if(timeCard != NULL)
+		{
+			timeCard->setData("dianka_35yuan", MONTH_CARD_TYPE_ID);
+		}
+	}
+}
+
+unsigned int RoleHeadUi::onServerBattleModeChanged( s_net_cmd* cmd )
+{
+	NET_SIS_change_pk_state* msg = (NET_SIS_change_pk_state*)cmd;
+	if(msg->dwError == 0)
+	{
+		//!设置成相应的模式;
+		signalBattleModeChanged.emit(msg->ePKState);
+		LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+		lp->setAttribute(RA_BATTLEMODE,msg->ePKState);
+		updateBattleMode();
+	}
+	else if (msg->dwError == E_PK_GuildLimit)
+	{
+		ToolTip::getInstance()->push(GET_STR(2390));
+	}
+	else if (msg->dwError==E_PK_AreaLimit)
+	{
+		
+	}
+	else if(msg->dwError == E_PK_TeamLimit)
+	{
+		ToolTip::getInstance()->push(GET_STR(9515));
+	}
+	CLOSE_UI(WCT_BattleMode);
+	return 0;
+}
+
+void RoleHeadUiLoaderLayer::gotoStoreUi()
+{
+	StoreUiLayer::m_willShowTag = StoreUiLayer::SUT_TabRemai;
+	OPEN_UI(WCT_STOREUI);
+}
+
+void RoleHeadUiLoaderLayer::onxiaofeixiePressed(cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CC_ASSERT(NULL != _ShoeBtn);
+	int num = PackageManager::getInstance()->getItemNumber(EICT_Bag,Item_shoeId);  //是不是有小飞鞋
+	if(0 >= num)
+	{
+		MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(2414).c_str(),TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+		World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+		msgUi->signalOkBtnPressed.connect(this,&RoleHeadUiLoaderLayer::gotoStoreUi);
+		return;
+	}
+
+	if(_ShoeBtn->isVisible())
+		SendGoto_Quest_Pos_Msg();
+}
+
+void  RoleHeadUiLoaderLayer::SendGoto_Quest_Pos_Msg()
+{
+	std::string mapid = GetMapidStr();
+	//获得当前地图的地图名   传送点为当前地图时不可使用小飞鞋功能，暂时不用
+// 	std::string curCopyMapName = MapManager::getInstance()->getCurCopyMapName();
+// 	curCopyMapName = curCopyMapName.substr(curCopyMapName.find_first_of("m"));
+// 	curCopyMapName = curCopyMapName.substr(0, curCopyMapName.find_first_of("."));
+// 	if( std::string("0") == mapid)
+// 	{
+// 		ToolTip::getInstance()->push(GET_STR(7277));
+// 		return ;
+// 	}else if (mapid == curCopyMapName)   //传送目标在本地图，不可使用小飞鞋
+// 	{
+// 		ToolTip::getInstance()->push(GET_STR(2418).c_str());
+// 		return;
+// 	}
+
+	if( std::string("0") == mapid)
+	{
+ 		ToolTip::getInstance()->push(GET_STR(7277));
+ 		return ;
+ 	}
+
+	if (MapManager::getInstance() == NULL)
+		return;
+	if (CrossSceneUI::getInstance()->isInCross())
+		return;
+
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if(NULL == player)
+		return ;
+	player->ClearPath();
+
+	player->setAutoRunState(false);
+	MessageDispatcher::Instance()->DispatchMsg(-1.0, NULL, player, M_LpStand, NULL);
+/*	CC_ASSERT(NULL != player->GetRunNode());
+	if(player->GetRunNode()->GetActionState())
+		player->GetRunNode()->StopAction(false, true);*/
+
+	NET_SIC_Goto_Quest_Pos send;
+	send.mapid =  name_crc32(convertWName(mapid.c_str()));
+	send.npcid = GetNpcId();
+		
+	send.fX = GetQuestPosx();
+	send.fZ = GetQuestPosy();
+
+	CCPoint pos(GetQuestPosx(), GetQuestPosy());
+	send.fX = pos.x;
+	send.fZ = pos.y;
+	/*if(MapManager::getInstance()->isBlock(GetQuestPosx(), GetQuestPosy()))
+	{
+		MapManager::getInstance()->findNoBlockPointByAStar(pos, pos);
+		
+	}*/
+		
+	//std::string str1 = "NET_SIC_Goto_Quest_Pos1";
+	//char sp1[512] = {0};
+	//sprintf(sp1, "NET_SIC_Goto_Quest_Pos1:%f",send.fX);
+	//char sp2[512] = {0};
+	//sprintf(sp2, "NET_SIC_Goto_Quest_Pos2:%f",send.fZ);
+
+	//CCLOG(sp1);
+	//CCLOG(sp2);
+
+	MapManager::getInstance()->SetISetEnabled(false);
+
+	TCP_CLIENT->send_net_cmd(&send, NP_CRITICAL, false);
+}
+
+void RoleHeadUiLoaderLayer::wear_change(wear_change_event* event)
+{
+	PackageManager::ItemMap* TmpItemMap = PackageManager::getInstance()->getItemMap(EICT_Equip);
+	PackageManager::ItemMap::iterator iter = TmpItemMap->begin();
+	for(; iter != TmpItemMap->end(); ++iter)
+	{
+		const tagItem* item = iter->second->get_data();
+		const EquipTypeData* data = PackageManager::getInstance()->getEquipTypeData(item->dw_data_id);
+		int cur_vlaue = GetEquipNewness(data->posIndex, item->nUseTimes, data->durability);
+		if(cur_vlaue < wear_cue_value)
+		{
+			play_ware_effect();
+			return;
+		}
+	}
+
+	hide_wear_effect();
+}
+
+void RoleHeadUiLoaderLayer::play_ware_effect()
+{
+	if(!IS_VALID_PTR(m_wear_cue))
+	{
+		return;
+	}
+
+	if(m_wear_cue->isVisible())
+	{
+		return;
+	}
+
+	m_wear_cue->stopAllActions();
+	m_wear_cue->setVisible(true);
+	m_wear_cue->setEnabled(false);
+
+	CCMoveTo* action_move = CCMoveTo::create(0.5, ccp(m_pConcernBtn->getPositionX(), m_wear_cue_point.y));
+	CCSequence* action_final = CCSequence::createWithTwoActions(action_move, CCCallFunc::create(this,SEL_CallFunc(&RoleHeadUiLoaderLayer::play_ware_end)));
+	m_wear_cue->runAction(action_final);
+}
+
+void RoleHeadUiLoaderLayer::play_ware_end()
+{
+	m_wear_cue->setEnabled(true);
+
+	RoleHeadUi* ui = World::getInstance()->getRoleHeadUi();
+	if(IS_VALID_PTR(ui))
+	{
+		ui->reset_wear_effect_time();
+	}
+}
+
+void RoleHeadUiLoaderLayer::create_wear_button()
+{
+	m_wear_cue = (CCControlButton*)getChildByTag(0)->getChildByTag(BM_WearCueBtn);
+	CC_ASSERT(m_wear_cue);
+	m_wear_cue->setVisible(false);
+	m_wear_cue_point = m_wear_cue->getPosition();
+
+	std::string effect_name = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_56.plist";
+	GameActionNode* effect = GameActionNode::create();
+	effect->InitWithPList(effect_name.c_str(), "E1_56");
+	CCSize size = m_wear_cue->getContentSize();
+	effect->setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+	m_wear_cue->addChild(effect);
+	effect->BeginAction(0.1f, true);
+}
+
+void RoleHeadUiLoaderLayer::hide_wear_effect()
+{
+	m_wear_cue->setVisible(false);
+	m_wear_cue->setPosition(m_wear_cue_point);
+}
+
+void RoleHeadUiLoaderLayer::onXianLuPressed(cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	OPEN_UI(WCT_LineSelectUi);
+}
+
+void RoleHeadUiLoaderLayer::onXiaomiPressed(cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	if(IS_UI_OPEN(WCT_ROLEEQUIPUI)||IS_UI_OPEN(WCT_SKILLUI)||IS_UI_OPEN(WCT_PACKAGEUI))
+	{
+		return;
+	}
+	else
+	{
+		OPEN_UI(WCT_XiaomiUi);
+	}
+}
+
+void RoleHeadUiLoaderLayer::onWearCue(cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	ShopMgr::getInstance()->setFollowShop(1);
+	ShopMgr::getInstance()->onRepair();
+}
+
+void RoleHeadUiLoaderLayer::setShoeEnabled(bool value)
+{
+	CC_ASSERT(NULL != _ShoeBtn);
+	_ShoeBtn->setEnabled(value);
+}
+  //设置小飞鞋按钮显示
+void RoleHeadUiLoaderLayer::SetShowShoe(bool show)
+{
+	CC_ASSERT(NULL != _ShoeBtn);
+	CC_ASSERT(NULL != _shoeText);
+	_ShoeBtn->setVisible(show);
+	_shoeText->setVisible(show);
+	int num = PackageManager::getInstance()->getItemNumber(EICT_Bag,Item_shoeId);  //是不是有小飞鞋
+	if(0 < num)
+	{
+		std::stringstream ss;
+		ss<<num;
+
+		std::string str = "X" + ss.str();
+		_shoeText->setString(str.c_str());
+		setButtonSpriteFrame(_ShoeBtn,"roleheadui_xiaofeixiebtnn","roleheadui_xiaofeixiebtnn","roleheadui_xiaofeixiebtnn");
+		
+	}
+	else
+	{
+		setButtonSpriteFrame(_ShoeBtn,"roleheadui_xiaofeixiebtnd","roleheadui_xiaofeixiebtnd","roleheadui_xiaofeixiebtnd");
+		_shoeText->setVisible(false);
+	}
+}
+
+void RoleHeadUi::setZhandouli( int v )
+{
+	if(_zhandouli == NULL || RoleManager::getInstance()->getLocalPlayer() == NULL)
+		return;
+	m_BattleValueList.clear();
+	int nNowZhandouli = RoleManager::getInstance()->getLocalPlayer()->getAttribute(RA_BATTLE_POINT);
+	if(v == nNowZhandouli)
+	{
+		std::ostringstream ostr;
+		ostr << v;
+		_zhandouli->setString(ostr.str().c_str());
+		return;
+	}
+	if(v > nNowZhandouli)
+	{
+		m_bIsAdd = true;
+	}
+	else
+		m_bIsAdd = false;
+
+	m_nNowBattleValue = nNowZhandouli;
+	int nLessZhandouli = abs(v - nNowZhandouli);
+
+	//[bing] 为了战斗力提升显示正确 延迟1秒后执行
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&RoleHeadUi::ZhanDouLiUpdate), this);
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&RoleHeadUi::ZhanDouLiUpdate), this, 1.0f, false);
+	if(m_nSaveBattleValue == 0)
+		m_nSaveBattleValue = nNowZhandouli;
+
+	m_nLessNum = 0;
+	int nTmpValue = nLessZhandouli;
+	int i = 1;
+	do 
+	{
+		m_BattleValueList.push_front(nTmpValue % 10);
+		nTmpValue /= 10;
+		i *= 10;
+		m_nLessNum++;
+	} while ( i <= nLessZhandouli );
+
+	/*
+	std::ostringstream ostr;
+	ostr << v;
+	_zhandouli->setString(ostr.str().c_str());
+	*/
+}
+
+cocos2d::CCRect RoleHeadUi::getRoleHeadGuidePos()
+{
+	SetNodeTintTo(dynamic_cast<CCNode*>(_headNew));
+
+	CCSize size = _headNew->getContentSize();
+	CCPoint pt = _headNew->convertToWorldSpace(ccp(0, 0));
+	return CCRect(pt.x, pt.y, size.width, size.height);
+}
+
+void RoleHeadUi::updateVIPIcon(bool isShow/*= false*/)
+{
+	//暂时屏蔽
+	/*
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	std::string mainuiList = uiDir + std::string("ccbResources/rendui.plist");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(mainuiList.c_str());//vv 2014.10.7 改变图片读取路径
+	CC_ASSERT(_vip != NULL);
+	if(!isShowLeftTime())
+	{
+		_vip->setVisible(false);
+	}
+	else
+	{
+		_vip->setVisible(true);
+	}
+	if(isShow)
+	{
+		if(!_vip->isVisible())
+		{
+			_vip->setVisible(true);
+		}
+	}*/
+}
+
+unsigned int RoleHeadUi::getVIPId( int level )
+{
+	if (level == 0)
+		return NULL;
+	switch (level)
+	{
+	case 1:
+		return 1400068; break;
+	case 2:
+		return 1400008; break;
+	case 3:
+		return 1400009; break;
+	case 4:
+		return 1400010; break;
+	default:
+		return 0; break;
+	}
+}
+
+
+void RoleHeadUi::initBuffBtn()
+{
+	m_buffBtns.clear();
+	//m_buff_effect_name.clear();
+
+	CDButton * cdbtn= (CDButton *)frame->getChildByTag(20);//以此为原始坐标
+	m_orignalPos=cdbtn->getPosition();
+
+	auto ref_map = SkillAnimManager::getInstance()->get_showtag_map();
+	std::for_each(	ref_map.begin(),
+					ref_map.end(),
+					[this](SkillAnimManager::buff_id_showtack::value_type const& kv)
+					{
+						unsigned int buff_id= kv.first;
+						int show_tack = kv.second;
+
+						CDButton* btn = dynamic_cast<CDButton *>(frame->getChildByTag(show_tack));
+						if (btn)
+						{
+							btn->setVisible(false);
+							btn->setVisibleWhenStoped(false);
+							m_buffBtns.insert(make_pair(buff_id,btn));
+						}
+					});
+
+	//st_buf_proto const* buff_proto = SkillAnimManager::getInstance()->get_buff_proto();
+	//查找数据表
+	// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Buffer");
+	// 	
+	// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	// 	while(table->retrieve_row())
+	// 	{
+	// // 		unsigned int idx = table->get_index("effectName");
+	// // 		string name = table->get_text(idx);
+	// // 		if(!name.empty())
+	// // 		{
+	// // 			idx = table->get_index("BufferId");
+	// // 			unsigned int buffId= table->get_integer32(idx);
+	// // 			m_buff_effect_name.insert(make_pair(buffId,name));
+	// // 		}
+	// 
+	// 		unsigned int idx = table->get_index("showTack");
+	// 		int showTag = table->get_integer32(idx);
+	// 		if(showTag!=0)
+	// 		{
+	// 			idx = table->get_index("BufferId");
+	// 			unsigned int buffId= table->get_integer32(idx);
+	// 			CDButton * btn=dynamic_cast<CDButton *>(frame->getChildByTag(showTag));
+	// 			if(btn)
+	// 			{
+	// 				btn->setVisible(false);
+	// 				btn->setVisibleWhenStoped(false);
+	// 				m_buffBtns.insert(make_pair(buffId,btn));
+	// 			}
+	// 		}
+	// 		else
+	// 			continue;
+	// 	}
+	// 
+	// 	c_db_manager::getSingleton()->destroy_table(table);
+	// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+}
+
+void RoleHeadUi::setBuffBtnCD(CDButton * btn,float duration,float max,int overlap)
+{
+	if(btn)
+	{
+		btn->stop();
+		btn->setCDTime(duration, max);
+		btn->set_overlap(overlap);
+		btn->run();
+	}
+}
+
+void RoleHeadUi::setBuffCD( unsigned int buffId, float curTime, float maxTime, int overlap/*=1*/)
+{
+// 	BuffEffectPic::iterator iter_1 = m_buff_effect_name.find(buffId);
+// 	if(iter_1 != m_buff_effect_name.end())
+// 	{
+// 		World::getInstance()->play_buff_effect(iter_1->second);
+// 	}
+
+	CDBtnMap::iterator iter=m_buffBtns.find(buffId);
+	bool isInShowList=false;
+	bool hide = curTime ==0 && maxTime == 0;
+	if(iter!=m_buffBtns.end())
+	{
+		CDButton * cdBtn=iter->second;
+		setBuffBtnCD(cdBtn,curTime / 1000, maxTime / 1000,overlap);
+		cdBtn->setVisible(!hide);
+
+		vector<CDButton*> needRemovedBtns;
+		for (vector<CDButton*>::iterator iter=m_visibleCDBtns.begin();iter!=m_visibleCDBtns.end();iter++)
+		{
+			if((*iter)==cdBtn)
+				isInShowList=true;
+			if(!((*iter)->isVisible()))
+			{
+				needRemovedBtns.push_back(*iter);
+			}
+		}
+		//移除不可见的
+		for (vector<CDButton*>::iterator iter=needRemovedBtns.begin();iter!=needRemovedBtns.end();iter++)
+		{
+			for (vector<CDButton*>::iterator iter02=m_visibleCDBtns.begin();iter02!=m_visibleCDBtns.end();iter02++)
+			{
+				 if((*iter)==(*iter02))
+				 {
+					m_visibleCDBtns.erase(iter02);
+					break;
+				 }
+			}
+			
+		}
+		if(!isInShowList)
+			m_visibleCDBtns.push_back(cdBtn);
+
+		float itemWidth=cdBtn->getContentSize().width;
+		//把显示的CDButton重新排序
+		int i=0;
+		for (vector<CDButton*>::iterator iter=m_visibleCDBtns.begin();iter!=m_visibleCDBtns.end();iter++)
+		{
+			(*iter)->setPosition(ccp(m_orignalPos.x+itemWidth*i,m_orignalPos.y));
+			i++;
+		}
+		
+	}
+
+}
+
+/*
+void RoleHeadUi::setBuffhpCD( float duration, float max )
+{
+	CC_ASSERT(_buffhpBtn != NULL);
+	_buffhpBtn->stop();
+	_buffhpBtn->setCDTime(duration, max);
+	_buffhpBtn->run();
+}
+
+void RoleHeadUi::setBuffmpCD( float duration, float max )
+{
+	CC_ASSERT(_buffmpBtn != NULL);
+	_buffmpBtn->stop();
+	_buffmpBtn->setCDTime(duration, max);
+	_buffmpBtn->run();
+}
+
+void RoleHeadUi::setBuffexpCD( float duration, float max )
+{
+	CC_ASSERT(_buffexpBtn != NULL);
+	_buffexpBtn->stop();
+	_buffexpBtn->setCDTime(duration, max);
+	_buffexpBtn->run();
+}
+
+void RoleHeadUi::setBufffangCD( float duration, float max )
+{
+	CC_ASSERT(_bufffangBtn != NULL);
+	_bufffangBtn->stop();
+	_bufffangBtn->setCDTime(duration, max);
+	_bufffangBtn->run();
+}
+
+void RoleHeadUi::setBuffXuanYunCD( float duration, float max )
+{
+	CC_ASSERT(_buffXuanYunBtn != NULL);
+	_buffXuanYunBtn->stop();
+	_buffXuanYunBtn->setCDTime(duration, max);
+	_buffXuanYunBtn->run();
+}
+void RoleHeadUi::setBuffGongCD(float duration,float max)
+{
+	CC_ASSERT(_buffZengYiBtn !=NULL);
+	_buffZengYiBtn->stop();
+	_buffZengYiBtn->setCDTime(duration,max);
+	_buffZengYiBtn->run();
+}
+
+void RoleHeadUi::setBuffCD( unsigned int buffId, float curTime, float maxTime )
+{
+	if(buffId == 1102001 || buffId == 1103001 || buffId == 1104001 || buffId == 1123001 || buffId == 1124001 ||
+		//短时间药瓶添加提示
+		buffId == 1108001 || buffId == 1109001 || buffId == 1110001 || buffId == 1111001 || buffId == 1112001 || buffId == 1113001
+		) //回血buff显示;
+	{
+		if(!_buffhpBtn->isVisible()){
+		    _buffhpBtn->setVisible(true);
+		    setBuffhpCD(curTime / 1000, maxTime / 1000);
+		}
+		//长时回复覆盖短时回复
+		else if(_buffhpBtn->getDurations() <= (curTime / 1000)){
+			setBuffhpCD(curTime / 1000, maxTime / 1000);
+		}
+	}
+	else if (buffId == 1105001 || buffId == 1106001 || buffId == 1107001 || buffId == 1125001 || buffId == 1126001 ||
+		//短时间药瓶添加提示
+		buffId == 1114001 || buffId == 1115001 || buffId == 1116001 || buffId == 1117001 || buffId == 1118001 || buffId == 1119001
+		) //回蓝buff显示;
+	{
+		if(!_buffmpBtn->isVisible()){
+		    _buffmpBtn->setVisible(true);
+		    setBuffmpCD(curTime / 1000, maxTime / 1000);
+		}
+		//长时回复覆盖短时回复
+		else if(_buffmpBtn->getDurations() <= (curTime / 1000)){
+			setBuffmpCD(curTime / 1000, maxTime / 1000);
+		}
+	}
+	else if (buffId == 3000600 || buffId == 3000700 || buffId == 3000800 || buffId == 3001100)  //经验宝典加倍buff显示;
+	{
+		_buffexpBtn->setVisible(true);
+		setBuffexpCD(curTime / 1000, maxTime / 1000);
+	}
+	else if (buffId == 1030401
+		|| buffId == 1030402
+		|| buffId == 1030403
+		|| buffId == 1030404
+		|| buffId == 1030405
+		|| buffId == 1030406
+		|| buffId == 1030407
+		|| buffId == 1030408
+		|| buffId == 1030409) //魔防1-9级buff回复显示;
+	{
+
+		_bufffangBtn->setVisible(true);
+		setBufffangCD(curTime / 1000, maxTime / 1000);
+	}
+	else if (buffId==3010206)//增益丹buff显示；
+	{
+		_buffZengYiBtn->setVisible(true);
+		setBuffGongCD(curTime/1000,maxTime/1000);
+	}
+	else if (buffId == 9000101
+		|| buffId == 9000102
+		|| buffId == 9000103
+		|| buffId == 9000104
+		|| buffId == 9000105
+		|| buffId == 9000106
+		|| buffId == 9000107
+		|| buffId == 9000108
+		|| buffId == 9000109
+		|| buffId == 9000110) //眩晕1-10级buff回复显示;
+	{
+		_buffXuanYunBtn->setVisible(true);
+		setBuffXuanYunCD(curTime / 1000, maxTime / 1000);
+	}
+	else if(buffId == 1120001 || buffId == 1121001 || buffId == 1122001)//太阳水，回血蓝
+	{
+		if(!_buffhpBtn->isVisible()){
+			_buffhpBtn->setVisible(true);
+		    setBuffhpCD(curTime / 1000, maxTime / 1000);
+		}else if(_buffhpBtn->getDurations() == (curTime / 1000)){
+			setBuffhpCD(curTime / 1000, maxTime / 1000);
+		}
+		if(!_buffmpBtn->isVisible()){
+			_buffmpBtn->setVisible(true);
+		    setBuffmpCD(curTime / 1000, maxTime / 1000);
+		}else if(_buffmpBtn->getDurations() == (curTime / 1000)){
+			setBuffmpCD(curTime / 1000, maxTime / 1000);
+		}
+	}
+}
+
+*/
+void RoleHeadUi::update(float delta)
+{
+	update_wear_effect_time(delta);
+
+	if(!_zhandouli)
+		return;
+
+	int nBSize = (int)m_BattleValueList.size();
+	if(nBSize == 0)
+		return;
+
+	bool bRet = false;
+	//int nValue = 0;
+	while(1)
+	{
+		unsigned char* pAdd = &m_BattleValueList.back();
+		while(*pAdd == 0)
+		{
+			m_BattleValueList.pop_back();
+			if(m_BattleValueList.size() == 0)
+			{
+				bRet = true;
+				break;
+			}
+			pAdd = &m_BattleValueList.back();
+			nBSize -= 1;
+		}
+		if(bRet)
+			break;
+
+		*pAdd -= 1;
+		if(m_bIsAdd)
+			m_nNowBattleValue += ((int)pow( 10.0, (m_nLessNum - nBSize) ));
+		else
+			m_nNowBattleValue -= ((int)pow( 10.0, (m_nLessNum - nBSize) ));
+		break;
+	}
+
+	std::ostringstream ostr;
+	ostr << m_nNowBattleValue;
+	_zhandouli->setString(ostr.str().c_str());
+}
+
+void RoleHeadUi::update_wear_effect_time(float delta)
+{
+	if(m_wear_effect_time <= 0)
+	{
+		return;
+	}
+
+	m_wear_effect_time = m_wear_effect_time - delta;
+	if(m_wear_effect_time <= 0)
+	{
+		if(IS_VALID_PTR(m_pLayer))
+		{
+			m_pLayer->hide_wear_effect();
+		}
+	}
+}
+
+void RoleHeadUi::updateBattleMode()
+{
+	int state = RoleManager::getInstance()->\
+		getLocalPlayer()->getAttribute(RA_BATTLEMODE);
+	if (state < ERolePK_Peace || state >= ERPKS_End)
+		return;
+	CCSpriteFrame* sp_c = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(BATTLE_IMG_COMM[state].c_str());
+	CCSpriteFrame* sp_h = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(BATTLE_IMG_HIGH[state].c_str());
+	
+	if (!sp_c)
+		return;
+	_battleMode->setBackgroundSpriteFrameForState(sp_c,CCControlStateNormal);
+	_battleMode->setBackgroundSpriteFrameForState(sp_h,CCControlStateHighlighted);
+}
+
+void RoleHeadUi::showConcern(int type)
+{
+	if (m_pLayer)
+	{
+		m_pLayer->showConcern(type);
+	}
+}
+
+void RoleHeadUi::updateConcern(int type)
+{
+	if (m_pLayer)
+	{
+		m_pLayer->updateConcern(type);
+	}
+}
+
+void RoleHeadUi::SysMsgSetCelebrateShow(bool isShow)
+{
+	if (m_pLayer)
+	{
+		m_pLayer->SysMsgSetCelebrateShow(isShow);
+	}
+}
+
+void RoleHeadUi::showCelebrate(bool isShow)
+{
+	if (m_pLayer)
+	{
+		m_pLayer->showCelebrate(isShow);
+	}
+}
+
+void RoleHeadUi::showCelebrate( HearSayChannel* data ,std::string name)
+{
+	if (m_pLayer)
+	{
+		m_pLayer->showCelebrate(data,name);
+	}
+}
+
+void RoleHeadUi::showZumaStoneState(int state)
+{
+	if (m_pLayer)
+	{
+		m_pLayer->showZumaStoneState(state);
+	}
+}
+
+void RoleHeadUi::runRechargeAnimation()
+{
+	/*AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0, "chongzhisaoguan", anims);
+	BSAnimate *animate = anims[0];
+	if(_rechargeEffect == NULL)
+	{
+		_rechargeEffect = CCSprite::create();
+		_rechargeEffect->setPosition(ccp(50.f, 12.f));
+		//_rechargeEffect->setAnchorPoint(ccp(0.f, 1.f));
+		_rechargeBtn->addChild(_rechargeEffect);
+	}
+	_rechargeEffect->runAction(animate);*/
+}
+
+void RoleHeadUi::stopRechargeAnimation()
+{
+	if(_rechargeEffect != NULL)
+	{
+		_rechargeEffect->stopAllActions();
+		_rechargeEffect->removeFromParent();
+		_rechargeEffect = NULL;
+	}
+}
+
+cocos2d::CCRect RoleHeadUi::getRechargeBtnPos()
+{
+	CCPoint pos = _rechargeBtn->convertToWorldSpace(ccp(0, 0));
+	CCSize size = _rechargeBtn->getContentSize();
+	return CCRect(pos.x, pos.y, size.width, size.height);
+}
+
+void RoleHeadUi::ZhanDouLiUpdate( float fdt )
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&RoleHeadUi::ZhanDouLiUpdate), this);
+
+	int nNowZhandouli = RoleManager::getInstance()->getLocalPlayer()->getAttribute(RA_BATTLE_POINT);
+	if(nNowZhandouli > m_nSaveBattleValue)
+		BattleValUpUI::Init(nNowZhandouli - m_nSaveBattleValue);
+
+	m_nSaveBattleValue = 0;
+}
+
+void RoleHeadUi::setShowFightPromote(bool isshow)
+{
+	if (pFPNode)
+	{
+		pFPNode->setVisible(isshow);
+		if (isshow)
+		{
+			CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&RoleHeadUi::setHideFightPromote), this, 10.0f, false);
+		}
+	}
+}
+bool RoleHeadUi::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_headNew, pTouch))
+		return true;
+
+	return false;
+}
+void RoleHeadUi::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+
+
+}
+void RoleHeadUi::setHideFightPromote(float fdt)
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&RoleHeadUi::setHideFightPromote), this);
+	setShowFightPromote(false);
+}
+
+void RoleHeadUi::onExit()
+{
+	CCLayer::onExit();
+	m_visibleCDBtns.clear();
+	//m_buff_effect_name.clear();
+	UiResourceMgr::getInstance()->releasePlistFile(sheetPlist);
+}
+
+
+void RoleHeadUi::SetShowShoe( bool show )
+{
+	if (m_pLayer)
+	{
+	   m_pLayer->SetShowShoe(show);
+	}
+}
+
+void RoleHeadUi::setShowLine( short index )
+{
+	if (m_pLayer)
+	{
+		m_pLayer->setShowLine(index);
+	}
+}
+
+void RoleHeadUi::setShoeEnabled( bool value )
+{
+	if (m_pLayer)
+	{
+		m_pLayer->setShoeEnabled(value);
+	}
+}
+
+void RoleHeadUi::updateZumaStoneState()
+{
+	if (m_pLayer)
+	{
+		m_pLayer->updateZumaStoneState();
+	}
+}
+
+void RoleHeadUi::setBtnHighLight()
+{
+	if (_headNew)
+	{
+		if (!World::getInstance()->isHighLight(_headNew,WT_CCSPRITE,WZ_ROLEHEADUI))
+		{
+			World::getInstance()->SetHighLight(_headNew,WT_CCSPRITE,WZ_ROLEHEADUI,0,true,37,60);
+		}
+	}
+}
+
+void RoleHeadUi::revokeBtnHighLight()
+{
+	if (_headNew)
+	{
+		if (World::getInstance()->isHighLight(_headNew,WT_CCSPRITE,WZ_ROLEHEADUI))
+		{
+			World::getInstance()->SetHighLight(_headNew,WT_CCSPRITE,WZ_ROLEHEADUI,0,false);
+		}
+	}
+}
+
+void RoleHeadUi::setXiaomiShow(bool isShow)
+{
+	if(_xiaomiBtn)
+	{
+		_xiaomiBtn->setVisible(isShow);
+	}
+}
+
+void RoleHeadUi::set_buff_overlap(unsigned int buff_id,int overlap )
+{
+	CDBtnMap::iterator iter=m_buffBtns.find(buff_id);
+	if(iter!=m_buffBtns.end())
+	{
+		CDButton * cdBtn=iter->second;
+		//cdBtn->setVisible(true);
+		if(cdBtn) cdBtn->set_overlap(overlap);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+cocos2d::SEL_MenuHandler RoleHeadUiLoaderLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler RoleHeadUiLoaderLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "guildModePressed", RoleHeadUiLoaderLayer::guildModePressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "prepaidPressed", RoleHeadUiLoaderLayer::prepaidPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "rechargeBtnPressed", RoleHeadUiLoaderLayer::rechargeBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onFightPressedBtn", RoleHeadUiLoaderLayer::onFightPressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHudonghePressed",RoleHeadUiLoaderLayer::onHudonghePressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHudonghaoyouPressed",RoleHeadUiLoaderLayer::onHudonghaoyouPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "xiaofeixiePressed",RoleHeadUiLoaderLayer::onxiaofeixiePressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "xianluPressed",RoleHeadUiLoaderLayer::onXianLuPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "XiaoMiBtnPressed",RoleHeadUiLoaderLayer::onXiaomiPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onWearCue",RoleHeadUiLoaderLayer::onWearCue);
+
+	return NULL;
+}
+
+void RoleHeadUiLoaderLayer::guildModePressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if(FMBattleMgr::getInstance()->isInBattle())
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["FM_BattleTip1"]);
+		return;
+	}
+	unsigned int mapID = MapManager::getInstance()->getCurMapId();
+	if (BF_BATTLE_MAP == mapID || BF_PREPARE_MAP == mapID)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["BF_BattleModeTip"]);
+		return;
+	}
+
+	OPEN_UI(WCT_BattleMode);
+}
+
+bool RoleHeadUiLoaderLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"stateLine",CCLabelTTF*,_stateLine);
+	return false;
+}
+
+void RoleHeadUiLoaderLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_pLineLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(_stateLine);
+	setAllChildernButtonPriority(this,2);
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+	std::string sSEFightFire = sSEDir + "E1_50.plist";
+	_plist.insert(sSEFightFire);
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEFightFire.c_str());
+	_fightNumAcNode = this->getFightSuperEffect();
+	_fightNumAcNode->setPosition(this->getChildByTag(0)->getChildByTag(BM_FightNumSE)->getPosition());
+	this->getChildByTag(0)->addChild(_fightNumAcNode, RZN_EFFECT);
+	_fightNumAcNode->BeginAction(0.07f, true);
+	_fightNumAcNode->setScale(0.55f);
+	this->getChildByTag(0)->getChildByTag(BM_FightNumSP)->setZOrder(RZN_EFFECT+1);
+	battleModeBackSprite=(CCSprite*)this->getChildByTag(0)->getChildByTag(35);
+//	this->getChildByTag(0)->getChildByTag(33)->setZOrder(RZN_EFFECT+1);
+
+	CCLayer *frame=dynamic_cast<CCLayer*>(this->getChildByTag(0));
+	m_pCelebrateBg = (CCSprite*)frame->getChildByTag(BM_CelebrateBg);
+	//m_pCelebrateLabel = (CCLabelTTF*)m_pCelebrateBg->getChildByTag(BM_CelebrateLabel);
+	//m_pCelebrateLabel->setZOrder(1);
+	m_pCelebrateBtn = (CCControlButton*)frame->getChildByTag(BM_CelebrateBtn);
+	m_pHongBaoSpr = CCSprite::create();
+	frame->addChild(m_pHongBaoSpr);
+	_ShoeBtn = (CCControlButton*)frame->getChildByTag(110);
+	CC_ASSERT(NULL != _ShoeBtn);
+	_ShoeBtn->setPosition(ccp(CCDirector::sharedDirector()->getWinSize().width / 2.f + 110, CCDirector::sharedDirector()->getWinSize().height / 3.f + 5.0f));
+	_ShoeBtn->setVisible(false);
+
+	_shoeText = (CCLabelTTF*)frame->getChildByTag(109);
+	CC_ASSERT(NULL != _shoeText);
+	_shoeText->setPosition(ccp(CCDirector::sharedDirector()->getWinSize().width / 2.f + 134 , CCDirector::sharedDirector()->getWinSize().height / 3.f - 1 ) );
+	_shoeText->setVisible(false);
+
+	m_pConcernSprite = (CCSprite*)frame->getChildByTag(BM_ConcernSprite);
+	m_pConcernBtn = (CCControlButton*)frame->getChildByTag(BM_ConcernBtn);
+
+	m_pCelebrateBg->setPositionY(m_pCelebrateBg->getPositionY());
+	m_pCelebrateBtn->setPositionY(m_pCelebrateBg->getPositionY());
+	m_pHongBaoSpr->setPosition(m_pCelebrateBtn->getPosition());
+
+	AnimationCache::createDefList(1, _anims, false);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_154", _anims);
+
+	m_pCelebrateBg->setVisible(false);
+	//m_pCelebrateLabel->setVisible(false);
+	m_pCelebrateBtn->setVisible(false);
+	m_pConcernSprite->setVisible(false);
+	m_pConcernBtn->setVisible(false);
+	m_pHongBaoSpr->setVisible(false);
+	m_pHongBaoSpr->stopAllActions();
+	m_pCelebrateIsShow = false;
+	m_pCelebrateCanShow = true;
+
+	m_pConcernSpritePt = m_pConcernSprite->getPosition();
+
+	//CCPoint pt = m_pCelebrateLabel->getPosition();
+
+	CCSize size = m_pCelebrateBg->getContentSize();
+	TTFConfig fc;
+	fc.fontFilePath = FT_FONTFACE;
+	fc.fontSize = 16;
+	fc.outlineSize = 1;
+	for (int i = 0;i < 10;++i)
+	{
+		LabelFT* tempLaber = LabelFT::createWithTTF(fc, "");
+		tempLaber->setAnchorPoint(ccp(0,0));
+		tempLaber->setPositionY((size.height - 16) / 2);
+		m_pCelebrateBg->addChild(tempLaber,1);
+		m_pLaberList.push_back(tempLaber);
+	}
+
+	m_pSkyStone = dynamic_cast<CCSprite*>(frame->getChildByTag(BM_SkyStoneSprite));
+	m_pGroundStone = dynamic_cast<CCSprite*>(frame->getChildByTag(BM_GroundStoneSprite));
+	m_pRoleStone = dynamic_cast<CCSprite*>(frame->getChildByTag(BM_RoleStoneSprite));
+
+	//m_pLineLabel = dynamic_cast<CCLabelTTF*>(frame->getChildByTag(BM_LineLabel));
+	m_pLineBtn = dynamic_cast<CCControlButton*>(frame->getChildByTag(BM_LineBtn));
+	//m_pSkyStone->setPositionY(m_pSkyStone->getPositionY() + 50);
+	//m_pGroundStone->setPositionY(m_pGroundStone->getPositionY() + 50);
+	//m_pRoleStone->setPositionY(m_pRoleStone->getPositionY() + 50);
+	char stoneState =InstanceMgr::getInstance()->getStoneState();
+	showZumaStoneState(stoneState);
+	updateZumaStoneState();
+
+	lineStr = GET_STR(9039);
+
+	int lineId = MapManager::getInstance()->getCurLine();
+	if (lineId > NULL)
+	{
+		std::string str;
+		safe_sprintf(str,lineStr.c_str(),lineId);
+		m_pLineLabel->setString(str.c_str());
+		m_pLineLabel->setVisible(true);
+		m_pLineBtn->setVisible(true);
+	}
+	else
+	{
+		m_pLineLabel->setVisible(false);
+		m_pLineBtn->setVisible(false);
+	}
+
+	create_wear_button();
+	
+	return;
+}
+
+//void RoleHeadUiLoaderLayer::headPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+//{
+//	RoleHeadUi* ui = (RoleHeadUi*)getParent();
+//	ui->signalHeadPressed.emit();
+//}
+
+//去除充值功能，更换为线路
+void RoleHeadUiLoaderLayer::prepaidPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	int yuanbaoNum=PackageManager::getInstance()->getTotalChargeYuanBao();
+	if (yuanbaoNum<=0)
+	{
+		OPEN_UI(WCT_ShouChongUi);
+	}
+	else
+	{
+		OPEN_UI(WCT_StoreRechargeUi);
+	}
+}
+
+void RoleHeadUiLoaderLayer::rechargeBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+}
+
+GameActionNode* RoleHeadUiLoaderLayer::getFightSuperEffect()
+{
+	GameActionNode* fireSEAcNode = GameActionNode::create();
+// 	for (int i=1; i<99; ++i)
+// 	{
+// 		CCString* fireStr = CCString::createWithFormat("%s%02d", "E1_50", i);
+// 		if(!fireSEAcNode->AddTexture(fireStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+	fireSEAcNode->InitTextureWithSpriteFrame("E1_50");
+	return fireSEAcNode;
+}
+
+void RoleHeadUiLoaderLayer::onEnter()
+{
+	REGISTER_EVENT(wear_change_event,RoleHeadUiLoaderLayer,wear_change);
+	CCLayer::onEnter();
+}
+
+void RoleHeadUiLoaderLayer::onExit()
+{
+	UNREGISTER_EVENT(wear_change_event,RoleHeadUiLoaderLayer,wear_change);
+
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+	AnimationCache::releaseDefList(_anims);
+	AnimationCache::getInstance()->releaseSinEffect("E1_154",true);
+	CCLayer::onExit();
+}
+
+void RoleHeadUiLoaderLayer::onFightPressedBtn( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	OPEN_UI(WCT_FightPromoteUi);
+	((RoleHeadUi*)getParent())->setHideFightPromote(0.0f);
+}
+
+void RoleHeadUiLoaderLayer::onHudonghePressed(cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	if (!(&m_pCelebrateData) || m_pCelebrateData.hearSay.dwRoleID == (DWORD)-1)
+		return;
+	if (m_pCelebrateData.hearSay.eType == EHST_ADD_YUANBAO)
+	{
+		if (CelebrateMgr::getInstance()->isCanGrabHongBao())
+		{
+			NET_SIC_ChongZhi_HongBao send;
+			send.dw_role_id = m_pCelebrateData.hearSay.dwRoleID;
+			send.dw_recharge_id = m_pCelebrateData.hearSay.dwParam3;
+			TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+		}
+		else
+		{
+			ToolTip::getInstance()->push(GET_STR(9426));
+		}
+		
+	}
+	else
+	{
+		OPEN_UI(WCT_SonghuaUi);
+		GET_UI(SonghuaUi, WCT_SonghuaUi)->setRoleId(m_pCelebrateData.hearSay.dwRoleID);
+		GET_UI(SonghuaUi, WCT_SonghuaUi)->setUserName(m_pCelebrateData.name);
+	}
+}
+
+void RoleHeadUiLoaderLayer::onHudonghaoyouPressed(cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CCSprite* sexSp;
+	CCLabelTTF* nameLabel;
+//	CCSprite* vipSp;
+	int num = 0;
+	if (m_pIsRunning)
+	{
+		m_pConcernData = ConcernMgr::getInstance()->getMidData(true);
+	}
+	else
+	{
+		m_pConcernData = ConcernMgr::getInstance()->getBackData(true);
+	}
+	if (&m_pConcernData && m_pConcernData.roleId != (unsigned int)-1)
+	{
+		std::ostringstream oss;
+		if (ES_Woman == m_pConcernData.sex)
+		{
+			sexSp = CCSprite::create("Art/ICON/SingleUI/chat_e2.png");
+		}
+		else if (ES_Man == m_pConcernData.sex)
+		{
+			sexSp = CCSprite::create("Art/ICON/SingleUI/chat_e1.png");
+		}
+		sexSp->setAnchorPoint(ccp(0.0,1.0));
+		num += 3;
+		nameLabel = CCLabelTTF::create();
+		nameLabel->setAnchorPoint(ccp(0.0,1.0));
+		nameLabel->setFontSize(16);
+		nameLabel->setColor(ccc3(0xff, 0xc9,0x24));
+		nameLabel->setString((m_pConcernData.name).c_str());
+		int len = (m_pConcernData.name).size();
+		int count = 0;
+		for (int i = 0;i < len; ++i)
+		{
+			if (m_pConcernData.name[i] >= 'a' && m_pConcernData.name[i] <= 'z' ||
+				m_pConcernData.name[i] >= 'A' && m_pConcernData.name[i] <= 'Z')
+			{
+				++count;
+			}
+		}
+		num = num + (len - count)*2/3 + count;
+		//num += len;
+// 		int level = m_pConcernData.vipLevel;
+// 		if (level >= 1 && level <= 16)
+// 		{
+// 			std::string levelStr = CCString::createWithFormat("Art/Icon/SingleUI/chat_v%d.png",level)->getCString();
+// 			vipSp = CCSprite::create(levelStr.c_str());
+// 			vipSp->setAnchorPoint(ccp(0.0,1.0));
+// 			if (level >= 10)
+// 			{
+// 				num += 4;
+// 			}
+// 			else
+// 			{
+// 				num += 3;
+// 			}
+// 		}
+		for (int i = 0;i < num; ++i)
+		{
+			oss<<"\x20\x20";
+		}
+		if (ECT_friend == m_pConcernData.type)
+		{
+			oss << GET_STR(9290);
+		}
+		else if (ECT_flower == m_pConcernData.type)
+		{
+			oss <<GET_STR(9295)<<m_pConcernData.count<<GET_STR(9296);
+		}
+		else if (ECT_hongbao == m_pConcernData.type)
+		{
+			oss<<GET_STR(9289);
+		}
+		oss<<GET_STR(9291);
+		if (ES_Woman == m_pConcernData.sex)
+		{
+			oss <<GET_STR(9292);
+		}
+		else if (ES_Man == m_pConcernData.sex)
+		{
+			oss <<GET_STR(9293);
+		}
+		oss<<GET_STR(9294);
+		MessageBoxUi *transUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,oss.str().c_str(), TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+		World::getInstance()->getScene()->addChild(transUi,WZ_MESSAGEBOX);
+		transUi->signalOkBtnPressed.connect(this, &RoleHeadUiLoaderLayer::ConfirmOneKeyTransmit);
+		CCPoint pt = transUi->getMsgLabelPt();
+		sexSp->setPosition(ccp(pt.x,pt.y + 2));
+		transUi->addToFrame(sexSp);
+		nameLabel->setPosition(ccp(pt.x + sexSp->getContentSize().width,pt.y + 1));
+		transUi->addToFrame(nameLabel);
+// 		if (level >= 1 && level <= 16)
+// 		{
+// 			vipSp->setPosition(ccp(nameLabel->getPosition().x + nameLabel->getContentSize().width,pt.y + 5));
+// 			transUi->addToFrame(vipSp);
+// 		}
+	}
+	ConcernData data = ConcernMgr::getInstance()->getBackData();
+	if (&data && data.roleId != (unsigned int)-1 && data.type != ECT_NoConcern)
+	{
+		std::string strNormal;
+		std::string strSelected;
+		if (ECT_friend == m_pConcernType)
+		{
+			strNormal = "smallui_hudonghaoyoubtnn";
+			strSelected = "smallui_hudonghaoyoubtnh";
+		}
+		else if (ECT_flower == m_pConcernType)
+		{
+			strNormal = "smallui_hudongsonghuabtnn";
+			strSelected = "smallui_hudongsonghuabtnh";
+		}
+		else if (ECT_hongbao == m_pConcernType)
+		{
+			strNormal = "smallui_hudonghongbaobtnn";
+			strSelected = "smallui_hudonghongbaobtnh";
+		}
+		CCSpriteFrame* frameNormal = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(strNormal.c_str());
+		CCSpriteFrame* frameSelected = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(strSelected.c_str());
+		m_pConcernSprite->setDisplayFrame(frameNormal);
+		m_pConcernBtn->setBackgroundSpriteFrameForState(frameNormal,CCControlStateNormal);
+		m_pConcernBtn->setBackgroundSpriteFrameForState(frameNormal,CCControlStateDisabled);
+		m_pConcernBtn->setBackgroundSpriteFrameForState(frameSelected,CCControlStateSelected);
+		m_pConcernBtn->setBackgroundSpriteFrameForState(frameSelected,CCControlStateHighlighted);
+	}
+	else
+	{
+		m_pConcernBtn->setVisible(false);
+		m_pConcernSprite->setVisible(false);
+	}
+}
+
+
+void RoleHeadUiLoaderLayer::showConcern( int type )
+{
+	m_pConcernType = type;
+	m_pIsRunning = true;
+	std::string strNormal;
+	if (ECT_friend == m_pConcernType)
+	{
+		strNormal = "smallui_hudonghaoyoubtnn";
+	}
+	else if (ECT_flower == m_pConcernType)
+	{
+		strNormal = "smallui_hudongsonghuabtnn";
+	}
+	else if (ECT_hongbao == m_pConcernType)
+	{
+		strNormal = "smallui_hudonghongbaobtnn";
+	}
+	CCSpriteFrame* frameNormal = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(strNormal.c_str());
+	m_pConcernSprite->stopAllActions();
+	m_pConcernSprite->setDisplayFrame(frameNormal);
+	m_pConcernSprite->setPosition(ccp(m_pConcernSpritePt.x,m_pConcernSpritePt.y));
+	m_pConcernSprite->setVisible(true);
+
+	CCMoveTo* move = CCMoveTo::create(0.5,m_pConcernBtn->getPosition());
+	CCSequence* squ = CCSequence::createWithTwoActions(move, CCCallFunc::create(this,SEL_CallFunc(&RoleHeadUiLoaderLayer::showConcernCallBack)));
+	m_pConcernSprite->runAction(squ);
+}
+
+void RoleHeadUiLoaderLayer::showConcernCallBack()
+{
+	m_pConcernSprite->setVisible(false);
+	m_pConcernSprite->stopAllActions();
+	m_pIsRunning = false;
+	std::string strNormal;
+	std::string strSelected;
+	if (ECT_friend == m_pConcernType)
+	{
+		strNormal = "smallui_hudonghaoyoubtnn";
+		strSelected = "smallui_hudonghaoyoubtnh";
+	}
+	else if (ECT_flower == m_pConcernType)
+	{
+		strNormal = "smallui_hudongsonghuabtnn";
+		strSelected = "smallui_hudongsonghuabtnh";
+	}
+	else if (ECT_hongbao == m_pConcernType)
+	{
+		strNormal = "smallui_hudonghongbaobtnn";
+		strSelected = "smallui_hudonghongbaobtnh";
+	}
+	CCSpriteFrame* frameNormal = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(strNormal.c_str());
+	CCSpriteFrame* frameSelected = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(strSelected.c_str());
+	m_pConcernBtn->setBackgroundSpriteFrameForState(frameNormal,CCControlStateNormal);
+	m_pConcernBtn->setBackgroundSpriteFrameForState(frameNormal,CCControlStateDisabled);
+	m_pConcernBtn->setBackgroundSpriteFrameForState(frameSelected,CCControlStateSelected);
+	m_pConcernBtn->setBackgroundSpriteFrameForState(frameSelected,CCControlStateHighlighted);
+	m_pConcernBtn->setVisible(true);
+}
+
+void RoleHeadUiLoaderLayer::ConfirmOneKeyTransmit()
+{
+	if (&m_pConcernData)
+	{
+		unsigned int roleId = m_pConcernData.roleId;
+		if (SocialMgr::getInstance()->has_friend(roleId))
+		{
+			ToolTip::getInstance()->push("\xE8\xAF\xA5\xE7\x8E\xA9\xE5\xAE\xB6\xE5\xB7\xB2\xE7\xBB\x8F\xE6\x98\xAF\xE6\x82\xA8\xE7\x9A\x84\xE5\xA5\xBD\xE5\x8F\x8B");
+		}
+		else
+		{
+			SocialMgr::getInstance()->onAddFriend(roleId);
+		}
+	}
+}
+
+void RoleHeadUiLoaderLayer::updateConcern( int type )
+{
+	if (type == ECT_NoConcern)
+	{
+		m_pConcernBtn->setVisible(false);
+	}
+	else 
+	{
+		std::string strNormal;
+		std::string strSelected;
+		if (ECT_friend == type)
+		{
+			strNormal = "smallui_hudonghaoyoubtnn";
+			strSelected = "smallui_hudonghaoyoubtnh";
+		}
+		else if (ECT_flower == type )
+		{
+			strNormal = "smallui_hudongsonghuabtnn";
+			strSelected = "smallui_hudongsonghuabtnh";
+		}
+		else if (ECT_hongbao == type)
+		{
+			strNormal = "smallui_hudonghongbaobtnn";
+			strSelected = "smallui_hudonghongbaobtnh";	
+		}
+		CCSpriteFrame* frameNormal = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(strNormal.c_str());
+		CCSpriteFrame* frameSelected = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(strSelected.c_str());
+		m_pConcernBtn->setBackgroundSpriteFrameForState(frameNormal,CCControlStateNormal);
+		m_pConcernBtn->setBackgroundSpriteFrameForState(frameNormal,CCControlStateDisabled);
+		m_pConcernBtn->setBackgroundSpriteFrameForState(frameSelected,CCControlStateSelected);
+		m_pConcernBtn->setBackgroundSpriteFrameForState(frameSelected,CCControlStateHighlighted);
+		m_pConcernBtn->setVisible(true);
+	}
+}
+
+void RoleHeadUiLoaderLayer::runMsg(const std::string &msg)
+{
+	std::string baseString = msg; 
+	std::list<std::string> msgListData;
+	std::list<std::string> msgListColor;
+	std::string::size_type index = 0;
+	std::string::size_type index2 = 0;
+	while(true)
+	{
+		index = baseString.find("<");
+		if (index != std::string::npos)
+		{
+			msgListColor.push_back(baseString.substr(index + 1,index + 2));
+			baseString = baseString.substr(index + 3,baseString.size());
+			index2 = baseString.find("<");
+			if (index2 != -1)
+			{
+				msgListData.push_back(baseString.substr(0,index2).c_str());
+				baseString = baseString.substr(index2,baseString.size());
+			}
+			else
+			{
+				msgListData.push_back(baseString.substr(0,baseString.size()).c_str());
+				break;
+			}
+			//index = -1;
+		}else{
+			break;
+		}
+	}
+	createMSG(msgListData,msgListColor);
+}
+
+void RoleHeadUiLoaderLayer::createMSG(std::list<std::string> msgListData ,std::list<std::string> msgListColor)
+{
+	int msgDataCount = msgListData.size();
+	float len = 0.0;
+	int i = 0;
+	bool needShow = false;
+	for (std::list<LabelFT*>::iterator iter = m_pLaberList.begin();iter != m_pLaberList.end(); ++iter,++i)
+	{
+		LabelFT* tempLaber = (*iter);
+		if (i < msgDataCount)
+		{
+			tempLaber->setString(msgListData.front().c_str());
+			msgListData.pop_front();
+			tempLaber->setColor(getChangeColor(msgListColor.front()));
+			msgListColor.pop_front();
+			tempLaber->setVisible(true);
+			len += tempLaber->getContentSize().width;
+			needShow = true;
+		}
+		else
+		{
+			tempLaber->setVisible(false);
+		}
+	}
+	float startWidth = (m_pCelebrateBg->getContentSize().width - len)/2;
+	float tempWidth = 0.0;
+	for (std::list<LabelFT*>::iterator iter = m_pLaberList.begin();iter != m_pLaberList.end(); ++iter)
+	{
+		LabelFT* temp = (*iter);
+		temp->setPositionX(startWidth + tempWidth);
+		tempWidth += temp->getContentSize().width;
+	}
+	if (needShow)
+	{
+		if (m_pCelebrateBg && m_pCelebrateBtn)
+		{
+			m_pCelebrateBg->setVisible(true);
+			m_pCelebrateBtn->setVisible(true);
+		}
+	}
+}
+
+ccColor3B RoleHeadUiLoaderLayer::getChangeColor(std::string str)
+{
+	ccColor3B color;//11种颜色
+	if (str.compare("c1") == 0)
+	{
+		color = ccc3(255,255,255);
+	}
+	else if (str.compare("c2") == 0)
+	{
+		color = ccc3(192,0,0);
+	}
+	else if (str.compare("c3") == 0)
+	{
+		color = ccc3(255,0,0);
+	}
+	else if (str.compare("c4") == 0)
+	{
+		color = ccc3(255,192,0);
+	}
+	else if (str.compare("c5") == 0)
+	{
+		color = ccc3(255,255,0);
+	}
+	else if (str.compare("c6") == 0)
+	{
+		color = ccc3(146,208,80);
+	}
+	else if (str.compare("c7") == 0)
+	{
+		color = ccc3(0,176,80);
+	}
+	else if (str.compare("c8") == 0)
+	{
+		color = ccc3(0,176,240);
+	}
+	else if (str.compare("c9") == 0)
+	{
+		color = ccc3(0,112,192);
+	}
+	else if (str.compare("c10") == 0)
+	{
+		color = ccc3(0,32,96);
+	}
+	else if (str.compare("c11") == 0)
+	{
+		color = ccc3(112,48,160);
+	}
+	else
+	{
+		color = ccc3(255,255,255);
+	}
+	return color;
+}
+
+void RoleHeadUiLoaderLayer::SysMsgSetCelebrateShow(bool isShow)
+{
+	m_pCelebrateCanShow = isShow;
+	showCelebrate(isShow);
+	CelebrateMgr::getInstance()->SysMsgSetCelebrateShow(isShow);
+}
+
+void RoleHeadUiLoaderLayer::showCelebrate(bool isShow)
+{
+	if (m_pCelebrateIsShow == isShow)
+	{
+		return;
+	}
+	m_pCelebrateIsShow = isShow;
+	if (false == isShow)
+	{
+		m_pHongBaoSpr->stopAllActions();
+		m_pHongBaoSpr->setVisible(false);
+		m_pCelebrateBg->setVisible(isShow);
+		//m_pCelebrateLabel->setVisible(isShow);
+		m_pCelebrateBtn->setVisible(isShow);
+		m_pCelebrateData.hearSay.dwRoleID = (DWORD)-1; 
+	}
+	else
+	{
+		if (!m_pCelebrateCanShow || (DWORD)-1 == m_pCelebrateData.hearSay.dwRoleID || (DWORD)-1 == m_pCelebrateData.hearSay.dwParam0 || "" == m_pCelebrateData.name)
+			return;
+		m_pCelebrateBg->setVisible(isShow);
+		//m_pCelebrateLabel->setVisible(isShow);
+		m_pCelebrateBtn->setVisible(isShow);
+		if (m_pCelebrateData.hearSay.eType == EHST_ADD_YUANBAO)
+		{
+			BSAnimate *animate = _anims[0];
+			m_pHongBaoSpr->runAction(CCRepeatForever::create(animate));
+			m_pHongBaoSpr->setVisible(true);
+		}
+	}
+}
+
+void RoleHeadUiLoaderLayer::showCelebrate( HearSayChannel* data ,std::string name)
+{
+	if (!m_pCelebrateCanShow)
+		return;
+	m_pHongBaoSpr->stopAllActions();
+	m_pHongBaoSpr->setVisible(false);
+	m_pCelebrateIsShow = true;
+	if (!data || data->dwRoleID == (DWORD)-1)
+		return;
+
+	m_pCelebrateData.hearSay = (*data);
+	m_pCelebrateData.name = name;
+	std::string strBg;
+	std::string strNormal;
+	std::string strSelected;
+	if (data->eType == EHST_ADD_YUANBAO)
+	{
+		strBg = "smallui_hudongchongzhidi";
+		strNormal = "smallui_hudongqiangbtnn";
+		strSelected = "smallui_hudongqiangbtnh";
+	}
+	else
+	{
+		strBg = "smallui_hudongvipdi";
+		strNormal = "smallui_hudonghebtnn";
+		strSelected = "smallui_hudonghebtnh";
+	}
+	CCSpriteFrame* frameBg = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(strBg.c_str());
+	CCSpriteFrame* frameNormal = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(strNormal.c_str());
+	CCSpriteFrame* frameSelected = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(strSelected.c_str());
+	if (frameBg == NULL || frameNormal == NULL || frameSelected == NULL)
+	{
+		return;
+	}
+
+	if(NULL != m_pCelebrateBtn && NULL != frameNormal)
+	{
+		m_pCelebrateBtn->setBackgroundSpriteFrameForState(frameNormal,CCControlStateNormal);
+		m_pCelebrateBtn->setBackgroundSpriteFrameForState(frameNormal,CCControlStateDisabled);
+	}
+
+	if(NULL != m_pCelebrateBg && NULL != frameBg)
+	{
+		m_pCelebrateBg->setDisplayFrame(frameBg);
+		//m_pCelebrateBg->setVisible(true);
+	}
+
+	if(NULL != m_pCelebrateBtn && NULL != frameSelected)
+	{
+		m_pCelebrateBtn->setBackgroundSpriteFrameForState(frameSelected,CCControlStateSelected);
+		m_pCelebrateBtn->setBackgroundSpriteFrameForState(frameSelected,CCControlStateHighlighted);
+		//m_pCelebrateBtn->setVisible(true);
+	}
+	
+	//if(NULL != m_pCelebrateLabel)
+	//	m_pCelebrateLabel->setVisible(true);
+
+	if (NULL == data)
+		return;
+
+	if (EHST_ROLE_LEVELUP == data->eType)
+	{
+		showRoleLevelUp(data,name);
+	}
+	else if(EHST_EQUIPSTRENGTH == data->eType)
+	{
+		showEquipStrength(data,name);
+	}
+	else if(EHST_KUNGFU_LEVEL_CHANGE == data->eType)
+	{
+		showGongfaLevelUp(data,name);
+	}
+	else if(EHST_EQUIPUPGRADE == data->eType)
+	{
+		showEquipUpGread(data,name);
+	}
+	else if(EHST_RIDEUPGRADE == data->eType)
+	{
+		showRideUpGread(data,name);
+	}
+	else if(EHST_GET_RECHARGE_REWARD == data->eType)
+	{
+		showRechargeReward(data,name);
+	}
+	else if(EHST_ADD_YUANBAO == data->eType)
+	{
+		showAddYuanbao(data,name);//暂时屏蔽充值提示(2015.09.12版本_测)
+	}
+	else if(EHST_EQUIP_FUSION == data->eType)
+	{
+		showEquipFusion(data,name);
+	}
+}
+
+void RoleHeadUiLoaderLayer::showRoleLevelUp( HearSayChannel* data ,std::string name)
+{
+	if (!data || data->dwRoleID == (DWORD)-1)
+		return;
+	short index(0);
+	switch (data->dwParam0)
+	{
+	case 40:
+		index = 4129;
+		break;
+	case 50:
+		index = 4130;
+		break;
+	case 60:
+		index = 4131;
+		break;
+	case 70:
+		index = 4132;
+		break;
+	case 80:
+		index = 4133;
+		break;
+	case 90:
+		index = 4134;
+		break;
+	case 100:
+		index = 4135;
+		break;
+	}
+// 	tstring strBasic("");
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Msg WHERE ID = ?1");
+// 	cmd->set_integer32(1 , index);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("Msg");
+// 		strBasic = table->get_text(idx).c_str();
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	tstring strBasic = Helper::getMsgStringByID(index);
+	std::string str = replaceStr(strBasic, "**", name);
+	runMsg(str);
+	if (data->dwRoleID==RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		setFllowerBtn(false);
+	}
+}
+
+void RoleHeadUiLoaderLayer::showEquipStrength( HearSayChannel* data ,std::string name)
+{
+	if (!data || data->dwRoleID == (DWORD)-1 || data->dwParam0 == (DWORD)-1)
+		return;
+	short index(0);
+	switch (data->dwParam1)
+	{
+	case 5:
+		index = 3043;
+		break;
+	case 9:
+		index = 3015;
+		break;
+	case 13:
+		index = 3014;
+		break;
+	case 16:
+		index = 3007;
+		break;
+	}
+// 	tstring strBasic("");
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Msg WHERE ID = ?1");
+// 	cmd->set_integer32(1 , index);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("Msg");
+// 		strBasic = table->get_text(idx).c_str();
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	tstring strBasic = Helper::getMsgStringByID(index);
+	std::string str = replaceStr(strBasic, "**", name);
+
+	//从数据库读取奖品ID的名称
+	strBasic = ("");
+
+	const EquipTypeData* t_data = PackageManager::getInstance()->getEquipTypeDataPointer(data->dwParam0);
+	if (t_data != NULL)
+	{
+		strBasic = t_data->name;
+	}
+//已完成 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 	cmd->set_integer32(1 , data->dwParam0);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("Name");
+// 		strBasic = table->get_text(idx).c_str();
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+	if (strBasic.empty())
+		return;
+	std::string stroutput = replaceStr(str, "***", strBasic);
+	runMsg(stroutput);
+	if (data->dwRoleID==RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		setFllowerBtn(false);
+	}
+}
+
+void RoleHeadUiLoaderLayer::showGongfaLevelUp( HearSayChannel* data ,std::string name)
+{
+	if (!data || data->dwRoleID == (DWORD)-1 || data->dwParam0 == (DWORD)-1)
+		return;
+	if (data->dwParam0 < 6)
+		return;
+	short index(0);
+	switch (data->dwParam0)
+	{
+	case 4:
+		index = 1217;
+		break;
+	case 5:
+		index = 1218;
+		break;
+	case 6:
+		index = 1219;
+		break;
+	case 7:
+		index = 1220;
+		break;
+	case 8:
+		index = 1221;
+		break;
+	case 9:
+		index = 1222;
+		break;
+	case 10:
+		index = 1223;
+		break;
+	case 11:
+		index = 1224;
+		break;
+	case 12:
+		index = 1225;
+		break;
+	case 13:
+		index = 1226;
+		break;
+	case 14:
+		index = 1227;
+		break;
+	case 15:
+		index = 1228;
+		break;
+	case 16:
+		index = 1229;
+		break;
+	default:
+		return;
+	}
+	//读取Msg表
+// 	tstring strBasic("");
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Msg WHERE ID = ?1");
+// 	cmd->set_integer32(1 , index);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("Msg");
+// 		strBasic = table->get_text(idx).c_str();
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	tstring strBasic =Helper::getMsgStringByID(index);
+	//没取到就退出
+	if( strBasic.empty() )
+		return;
+	std::string strtmp = replaceStr(strBasic,"**",name);
+
+	std::string sTypeName = ("");
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM GongfaTipData WHERE typeId = ?1");
+	cmd->set_integer32(1 , data->dwParam1);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("name");
+		sTypeName = table->get_text(idx).c_str();
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	if (sTypeName.empty())
+		return;
+	std::string strOut = replaceStr(strtmp,"***",sTypeName);
+	runMsg(strOut);
+	if (data->dwRoleID==RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		setFllowerBtn(false);
+	}
+}
+
+void RoleHeadUiLoaderLayer::showEquipUpGread( HearSayChannel* data ,std::string name)
+{
+	if (!data || data->dwRoleID == (DWORD)-1 || data->dwParam0 == (DWORD)-1)
+		return;
+	short index(0);
+	if (0 == data->dwParam1)
+	{
+		index = 3003;
+	}
+	else if (1 == data->dwParam1)
+	{
+		index = 3004;
+	}
+	else
+	{
+		return;
+	}
+
+// 	tstring sLotteryBasic("");
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Msg WHERE ID = ?1");
+// 	cmd->set_integer32(1 , index);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("Msg");
+// 		sLotteryBasic = table->get_text(idx).c_str();
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	tstring sLotteryBasic = Helper::getMsgStringByID(index);
+	//没取到就退出
+	if( sLotteryBasic.empty() )
+		return;
+	//没取到就退出
+	std::string strtmp = replaceStr(sLotteryBasic,"**",name);
+	//从数据库读取奖品ID的名称
+	sLotteryBasic = ("");
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM PackageData WHERE TypeId = ?1");
+	cmd->set_integer32(1 , data->dwParam0);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("Name");
+		sLotteryBasic = table->get_text(idx).c_str();
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	if (sLotteryBasic.empty())
+		return;
+	std::string str = replaceStr(strtmp, "***", sLotteryBasic);
+	runMsg(str);
+	if (data->dwRoleID==RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		setFllowerBtn(false);
+	}
+}
+
+void RoleHeadUiLoaderLayer::showRideUpGread( HearSayChannel* data ,std::string name)
+{
+	if (!data || data->dwRoleID == (DWORD)-1)
+		return;
+	if (!IS_VALID(data->dwRoleID))
+		return;
+	if (data->dwParam0 < 2)
+		return;
+	int index = 0;
+	if (3 == data->dwParam0)//
+	{
+		index = 3026;
+	}
+	else if (4 == data->dwParam0)
+	{
+		index = 3027;
+	}
+	else if (5 == data->dwParam0)
+	{
+		index = 3028;
+	}
+	else if (6 == data->dwParam0)
+	{
+		index = 3029;
+	}
+	else if (7 == data->dwParam0)
+	{
+		index = 3030;
+	}
+	else if (8 == data->dwParam0)
+	{
+		index = 3031;
+	}
+	else if (9 == data->dwParam0)
+	{
+		index = 3032;
+	}
+	else if (10 == data->dwParam0)
+	{
+		index = 3033;
+	}
+	else if (11 == data->dwParam0)
+	{
+		index = 3034;
+	}
+	else
+	{
+		return;
+	}
+	//读取Msg表
+// 	tstring strBasic("");
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Msg WHERE ID = ?1");
+// 	cmd->set_integer32(1 , index);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("Msg");
+// 		strBasic = table->get_text(idx).c_str();
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	tstring strBasic = Helper::getMsgStringByID(index);
+	//没取到就退出
+	if( strBasic.empty() )
+		return;
+	std::string strtmp = replaceStr(strBasic,"**",name);
+	runMsg(strtmp);
+	if (data->dwRoleID==RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		setFllowerBtn(false);
+	}
+	return;
+}
+
+void RoleHeadUiLoaderLayer::showRechargeReward( HearSayChannel* data ,std::string name)
+{
+	if (!data || data->dwRoleID == (DWORD)-1 || data->dwParam0 == (DWORD)-1)
+		return;
+	//! dwParam0:奖励等级(1-12)
+	if (!IS_VALID(data->dwRoleID))
+		return;
+	if (!IS_VALID(data->dwParam0))
+		return;
+	int msg_index = 1237;
+// 	tstring strBasic("");
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Msg WHERE ID = ?1");
+// 	cmd->set_integer32(1 , msg_index);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("Msg");
+// 		strBasic = table->get_text(idx).c_str();
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	tstring strBasic = Helper::getMsgStringByID(msg_index);
+	//没取到就退出
+	if( strBasic.empty() )
+		return;
+
+	std::string str1 = replaceStr(strBasic,"**",name); //替换
+
+	tstring lv("");
+	switch( data->dwParam0 )
+	{
+	case 1: //1
+		lv = "\x31";
+		break;
+	case 2: //2
+		lv = "\x32";
+		break;
+	case 3: //3
+		lv = "\x33";
+		break;
+	case 4: //4
+		lv = "\x34";
+		break;
+	case 5: //5
+		lv = "\x35";
+		break;
+	case 6: //6
+		lv = "\x36";
+		break;
+	case 7: //7
+		lv = "\x37";
+		break;
+	case 8: //8
+		lv = "\x38";
+		break;
+	case 9: //9
+		lv = "\x39";
+		break;
+	case 10: //10
+		lv = "\x31\x30";
+		break;
+	case 11: //11
+		lv = "\x31\x31";
+		break;
+	case 12: //12
+		lv = "\x31\x32";
+		break;
+	}
+	std::string stroutput = replaceStr(str1, "***", lv); //替换
+	runMsg(stroutput);
+	if (data->dwRoleID==RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		setFllowerBtn(false);
+	}
+}
+
+void RoleHeadUiLoaderLayer::showAddYuanbao( HearSayChannel* data ,std::string name)
+{
+	if (!data || data->dwRoleID == (DWORD)-1 || data->dwParam0 == (DWORD)-1)
+		return;
+	CelebrateMgr::getInstance()->setCanGrabHongBao(true);
+	BSAnimate *animate = _anims[0];
+	m_pHongBaoSpr->runAction(CCRepeatForever::create(animate));
+	m_pHongBaoSpr->setVisible(true);
+// 	tstring strBasic("");
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Msg WHERE ID = ?1");
+// 	cmd->set_integer32(1 , 4150);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("Msg");
+// 		strBasic = table->get_text(idx).c_str();
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	tstring strBasic = Helper::getMsgStringByID(4150);
+	//没取到就退出
+	if( strBasic.empty() )
+		return;
+	std::string str1 = replaceStr(strBasic,"**",name); //替换
+// 	std::ostringstream ossYuanbao;
+// 	ossYuanbao<<data->dwParam0/10;
+// 	std::string str2 = replaceStr(str1,"***",ossYuanbao.str()); //替换
+// 	std::string str3 = "";
+// 	strBasic = "";
+// 	if (data->dwParam2)
+// 	{
+// 		//暂时屏蔽VIP提示
+// 		//cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Msg WHERE ID = ?1");
+// 		//cmd->set_integer32(1 , 4151);
+// 		//table = c_db_manager::getSingleton()->create_table();
+// 		//while(table->retrieve_row())
+// 		//{
+// 		//	unsigned int idx = table->get_index("Msg");
+// 		//	strBasic = table->get_text(idx).c_str();
+// 		//}
+// 		//c_db_manager::getSingleton()->destroy_table(table);
+// 		//c_db_manager::getSingleton()->end_operation(cmd);
+// 		//std::ostringstream ossVip;
+// 		//int level = data->dwParam1;
+// 		//ossVip<<level;
+// 		//str3 = replaceStr(strBasic,"**",ossVip.str());
+// 		str2 = str2 + str3;
+// 	}
+// 	int recharge = data->dwParam0/10;
+// 	int index(0);
+// 	if (recharge >= 0 && recharge <= 100)
+// 	{
+// 		index = 4152;
+// 	}
+// 	else if (recharge > 100 && recharge <= 1000)
+// 	{
+// 		index = 4153;
+// 	}
+// 	else if (recharge > 1000 && recharge <= 5000)
+// 	{
+// 		index = 4154;
+// 	}
+// 	else if (recharge > 5000 && recharge <= 20000)
+// 	{
+// 		index = 4155;
+// 	}
+// 	else if (recharge > 20000)
+// 	{
+// 		index = 4156;
+// 	}
+// 	strBasic = "";
+// 	cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Msg WHERE ID = ?1");
+// 	cmd->set_integer32(1 , index);
+// 	table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("Msg");
+// 		strBasic = table->get_text(idx).c_str();
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+// 	std::string stroutput = str2 + strBasic;
+// 	runMsg(stroutput);
+	runMsg(str1);
+	if (data->dwRoleID==RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		setFllowerBtn(false);
+	}
+}
+
+void RoleHeadUiLoaderLayer::showZumaStoneState( int state )
+{
+	/////////真正进入地图才显示，接收到消息先不显示
+	if (0 == state)
+	{
+		CCSpriteFrame* tempFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("smallui_suishitou");
+		if (m_pSkyStone != NULL)
+		{
+			if(tempFrame)
+				m_pSkyStone->initWithSpriteFrame(tempFrame);
+		}
+		if (m_pGroundStone != NULL)
+		{
+			if(tempFrame)
+				m_pGroundStone->initWithSpriteFrame(tempFrame);
+		}
+		if (m_pRoleStone != NULL)
+		{
+			if(tempFrame)
+				m_pRoleStone->initWithSpriteFrame(tempFrame);
+		}
+		return;
+	}
+	CCSpriteFrame* frame = NULL;
+	int data = state & 0x1;
+	if ( 0x1 == data)
+	{
+		frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("smallui_zhanshishitou");
+		if (m_pSkyStone && frame)
+		{
+			m_pSkyStone->initWithSpriteFrame(frame);
+		}
+		frame = NULL;
+	}
+	else if(0 == data)
+	{
+		frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("smallui_suishitou");
+		if (m_pSkyStone && frame)
+		{
+			m_pSkyStone->initWithSpriteFrame(frame);
+		}
+		frame = NULL;
+	}
+	data = state & 0x2;
+	if (0x2 == data)
+	{
+		frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("smallui_fashishitou");
+		if (m_pGroundStone && frame)
+		{
+			m_pGroundStone->initWithSpriteFrame(frame);
+		}
+		frame = NULL;
+	}
+	else if(0 == data)
+	{
+		frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("smallui_suishitou");
+		if (m_pGroundStone && frame)
+		{
+			m_pGroundStone->initWithSpriteFrame(frame);
+		}
+		frame = NULL;
+	}
+	data = state & 0x4;
+	if (0x4 == data)
+	{
+		frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("smallui_daoshishitou");
+		if (m_pRoleStone && frame)
+		{
+			m_pRoleStone->initWithSpriteFrame(frame);
+		}
+		frame = NULL;
+	}
+	else if(0 == data)
+	{
+		frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("smallui_suishitou");
+		if (m_pRoleStone && frame)
+		{
+			m_pRoleStone->initWithSpriteFrame(frame);
+		}
+		frame = NULL;
+	}
+}
+
+void RoleHeadUiLoaderLayer::updateZumaStoneState()
+{
+	unsigned int tempMapId = MapManager::getInstance()->getCurMapId();
+	if (InstanceMgr::getInstance()->isInZumaCommonMap(tempMapId))
+	{
+		m_pSkyStone->setVisible(true);
+		m_pGroundStone->setVisible(true);
+		m_pRoleStone->setVisible(true);
+	}
+	else
+	{
+		m_pSkyStone->setVisible(false);
+		m_pGroundStone->setVisible(false);
+		m_pRoleStone->setVisible(false);
+	}
+}
+
+void RoleHeadUiLoaderLayer::showEquipFusion( HearSayChannel* data ,std::string name )
+{
+	if (!data || data->dwRoleID == (DWORD)-1 || data->dwParam0 == (DWORD)-1)
+		return;
+	short index(0);
+	if (EIQ_Quality4 == data->dwParam0)
+	{
+		index = 3003;
+	}
+	else if (EIQ_Quality5 == data->dwParam0)
+	{
+		index = 3004;
+	}
+	else
+	{
+		return;
+	}
+
+// 	tstring sLotteryBasic("");
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Msg WHERE ID = ?1");
+// 	cmd->set_integer32(1 , index);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("Msg");
+// 		sLotteryBasic = table->get_text(idx).c_str();
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+	tstring sLotteryBasic = Helper::getMsgStringByID(index);
+	//没取到就退出
+	if( sLotteryBasic.empty() )
+		return;
+	//没取到就退出
+	std::string strtmp = replaceStr(sLotteryBasic,"**",name);
+	//从数据库读取奖品ID的名称
+	sLotteryBasic = ("");
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM PackageData WHERE TypeId = ?1");
+	cmd->set_integer32(1 , data->dwParam1);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("Name");
+		sLotteryBasic = table->get_text(idx).c_str();
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	if (sLotteryBasic.empty())
+		return;
+	std::string str = replaceStr(strtmp, "***", sLotteryBasic);
+	runMsg(str);
+	if (data->dwRoleID==RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		setFllowerBtn(false);
+	}
+}
+
+void RoleHeadUiLoaderLayer::setShowLine( short index )
+{
+	if (index > NULL)
+	{
+		std::string str;
+		safe_sprintf(str,lineStr.c_str(),index);
+		m_pLineLabel->setString(str.c_str());
+		m_pLineLabel->setVisible(true);
+		m_pLineBtn->setVisible(true);
+	}
+	else
+	{
+		m_pLineLabel->setVisible(false);
+		m_pLineBtn->setVisible(false);
+	}
+}
+
+void RoleHeadUiLoaderLayer::setFllowerBtn( bool isShow )
+{
+	if (m_pCelebrateBtn && m_pHongBaoSpr )
+	{
+		m_pCelebrateBtn->setVisible(isShow);
+		m_pHongBaoSpr->stopAllActions();
+		m_pHongBaoSpr->setVisible(isShow);
+	}
+}
+

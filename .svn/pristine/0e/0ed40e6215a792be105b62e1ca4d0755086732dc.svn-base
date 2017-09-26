@@ -1,0 +1,122 @@
+#include "SinSkillEffect.h"
+#include "SkillAnimManager.h"
+#include "AnimationCache.h"
+#include "RoleManager.h"
+#include "Role.h"
+#include "SkillManager.h"
+
+SinSkillEffect::SinSkillEffect()
+{
+
+}
+
+SinSkillEffect::~SinSkillEffect()
+{
+	AnimationCache::releaseDefList( _animate);
+}
+
+
+bool SinSkillEffect::initSkill(unsigned int skillId,  const st_skill_proto &skillInfo )
+{
+	bool ret = SkillEffect::initSkill(skillId, skillInfo);
+
+	if (!ret)
+	{
+		return false;
+	}
+
+	CC_ASSERT(skillInfo.dirType == DT_SIN);
+	CC_ASSERT(!skillInfo.animFile.empty());
+
+	if (skillInfo.animFile !="0")
+	{
+		AnimationCache::createDefList(1, _animate, false);
+		AnimationCache::getInstance()->getSinEffect(skillId, skillInfo.animFile.c_str(), _animate);
+		_usedAnim.push_back(AnimsUsed(AT_Sin, skillInfo.animFile));
+	}
+
+	if(skillInfo.type == ST_TARGET || skillInfo.type == ST_TARGETLOOP)
+	{
+		_updatePos = true;
+	}
+
+	_sprite->setVisible(false);
+
+	return true;
+}
+
+bool SinSkillEffect::run( unsigned int targetRoleId )
+{
+	//if ( !SkillEffect::run(targetRoleId) )
+	//	return false;
+
+	//if(targetRoleId == INVALID_ID)
+	//	return false;
+
+	if (!_bHasEffect)
+	{
+		return true;
+	}
+
+	CC_ASSERT(_animate.size() == 1 && _sprite != NULL);
+	Role *role = RoleManager::getInstance()->findRole(targetRoleId);
+	
+	if(role != NULL)
+	{
+		setPosition(ccp(role->getPosition().x, role->getPosition().y - 1));
+	}
+	else
+		return false;
+	//setPosition(role->getPosition());
+	//[bing] 让1方向特效往下移1像素 让特效盖在物体上面
+	//setPosition(ccp(role->getPosition().x, role->getPosition().y - 1));
+	CCSequence *sequence = CCSequence::createWithTwoActions(_animate[0], CCCallFuncND::create(SinSkillEffectCallback::getInstance(), SEL_CallFuncND(&SinSkillEffectCallback::onEffectFinished), this));
+	_sprite->stopAllActions();
+	_sprite->runAction(sequence);  	
+	_sprite->setVisible(true);
+	return true;
+	//}
+	//return true;
+}
+void SinSkillEffect::runOnUpdate()
+{
+	if (!_bHasEffect)
+	{
+		return;
+	}
+
+	CC_ASSERT(_animate.size() == 1 && _sprite != NULL);
+	Role *role = RoleManager::getInstance()->findRole(_targetRoleId);
+	if(role != NULL)
+	{
+		//setPosition(role->getPosition());
+		//[bing] 让1方向特效往下移1像素 让特效盖在物体上面
+		setPosition(ccp(role->getPosition().x, role->getPosition().y - 1));
+		CCSequence *sequence = CCSequence::createWithTwoActions(_animate[0], CCCallFuncND::create(SinSkillEffectCallback::getInstance(), SEL_CallFuncND(&SinSkillEffectCallback::onEffectFinished), this));
+		_sprite->stopAllActions();
+		_sprite->runAction(sequence);
+		_sprite->setVisible(true);
+	}
+}
+
+void SinSkillEffect::stop()
+{
+	if (!_bHasEffect)
+	{
+		return;
+	}
+
+	_sprite->stopAllActions();
+	_sprite->setVisible(false);
+}
+
+void SinSkillEffect::finished()
+{
+	if (!_bHasEffect)
+	{
+		return;
+	}
+
+	_sprite->setVisible(false);
+	//removeFromManager();
+}

@@ -1,0 +1,147 @@
+#include "NotificationManager.h"
+#include "f_data_set.h"
+#include "rapidxml.hpp"
+#include "f_util.h"
+#include "BaseDefine.h"
+#include "f_string_util.h"
+//#include "FileInputStream.h"
+#include "cocos2d.h"
+#include "tagDWORDTime.h"
+#include "ServerTime.h"
+#include "LocalPlayer.h"
+#include "f_string_table.h"
+#include "RoleManager.h"
+#include "HookSetUi.h"
+USING_NS_CC;
+
+using namespace std;
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+#include "wzolJni.h"
+#endif
+#define CONCATE_ADDEQU(add,equ) add##equ 
+
+static NotificationManager* _pNotifiMgr;
+NotificationManager* NotificationManager::getNotificationManager()
+{
+	if (NULL == _pNotifiMgr)
+	{
+		_pNotifiMgr = new NotificationManager();
+        _pNotifiMgr->init();
+		return _pNotifiMgr;
+	}
+
+	return _pNotifiMgr;
+}
+
+void NotificationManager::init()
+{
+	readNotificationInfoFromLocalXML();
+}
+// Do refresh all push message, IOS and Android
+void NotificationManager::refreshAllPushMessage()
+{
+    CCLog("---------wzoljniandroid  NotificationManager::refreshAllPushMessage()");
+	if (!UiMgr::getInstance()->has_inited())
+	{
+		 CCLog("UiMgr has not inited!!!");
+		return;
+	}
+
+    if (!GET_UI(HookSetUi, WCT_HookSetUi)->gameSetData().isOfflineNotificate)
+    {
+        CCLog("The push function is closed");
+        return;
+    }
+    RoleManager* roleMgr = RoleManager::getInstance();
+    if (roleMgr && roleMgr->getLocalPlayer()) {
+        this->eraseAllNotification();
+        const int level = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+        char szTime[256];
+        tagDWORDTime curtime = ServerTime::getInstance()->cal_current_server_dword_time();
+        vector<PushMessageInfo>::iterator iter = _vecPushInfo.begin();
+        PushMessageInfo tempData;
+        while(iter != _vecPushInfo.end())
+        {
+            tempData.clear();
+            tempData = *iter;
+            tagDWORDTime desTime = curtime;
+            if (level < tempData.push_level || 0 == tempData.push_weekday)
+            {
+                iter++;
+                continue;
+            }
+            int i = 0;
+            while (i < NOTIFI_MAX_DAY) {
+                desTime.hour = tempData.push_hour;
+                desTime.min = tempData.push_min;
+                
+                if (CalcTimeDiff(curtime,desTime) > 0) {
+                    desTime = AddDay(desTime);
+                    continue;
+                }
+                int docWeekday = WhichWeekday(desTime);
+                int tarDayWeek = docWeekday != 0 ? ((int)1 << (docWeekday - 1)) : (int)1 << 6;
+                if ((tempData.push_weekday & tarDayWeek) != 0) {
+                    DwordTime2DataTime(szTime,20,desTime);
+                    string timestr = szTime;
+                    string pusStr = STRING_TABLE[tempData.str_key.c_str()];
+                    int key = desTime.day * 10000 + desTime.hour * 100 + tempData.id;
+                    this->notification(timestr,pusStr.c_str(),-1,"Enter",key);
+                    CCLog("--------- timestr:%s", timestr.c_str());
+                }
+                desTime = AddDay(desTime);
+                i++;
+            }
+            
+            iter++;
+        }
+    }
+	
+}
+void NotificationManager::readNotificationInfoFromLocalXML()
+{
+	/*TODO 
+	1. Add read tab,and get all config of push;
+	2. Get the game push switch;
+	*/
+
+	f_data_set dataset;
+	std::list<std::string> fields;
+	bool ret =dataset.load("Config/PushLocalMessage.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		PushMessageInfo data;
+		data.id = dataset.get_int("id",one.c_str(),0);
+		data.push_hour = dataset.get_int("push_hour",one.c_str(),0);
+		data.push_min = dataset.get_int("push_min",one.c_str(),0);
+		data.push_level = dataset.get_int("push_level",one.c_str(),0);
+        data.push_weekday = dataset.get_int("push_weekDay",one.c_str(),0);
+		data.str_key = dataset.get_string("str_key",one.c_str(),"");
+		_vecPushInfo.push_back(data);
+	});
+}
+
+void NotificationManager::eraseAllNotification()
+{
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+    WzolJni::getInstance()->clearAllNotificationMessage();
+#endif
+}
+
+void NotificationManager::notification(std::string firDate,std::string alertBody,int badge,std::string alertAction, int notificationKey)
+{
+	std::string strKey;
+    safe_sprintf(strKey, "%d", notificationKey);
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	WzolJni::getInstance()->pushNotificationMessage(firDate,alertBody,badge,alertAction,strKey);
+#endif
+}
+
+void NotificationManager::setTag(std::string tag)
+{
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+    WzolJni::getInstance()->setPushTag(tag);
+#endif
+}

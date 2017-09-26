@@ -1,0 +1,461 @@
+
+/*
+-----------------------------------------------------------------------------
+WorldPacket.h  -  description
+-------------------
+
+begin                : 2010.11.12
+author               : Once
+
+-----------------------------------------------------------------------------
+*/
+
+#pragma once
+
+#pragma pack(push, 1)
+
+class WorldPacket
+{
+
+protected:
+	unsigned char* mData;
+
+	size_t dw_size;
+	size_t mBuffSize;
+
+	unsigned char* mPosRead;
+	unsigned char* mPosWrite;
+	bool   mFreeOnClose;
+
+	enum { MEMORY_BOUND_SIZE = 128 };
+
+public:
+
+	WorldPacket() :  
+		mData(0), 
+		mBuffSize(0), 
+		mPosRead(0), 
+		mPosWrite(0), 
+		dw_size(0),
+		mFreeOnClose(true)
+	  {
+
+	  }
+
+	  WorldPacket(const WorldPacket& other)
+	  {
+		  if (this == &other)
+			  return;
+
+		  dw_size = other.dw_size;
+		  mBuffSize = other.mBuffSize;
+		  mFreeOnClose = other.mFreeOnClose;
+
+		  mData = new unsigned char[other.mBuffSize];
+		  memcpy(mData, other.mData, mBuffSize);
+
+		  mPosRead = mData + (other.mPosRead - other.mData);
+		  mPosWrite = mData + (other.mPosWrite - other.mData);
+
+	  }
+
+	  //[bing] Add
+
+	  /*
+
+	  接收消息
+	  ex:
+
+	  WorldPacket Msg((const void*)cmd);
+
+	  Msg >> dwId1;
+	  Msg >> dwId2;
+
+	  */
+
+	  WorldPacket(const void* buff) :
+		mData(0), 
+		mBuffSize(0), 
+		mPosRead(0), 
+		mPosWrite(0), 
+		dw_size(0),
+		mFreeOnClose(true)
+	  {
+		  //[bing] 取第4BYTE的size
+		  unsigned char* pData = (unsigned char*)buff;
+		  unsigned int dwSize = *(unsigned int*)(pData + 4);
+
+		  write(buff, dwSize);
+		  
+		  size_t nSeekPos = sizeof(unsigned int) * 2;
+		  seek(nSeekPos);
+	  }
+
+	  unsigned int message_id_crc(const char* sz_message_name_)
+	  {
+		  unsigned int u_result;
+		  unsigned char *p_data = (unsigned char *)sz_message_name_;
+		  if( 0 == p_data[0] ) 
+			  return (unsigned int)-1;
+		  u_result = *p_data++ << 24;
+		  if( *p_data )
+		  {
+			  u_result |= *p_data++ << 16;
+			  if( *p_data )
+			  {
+				  u_result |= *p_data++ << 8;
+				  if( *p_data ) u_result |= *p_data++;
+			  }
+		  }
+		  u_result = ~ u_result;
+		  while( *p_data )
+		  {
+			  u_result = (u_result << 8 | *p_data) ^ crc32_table[u_result >> 24];
+			  p_data++;
+		  }
+		  return ~u_result;
+	  }
+
+	  static size_t _utf_length(const char* utf8str_) 
+	  {
+		  size_t cnt = 0;
+		  while (*utf8str_++)
+			  cnt++;
+		  return cnt;
+	  }
+
+	  static size_t _utf_length(const wchar_t* utf16str_)
+	  {
+		  size_t cnt = 0;
+		  while (*utf16str_++)
+			  cnt++;
+		  return cnt;
+	  }
+
+	  static size_t _encoded_size(wchar_t codepoint_)
+	  {
+		  if (codepoint_ < 0x80)
+			  return 1;
+		  else if (codepoint_ < 0x0800)
+			  return 2;
+		  else if (codepoint_ < 0x10000)
+			  return 3;
+		  else
+			  return 4;
+	  }
+
+	  static size_t Utf8ToUtf16(const char* src_, wchar_t* dest_, size_t destlen_, size_t srclen_ /*= 0*/) 
+	  {
+		  if (srclen_ == 0)
+			  srclen_ = WorldPacket::_utf_length(src_);
+		  size_t destcapacity = destlen_;
+		  for (size_t idx = 0; ((idx < srclen_) && (destcapacity > 0));)
+		  {
+			  wchar_t	cp;
+			  unsigned char	cu = src_[idx++];
+			  if (cu < 0x80)
+				  cp = (wchar_t)(cu);
+			  else if (cu < 0xE0)
+			  {
+				  cp = ((cu & 0x1F) << 6);
+				  cp |= (src_[idx++] & 0x3F);
+			  }
+			  else if (cu < 0xF0)
+			  {
+				  cp = ((cu & 0x0F) << 12);
+				  cp |= ((src_[idx++] & 0x3F) << 6);
+				  cp |= (src_[idx++] & 0x3F);
+			  }
+			  else
+			  {
+				  cp = L'?';
+			  }
+			  *dest_++ = cp;
+			  --destcapacity;
+		  }
+		  return destlen_ - destcapacity;
+	  }
+
+	  static size_t Utf16ToUtf8(const wchar_t* src_, char* dest_, size_t destlen_, size_t srclen_)
+	  {
+		  if (srclen_ == 0)
+			  srclen_ = WorldPacket::_utf_length(src_);
+		  size_t destcapacity = destlen_;
+		  for (size_t idx = 0; idx < srclen_; ++idx)
+		  {
+			  wchar_t cp = src_[idx];
+			  if (destcapacity < WorldPacket::_encoded_size(cp))
+				  break;
+			  if (cp < 0x80)
+			  {
+				  *dest_++ = (char)cp;
+				  --destcapacity;
+			  }
+			  else if (cp < 0x0800)
+			  {
+				  *dest_++ = (char)((cp >> 6) | 0xC0);
+				  *dest_++ = (char)((cp & 0x3F) | 0x80);
+				  destcapacity -= 2;
+			  }
+			  else if (cp < 0x10000)
+			  {
+				  *dest_++ = (char)((cp >> 12) | 0xE0);
+				  *dest_++ = (char)(((cp >> 6) & 0x3F) | 0x80);
+				  *dest_++ = (char)((cp & 0x3F) | 0x80);
+				  destcapacity -= 3;
+			  }
+			  else
+			  {
+				  *dest_++ = (char)'?';
+				  *dest_++ = (char)'?';
+				  *dest_++ = (char)'?';
+				  *dest_++ = (char)'?';
+				  destcapacity -= 4;
+			  }
+		  }
+		  return destlen_ - destcapacity;
+	  }
+
+	  //[bing] add
+	   /*
+	  发送消息流用这个
+	  ex: 服务器
+	  WorldPacket SendMsg("NET_SIS_GuildCopy_Open_Result");		//组装消息头
+
+	  SendMsg << 10;											//发送信息内容
+	  SendMsg << 20;
+
+	  SendMessage((PVOID)SendMsg.contents(), SendMsg.size());	//发送
+		
+	  ex: 客户端
+	  WorldPacket SIC_Msg("NET_SIC_cgs_begin_change");		//组装消息头
+
+	  SIC_Msg << dwId1										//发送信息内容
+	  SIC_Msg << dwId2;
+
+	  TCP_CLIENT->send_net_cmd((const s_net_cmd*)SIC_Msg.contents(), NP_NORMAL, false);		//发送
+	  */
+
+	  WorldPacket( const char* sz_message_name_ ) :
+	  mData(0), 
+		  mBuffSize(0), 
+		  dw_size(0),
+		  mPosRead(0), 
+		  mPosWrite(0), 
+		  mFreeOnClose(true) 
+	  {
+		  unsigned int dwMessageId = message_id_crc(sz_message_name_);
+		  unsigned int dwSize = sizeof(unsigned int);
+		  //[bing] 把消息按照tag_net_message格式加入消息头
+		  write( (const void *)&dwMessageId, dwSize );
+		  write( (const void *)&dwSize, dwSize );
+	  }
+
+	  WorldPacket& operator = (const WorldPacket& other)
+	  {
+		  if (this == &other)
+			  return *this;
+
+		  close();
+
+		  dw_size = other.dw_size;
+		  mBuffSize = other.mBuffSize;
+		  mFreeOnClose = other.mFreeOnClose;
+
+		  mData = new unsigned char[other.mBuffSize];
+		  memcpy(mData, other.mData, mBuffSize);
+
+		  mPosRead = mData + (other.mPosRead - other.mData);
+		  mPosWrite =  mData + (other.mPosWrite - other.mData);
+
+		  return *this;
+
+	  }
+
+	  ~WorldPacket()
+	  {
+		  close();
+	  }
+
+	  const unsigned char* contents() const 
+	  {
+		  return mData; 
+	  };
+
+	  size_t size() const 
+	  { 
+		  return dw_size; 
+	  }
+
+	  size_t bufferSize() const
+	  {
+		  return mBuffSize;
+	  }
+
+	  size_t read(void* buf, size_t count)
+	  {
+		  size_t cnt = count;
+
+		  // Read over end of memory?
+		  if (mPosRead + cnt > mData + dw_size)
+			  cnt = (size_t)(mData + dw_size - mPosRead);
+
+		  if (cnt == 0)
+			  return 0;
+
+		  assert (cnt<=count);
+
+		  memcpy(buf, mPosRead, cnt);
+		  mPosRead += cnt;
+		  return cnt;
+	  }
+
+	  size_t write(const void* buf, size_t count)
+	  {
+		  if (dw_size + count > mBuffSize)		
+		  {
+			  unsigned char* temp = mData;
+			  size_t size = bound(count);
+			  mBuffSize = size;
+			  mData = new unsigned char[size];
+			  mPosWrite = mData + dw_size;
+			  mPosRead = mData + (mPosRead - temp);
+
+			  if (temp)
+			  {
+				  memcpy(mData, temp, dw_size);
+				  delete [] temp;
+			  }
+
+		  }
+
+		  memcpy(mPosWrite, buf, count);
+		  mPosWrite += count;
+		  dw_size += count;
+
+		  resize((unsigned int)dw_size);
+
+		  return count;
+	  }
+
+	  void resize( unsigned int dwSize )
+	  {
+		  //[bing] 前4BYTE存消息编号 后4BYTE存消息size
+		  *(unsigned int*)(mData + 4) = dwSize;
+	  }
+
+	  void skip(size_t count)
+	  {
+		  size_t newpos = (size_t)(( mPosRead - mData ) + count);
+		  assert(newpos <= dw_size);        
+		  mPosRead = mData + newpos;
+	  }
+
+	  void seek(size_t pos)
+	  {
+		  assert(pos <= dw_size);
+		  mPosRead = mData + pos;
+	  }
+
+	  size_t tell(void) const
+	  {
+		  return (size_t)(mPosRead - mData);
+	  }
+
+	  bool eof(void) const
+	  {
+		  return mPosRead >= mData + dw_size;
+	  }
+
+	  void close(void)
+	  {
+		  mBuffSize = 0;
+		  dw_size = 0;
+		  mPosRead = 0;
+		  mPosWrite = 0;
+
+		  if (mFreeOnClose && mData)
+			  delete [] mData;
+
+		  mData = 0;
+	  }
+
+	  void setFreeOnClose(bool free) 
+	  {
+		  mFreeOnClose = free;
+	  }
+
+	  void Initialize(unsigned short opcode)
+	  {
+		  write(static_cast<void*>(&opcode), sizeof(opcode));
+		  mPosRead += sizeof(unsigned short);
+	  }
+
+	  void Initialize(const void* buff, size_t size)
+	  {
+		  write(buff, size);
+		  mPosRead += sizeof(unsigned short);
+	  }
+
+	  unsigned short GetOpcode()
+	  {
+		  return *((unsigned short*)(mData));
+	  }
+
+protected:
+
+	size_t bound(size_t count)
+	{
+		return mBuffSize + (1 + count / MEMORY_BOUND_SIZE ) * MEMORY_BOUND_SIZE;
+	}
+
+};
+
+template <typename T> inline WorldPacket& operator >> (WorldPacket& packet, T& val)
+{
+	packet.read(static_cast<void*>(&val), sizeof(T));
+	return packet;
+}
+
+inline WorldPacket& operator >> (WorldPacket& packet, char* val)
+{
+	int len = 0;
+	packet >> len;
+	packet.read(val, len);
+
+	return packet;
+}
+
+template <> inline WorldPacket& operator >> (WorldPacket& packet, std::string& val)
+{
+	int len = 0;
+	packet.read(static_cast<void*>(&len), sizeof(len));
+	std::string temp(len, '\0');
+	char* buff = (char*)temp.c_str();
+	packet.read((void*)buff, len);
+	val = temp;
+
+	return packet;
+}
+
+template <typename T> inline WorldPacket& operator << (WorldPacket& packet, const T& val)
+{
+	packet.write(static_cast<const void*>(&val), sizeof(T));
+	return packet;
+}
+
+inline WorldPacket& operator << (WorldPacket& packet, char const* val)
+{
+	int len = (int)strlen(val);
+	packet << len;
+	packet.write((const void*)val, len);
+	return packet;
+}
+
+template <> inline WorldPacket& operator << (WorldPacket& packet, const std::string& val)
+{
+	packet << val.c_str();
+	return packet;
+}
+
+#pragma pack(pop)

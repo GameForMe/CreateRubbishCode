@@ -1,0 +1,312 @@
+#include "TradeUi.h"
+#include "World.h"
+#include "UiResourceMgr.h"
+#include "CfgReader.h"
+#include "UiLoader.h"
+#include "BaseDefine.h"
+#include "ItemNode.h"
+#include "UiTools.h"
+#include "PackageUi.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ExchangeBusinessMgr.h"
+#include "UiManager.h"
+#include "EquipTipUi.h"
+#include "ItemTip.h"
+#include "NameMgr2.h"
+#include "SelectRoleHeadUi.h"
+
+CCNode * TradeUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["TradeFrameUi"] = UiSpriteLoader<TradeUiFrame>::loader();
+	CCNode *uiNode1 = readUiFromCCBI("tradeui", nodeLoaders, _loadSpriteSheet);
+	CCNode *uiNode2 = readUiFromCCBI("tradeui", nodeLoaders, _loadSpriteSheet);
+
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	uiNode1->setPosition(ccp(winSize.width * 0.75, winSize.height * 0.8));
+	uiNode2->setPosition(ccp(winSize.width * 0.75, winSize.height * 0.4));
+
+	TradeUiLayer *layer = TradeUiLayer::create();
+	layer->setContentSize(winSize);
+
+	layer->addChild(uiNode1, WZ_POPUI, 0);
+	layer->addChild(uiNode2, WZ_POPUI, 1);
+
+	layer->_frame1 = dynamic_cast<TradeUiFrame*>(uiNode1);
+	layer->_frame2 = dynamic_cast<TradeUiFrame*>(uiNode2);
+
+	layer->_frame1->setUserId(RoleManager::getInstance()->getLocalPlayer()->getId());
+	layer->_frame1->setName(RoleManager::getInstance()->getLocalPlayer()->getNameUtf8());
+	layer->_frame1->setHeadFrame(RoleManager::getInstance()->getLocalPlayer()->getHeadFrameName());
+	layer->_frame1->setLevel(RoleManager::getInstance()->getLocalPlayer()->getLevel());
+	layer->_frame1->setProfession(RoleManager::getInstance()->getLocalPlayer()->getRoleType());
+
+	//CC_ASSERT(RoleManager::getInstance()->getSelectRole() != (unsigned int)-1);
+	std::string srcName("");
+	layer->_frame2->setUserId(RoleManager::getInstance()->getTradeRoleId());
+	NameMgr2::getInstance()->queryName(RoleManager::getInstance()->getTradeRoleId(),srcName);
+	Role *role = RoleManager::getInstance()->findRole(RoleManager::getInstance()->getTradeRoleId());
+	layer->_frame2->setHeadFrame(role->getHeadFrameName().c_str());
+	layer->_frame2->setName(srcName);
+	layer->_frame2->setLevel(role->getLevel());
+	layer->_frame2->setProfession(role->getRoleType());
+
+	//交易界面开启时 关闭Target头像开启的快捷界面 //add by XSea 2014.11.21
+	SelectRoleHeadUi *_selectRoleHeadUi = World::getInstance()->getSelectRoleHeadUi();
+	if(_selectRoleHeadUi != NULL)
+	{
+		//_selectRoleHeadUi->setVisible(false);
+		_selectRoleHeadUi->setBtnVisible(false);
+	}
+	
+	//OPEN_UI(WCT_PACKAGEUI);
+
+	return layer;
+}
+
+TradeUiLayer * TradeUi::getUiLayer()
+{
+	return getUiNodeByTag<TradeUiLayer>(WCT_TradeUi);
+}
+
+void TradeUi::updateData()
+{
+	TradeUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateDisplayData();
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+short TradeUiLayer::getItemBegin( CCTouch &touch, eGetResult &result )
+{
+	if(isTouchOnNodeContent(_frame1, &touch))
+	{
+		result = GR_SUCCESS;
+	}
+	else if(isTouchOnNodeContent(_frame2, &touch))
+	{
+		result = GR_SUCCESS;
+	}
+	else
+	{
+		result = GR_ERROR;
+	}
+
+	return -1;
+}
+
+short TradeUiLayer::getItemEnd( CCTouch &touch, eGetResult &result, EItemConType src, short itemIndex )
+{
+	if(isTouchOnNodeContent(_frame1, &touch))
+	{
+		_frame1->getItemEnd(touch, src, itemIndex);
+		result = GR_SUCCESS;
+	}
+	else if(isTouchOnNodeContent(_frame2, &touch))
+	{
+		_frame2->getItemEnd(touch, src, itemIndex);
+		result = GR_SUCCESS;
+	}
+	else
+	{
+		result = GR_ERROR;
+	}
+
+	return -1;
+}
+
+bool TradeUiLayer::onClicked( CCTouch &touch )
+{
+	if(isTouchOnNodeContent(_frame1, &touch))
+	{
+		CCPoint pt = _frame1->convertTouchToNodeSpace(&touch);
+		int index = _frame1->getItemUnderPoint(pt);
+		if(index != -1)
+		{
+			const tagStallGoodsInfo *goodsInfo = ExchangeBusinessMgr::getInstance()->GetLocalExchangeInfo();
+			const tagStallGoodsInfo &info = goodsInfo[index];
+			if(info.n64_Serial != INVALID)
+			{
+				if (info.typeID != INVALID && info.typeID != 0)
+				{
+					if(MIsEquipment(info.typeID))
+					{
+						EquipTipUiLayer *ui = EquipTipUi::create();
+						f_equipment& equipMent = ExchangeBusinessMgr::getInstance()->getLocalExchangeEquipment(index);
+						ui->showUi(_frame2->getItemWorldPos(index),&equipMent);
+						//ui->showUi(_frame2->getItemWorldPos(index), info);
+						ui->setAllButtonOff(WCT_Null);
+						//CC_SAFE_DELETE(&equipMent);
+					}
+					else
+					{
+						ItemTip::getInstace()->open();
+						ItemTip::getInstace()->setPosition(_frame1->getItemWorldPos(index));
+						ItemTip::getInstace()->setDataId(info.typeID);
+						ItemTip::getInstace()->hideOpBtn();
+					}
+				}
+	
+			}
+		}
+		return true;
+	}
+	else if(isTouchOnNodeContent(_frame2, &touch))
+	{
+		CCPoint pt = _frame2->convertTouchToNodeSpace(&touch);
+		int index = _frame2->getItemUnderPoint(pt);
+		if(index != -1)
+		{
+			const tagStallGoodsInfo *goodsInfo = ExchangeBusinessMgr::getInstance()->GetRemoteExchangeInfo();
+			const tagStallGoodsInfo &info = goodsInfo[index];
+			if(info.n64_Serial != INVALID)
+			{
+				if (info.typeID != INVALID && info.typeID != 0) //复制粘贴还tm少一行，你妹的
+				{
+					if(MIsEquipment(info.typeID))
+					{
+						EquipTipUiLayer *ui = EquipTipUi::create();
+						const tagEquip& equip = ExchangeBusinessMgr::getInstance()->getRemoteExchangeEquipment(index);
+						f_equipment* equipMent = new f_equipment(equip);
+						ui->showUi(_frame2->getItemWorldPos(index),equipMent);
+						//ui->showUi(_frame2->getItemWorldPos(index), info);
+						ui->setAllButtonOff(WCT_Null);
+						CC_SAFE_DELETE(equipMent);
+					}
+					else
+					{
+						ItemTip::getInstace()->open();
+						ItemTip::getInstace()->setPosition(_frame2->getItemWorldPos(index));
+						ItemTip::getInstace()->setDataId(info.typeID);
+						ItemTip::getInstace()->hideOpBtn();
+					}
+				}
+			}
+		}
+		return true;
+	}
+	else
+	{
+		return false;
+	}
+
+	return false;
+}
+
+void TradeUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	DropDragDelegate::getInstance()->addDropLayer(this);
+}
+
+void TradeUiLayer::onExit()
+{
+	DropDragDelegate::getInstance()->removeDropLayer(this);
+	CCLayer::onExit();
+}
+
+void TradeUiLayer::updateDisplayData()
+{
+	tagStallGoodsInfo *localInfo = ExchangeBusinessMgr::getInstance()->GetLocalExchangeInfo();
+	tagStallGoodsInfo *remoteInfo = ExchangeBusinessMgr::getInstance()->GetRemoteExchangeInfo();
+	if(localInfo != NULL)
+	{
+		for(int i = 0; i < Role_Exchange_Max_Num; i ++)
+		{
+			ItemNode *itemNode =_frame1->getItemNode(i);
+			if (itemNode != NULL)
+			{
+				if(MIsEquipment(localInfo[i].typeID))
+				{
+					f_equipment& equipMent = ExchangeBusinessMgr::getInstance()->getLocalExchangeEquipment(i);
+					itemNode->initWithItem(&equipMent);
+					//CC_SAFE_DELETE(&equipMent);
+					//装备中不同品质边框显示;
+//					if (localInfo[i].byQuality != -1 && localInfo[i].byQuality != 0)
+//					{
+//						itemNode->setEQuality(localInfo[i].byQuality);
+// 						switch(localInfo[i].byQuality)
+// 						{
+// 						case 1:
+// 							itemNode->setQualityBox("rendui_youxiu");break;
+// 						case 2:
+// 							itemNode->setQualityBox("rendui_zhuoyue");break;
+// 						case 3:
+// 							itemNode->setQualityBox("rendui_wanmei");break;
+// 						case 4:
+// 							itemNode->setQualityBox("rendui_shishi");break;
+// 						case 5:
+// 							itemNode->setQualityBox("rendui_chuanshuo");break;
+// 						}
+//					}
+				}
+				else
+				{
+					_frame1->setItemData(i, localInfo[i].typeID, localInfo[i].goodsNum);
+				}
+			}
+		}
+	}
+	if(remoteInfo != NULL)
+	{
+		for(int i = 0; i < Role_Exchange_Max_Num; i ++)
+		{
+			ItemNode *itemNode =_frame2->getItemNode(i);
+			if (itemNode != NULL)
+			{
+				if(MIsEquipment(remoteInfo[i].typeID))
+				{
+					const tagEquip& equip = ExchangeBusinessMgr::getInstance()->getRemoteExchangeEquipment(i);
+					f_equipment* equipMent = new f_equipment(equip);
+					itemNode->initWithItem(equipMent);
+					CC_SAFE_DELETE(equipMent);
+					//装备中不同品质边框显示;
+//					if (remoteInfo[i].byQuality != -1 && remoteInfo[i].byQuality != 0)
+//					{
+//						itemNode->setEQuality(remoteInfo[i].byQuality);
+// 						switch(remoteInfo[i].byQuality)
+// 						{
+// 						case 1:
+// 							itemNode->setQualityBox("rendui_youxiu");break;
+// 						case 2:
+// 							itemNode->setQualityBox("rendui_zhuoyue");break;
+// 						case 3:
+// 							itemNode->setQualityBox("rendui_wanmei");break;
+// 						case 4:
+// 							itemNode->setQualityBox("rendui_shishi");break;
+// 						case 5:
+// 							itemNode->setQualityBox("rendui_chuanshuo");break;//已删除该图
+// 						}
+//					}
+				}
+				else
+				{
+					_frame2->setItemData(i, remoteInfo[i].typeID, remoteInfo[i].goodsNum);
+				}
+			}
+		}
+	}
+
+	_frame1->setLock(ExchangeBusinessMgr::getInstance()->isLocalLock());
+	_frame2->setLock(ExchangeBusinessMgr::getInstance()->isRemoteLock());
+}
+
+bool TradeUiLayer::onDoubleClicked( CCTouch &touch )
+{
+	/*if(isTouchOnNodeContent(_frame1, &touch))
+	{
+		CCPoint pt = _frame1->convertTouchToNodeSpace(&touch);
+		int index = _frame1->getItemUnderPoint(pt);
+		if(index != -1)
+		{
+			ExchangeBusinessMgr::getInstance()->CancelExchangeItemAny(index);
+		}
+		return true;
+	}*/
+
+	return false;
+}

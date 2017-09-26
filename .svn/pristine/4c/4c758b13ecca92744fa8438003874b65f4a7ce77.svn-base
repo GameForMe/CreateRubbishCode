@@ -1,0 +1,1719 @@
+#include "Login.h"
+#include "LoginUi.h"
+#include "RegisterUi.h"
+#include "LoginProto.h"
+#include "MessageBoxUi.h"
+#include "LoginProto.h"
+#include "Base.h"
+#include "Md5.h"
+#include "TCPClient.h"
+#include "CfgReader.h"
+#include "AppDelegate.h"
+#include "AudioPlayer.h"
+#include "CrossSceneUI.h"
+#include "SelectRole.h"
+#include "DBMgr.h"
+#include "ClientUpdate.h"
+#include "CreateRole.h"
+//#include "FileInputStream.h"
+#include "ServerTime.h"
+#include "cocos2d.h" 
+#include "TeamMgr.h"
+#include "AnimationCache.h"
+#include "CfgReader.h"
+#include "BSAnimate.h"
+#include "BSAnimation.h"
+#include "MovingBackground.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "Platform.h"
+#include "Http.h"
+#include <fstream>
+#include "QuestMgr.h"
+#include "AudioPlayer.h"
+#include "Loading.h"
+#include "tools.h"
+#include "ClientCfg.h"
+#include "UiTools.h"
+#include "ServerListUi.h"
+#include "InstanceMgr.h"
+#include "BoundingUi.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "GameActionNode.h"
+#include "AppDelegate.h"
+#include "UiManager.h"
+#include "World.h"
+//#include "QuickConfig.h"
+#include "NameMgr2.h"
+#include "f_string_table.h"
+#include "f_util.h"
+
+#if ENABLE_GOTYE==1
+#include "voice/VoiceMgr.h"
+#endif
+
+
+/*
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_WIN32)
+#include <vld.h>
+#endif
+*/
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+#include "wzolJni.h"
+#endif
+
+using namespace cocos2d;
+
+char LOGINSERVER[32];
+unsigned int OPK_ORIGIN_VERSION = 401;
+const wchar_t* CLIENT_VERSION = L"1.7.6.0";
+
+#define EXTERNAL_NET
+#ifdef WIN32
+const char* HTTP_SERVER_IP = "msby.pay.szldsh.cn";
+#endif
+
+
+
+class MaskNode : public CCNode, public CCTouchDelegate
+{
+public:
+	CREATE_FUNC(MaskNode);
+	bool init() {
+
+		return true;
+	}
+
+	virtual void onEnter()
+	{
+
+		//优先级调整为比messagebox低
+		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -3, true);
+	}
+
+	virtual void onExit()
+	{
+		AudioPlayer::getSigletonPtr()->stopMusic();//(LOGIN_RUN);
+		CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	}
+
+	virtual bool ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+	{
+		return true;
+	}
+};
+
+
+Login::~Login()
+{
+	if(m_needExit)
+	{
+		//!TODO关闭,messagebox提示，无法更细资源，游戏需要关闭,同时需要把opk文件删除le ;
+	}
+}
+
+Login::Login()
+	:  _openServerListUi(false)
+	, _writeble(CCFileUtils::sharedFileUtils()->getWritablePath())
+	, _sendProof(false)
+	, _verifyFailed(false)
+	,_needLogin(true)
+	,_needShowSdkLoginUI(false)
+	,_needShowSdkSwitchUI(false)
+	,_isFirstCreateRole(false)
+{
+	CCLOG("_writeablePath = %s", _writeble.c_str());
+	m_needExit = false;
+	//m_checkingsz = 0;
+	m_ticket = "";
+	m_userid = "";
+	m_sdkType = (unsigned int)-1;
+	m_GameServerIP = "";
+	//m_totalsz = 0;
+	//m_downloadsz = 0;
+	//_gameServerIP = INVALID;
+	//_resInited = false;
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	m_sSEName = sSEDir + "E1_32.plist";
+}
+
+Login * Login::getInstance()
+{
+	static Login _login;
+	return &_login;
+}
+
+
+unsigned int Login::onProof( s_net_cmd* cmd )
+{//登陆服务器 验证完成;
+
+	CCLOG("------------ Login::onProof 1");
+
+	this->removeLoadingSE();
+	//[bing] 只要从外面登陆的一定要重置它
+	TCP_CLIENT->bCgsIsFinish = true;
+
+	if(cmd->id == message_id_crc("NET_L2C_proof_result"))
+	{
+		NET_L2C_proof_result *ret = (NET_L2C_proof_result*)cmd;
+		if(ret->dw_error_code == E_ProofResult_Queue)
+		{//需要排队
+			_scene->addChild(MaskNode::create());
+		}
+		else if (ret->dw_error_code == E_ProofResult_Ip_Full)
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["ver_error_5"]);
+		}
+		else if(ret->dw_error_code == E_Success)
+		{
+			CCLOG("---------- Login::onProof Success %s, %d", ret->sz_ip, ret->dwPort);
+			//_gameServerIP = ret->dw_ip;
+			m_GameServerIP = ret->sz_ip;
+			//CrossSceneUI::getInstance()->open(0);
+			ClientUpdate::getInstance()->setServerType(ST_GAME);
+			NET_SIC_join_game *joinGame = new NET_SIC_join_game;
+			joinGame->dw_account_id = ret->dw_account_id;
+			//joinGame->dw_ThirdID = ret->dw_ThirdID;
+			memcpy(joinGame->dw_ThirdID,ret->dw_ThirdID,sizeof(ret->dw_ThirdID));
+
+			// 当前设备类型
+			joinGame->nOSType = CCApplication::sharedApplication()->getTargetPlatform();
+
+#if _USE_SDK
+			std::string deviceId = WzolJni::getInstance()->getDeviceId();
+			memcpy(joinGame->deviceId, deviceId.c_str(), deviceId.size());
+			std::string thirdid("");
+			bool is = WzolJni::getInstance()->callPlatformWithReturn(GET_THIRD_ID,"",thirdid);
+			if (is && !thirdid.empty())
+			{
+				memcpy(joinGame->szChannelType,thirdid.c_str(),thirdid.size());
+			}
+#endif
+			//当前appversion
+			std::string version = CCUserDefault::sharedUserDefault()->getStringForKey(KEY_OF_VERSION);
+			memcpy(joinGame->appVersion, version.c_str(), version.size());
+
+
+			joinGame->n_ThirdType = ret->n_ThirdType;
+			joinGame->dwVerifyCode = ret->dwVerifyCode;
+			ClientUpdate::getInstance()->setCmd(joinGame);
+			TCP_CLIENT->connect(ret->sz_ip , ret->dwPort);
+			//_loginUi->removeFromParent();
+			//[bing] 客户端连接GameServer
+			World::getInstance()->setAccountId(ret->dw_account_id);
+#ifdef _USE_SDK
+			extern int g_zoneid;
+			extern std::string g_zonename;
+			extern std::string g_zonenum;
+			extern std::string g_areaName;
+			std::string roleName = "";
+			WzolJni *jni = WzolJni::getInstance();
+			jni->loginGameInfo(1,0, roleName.c_str(), 1, g_zoneid, g_zonename.c_str(), g_zonenum.c_str(), World::getInstance()->getAccountId(), g_areaName.c_str());
+#endif
+
+			//add by lpf
+#if ENABLE_GOTYE==1
+			//VoiceMgr::getSingleton()->init();
+
+			ServerZone::Zone zone;
+			ServerZone::Server server;
+			if (!ServerListUi::getInstance()->getCurDataForGame(zone, server))
+			{
+				server.serial = 1000;
+			}
+			std::stringstream yy_account;
+			yy_account << server.serial;
+			VoiceMgr::getSingleton()->setYYConfig(YYCO_SERVERID, yy_account.str());
+#endif
+            
+		}
+		else
+		{
+			CCLOG("---------- Login::onProof Error %s, %d   ------retCode%d", ret->sz_ip, ret->dwPort, ret->dw_error_code);
+			//#ifndef _USE_SDK
+			hideTip();
+			//!读取数据库，获取错误字符;
+			std::string name;
+			c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT msg FROM LoginError WHERE id = ?1");
+			cmd->set_integer32(1 , ret->dw_error_code);
+			c_sql_table* table = c_db_manager::getSingleton()->create_table();
+			while(table->retrieve_row())
+			{
+				name = table->get_text(0);
+			}
+			c_db_manager::getSingleton()->destroy_table(table);
+			c_db_manager::getSingleton()->end_operation(cmd);
+			MessageBoxUi *ui = MessageBoxUi::createWithOneBtn("\xE9\x94\x99\xE8\xAF\xAF", name.c_str(), "\xE7\xA1\xAE\xE5\xAE\x9A");
+			ui->signalOkBtnPressed.connect(ClientUpdate::getInstance(), &ClientUpdate::onMessageBoxCancel);
+			_scene->addChild(ui, WZ_MESSAGEBOX);
+			//#endif
+		}
+	}
+	return 0;
+}
+
+unsigned int Login::onJoinGame( s_net_cmd *cmd )
+{
+	CCLOG("------------ onJoinGame 1");
+
+	//static bool bLoad = false;
+	//if(bLoad)
+	//	return 0;
+	//bLoad = true;
+
+	if(cmd->id == message_id_crc("NET_SIS_join_game"))
+	{//游戏服务器连接成功;
+		NET_SIC_enum_role role;
+
+		wchar_t vStr[256] = {0};
+
+		ServerZone::Zone zone;
+		ServerZone::Server server;
+		ServerListUi::getInstance()->getCurDataForGame(zone, server);
+
+		Utf8ToUtf16(server.name.c_str(), vStr,256,0);
+		role.dw_world_name_crc = f_util::get_crc(vStr);
+
+		TCP_CLIENT->send_net_cmd(&role, NP_CRITICAL, false);
+		showTip(GET_STR(80));
+
+		TCP_CLIENT->setLConnectingState(false);
+
+		//[bing] 发送给服务器记录账号密码信息用
+		/*
+		NET_SIC_UNAME_PWD msg;
+		memcpy_s(msg.szUserName, 32, "admin", 32);
+		memcpy_s(msg.szPwd, 32, "123456", 32);
+		TCP_CLIENT->send_net_cmd(&msg, NP_CRITICAL, false);
+		*/
+	}
+	return 0;
+}
+
+unsigned int Login::onEnumRoleList( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_enum_role"))
+	{
+		NET_SIS_enum_role *enumRole = (NET_SIS_enum_role*)cmd;
+		if (enumRole->dw_error_code != 0)
+		{
+			CCLog("onEnumRoleList Fail !!!");
+			return -1;
+		}
+
+		CHECK_SCENE_TRANSATION_FINISHED;
+
+		if(enumRole->n_num > 0)
+		{
+			_isFirstCreateRole = false;
+			SelectRole::getInstance()->open();  //Legend
+			CCDirector::sharedDirector()->replaceScene(SelectRole::getInstance()->getScene());
+			//close();
+			tagSimRole* pRole = (tagSimRole *)(enumRole->bySimpleInfo);
+			for(int i = 0; i < enumRole->n_num && i < 3; i ++)
+			{
+				RoleInfo roleInfo;
+				roleInfo.roleNum = i;
+				roleInfo.id = pRole[i].dw_role_id;
+				roleInfo.level = pRole[i].byLevel;
+				roleInfo.type = (eRoleTypeEnum)pRole[i].eClassType;
+				roleInfo.roleCreateTime = pRole[i].dwDelGuardTime;
+				if(pRole[i].eClassType == EV_Warrior)
+				{
+					if(pRole[i].Avatar.bySex == 0)
+						roleInfo.type = RTE_WWARRIOR;
+					else
+						roleInfo.type = RTE_MWARRIOR;
+				}
+				else if(pRole[i].eClassType == EV_Mage)
+				{
+					if(pRole[i].Avatar.bySex == 0)
+						roleInfo.type = RTE_WMASTER;
+					else
+						roleInfo.type = RTE_MMASTER;
+				}
+				else if(pRole[i].eClassType == EV_Taoist)
+				{
+					if(pRole[i].Avatar.bySex == 0)
+						roleInfo.type = RTE_WTAOIST;
+					else
+						roleInfo.type = RTE_MTAOIST;
+				}
+				memcpy(roleInfo.name, pRole[i].szRoleName, sizeof(wchar_t) * X_SHORT_NAME);
+				//SelectRole::getInstance()->clearRole();
+				SelectRole::getInstance()->addRole(roleInfo);
+				NameMgr2::getInstance()->updateRoleName(roleInfo.id, convertName(roleInfo.name));
+			}
+			SelectRole::getInstance()->onRolePage();
+#ifdef _USE_SDK
+			string params;
+			extern int g_zoneid;
+			WzolJni* jni = WzolJni::getInstance();
+			params += "accountId="+ jni->toString(World::getInstance()->getAccountId());
+			params += "\tserverId="+ jni->toString(g_zoneid);
+			jni->logToServer(LOG_LOGIN, params);
+#endif
+		}
+		else
+		{
+			_isFirstCreateRole = true;
+			CCDirector::sharedDirector()->replaceScene(CreateRole::getInstance()->getScene(true));
+			CreateRole::getInstance()->open();   //Legend
+
+#ifdef _USE_SDK
+			WzolJni *jni = WzolJni::getInstance();
+			jni->ryRegisterAccountID();
+#endif
+
+			// #ifdef _USE_SDK
+			// 			string params;
+			// 			extern int g_zoneid;
+			// 			WzolJni* jni = WzolJni::getInstance();
+			// 			params += "accountId="+ jni->toString(World::getInstance()->getAccountId());
+			// 			params += "\tserverId="+ jni->toString(g_zoneid);
+			// 			//按照需求只有以前没创建账号才发rolecreate消息
+			// 			unsigned int lastLogin = (unsigned int)enumRole->dwTimeLastLogin;
+			// 			if (lastLogin == 0)
+			// 			{
+			// 				jni->logToServer(LOG_CREATE, params);
+			// 				jni->logToServer(LOG_CREATEUI, "");
+			// 			}
+			// 			else
+			// 			{
+			// 				jni->logToServer(LOG_LOGIN, params);
+			// 			}
+			// #endif
+		}
+		//gx add 组队消息注册;
+		TeamMgr::getInstance()->Init_Signal();
+		InstanceMgr::getInstance()->Init_Signal();//副本消息单独注册;
+		//end
+	}
+	return 0;
+}
+
+//add by lpf 2015-10-31  游戏登陆ticket验证结果
+unsigned int Login::onCheckLoginFirstResult( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_C2L_proof_sdk_ticketid_result"))
+	{
+		NET_C2L_proof_sdk_ticketid_result *enumRole = (NET_C2L_proof_sdk_ticketid_result*)cmd;
+		if (enumRole->dwErrorID != 0)
+		{
+			CCLOG("----------------------------------onCheckLoginFirstResult 1   dwErrorID:%d    userid:%s", enumRole->dwErrorID, enumRole->szUserid);
+			//_verifyFailed = false;
+			hideTip();
+			showTip("\xE9\xAA\x8C\xE8\xAF\x81\xE5\xA4\xB1\xE8\xB4\xA5\xEF\xBC\x8C\xE8\xAF\xB7\xE9\x87\x8D\xE8\xAF\x95\xEF\xBC\x81");
+			ClientUpdate::getInstance()->gotoSeverListMsg2();
+			return -1;
+		}
+		if (m_userid.empty())
+		{
+			m_userid = enumRole->szUserid;
+		}
+
+#ifdef _USE_SDK
+		if (enumRole->szUserid != NULL)
+		{
+			string params;
+			WzolJni* jni = WzolJni::getInstance();
+			string strid = enumRole->szUserid;
+			params += "sdkid="+ strid;
+			jni->logToServer(WHAT_LOGIN, params);
+		}
+#endif
+		CCLOG("----------------------------------onCheckLoginFirstResult 2   dwErrorID:%d    userid:%s", enumRole->dwErrorID, enumRole->szUserid);
+	}
+
+	return 0;
+}
+
+void Login::loginBtnPressed()
+{
+#ifdef _USE_SDK
+	onSeverSelect();
+#else
+	CCLOG("-----------------Login::loginBtnPressed()  --1 ");
+
+	CCLOG("-----------------Login::loginBtnPressed()  --2 ");
+	_userName =  _loginUi->getUserName();
+	_pwd = _loginUi->getPassword();
+	CCLOG("-----------------Login::loginBtnPressed()  --3 ");
+	ClientCfg::getInstance()->setString("general", "user", _userName);
+	ClientCfg::getInstance()->setString("general", "pwd", _pwd);
+	CCLOG("-----------------Login::loginBtnPressed()  --4 ");
+	ClientCfg::getInstance()->flush();
+	CCLOG("-----------------Login::loginBtnPressed()  --5 ");
+
+	ServerZone::Zone zone, realZone;
+	ServerZone::Server server, realServer;
+	/*
+	if(ServerListUi::getInstance()->getCurData(zone, server))
+	{*/
+	//ClientCfg::getInstance()->getString()
+	std::string areaName = ClientCfg::getInstance()->getString("general", "area", "").c_str();
+	std::string serverName = ClientCfg::getInstance()->getString("general", "server", "").c_str();
+	CCLOG("-----------------Login::loginBtnPressed()  --6 ");
+	if (areaName != "" || serverName != "")
+	{
+		CCLOG("-----------loginBtnPressed()-----------");
+		ServerListUi::getInstance()->praseServerList();
+	}
+	CCLOG("-----------------Login::loginBtnPressed()  --7 ");
+	bool flag = ServerListUi::getInstance()->getCurDataForGame(zone, server);
+	flag = ServerListUi::getInstance()->getCurDataForLogin(realZone, realServer);
+	//setisFirstLogin(true);
+	//上一次登陆服务器 存储区服
+	ClientCfg::getInstance()->setString("general", "area", zone.name);
+	ClientCfg::getInstance()->setString("general", "servernum", server.num); //保存上次登陆是几服 add by XSea 2014.10.22
+	ClientCfg::getInstance()->setString("general", "server", server.name);
+	ClientCfg::getInstance()->setString("general", "serverstate", CCString::createWithFormat("%d",server.status)->getCString());
+	ClientCfg::getInstance()->setInt("general", "areatag", zone.areatag);
+	saveUsedLoginServer(zone.ip, zone.port, server.name);
+	ClientCfg::getInstance()->flush();
+	CCLOG("-----------------Login::loginBtnPressed()  --8 ");
+	ClientUpdate::getInstance()->setServerType(ST_LOGIN);
+	CCLOG("-----------------Login::loginBtnPressed()  --9 ");
+	NET_C2L_proof *cmd = new NET_C2L_proof;
+	CCLOG("-----------------Login::loginBtnPressed()  --10 [%s-%d-%s]", zone.ip.c_str(), zone.port, server.name.c_str());
+	strcpy(cmd->szUserName , _userName.c_str());
+	cmd->dwType = 1;
+	unsigned char digest[16];
+	c_md5_creator md5;
+	CCLOG("-----------------Login::loginBtnPressed()  --11 [%s-%s]", _userName.c_str(), _pwd.c_str());
+	strcpy(cmd->szPsd , md5.make((_pwd + "msby.password").c_str(), digest).c_str());
+	strcpy(cmd->szGUID , "123");
+
+	wchar_t vStr[256] = {'\0'};
+	memset(vStr, 0, sizeof(vStr));
+	Utf8ToUtf16(realZone.version.c_str(), vStr,256,0);
+	cmd->dwCurVersionID = f_util::get_crc(vStr);
+	memset(vStr, 0, sizeof(vStr));
+	Utf8ToUtf16(realServer.name.c_str(), vStr,256,0);
+	loginServerName = server.name;
+	cmd->dw_world_name_crc = f_util::get_crc(vStr);
+
+	CCLOG("login world:%s->%u", realServer.name.c_str(), cmd->dw_world_name_crc);
+	//[bing] 保存一下登陆信息
+	TCP_CLIENT->SaveAccountInfo(cmd->szUserName, cmd->szPsd, cmd->dwCurVersionID, realZone.ip.c_str(), realZone.port, cmd->dw_world_name_crc);
+
+	ClientUpdate::getInstance()->setCmd(cmd);
+	TCP_CLIENT->connect(realZone.ip.c_str() , realZone.port);
+	TCP_CLIENT->setLConnectingState(true);
+
+	this->showLoadingSE();
+#endif
+
+}
+
+ void Login::loginVerifyCallback(bool success, const std::string &guid, const std::string &szCode)
+ {
+ 	if(success)
+ 	{
+ 	CCLOG("loginVerifyCallback 2222222222");
+ 	_userName = guid;
+ 	_pwd = szCode;
+ 	_sendProof = true;
+ 	}
+ 	else
+ 	{
+ 		_verifyFailed = true;
+ 		CCLOG("loginVerifyCallback 333333333");
+ 	}
+ }
+
+bool Login::openServerList()
+{
+	CCLOG("openServerList=====");
+	_openServerListUi = true;
+	return _openServerListUi;
+}
+
+bool Login::openServerList2()
+{
+	CCLOG("openServerList2=====");
+	//ClientUpdate::getInstance()->_currentScene = ST_LOGINSCENE;
+	_openServerListUi2 = true;
+	return _openServerListUi2;
+}
+void Login::openOnCGVedioEnd1()
+{
+	Login::getInstance()->open();
+	/*CCScene *loginScene =*/ Login::getInstance()->getScene();
+	//loginScene->retain();
+}
+void Login::openOnCGVedioEnd2()
+{
+	//CCSpriteFrameCache::sharedSpriteFrameCache()->removeUnusedSpriteFrames();
+	//CCTextureCache::sharedTextureCache()->removeUnusedTextures();
+
+#ifdef _USE_TX_SDK
+	Login::getInstance()->openOnSwitchAccount();
+	return;
+#endif
+
+#ifdef _USE_SDK
+	//[bing] 初始化游老大的SDK
+	//init_Uld_Sdk();
+#endif
+	//Login::getInstance()->open();
+	CCScene *loginScene = Login::getInstance()->getScene();
+
+#ifndef WIN32
+	CCLOG("-----------GoLoginScene::loginSceneOn----------2");
+	CCDirector::sharedDirector()->replaceScene(loginScene);
+	//loginScene->retain();
+	loginScene->setVisible(false);
+
+	//loginScene->release();
+	CCLOG("----------GoLoginScene::loginSceneOn----------3");
+#else
+	CCTransitionFade *crossFade = CCTransitionFade::create(1.2f, loginScene);
+	CCDirector::sharedDirector()->replaceScene(crossFade);
+#endif
+}
+void Login::openOnCGVedioEnd3()
+{
+	CCScene *loginScene = Login::getInstance()->getScene();
+	loginScene->setVisible(true);
+}
+void Login::openOnCGVedioEnd4()
+{
+	AudioPlayer::getSigletonPtr()->playerMusic(LOGIN_RUN);
+}
+
+void Login::registerBtnPressed()
+{
+	//一键注册 改变场景;
+	//	_scene->removeChild(_loginUi);
+	// 	_registerUi = RegisterUi::create();
+	// 	_scene->addChild(_registerUi);
+
+	//91平台相关测试
+	//WzolJni::getInstance()->loginAcountJni();
+	//WzolJni::getInstance()->payJni();
+}
+
+void Login::open(bool bFirst)
+{
+	TCP_CLIENT->clear();
+	CCLOG("-------------- Login::open() 1");
+	if (ClientUpdate::getInstance()->_currentScene == ST_LOGINSCENE)
+	{
+		CC_ASSERT(_loginUi);
+		_loginUi->restoreLoginBtn();
+		return;
+		//close();
+	}
+
+	CC_ASSERT(_scene==NULL);
+
+	ClientUpdate::getInstance()->_currentScene = ST_LOGINSCENE;
+
+	_loginUi = NULL;
+	_needShowExit = false;
+
+	CCLOG("-------------- Login::open() 2");
+	//AudioPlayer::getSigletonPtr()->playerMusic(LOGIN_RUN);//vv
+
+	CCLOG("-------------- Login::open() 3");
+	//CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+
+	CCLOG("-------------- Login::open() 4");
+	getScene(true);
+
+	CCLOG("-------------- Login::open() 5");
+	_loginUi = LoginUi::create();
+	CCLOG("-------------- Login::open() 6");
+	_scene->addChild(_loginUi);
+
+	//#ifdef _USE_SDK
+	//	if (WzolJni::getInstance()->getPlatformType() == 1004 || 
+	//		WzolJni::getInstance()->getPlatformType() == 1005) {
+	//			_txLoginUI = entranceUIForTX::create();
+	//			_txLoginUI->setTag(1988);
+	//			_scene->addChild(_txLoginUI);
+	//	}
+	//#endif
+
+	CCLOG("-------------- Login::open() 7");
+	//read userName, password
+	std::string user = ClientCfg::getInstance()->getString("general", "user", "");
+	std::string pwd = ClientCfg::getInstance()->getString("general", "pwd", "");
+	user = trimStr(user);
+	pwd = trimStr(pwd);
+	CCLOG("-------------- Login::open() 8");
+
+#ifndef _USE_SDK
+	_loginUi->setUserName(user);
+	_loginUi->setPassword(pwd);
+#endif
+
+	_loginUi->signalLoginPressed.connect(this, &Login::loginBtnPressed);
+
+#ifdef WIN32
+	_loginUi->setUserName(user);
+	_loginUi->setPassword(pwd);
+	CCLOG("-------------- Login::open() 9");
+
+	CCLOG("Login::open() 10");
+#endif
+
+	CCLOG("-------------- Login::open() 10");
+
+	TCP_CLIENT->register_net_cmd("NET_L2C_proof_result" , this , &Login::onProof);
+	TCP_CLIENT->register_net_cmd("NET_SIS_join_game", this, &Login::onJoinGame);
+	TCP_CLIENT->register_net_cmd("NET_SIS_enum_role", this, &Login::onEnumRoleList);
+	TCP_CLIENT->register_net_cmd("NET_SIS_synchronize_time", this, &Login::onSynchronizeTime);
+	TCP_CLIENT->register_net_cmd("NET_L2C_queue", this, &Login::onQueue);
+	TCP_CLIENT->register_net_cmd("NET_C2L_proof_sdk_ticketid_result", this, &Login::onCheckLoginFirstResult);
+
+	setisFirstLogin(true);
+
+	// #ifndef WIN32
+	// 	//资源都用自动更新里拷贝了，不在这里处理
+	// 	//updateResource();	//[bing] 手机版用rpz包资源
+	// #endif
+
+#if (defined _WIN32) &&(defined _DEBUG) 
+	bool bEnable = CFG(int,"enable_menu",0)==1;
+
+	if (bEnable)
+	{
+		struct menu_def
+		{
+			const char* szText;
+			SEL_MenuHandler handler;
+		}menu_array[]=
+		{
+			{"test",menu_selector(Login::dumpTexture)},
+			{NULL,NULL},
+		};
+
+		CCMenu* menu = CCMenu::create();
+		_scene->addChild(menu);
+		menu->setPosition(CCPointZero);
+		//menu->setHandlerPriority(1);
+
+		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+		for (int i = 0; menu_array[i].szText != NULL  ; i++)
+		{
+			CCLabelTTF* label = CCLabelTTF::create(menu_array[i].szText,FONT_NAME,24);
+			CCMenuItemLabel* mi = CCMenuItemLabel::create(label,this,menu_array[i].handler);
+			menu->addChild(mi);
+			mi->setPosition(ccp(winSize.width -50,winSize.height - (260+30*(i+1))));
+		}
+	}
+
+#endif
+	CCLOG("-------------- Login::open() 11");
+}
+void Login::openOnSwitchAccount()
+{
+#ifdef _USE_SDK
+	CHECK_SCENE_TRANSATION_FINISHED;
+
+	CCLog("------------- openOnSwitchAccount 1");
+
+	ClientUpdate::getInstance()->_currentScene = ST_LOGINSCENE;
+	AudioPlayer::getSigletonPtr()->playerMusic(LOGIN_RUN);//vv
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+
+	if (_scene==NULL)
+	{
+		_scene = CCScene::create();
+		_scene->retain();
+	}
+
+	CCDirector::sharedDirector()->replaceScene(_scene);
+
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	CCSprite *sprite = CCSprite::create((uiDir + "login1.jpg").c_str());
+	sprite->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+	const CCSize& uiEffectSize = sprite->getContentSize();
+	sprite->setScaleX(winSize.width / uiEffectSize.width);
+	sprite->setScaleY(winSize.height / uiEffectSize.height);
+	_scene->addChild(sprite);
+
+	ClientUpdate::getInstance()->setJoinGame(false);
+	extern bool g_exit;
+	TCP_CLIENT->shutdown();
+	g_exit = true;
+	TCP_CLIENT->initialize(15 , false , true);
+
+	TCP_CLIENT->register_net_cmd("NET_L2C_proof_result" , this , &Login::onProof);
+	TCP_CLIENT->register_net_cmd("NET_SIS_join_game", this, &Login::onJoinGame);
+	TCP_CLIENT->register_net_cmd("NET_SIS_enum_role", this, &Login::onEnumRoleList);
+	TCP_CLIENT->register_net_cmd("NET_SIS_synchronize_time", this, &Login::onSynchronizeTime);
+	TCP_CLIENT->register_net_cmd("NET_L2C_queue", this, &Login::onQueue);
+	TCP_CLIENT->register_net_cmd("NET_C2L_proof_sdk_ticketid_result", this, &Login::onCheckLoginFirstResult);
+#endif
+}
+
+void Login::close()
+{
+	CCLog("------------- Login::close() 1");
+
+	ServerListUi::getInstance()->close();
+	CrossSceneUI::getInstance()->close();
+
+	_scene=  NULL;
+	//CC_SAFE_RELEASE_NULL(_scene);
+	//_scene->release();
+	//_scene = NULL;
+
+	//delete _moveBack;
+
+	//std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	//std::string pListFile = uiDir + "ccbResources/login.plist";
+	//CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFramesFromFile(pListFile.c_str());
+	//CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFramesFromFile((uiDir + "ccbResources/loading.plist").c_str());
+	CCTextureCache::sharedTextureCache()->removeUnusedTextures();
+
+	TCP_CLIENT->unregister_net_cmd("NET_L2C_proof_result" , this , &Login::onProof);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_join_game", this, &Login::onJoinGame);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_enum_role", this, &Login::onEnumRoleList);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_synchronize_time", this, &Login::onSynchronizeTime);
+	TCP_CLIENT->unregister_net_cmd("NET_L2C_queue", this, &Login::onQueue);
+	TCP_CLIENT->unregister_net_cmd("NET_C2L_proof_sdk_ticketid_result", this, &Login::onCheckLoginFirstResult);
+}
+
+unsigned int Login::onSynchronizeTime( s_net_cmd *cmd )
+{
+	NET_SIS_synchronize_time* pMsg = (NET_SIS_synchronize_time*)cmd;
+	ServerTime::getInstance()->synchronism_time( pMsg->dw_time );
+	return 0;
+}
+
+void Login::showTip( const std::string &string )
+{
+	//ToolTip::getInstance();
+	//return;
+	ToolTip::getInstance()->show(string, -1);
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	ToolTip::getInstance()->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f - 180.0f));
+#ifdef OVD_PLATFORM_WINDOWS
+	CCDirector::sharedDirector()->drawScene();
+#endif
+}
+
+void Login::hideTip()
+{
+	//return;
+	ToolTip::getInstance()->hide();
+}
+
+// void Login::updateResource()
+// {
+// 	CCLog("------------------- Login::updateResource 1");
+// 	if(_resInited == true)
+// 		return;
+// 
+// 	CCLog("------------------- Login::updateResource 2");
+// 
+// /*
+// #ifdef _USE_SDK
+// 	//[bing] 用这个
+// 	CCFileUtils::sharedFileUtils()->reInitResource();
+// 
+// 	CCLayer *layer = static_cast<CCLayer*>(_scene->getChildByTag(1000));
+// 	if(layer)
+// 		CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(layer);
+// 	WzolJni::getInstance()->checkForUpdate();
+// #endif
+// 
+// 	return;
+// */
+// 
+// 	CCLog("--------------updateResource 1");
+// 	//_loading = new ResLoading;
+// 	_update_res = true;
+// 
+// 	switch(getServerOPKVersion())
+// 	{
+// 	case DS_OK:
+// 		break;
+// 	case DS_NO_NET:
+// 		showInfoAndExit();
+// 		return;
+// 	case DS_DOWNLOAD_FAIL:
+// 		deleteOPKAndExit();
+// 		break;
+// 	}
+// 
+// 	CCLog("---------------updateResource 2");
+// 	//!1.检查本地opk是否存在
+// 	checkOPKExist();
+// 
+// 	CCLog("------------------updateResource 3");
+// 	_downloadThread = new c_thread(_download_thread_func , NULL , this);
+// }
+
+void Login::update( float dt )
+{
+#ifdef _USE_SDK
+	//if (_needLogin && isCheckVersionOK() && WzolJni::getInstance()->isCGEnd())
+	if (_needLogin && WzolJni::getInstance()->isCheckVersionOK() )//带自动更新时不用判断CG
+	{
+		CCLOG("------------------Login::update  4 _needLogin && isCheckVersionOK()");
+		WzolJni::getInstance()->loginAcountJni();
+		_needLogin = false;
+		//平台相关登陆
+	}
+
+	if (_needShowSdkLoginUI && WzolJni::getInstance()->isShowKTSdkLoginUI())
+	{
+		CCLOG("------------------Login::update  4 _needShowSdkLoginUI && isShowKTSdkLoginUI()");
+		_needShowSdkLoginUI = false;
+		_txLoginUI = entranceUIForTX::create();
+		_scene->addChild(_txLoginUI);
+	}
+	if (_needShowSdkSwitchUI && WzolJni::getInstance()->isShowKTSdkSwitchUI())
+	{
+		CCLOG("------------------Login::update  4 _needShowSdkSwitchUI && isShowKTSdkSwitchUI()");
+		_needShowSdkSwitchUI = false;
+#ifdef _USE_TX_SDK
+		if (_loginUi)
+			_loginUi->removeFromParent();
+		_txLoginUI = entranceUIForTX::create();
+		_scene->addChild(_txLoginUI);
+#endif
+	}
+
+	if(_openServerListUi)
+	{
+		CCLOG("------------------- login::update 5");
+		_needShowSdkSwitchUI = true;
+		_openServerListUi = false;
+		//ServerListUi::getInstance()->open();
+#ifdef _USE_TX_SDK
+		_loginUi = LoginUi::create();
+		_scene->addChild(_loginUi);
+#endif
+		//_loginUi->signalLoginPressed.connect(this, &Login::loginBtnPressed);
+
+		hideTip();
+		//平台登录成功
+		showTip("\xE5\xB9\xB3\xE5\x8F\xB0\xE7\x99\xBB\xE5\xBD\x95\xE6\x88\x90\xE5\x8A\x9F");
+		if (_loginUi)
+			_loginUi->resetServerlistprased();
+
+		WzolJni::getInstance()->downloadServerList();
+	}
+
+	if(_openServerListUi2)
+	{
+		CCLOG("------------- login::_openServerListUi2 if(_openServerListUi2)");
+
+		_openServerListUi2 = false;
+		openOnSwitchAccount();
+	}
+
+	if(_sendProof)
+	{
+		CCLOG("------------- login::update if(_sendProof)");
+		_sendProof = false;
+		hideTip();
+		showTip("\xE9\xAA\x8C\xE8\xAF\x81\xE6\x88\x90\xE5\x8A\x9F");
+		beginLogin();
+	}
+
+	if(_verifyFailed)
+	{
+		CCLOG("login::update 5");
+		_verifyFailed = false;
+		hideTip();
+		showTip("\xE9\xAA\x8C\xE8\xAF\x81\xE5\xA4\xB1\xE8\xB4\xA5\xEF\xBC\x8C\xE8\xAF\xB7\xE9\x87\x8D\xE8\xAF\x95\xEF\xBC\x81");
+		ClientUpdate::getInstance()->gotoSeverListMsg2();
+	}
+#endif
+}
+void Login::backtoLoginUI()
+{
+	getScene(true);
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	CCSprite *sprite = CCSprite::create((uiDir + "login1.jpg").c_str());
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	const CCSize& uiEffectSize = sprite->getContentSize();
+	sprite->setScaleX(winSize.width / uiEffectSize.width);
+	sprite->setScaleY(winSize.height / uiEffectSize.height);
+	sprite->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+	_scene->addChild(sprite);
+	_loginUi = LoginUi::create();
+	_scene->addChild(_loginUi);
+
+	ClientUpdate::getInstance()->_currentScene = ST_LOGINSCENE;
+
+	TCP_CLIENT->register_net_cmd("NET_L2C_proof_result" , this , &Login::onProof);
+	TCP_CLIENT->register_net_cmd("NET_SIS_join_game", this, &Login::onJoinGame);
+	TCP_CLIENT->register_net_cmd("NET_SIS_enum_role", this, &Login::onEnumRoleList);
+	TCP_CLIENT->register_net_cmd("NET_SIS_synchronize_time", this, &Login::onSynchronizeTime);
+	TCP_CLIENT->register_net_cmd("NET_L2C_queue", this, &Login::onQueue);
+	TCP_CLIENT->register_net_cmd("NET_C2L_proof_sdk_ticketid_result", this, &Login::onCheckLoginFirstResult);
+}
+
+void Login::resetLoginState()
+{
+	LoginUi::_isLoginBtnEnabel = false;
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	WzolJni::getInstance()->switchAccount();
+#endif
+}
+
+void Login::setUiToLoginFromMen()
+{
+	if (_loginUi)
+		_loginUi->backToLoginFromMen();
+}
+
+// void Login::updateOver()
+// {
+// 	//_resInited = true;
+// 	//_update_res = false;
+// }
+
+void Login::setTXEntranceFunc(int nState)
+{
+	CCLog("---------------setTXEntranceFunc  begin nState------> %d",nState);
+	CCScene* curScene = CCDirector::sharedDirector()->getRunningScene();
+	entranceUIForTX* txLayer = dynamic_cast<entranceUIForTX*>(curScene->getChildByTag(SPT_TX));
+	if (txLayer != NULL)
+	{
+		switch(nState)
+		{
+		case 0:
+			CCLog("---------------setTXEntranceFunc  begin nState------case 0 begin");
+			txLayer->removeFromParent();
+			CCLog("---------------setTXEntranceFunc  begin nState------case 0 end");
+			//txLayer->setMenuFucntion(false);
+			break;
+		case 1:
+			txLayer->setMenuFucntion(true);
+			break;
+		default:
+			txLayer->setMenuFucntion(false);
+			break;
+		}
+	}
+
+}
+
+
+// #ifdef OVD_PLATFORM_WINDOWS
+// unsigned int Login::_download_thread_func(void* thread_)
+// #else 
+// void* Login::_download_thread_func(void* thread_)
+// #endif
+// {
+// 	Login* self = (Login*)((c_thread*)thread_)->lock_user_data();
+// 	((c_thread*)thread_)->unlock_user_data();
+// 	//!1.首先处理本地无opk的情况
+//  	if(!self->m_opkExist)
+//  	{
+//  		switch(self->downOriginOPK())
+//  		{
+//  		case DS_DOWNLOAD_FAIL:
+//  			self->deleteOPKAndExit();
+//  			goto end;
+//  		case DS_OK:
+//  			break;
+//  		case DS_NO_NET:
+//  			self->showInfoAndExit();
+//  			goto end;
+//  		}
+//  	}
+// end:
+// 	self->updateOver();
+// #ifdef OVD_PLATFORM_WINDOWS
+// 	return 0xdead;
+// #else 
+// 	return (void*)0xdead;
+// #endif
+// }
+
+
+//////////////////////////////////////////////////////////////////////////
+// void Login::checkOPKExist()
+// {
+// 	std::string fileName = _writeble + "GameRes.rpz";
+// 	FILE* fp = fopen(fileName.c_str(), "rb");
+// 	if(!fp)
+// 	{
+// 		m_opkExist = false;
+// 	}
+// 	else
+// 	{
+// 		m_opkExist = true;
+// 		/*
+// 		fseek(fp , 0 , SEEK_SET);
+// 		unsigned int tmp;
+// 		fread(&tmp , 1 , sizeof(int) , fp);
+// 		fread(&tmp , 1 , sizeof(int) , fp);
+// 		fclose(fp);
+// 		if(tmp != OPK_ORIGIN_VERSION)
+// 			m_opkExist = false;
+// 		else
+// 		{
+// 			m_opkExist = true;
+// 		}*/
+// 	}
+// 	//!TODO如果不存在，需要把apk里面的opk拷贝到ninesky下
+// #ifndef WIN32
+// 	int v = CCUserDefault::sharedUserDefault()->getIntegerForKey("IS_FIRST_USED_THIS_APP", 1);
+// 	if (v==1)
+// 	{
+// 		remove(fileName.c_str());
+// 		m_opkExist = false;
+// 		CCUserDefault::sharedUserDefault()->setIntegerForKey("IS_FIRST_USED_THIS_APP", 0);
+// 		CCUserDefault::sharedUserDefault()->flush();
+// 	}
+// 
+// 	if(!m_opkExist)
+// 	{
+// 		_opksize = 0;
+// 		_opkData = CCFileUtils::sharedFileUtils()->getFileData("GameRes.rpz",  "rb" , &_opksize);
+// 		m_totalsz = _opksize;
+// 		m_info = "\xE6\xAD\xA3\xE5\x9C\xA8\xE7\x8E\xA9\xE5\x91\xBD\xE8\xA7\xA3\xE5\x8E\x8B\xE8\xB5\x84\xE6\xBA\x90";
+// 	}
+// #endif
+// }
+
+
+// eDOWN_STATE Login::downOriginOPK()
+// {
+// #ifndef WIN32
+// 	m_downloadsz = 0;
+// 		CCLog("---------downOriginOPK 1");
+// 	if(_opkData != NULL && _opksize != 0)
+// 	{
+// 		CCLog("------------downOriginOPK 2");
+// 		std::string fileName = _writeble + "GameRes.rpz";
+// 		FILE *file = fopen(fileName.c_str(), "wb");
+// 		m_downloadsz = 0;
+// 		do
+// 		{
+// 			if(_opksize - m_downloadsz > 2048)
+// 			{
+// 				m_downloadsz += fwrite(_opkData + m_downloadsz, sizeof(unsigned char), 2048, file);
+// 			}
+// 			else
+// 			{
+// 				m_downloadsz += fwrite(_opkData + m_downloadsz, sizeof(unsigned char), _opksize - m_downloadsz, file);
+// 				break;
+// 			}
+// 		}while(1);
+// 
+// 		CCLog("-----------downOriginOPK 3");
+// 		fclose(file);
+// 	}
+// 	//_resInited = true;
+// 	m_downloadsz = 0;
+// #endif
+// 	return DS_OK;
+// }
+
+// void Login::deleteOPKAndExit()
+// {
+// 	//!需要在这里退出游戏
+// 	m_needExit = true;
+// }
+
+// void Login::getLocalOPKVersion()
+// {
+// 	std::string fileName = _writeble + "4G634B11STI.opk";
+// 	FILE* fp = fopen(fileName.c_str() , "rb");
+// 	fseek(fp , 0 , SEEK_SET);
+// 	fread(&m_opkVer , sizeof(int) , 1 , fp);
+// 	fread(&m_opkVer , sizeof(int) , 1 , fp);
+// 	fclose(fp);
+// }
+
+// eDOWN_STATE Login::getServerOPKVersion()
+// {
+// 	return DS_OK;//TODO
+// 
+// 	m_info = "\xE8\xB5\x84\xE6\xBA\x90\xE5\x8C\x85\xE7\x8E\xA9\xE5\x91\xBD\xE4\xB8\x8B\xE8\xBD\xBD\xE4\xB8\xAD";
+// 	std::string fileName = _writeble + "ResVersion.txt";
+// 	c_connection conn;
+// 	if(!conn.login(HTTP_SERVER_IP , 80))
+// 		return DS_NO_NET;
+// #ifdef EXTERNAL_NET
+// 	if(!conn.download("/slash_/ResVersion.txt" , fileName.c_str()))
+// #else
+// 	if(!conn.download("/http/ResVersion.txt" , fileName.c_str()))
+// #endif
+// 	{
+// 		conn.logout();
+// 		return DS_DOWNLOAD_FAIL;
+// 	}
+// 	conn.logout();
+// 	CFGReader2 cfg(fileName.c_str());	
+// 	m_serverVer = atoi(cfg.get_profile_string("check" , "version" , "79").c_str());
+// 	m_serverMd5.assign(cfg.get_profile_string("check" , "md5" , "MarilynDafa").c_str() , 32);
+// 	m_checkingsz = atoi(cfg.get_profile_string("stat" , "opksz" , "0").c_str());
+// 	m_totalsz = m_checkingsz;
+// 	return DS_OK;
+// }
+
+// bool Login::checkMd5()
+// {
+// 	//return true;//TODO
+// #ifdef ABS_CHECK
+// 	std::string fileName = _writeble + "4G634B11STI.opk";
+// 	FILE* fp = fopen(fileName.c_str(), "rb");
+// 	if(!fp)
+// 	{
+// 		assert(0);
+// 		return false;
+// 	}
+// 	c_md5_creator creator;
+// 	unsigned char digest[16];
+// 	//!!获取文件大小
+// 	fseek(fp , 0 ,SEEK_END);
+// 	size_t filesz = ftell(fp);
+// 	fseek(fp , 0 , SEEK_SET);
+// 	//!计算md5
+// 	unsigned char* buf = (unsigned char* )malloc(filesz);
+// 	fread(buf , sizeof(unsigned char) , filesz , fp);
+// 	_opkmd5 = creator.make(buf , filesz , digest);
+// 	free(buf);
+// 	fclose(fp);
+// 	return m_serverMd5 == _opkmd5;
+// #else
+// 	std::string fileName = _writeble + "4G634B11STI.opk";
+// 	FILE* fp = fopen(fileName.c_str(), "rb");
+// 	if(!fp)
+// 	{
+// 		assert(0);
+// 		return false;
+// 	}
+// 	fseek(fp , 0 , SEEK_END);
+// 	size_t xxsz = ftell(fp);
+// 	fclose(fp);
+// 	return (xxsz) == m_checkingsz;
+// #endif
+// }
+
+// eDOWN_STATE Login::patchAlways()
+// {	
+// 	CCFileUtils::sharedFileUtils()->reInitResource();
+// 	std::string localfile = _writeble + "PF.pat";
+// 	while(m_serverVer != m_opkVer)
+// 	{
+// 
+// #ifdef EXTERNAL_NET
+// 		std::string dir = "/slash_/PF";
+// #else
+// 		std::string dir = "/http/PF";
+// #endif
+// 		char buf[64];
+// 		std::ostringstream ostr;
+// 		ostr << m_opkVer;
+// 		memset(buf , 0 , sizeof(buf));
+// 		//itoa(m_opkVer , buf , 10);
+// 		strcpy(buf, ostr.str().c_str());
+// 		dir.append(buf);
+// 		dir.append(".pat");
+// 		c_connection conn;
+// 		if(!conn.login(HTTP_SERVER_IP , 80))
+// 			return DS_NO_NET;
+// 		if(!conn.download(dir.c_str() , localfile.c_str()))
+// 			return DS_DOWNLOAD_FAIL;
+// 		return DS_DOWNLOAD_FAIL;
+// 		/*conn.logout();
+// 		CCFileUtils::sharedFileUtils()->patchResource(localfile.c_str());
+// 		CFGReader2 cfg;
+// 		m_checkingsz = atoi(cfg.get_profile_string("stat" , ostr.str() , "100").c_str());
+// 		getLocalOPKVersion();
+// 		*/
+// 	}
+// 	return DS_OK;
+// }
+
+// void Login::showInfoAndExit()
+// {
+// 	_needShowExit = true;
+// 
+// 	MessageBoxUi *ui = MessageBoxUi::createWithOneBtn("\xE9\x94\x99\xE8\xAF\xAF" , "\xE6\x82\xA8\xE6\xB2\xA1\xE6\x9C\x89\xE7\xBD\x91\xE7\xBB\x9C\xE7\x8E\xAF\xE5\xA2\x83\xEF\xBC\x8C\xE6\xB8\xB8\xE6\x88\x8F\xE5\xB0\x86\xE4\xBC\x9A\xE5\x85\xB3\xE9\x97\xAD" , "\xE7\xA1\xAE\xE5\xAE\x9A");
+// 	_scene->addChild(ui , WZ_POPUI);
+// 	ui->signalOkBtnPressed.connect(this, &Login::onExitMessageBox);
+// }
+
+void Login::onExitMessageBox()
+{
+	//delete CCApplication::sharedApplication();
+	exitGame();
+}
+
+unsigned int Login::onQueue( s_net_cmd *cmd )
+{
+	NET_L2C_queue *msg = (NET_L2C_queue*)cmd;
+	std::ostringstream ostr;
+	ostr << msg->dwPosition;
+	std::string str = "\xE5\x89\x8D\xE9\x9D\xA2\xE8\xBF\x98\xE6\x9C\x89\x2A\x2A\xE4\xB8\xAA\xE7\x8E\xA9\xE5\xAE\xB6\xE5\x9C\xA8\xE6\x8E\x92\xE9\x98\x9F\xEF\xBC\x8C\xE8\xAF\xB7\xE8\x80\x90\xE5\xBF\x83\xE7\xAD\x89\xE5\xBE\x85\xEF\xBC\x81";
+	showTip(replaceStr(str, "**", ostr.str()));
+	return 0;
+}
+
+void Login::onSeverSelect()
+{
+#ifdef _USE_SDK
+	CCLOG("Login::onSeverSelect------------------1");
+	hideTip();
+	//showTip("\xE6\xAD\xA3\xE5\x9C\xA8\xE9\xAA\x8C\xE8\xAF\x81\xE7\x94\xA8\xE6\x88\xB7\x2E\x2E\x2E");//正在验证用户
+	showTip(GET_STR(79));
+
+	//保存上一次登陆的服务器信息 //add by XSea 2015.01.19
+	ServerZone::Zone zone;
+	ServerZone::Server server;
+	bool flag = ServerListUi::getInstance()->getCurDataForGame(zone, server);
+	//上一次登陆服务器 存储区服
+	if( flag )
+	{
+		ClientCfg::getInstance()->setString("general", "area", zone.name);
+		ClientCfg::getInstance()->setString("general", "servernum", server.num); //保存上次登陆是几服 add by XSea 2014.10.22
+		ClientCfg::getInstance()->setString("general", "server", server.name);
+		ClientCfg::getInstance()->setString("general", "serverstate", CCString::createWithFormat("%d",server.status)->getCString());
+		ClientCfg::getInstance()->setInt("general", "areatag", zone.areatag);
+		saveUsedLoginServer(zone.ip, zone.port, server.name);
+		ClientCfg::getInstance()->flush();
+		CCLOG("Login::onSeverSelect------------------2[%s-%d-%s]",zone.ip.c_str(), zone.port, server.name.c_str());
+	}
+
+	//checkLoginInfo();
+	checkGameLoginInfo();
+#else
+	showTip(GET_STR(79));
+
+	ServerZone::Zone zone, realZone;
+	ServerZone::Server server, realServer;
+	if(ServerListUi::getInstance()->getCurDataForGame(zone, server) 
+		&& ServerListUi::getInstance()->getCurDataForLogin(realZone, realServer))
+	{
+		ClientCfg::getInstance()->setString("general", "area", zone.name);
+		ClientCfg::getInstance()->setString("general", "server", server.name);
+		ClientCfg::getInstance()->flush();
+
+		ClientUpdate::getInstance()->setServerType(ST_LOGIN);
+		NET_C2L_proof *cmd = new NET_C2L_proof;
+		strcpy(cmd->szUserName , _userName.c_str());
+		CCLOG("Login::onSeverSelect------------------3 UserName=%s", _userName.c_str());
+		cmd->dwType = 1;
+		unsigned char digest[16];
+		c_md5_creator md5;
+		strcpy(cmd->szPsd , md5.make((_pwd + "ssplay.password").c_str(), digest).c_str());
+		CCLOG("Login::onSeverSelect------------------4 PSD=%s", cmd->szPsd);
+		strcpy(cmd->szGUID , "123");
+
+		wchar_t vStr[256];
+		memset(vStr, 0, sizeof(vStr));
+		Utf8ToUtf16(realZone.version.c_str(), vStr,256,0);
+		cmd->dwCurVersionID =  f_util::get_crc(vStr);
+		CCLOG("Login::onSeverSelect------------------5 Version=[%s]%d",realZone.version.c_str(), cmd->dwCurVersionID);
+		memset(vStr, 0, sizeof(vStr));
+		Utf8ToUtf16(realServer.name.c_str(), vStr,256,0);
+		cmd->dw_world_name_crc = f_util::get_crc(vStr);
+		CCLOG("Login::onSeverSelect------------------6 ServName=[%s]",realZone.name.c_str());
+		loginServerName = server.name;
+		//[bing] 保存一下登陆信息
+		TCP_CLIENT->SaveAccountInfo(cmd->szUserName, cmd->szPsd, cmd->dwCurVersionID, realZone.ip.c_str(), realZone.port, cmd->dw_world_name_crc);
+
+		ClientUpdate::getInstance()->setCmd(cmd);
+		TCP_CLIENT->connect(realZone.ip.c_str() , realZone.port);
+		CCLOG("Login::onSeverSelect------------------7 IP[%s]=Port[%d]",realZone.ip.c_str() , realZone.port);
+		//[bing] 客户端连接login服务器登陆
+	}
+	CCLOG("Login::onSeverSelect----------------8 end");
+#endif
+}
+
+void Login::beginLogin()
+{
+	CCLog("---------------- beginLogin() 1");
+
+	ServerZone::Zone zone, realZone;
+	ServerZone::Server server, realServer;
+	if(ServerListUi::getInstance()->getCurDataForGame(zone, server) && ServerListUi::getInstance()->getCurDataForLogin(realZone, realServer))
+	{
+		CCLog("------------- beginLogin() 2");
+		showTip(GET_STR(79));
+		std::string areaName = ClientCfg::getInstance()->getString("general", "area", "").c_str();
+		std::string serverName = ClientCfg::getInstance()->getString("general", "server", "").c_str();
+		/*		if (areaName != "" || serverName != "")
+		{
+		ServerListUi::getInstance()->praseServerList();
+		}
+		bool flag = ServerListUi::getInstance()->getCurData(zone, server);
+		//setisFirstLogin(true);
+		//上一次登陆服务器 存储区服
+		ClientCfg::getInstance()->setString("general", "area", zone.name);
+		ClientCfg::getInstance()->setString("general", "servernum", server.num); //保存上次登陆是几服 add by XSea 2014.10.22
+		ClientCfg::getInstance()->setString("general", "server", server.name);
+		ClientCfg::getInstance()->setString("general", "serverstate", CCString::createWithFormat("%d",server.status)->getCString());
+		*/
+		ClientCfg::getInstance()->setString("general", "area", zone.name);
+		ClientCfg::getInstance()->setString("general", "server", server.name);
+		ClientCfg::getInstance()->flush();
+
+		CCLog("---------------- beginLogin() 4 %s, %s", _userName.c_str(), _pwd.c_str());
+		NET_C2L_proof_third *cmd = new NET_C2L_proof_third;
+		strcpy(cmd->szGUID, _userName.c_str());
+		strcpy(cmd->szCode, _pwd.c_str());
+
+		wchar_t vStr[256];
+		memset(vStr, 0, sizeof(vStr));
+		Utf8ToUtf16(realZone.version.c_str(), vStr,256,0);
+		cmd->dwCurVersionID = f_util::get_crc(vStr);
+
+		memset(vStr, 0, sizeof(vStr));
+		Utf8ToUtf16(realServer.name.c_str(), vStr,256,0);
+		cmd->dw_world_name_crc = f_util::get_crc(vStr);
+#ifdef _USE_SDK
+		cmd->eType = (EThirdVerifyType)WzolJni::getInstance()->getPlatformType();
+#endif
+		loginServerName = server.name;
+		ClientUpdate::getInstance()->setServerType(ST_LOGIN);
+		ClientUpdate::getInstance()->setCmd(cmd);
+		CCLog("----------------- beginLogin() 5  %s->%lu", realServer.name.c_str(), cmd->dw_world_name_crc);
+		TCP_CLIENT->connect(realZone.ip.c_str() , realZone.port);
+
+		//showLoadingSE();
+	}
+}
+
+void Login::removeTXPlatformView()
+{
+	//#ifdef _USE_SDK
+	//	if (WzolJni::getInstance()->getPlatformType() == 1004 || 
+	//		WzolJni::getInstance()->getPlatformType() == 1005) {
+	//			CCScene * scene = CCDirector::sharedDirector()->getRunningScene();
+	//			scene->removeChildByTag(1988);
+	//	}
+	//#endif
+}
+
+/*
+#ifdef WIN32
+void Login::onBackBtnPressed()
+{
+
+CCSize size = CCDirector::sharedDirector()->getWinSize();
+_loginUi->setPositionX(_loginUi->getPositionX() - size.width);
+}
+#endif
+*/
+
+void Login::showLoadingSE()
+{
+	//ZHJL:去掉特效，直接显示提示文字
+	//showTip("\xE6\x9C\x8D\xE5\x8A\xA1\xE5\x99\xA8\xE8\xBF\x9E\xE6\x8E\xA5\xE4\xB8\xAD\x2E\x2E\x2E");//服务器连接中
+	showTip(GET_STR(79));
+	//GameActionNode* loadingAcNode = dynamic_cast<GameActionNode*>(CCDirector::sharedDirector()->getRunningScene()->getChildByTag(ELT_LoadingSE));
+	//if(NULL == loadingAcNode)
+	//{
+	//	loadingAcNode = GameActionNode::create();
+	//	loadingAcNode->InitWithPList(m_sSEName.c_str(), "E1_32");
+
+	//	loadingAcNode->setPosition(CCDirector::sharedDirector()->getWinSize().width / 2.f, CCDirector::sharedDirector()->getWinSize().height / 2.f);
+	//	CCDirector::sharedDirector()->getRunningScene()->addChild(loadingAcNode, RZN_EFFECT);
+	//	loadingAcNode->setTag(ELT_LoadingSE);
+	//	loadingAcNode->BeginAction(0.12f, true);
+	//}
+	//else
+	//{
+	//	return;
+	//}
+}
+
+void Login::removeLoadingSE()
+{
+	//GameActionNode* needRemoveAcNode = dynamic_cast<GameActionNode*>(CCDirector::sharedDirector()->getRunningScene()->getChildByTag(ELT_LoadingSE));
+	//if (needRemoveAcNode != NULL)
+	//{
+	//	needRemoveAcNode->removeFromParent();
+	//}
+}
+
+void Login::openOnSwitchAccount2()
+{
+#ifdef _USE_SDK
+	CCLog("------------- openOnSwitchAccount2    1");
+
+	if(ClientUpdate::getInstance()->_currentScene == ST_LOGINSCENE)
+		return;
+
+	ClientUpdate::getInstance()->gotoSelectServer();
+
+	resetLoginState();
+
+	CCLog("------------- openOnSwitchAccount2    5");
+#endif
+}
+
+void Login::checkGameLoginInfo()
+{
+	CCLOG("---------------- checkGameLoginInfo() 1");
+
+	ServerZone::Zone zone, realZone;
+	ServerZone::Server server, realServer;
+	if(ServerListUi::getInstance()->getCurDataForGame(zone, server) && ServerListUi::getInstance()->getCurDataForLogin(realZone, realServer))
+	{
+		CCLOG("------------- checkGameLoginInfo() 2");
+		showTip(GET_STR(79));
+		std::string areaName = ClientCfg::getInstance()->getString("general", "area", "").c_str();
+		std::string serverName = ClientCfg::getInstance()->getString("general", "server", "").c_str();
+		/*		if (areaName != "" || serverName != "")
+		{
+		ServerListUi::getInstance()->praseServerList();
+		}
+		bool flag = ServerListUi::getInstance()->getCurData(zone, server);
+		//setisFirstLogin(true);
+		//上一次登陆服务器 存储区服
+		ClientCfg::getInstance()->setString("general", "area", zone.name);
+		ClientCfg::getInstance()->setString("general", "servernum", server.num); //保存上次登陆是几服 add by XSea 2014.10.22
+		ClientCfg::getInstance()->setString("general", "server", server.name);
+		ClientCfg::getInstance()->setString("general", "serverstate", CCString::createWithFormat("%d",server.status)->getCString());
+		*/
+		ClientCfg::getInstance()->setString("general", "area", zone.name);
+		ClientCfg::getInstance()->setString("general", "server", server.name);
+		ClientCfg::getInstance()->flush();
+
+		CCLOG("---------------- checkGameLoginInfo() 4 Ticket:%s", m_ticket.c_str());
+		NET_C2L_proof_sdk_ticketid *cmd = new NET_C2L_proof_sdk_ticketid;
+		strcpy(cmd->szTicketid, m_ticket.c_str());
+		strcpy(cmd->szUserid, m_userid.c_str());
+		//strcpy(cmd->szCode, _pwd.c_str());
+
+		wchar_t vStr[256];
+		memset(vStr, 0, sizeof(vStr));
+		Utf8ToUtf16(realZone.version.c_str(), vStr,256,0);
+
+		memset(vStr, 0, sizeof(vStr));
+		Utf8ToUtf16(realServer.name.c_str(), vStr,256,0);
+		cmd->dw_world_name_crc = f_util::get_crc(vStr);
+		CCLOG("---------------- checkGameLoginInfo() 4 zone.name:%s   server.name:%s   dw_world_name_crc:%d", realZone.name.c_str(),realServer.name.c_str(),cmd->dw_world_name_crc);
+#ifdef _USE_SDK
+		cmd->nType = WzolJni::getInstance()->getPlatformType();
+		cmd->eType = (EThirdVerifyType)m_sdkType;
+
+		std::string ver;
+		WzolJni::getInstance()->callPlatformWithReturn(GET_APP_VER, "", ver);
+		memset(vStr, 0, sizeof(vStr));
+		Utf8ToUtf16(ver.c_str(), vStr,256,0);
+		cmd->dwCurVersionID = f_util::get_crc(vStr);
+#else
+
+		memset(vStr, 0, sizeof(vStr));
+		Utf8ToUtf16(realZone.version.c_str(), vStr,256,0);
+		cmd->dwCurVersionID =f_util::get_crc(vStr);
+#endif
+		loginServerName = server.name;
+		ClientUpdate::getInstance()->setServerType(ST_LOGIN);
+		ClientUpdate::getInstance()->setCmd(cmd);
+		TCP_CLIENT->connect(realZone.ip.c_str() , realZone.port);
+
+		//showLoadingSE();
+		CCLOG("----------------- checkGameLoginInfo() 5 IP[%s]-PORT[%d]", realZone.ip.c_str() , realZone.port);
+	}
+}
+
+void Login::dumpTexture( CCObject* pSender )
+{
+	//CCTextureCache::sharedTextureCache()->dumpCachedTextureInfo();
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_WINRT) || (CC_TARGET_PLATFORM == CC_PLATFORM_WP8)
+	CCMessageBox("You pressed the close button. Windows Store Apps do not implement a close button.","Alert");
+
+#else
+	close();
+
+	CCDirector::sharedDirector()->end();
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	exit(0);
+#endif
+#endif
+}
+
+void Login::saveUsedLoginServer( const std::string & ip , int port , const std::string & serverName )
+{
+	/*
+	**	将登陆过的服务器的信息存储在ClientCfg中。
+	**	每个登陆过的服务器分别存储ip，port，servername，并用“&”连接。
+	**	服务器之间用“+”连接。
+	*/
+
+	std::string usedLoginServers = ClientCfg::getInstance()->getString("general", "usedLoginServers", "").c_str();
+	std::vector<std::string> vecServers;
+	part_string(usedLoginServers.c_str() , vecServers , '+');
+
+	// 先判断一下之前是否登陆过这个服，登陆过的话，先删除掉相关信息，再从最后重新插入。
+	bool bLoginThisServerBefore = false;
+	for (auto iter = vecServers.begin();iter != vecServers.end(); ++iter)
+	{
+		std::string server = *iter;
+		std::vector<std::string> info;
+		part_string(server.c_str() , info , '&');
+
+		if (info.size() != 3)
+			continue;
+
+		if (	info[0] == ip
+			&& atoi(info[1].c_str()) == port 
+			&&	info[2] == serverName )
+		{
+			vecServers.erase(iter);
+			bLoginThisServerBefore = true;
+			break;
+		}
+
+	}
+
+	std::string lastLogin = ip + "&" + intToString(port) + "&" + serverName;
+
+	if (bLoginThisServerBefore)		// 通过vecServers组合成新的usedLoginServers字符串
+	{
+		usedLoginServers.clear();
+		vecServers.push_back(lastLogin);
+		for (auto iter = vecServers.begin(); iter != vecServers.end(); ++iter)
+		{
+			if (iter != vecServers.begin())
+				usedLoginServers.append("+");
+
+			usedLoginServers.append(*iter);
+		}
+
+	}
+	else		// usedLoginServers没有发生改变，直接在最后添加即可
+	{
+		if ( ! usedLoginServers.empty() )
+			usedLoginServers.append("+");
+
+		usedLoginServers.append(lastLogin);
+	}
+
+
+	ClientCfg::getInstance()->setString("general", "usedLoginServers", usedLoginServers);
+
+}
+
+bool entranceUIForTX::init()
+{
+	if(!CCLayer::init())
+		return false;
+	this->addTXFunctionMenu();
+	this->setTag(SPT_TX);
+	return true;
+}
+
+void entranceUIForTX::onQQBtnPressed(CCObject *pSender, extension::CCControlEvent pCCControlEvent)
+{
+#if (CC_TARGET_PLATFORM==CC_PLATFORM_ANDROID)
+	WzolJni::getInstance()->loginJNIQQ();
+	//this->removeFromParent();
+#endif
+}
+
+void entranceUIForTX::onWXBtnPressed(CCObject *pSender, extension::CCControlEvent pCCControlEvent)
+{
+#if (CC_TARGET_PLATFORM==CC_PLATFORM_ANDROID)
+	WzolJni::getInstance()->loginJNIWeiXin();
+	//this->removeFromParent();
+#endif
+}
+
+
+
+
+void entranceUIForTX::setMenuFucntion( bool canTouch )
+{
+
+	CCControlButton* qqBtn = dynamic_cast<CCControlButton*>(this->getChildByTag(TXUI_QQ));
+	CCControlButton* wxBtn = dynamic_cast<CCControlButton*>(this->getChildByTag(TXUI_WX));
+	if (canTouch)
+	{
+		if(NULL == qqBtn && NULL == wxBtn)
+			this->addTXFunctionMenu();
+		else if (NULL == qqBtn || NULL == wxBtn)
+		{
+			CCDirector::sharedDirector()->end();
+		}
+		else
+		{
+			if(qqBtn != NULL)
+				qqBtn->setTouchEnabled(canTouch);
+			if(wxBtn != NULL)
+				wxBtn->setTouchEnabled(canTouch);
+		}
+	}
+	else
+	{
+		if(qqBtn != NULL)
+			qqBtn->removeFromParent();
+		if(wxBtn != NULL)
+			wxBtn->removeFromParent();
+	}
+}
+
+void entranceUIForTX::addTXFunctionMenu()
+{
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+
+	CCControlButton* qqBtn = CCControlButton::create();
+	CCSpriteFrame* qqNormalFram = this->getBtnStateFram("login_tx_QQBtnn");
+	CCSpriteFrame* qqHighlightFram = this->getBtnStateFram("login_tx_QQBtnh");
+	qqBtn->setBackgroundSpriteFrameForState(qqNormalFram, CCControlStateNormal);
+	qqBtn->setBackgroundSpriteFrameForState(qqHighlightFram, CCControlStateHighlighted);
+	qqBtn->setBackgroundSpriteFrameForState(qqNormalFram, CCControlStateDisabled);
+	qqBtn->addTargetWithActionForControlEvents(this, cccontrol_selector(entranceUIForTX::onQQBtnPressed), CCControlEventTouchUpInside);
+	CCRect qqBtnRect(qqNormalFram->getRect());
+	qqBtn->setContentSize(CCSize(qqBtnRect.getMaxX() - qqBtnRect.getMinX(), qqBtnRect.getMaxY() - qqBtnRect.getMinY()));
+	qqBtn->setPreferredSize(CCSize(qqBtnRect.getMaxX() - qqBtnRect.getMinX(), qqBtnRect.getMaxY() - qqBtnRect.getMinY()));
+
+	CCControlButton* wxBtn = CCControlButton::create();
+	CCSpriteFrame* wxNormalFram = this->getBtnStateFram("login_tx_WXBtnn");
+	CCSpriteFrame* wxHighlightFram = this->getBtnStateFram("login_tx_WXBtnh");
+	wxBtn->setBackgroundSpriteFrameForState(wxNormalFram, CCControlStateNormal);
+	wxBtn->setBackgroundSpriteFrameForState(wxHighlightFram, CCControlStateHighlighted);
+	wxBtn->setBackgroundSpriteFrameForState(wxNormalFram, CCControlStateDisabled);
+	wxBtn->addTargetWithActionForControlEvents(this, cccontrol_selector(entranceUIForTX::onWXBtnPressed), CCControlEventTouchUpInside);
+	CCRect wxBtnRect(wxNormalFram->getRect());
+	wxBtn->setContentSize(CCSize(wxBtnRect.getMaxX() - wxBtnRect.getMinX(), wxBtnRect.getMaxY() - wxBtnRect.getMinY()));
+	wxBtn->setPreferredSize(CCSize(wxBtnRect.getMaxX() - wxBtnRect.getMinX(), wxBtnRect.getMaxY() - wxBtnRect.getMinY()));
+
+	const CCSize& winSize = CCDirector::sharedDirector()->getWinSize();
+	CCSprite *sprite = CCSprite::create((uiDir + "login1.jpg").c_str());
+	sprite->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+	const CCSize& uiEffectSize = sprite->getContentSize();
+	sprite->setScaleX(winSize.width / uiEffectSize.width);
+	sprite->setScaleY(winSize.height / uiEffectSize.height);
+	this->addChild(sprite);
+
+	CCPoint wxPt = ccp(CCDirector::sharedDirector()->getWinSize().width * 3.f / 8.f, CCDirector::sharedDirector()->getWinSize().height / 3.f);
+	wxBtn->setPosition(wxPt);
+	this->addChild(wxBtn);
+	wxBtn->setTag(TXUI_QQ);
+
+	CCPoint qqPt = ccp(CCDirector::sharedDirector()->getWinSize().width * 5.f / 8.f, CCDirector::sharedDirector()->getWinSize().height / 3.f);
+	qqBtn->setPosition(qqPt);
+	this->addChild(qqBtn);
+	qqBtn->setTag(TXUI_WX);
+}
+
+CCSpriteFrame* entranceUIForTX::getBtnStateFram(const char* fileName)
+{
+	CCSpriteFrame* spriteFram = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(fileName);
+	if (spriteFram == NULL)
+	{
+		std::string sName = CFGReader::instance()->get_profile_string("Art", "UI", "") + fileName + std::string(".png");
+		CCImage image;
+		image.initWithImageFile(sName.c_str());
+		CCTexture2D* texture = CCTextureCache::sharedTextureCache()->addUIImage(&image, fileName);
+		CCSpriteFrame* frame = CCSpriteFrame::createWithTexture(texture, CCRect(0.f, 0.f, texture->getPixelsWide(), texture->getPixelsHigh()));
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(frame, fileName);
+		spriteFram = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(fileName);
+	}
+	return spriteFram;
+}
+

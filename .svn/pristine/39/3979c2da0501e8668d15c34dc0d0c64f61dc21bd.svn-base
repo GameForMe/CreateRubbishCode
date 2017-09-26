@@ -1,0 +1,466 @@
+#include "CmdAdapter.h"
+#include "RoleHeadBloodUi.h"
+#include "CfgReader.h"
+#include "BaseDefine.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "StringMgr.h"
+RoleHeadBloodUi::RoleHeadBloodUi()
+	: _hp(NULL)
+	, _hpLabel(NULL)
+	, _vip(NULL)
+	,_name(NULL)
+	,_guildName(NULL)
+	,_hpBack(NULL)
+	,_guildBack(NULL)
+	,_redlip(NULL)
+	,_enemy(NULL)
+	,_spouseName(NULL)
+	,_war(NULL)
+{
+
+}
+bool RoleHeadBloodUi::init()
+{
+	_hpBack = CCSprite::createWithSpriteFrameName("rendui_bloodrectback");
+	addChild(_hpBack);
+
+	CCSprite *hp = CCSprite::createWithSpriteFrameName("rendui_bloodrect");
+	_hp = CCProgressTimer::create(hp);
+	_hp->setType(kCCProgressTimerTypeBar);
+	_hp->setMidpoint(ccp(0.0, 0.0));
+	_hp->setBarChangeRate(ccp(1.0, 0.0));
+	_hp->setPercentage(0.0f);
+	_hp->setPosition(hp->getPosition());
+	hp->setVisible(false);
+	addChild(hp);
+	addChild(_hp);
+
+	hp->setScale(0.8f);
+	_hp->setScale(0.8f);
+	_hpBack->setScale(0.8f);
+
+	TTFConfig fc;
+	fc.fontFilePath = FT_FONTFACE;
+	fc.fontSize = 14;
+	fc.outlineSize = 1;
+
+	_name  =LabelFT::createWithTTF(fc,"");
+	//_name = LabelFT::create();
+	//_name->setFontSize(16);
+	//_name->setPositionY( -60.0f );
+	_name->setPositionY(NAME_LINE*2.0f/3.0f);
+	addChild(_name);
+
+	_guildBack = CCSprite::createWithSpriteFrameName("rendui_vipmap");
+	_guildBack->setPositionY(-30.f);
+	_guildBack->setVisible(false);//vv 是否显示行会名背景
+	addChild(_guildBack);
+
+	fc.fontSize = 12;
+	_spouseName = LabelFT::createWithTTF(fc,"");
+	_spouseName->setPositionY(_name->getPositionY() + NAME_LINE);
+	addChild(_spouseName);
+
+	_guildName = LabelFT::createWithTTF(fc,"");
+	_guildName->setPositionY(_spouseName->getPositionY() + NAME_LINE);
+	addChild(_guildName);
+
+	//... [1/12/2017 Catch_y]
+	//fc.fontSize = 14;
+	//_hpLabel = LabelFT::createWithTTF(fc,"");
+	//addChild(_hpLabel);
+
+	return CCNode::init();
+}
+
+void RoleHeadBloodUi::setName( const char *name )
+{
+	_name->setString(name);
+	//_name->setVisible(false);//vv
+	//int height = _name->getContentSize().height;
+	updateDisplay();
+}
+
+void RoleHeadBloodUi::setName( const wchar_t *name )
+{
+	char roleName[128];
+	memset(roleName, 0, sizeof(char) * 128);
+	Utf16ToUtf8(name, roleName, 128, 0);
+	setName(roleName);
+}
+
+void RoleHeadBloodUi::setName( const char *name ,bool flag)
+{
+	_name->setString(name);
+	_name->setVisible(flag);//vv
+	//int height = _name->getContentSize().height;
+	updateDisplay();
+}
+
+void RoleHeadBloodUi::setName( const wchar_t *name ,bool flag)
+{
+	char roleName[128];
+	memset(roleName, 0, sizeof(char) * 128);
+	Utf16ToUtf8(name, roleName, 128, 0);
+	setName(roleName,flag);
+}
+
+void RoleHeadBloodUi::setBlood( int cur, int max )
+{
+	if(_hp && _hp->isVisible())
+	{
+		//CC_ASSERT(_hp != NULL);
+		if(max == 0)
+		{
+			if (_hp != NULL)
+				_hp->setPercentage(100.f);
+		}
+		else
+		{
+			if (_hp != NULL)
+				_hp->setPercentage(cur * 100.0f / max);
+		}
+	}
+
+	if(_hpLabel && _hpLabel->isVisible())
+	{
+		CCString *str = CCString::createWithFormat("%d/%d", cur, max);
+		if (_hpLabel != NULL)
+		{
+			_hpLabel->setString(str->getCString());
+			_hpLabel->setPositionY(_hpLabel->getContentSize().height * 2.0f / 3.0f);
+		}
+	}
+	_lastSetHp = cur;
+	_lastSetMaxHp = max;
+}
+
+void RoleHeadBloodUi::setNameColor( int r, int g, int b )
+{
+	setNameColor(ccc3(r, g, b));
+}
+
+void RoleHeadBloodUi::setNameColor( const ccColor3B &color )
+{
+	ccColor4B newColor={color.r,color.g,color.b,255};
+	_name->setTextColor(newColor);
+}
+
+CCNode *RoleHeadBloodUi::GetNameNode()
+{
+	return 	_name;
+}
+
+void RoleHeadBloodUi::setHpVisiable( bool visiable )
+{
+	std::string name = _name->getString();
+	if(visiable && (name.empty() ||  name.find_first_not_of(" ") != 0))
+		return;
+	if (_hpLabel != NULL)
+		_hpLabel->setVisible(visiable);
+	if (_hp != NULL)
+		_hp->setVisible(visiable);
+	if (_hpBack != NULL)
+		_hpBack->setVisible(visiable);
+
+	if(visiable)
+	{
+		setBlood(_lastSetHp, _lastSetMaxHp);
+	}
+}
+void RoleHeadBloodUi::setSpouseName(const std::string &name,int sex)
+{
+	if(NULL != _spouseName && NULL != _name && false == name.empty())
+	{
+		//如果是女性
+		if(sex != 1)
+		{
+			_spouseName->setString(name + GET_STR(9480));
+		}
+		//如果是男性
+		else
+		{
+			_spouseName->setString(name + GET_STR(9479));
+		}
+		if((_guildName != NULL) && (!std::string(_guildName->getString()).empty()))
+		{
+			_guildName->setPositionY(_spouseName->getPositionY() + NAME_LINE);
+		}
+	}
+	else if(_spouseName != NULL)
+	{
+		_spouseName->setString(name);
+		if((_guildName != NULL) &&(!std::string(_guildName->getString()).empty()))
+		{
+			_guildName->setPositionY(_name->getPositionY() + NAME_LINE);
+		}
+	}
+}
+void RoleHeadBloodUi::setGuildName( const std::string &name )
+{
+
+	if (NULL != _guildName && NULL != _name && false == name.empty())
+	{
+		//_guildName->setPositionY(-45.0f);
+		//_name->setPositionY( - 60.0f );
+		_guildName->setString(name.c_str());
+	}
+	else
+	{
+		if(_guildName != NULL)
+		{
+			if( NULL !=_name)
+			{
+				//_name->setPositionY( - 52.0f );
+				_guildName->setString(name.c_str());
+			}
+		}
+		
+	}
+	if(_guildName != NULL)
+	{
+		if((_spouseName != NULL) && (!std::string(_spouseName->getString()).empty()))
+		{
+			_guildName->setPositionY(_spouseName->getPositionY() + NAME_LINE);
+		}
+		else
+		{
+			_guildName->setPositionY(_name->getPositionY() + NAME_LINE);
+		}
+	}
+	updateGuildPos();
+}
+
+float RoleHeadBloodUi::getTopY()
+{
+	if((_spouseName) &&(!std::string(_spouseName->getString()).empty()))
+	{
+		return _spouseName->getPositionY();
+	}
+	if((_guildName) &&(!std::string(_guildName->getString()).empty()))
+	{
+		return _guildName->getPositionY();
+	}
+	if((_name) &&(!std::string(_name->getString()).empty()))
+	{
+		return _name->getPositionY();
+	}
+	return .0f;
+}
+
+void RoleHeadBloodUi::setGuildNameColor( const ccColor3B &color )
+{
+	ccColor4B newColor = {color.r,color.g,color.b,255};
+	if(NULL != _guildName )
+		_guildName->setTextColor(newColor);
+}
+
+void RoleHeadBloodUi::setVip( int level , bool flag)
+{
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+ 	std::string mainuiList = uiDir + std::string("ccbResources/rendui.plist");
+ 	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(mainuiList.c_str());//vv 2014.10.7 改变图片读取路径
+ 
+	CC_ASSERT(level >= 0 && level <= 16);
+	if(_vip == NULL)
+	{
+		_vip = CCSprite::create();
+		addChild(_vip);
+	}
+
+	CC_ASSERT(_vip != NULL);
+
+	if(level == 0)
+	{
+		_vip->setVisible(false);
+		_name->setPositionX(0.f);
+	}
+	else
+	{
+		const char *frameName[] = 
+		{
+			"rendui_vipMutoo",
+			"rendui_vipCu",
+			"rendui_vipCu",
+			"rendui_vipCu",
+			"rendui_vipAg",
+			"rendui_vipAg",
+			"rendui_vipAg",
+			"rendui_vipAg",
+			"rendui_vipAg",
+			"rendui_vipAg",
+			"rendui_vipAu",
+			"rendui_vipAu",
+			"rendui_vipAu",
+			"rendui_vipGjade",
+			"rendui_vipPjade",
+			"rendui_vipDjade"	
+
+		};
+
+// 		int frameIndex = level / 4 - 1;
+// 		if (frameIndex<0)
+// 		{
+// 			frameIndex = 0;
+// 		}
+		CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName[level-1]);
+		CC_ASSERT(spriteFrame != NULL);
+		_vip->setVisible(false);//vvv
+		_vip->setDisplayFrame(spriteFrame);
+	}
+
+	//暂时不需要显示VIP的标志
+//	_vip->setVisible(flag);
+
+	updateDisplay();
+}
+
+void RoleHeadBloodUi::setRedLip(bool isRedlip)
+{
+	if (isRedlip)
+	{
+		if (_redlip == NULL)
+		{
+			_redlip = CCSprite::create();
+			addChild(_redlip);
+			const char *frameName = "rendui_redlip";
+			CCSpriteFrame *spriteFrame  = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName);
+			CC_ASSERT(spriteFrame != NULL);
+			_redlip->setDisplayFrame(spriteFrame);
+		}
+		CC_ASSERT(_redlip != NULL);
+		_redlip->setVisible(true);
+	}
+	else
+	{
+		if(_redlip != NULL)
+			_redlip->setVisible(false);
+		//_name->setPositionX(0.f);
+	}
+	updateDisplay();
+}
+
+void RoleHeadBloodUi::updateDisplay()
+{
+	if((_vip == NULL || !_vip->isVisible()) && (_redlip == NULL || !_redlip->isVisible()) && (_enemy == NULL || !_enemy->isVisible()))
+	{
+		_name->setPositionX(0.f);
+	}
+	else if(_redlip == NULL || !_redlip->isVisible())
+	{
+		CCSize vipSize = _vip->getContentSize();
+		CCSize nameSize = _name->getContentSize();
+		_name->setPositionX(vipSize.width / 2.0f);
+		_vip->setPosition(ccp(-nameSize.width / 2.0f, _name->getPositionY()));
+		if (!(_enemy == NULL || !_enemy->isVisible()))
+		{
+			CCSize enemySize = _enemy->getContentSize();
+			if (vipSize.width < 12)
+				vipSize.width = 12;
+			_enemy->setPosition(ccp(-nameSize.width / 2.0f - vipSize.width, _name->getPositionY() - 2.0f));
+		}
+	}
+	else if (_vip == NULL || !_vip->isVisible())
+	{
+		CCSize redlipSize = _redlip->getContentSize();
+		CCSize nameSize = _name->getContentSize();
+		_name->setPositionX(redlipSize.width / 2.0f);
+		_redlip->setPosition(ccp(-nameSize.width/2.0f,_name->getPositionY()));
+		if (!(_enemy == NULL || !_enemy->isVisible()))
+		{
+			CCSize enemySize = _enemy->getContentSize();
+			_enemy->setPosition(ccp(-nameSize.width / 2.0f - redlipSize.width, _name->getPositionY()));
+		}
+	}
+	else if (_enemy == NULL || !_enemy->isVisible())
+	{
+		CCSize vipSize = _vip->getContentSize();
+		CCSize nameSize = _name->getContentSize();
+		CCSize redlipSize = _redlip->getContentSize();
+		_name->setPositionX(vipSize.width/2.0f);  
+		_vip->setPosition(ccp(-nameSize.width / 2.0f, _name->getPositionY()));
+		_redlip->setPosition(ccp(-nameSize.width / 2.0f - vipSize.width , _name->getPositionY() - 2.0f));
+	}
+	else
+	{
+		CCSize vipSize = _vip->getContentSize();
+		CCSize nameSize = _name->getContentSize();
+		CCSize redlipSize = _redlip->getContentSize();
+		CCSize enemySize = _enemy->getContentSize();
+		_name->setPositionX(vipSize.width/2.0f);  
+		_vip->setPosition(ccp(-nameSize.width / 2.0f, _name->getPositionY()));
+		_redlip->setPosition(ccp(-nameSize.width / 2.0f - vipSize.width , _name->getPositionY() + 2.0f));
+		_enemy->setPosition(ccp(-nameSize.width / 2.0f - vipSize.width - enemySize.width, _name->getPositionY() - 2.0f));
+	}
+}
+
+std::string RoleHeadBloodUi::getName()
+{
+	if(_name != NULL)
+		return std::string(_name->getString());
+	return std::string();
+}
+
+void RoleHeadBloodUi::setEnemyRole( bool isVisible )
+{
+	if (!isVisible && _enemy == NULL)
+		return;
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	std::string mainuiList = uiDir + std::string("ccbResources/rendui.plist");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(mainuiList.c_str());//vv 2014.10.7 改变图片读取路径
+
+	if(_enemy == NULL)
+	{
+		_enemy = CCSprite::create();
+		addChild(_enemy);
+	}
+
+	CC_ASSERT(_enemy != NULL);
+
+	if (isVisible)
+	{
+		CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_chouren");
+		CC_ASSERT(spriteFrame != NULL);
+		_enemy->setDisplayFrame(spriteFrame);
+	}
+	
+	_enemy->setVisible(isVisible);
+	updateDisplay();
+}
+
+void RoleHeadBloodUi::showWarGuild( bool isVisible )
+{
+	if (!isVisible && _war == NULL)
+		return;
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	std::string mainuiList = uiDir + std::string("ccbResources/rendui.plist");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(mainuiList.c_str());//vv 2014.10.7 改变图片读取路径
+
+	if(_war == NULL)
+	{
+		_war = CCSprite::create();
+		addChild(_war);
+	}
+
+	CC_ASSERT(_war != NULL);
+
+	if (isVisible)
+	{
+		CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_xiaojian");
+		CC_ASSERT(spriteFrame != NULL);
+		_war->setDisplayFrame(spriteFrame);
+	}
+
+	_war->setVisible(isVisible);
+	updateGuildPos();
+}
+
+void RoleHeadBloodUi::updateGuildPos()
+{
+	if (_war && _war->isVisible())
+	{
+		_war->setPositionX(_guildName->getPositionX() - _guildName->getContentSize().width / 2 - 10);
+		_war->setPositionY(_guildName->getPositionY());
+	}
+}

@@ -1,0 +1,64 @@
+#include "Thread.h"
+#include "platform/CCPlatformConfig.h"
+
+c_thread::c_thread(thread_cb threadfunc, wakeup_cb wakeupfunc, void* ud)
+	:m_thread_func(threadfunc) , 
+	m_wakeup_func(wakeupfunc) , 
+	m_user_data(ud) , 
+	m_running(true)
+{
+#ifdef OVD_PLATFORM_WINDOWS
+	unsigned int id;
+	m_handle = (HANDLE)_beginthreadex(NULL, 0, m_thread_func, this, 0, &id);
+#else
+	if(pthread_create(&m_handle, NULL, m_thread_func, this) != 0)
+	{
+		m_handle = 0;
+	}
+#endif
+	//m_running = true;
+}
+//--------------------------------------------------------	
+c_thread::~c_thread()
+{
+	m_mutex.lock();
+	m_running = false;
+	m_mutex.unlock();
+	if(m_wakeup_func)
+		m_wakeup_func(this);
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	pthread_cancel(m_handle);
+	m_handle = 0;
+#elif (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+	pthread_join(m_handle, NULL);
+	m_handle = 0;
+#else
+	//WaitForSingleObject(m_handle, INFINITE);
+	WaitForSingleObject(m_handle, 10000);	//[bing] 若10秒还没关闭强制关闭了
+	CloseHandle(m_handle);
+	m_handle = 0;
+#endif		
+}
+//--------------------------------------------------------	
+void c_thread::yield()
+{
+#ifdef OVD_PLATFORM_WINDOWS
+	Sleep(1);
+#else
+	struct timespec ts = {0,1000000};
+	nanosleep(&ts, NULL);
+#endif
+}
+//--------------------------------------------------------	
+void* c_thread::lock_user_data()
+{
+	if(m_user_data)
+		m_mutex.lock();
+	return m_user_data;
+
+}
+//--------------------------------------------------------	
+void c_thread::unlock_user_data()
+{
+	m_mutex.unlock();
+}

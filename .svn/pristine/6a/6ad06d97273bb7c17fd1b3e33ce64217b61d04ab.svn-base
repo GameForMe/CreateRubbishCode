@@ -1,0 +1,224 @@
+#include "Loading.h"
+#include "CfgReader.h"
+#include "UiManager.h"
+#include "AnimationCache.h"
+#include "BSAnimate.h"
+
+class LoadResourceLayer : public CCLayer
+{
+public:
+	CREATE_FUNC(LoadResourceLayer);
+
+	bool init()
+	{
+		if(CCLayer::init())
+		{
+			CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+			CCLayerColor *colorLayer = CCLayerColor::create(ccc4(0, 0, 0, 255), winSize.width, winSize.height);
+			addChild(colorLayer);
+			return true;
+		}
+		return false;
+	}
+
+	virtual void onEnter()
+	{
+		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -2, true);
+		CCLayer::onEnter();
+	}
+
+	virtual void onExit()
+	{
+		CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+		CCLayer::onExit();
+	}
+
+	virtual bool ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+	{
+		return true;
+	}
+};
+
+
+ResLoading::ResLoading()
+	: _progressBar(NULL)
+	, _progressBack(NULL)
+	, _label(NULL)
+{
+	init();
+}
+
+ResLoading::~ResLoading()
+{
+	destory();
+}
+
+void ResLoading::init()
+{
+	//std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	//CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile((uiDir + "ccbResources/loading.plist").c_str());
+
+	LoadResourceLayer *downLayer = LoadResourceLayer::create();
+	downLayer->setTag(1000);
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	
+	CCSprite *downBack = CCSprite::createWithSpriteFrameName("loading_downback");
+	downBack->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+	downLayer->addChild(downBack);
+
+	CCAnimation *animation = CCAnimation::create();
+
+	const char *prefixStr = "loading_";
+	for(int i = 16; i > 0; i --)
+	{
+		std::ostringstream ostr;
+		ostr << prefixStr << i;
+
+		CCSpriteFrame *frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(ostr.str().c_str());
+		CC_ASSERT(frame != NULL);
+		animation->addSpriteFrame(frame);   //16-1
+	}
+	animation->setDelayPerUnit(0.2f);
+
+	CCSprite *circleP = CCSprite::create();
+	circleP->setPosition(ccp(winSize.width - 90.f, 170.f));
+	downLayer->addChild(circleP);
+	circleP->runAction(CCRepeatForever::create(CCAnimate::create(animation)));
+
+	CCScene *scene = UiMgr::getInstance()->getCurScene();
+	scene->addChild(downLayer);
+
+	CCPoint progressPos = ccp(winSize.width / 2.0f, winSize.height / 8.0f);
+
+	_progressBack = CCSprite::createWithSpriteFrameName("loading_progressback");
+	CCSize backSize = _progressBack->getContentSize();
+	_progressBack->setPosition(progressPos);
+	downLayer->addChild(_progressBack);
+	_progressBack->retain();
+
+	CCSprite *progress = CCSprite::createWithSpriteFrameName("loading_progress");
+	progress->setPosition(ccp(backSize.width / 2.0f, backSize.height / 2.0f));
+
+	_progressBar = new ProgressBar;
+	_progressBar->initBarWithSprite(progress,16);
+	_progressBar->addToParent(_progressBack);
+	//_progressBar->setFontSize(16);
+
+	_label = CCLabelTTF::create();
+	_label->retain();
+	_label->setFontSize(16);
+	_label->setVisible(false);
+	_label->setPosition(progressPos);
+	downLayer->addChild(_label);
+}
+
+void ResLoading::destory()
+{
+	CCScene *scene = UiMgr::getInstance()->getCurScene();
+	scene->removeChildByTag(1000);
+	CC_SAFE_DELETE(_progressBar);
+	CC_SAFE_RELEASE(_progressBack);
+	CC_SAFE_RELEASE(_label);
+}
+
+void ResLoading::setValue( int cur, int max, const std::string &prefix)
+{
+	if(_progressBar != NULL)
+	{
+		if(cur == 0 && max == 0)
+		{
+			_progressBar->setVisible(false);
+			_progressBack->setVisible(false);
+			_label->setVisible(true);
+			_label->setString(prefix.c_str());
+		}
+		else
+		{
+			_progressBar->setVisible(true);
+			_progressBack->setVisible(true);
+			_label->setVisible(false);
+			_progressBar->setProgress(cur, max, prefix, "B");
+		}
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+bool WaitLoading::EffectSprite::init()
+{
+	if(!CCSprite::init())
+		return false;
+	setAnchorPoint(ccp(0.f, 1.f));
+	return true;
+}
+
+void WaitLoading::EffectSprite::onEnter()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -3, true);
+	CCSprite::onEnter();
+
+	/*AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0, "jiazaitexiao", anims);
+	BSAnimate *animate = anims[0];
+	runAction(CCRepeatForever::create(animate));*/
+}
+
+void WaitLoading::EffectSprite::onExit()
+{
+	CCSprite::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+
+	stopAllActions();
+	AnimationCache::getInstance()->releaseSinEffect("jiazaitexiao");
+}
+
+bool WaitLoading::EffectSprite::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(_canOp)
+		return false;
+	return true;
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+WaitLoading::WaitLoading()
+{
+
+}
+
+WaitLoading::~WaitLoading()
+{
+
+}
+
+WaitLoading * WaitLoading::getInstance()
+{
+	static WaitLoading instance;
+	return &instance;
+}
+
+void WaitLoading::start( bool canOp /*= false*/ )
+{
+	CCScene *scene = UiMgr::getInstance()->getCurScene();
+	if(scene->getChildByTag(WCT_WaitLoading) != NULL)
+	{
+		WaitLoading::EffectSprite *sprite = dynamic_cast<WaitLoading::EffectSprite *>(scene->getChildByTag(WCT_WaitLoading));
+		sprite->_canOp = canOp;
+		return;
+	}
+
+	WaitLoading::EffectSprite *sprite = WaitLoading::EffectSprite::create();
+	sprite->_canOp = canOp;
+	scene->addChild(sprite, WZ_WaitLoading, WCT_WaitLoading);
+
+	CCSize size = CCDirector::sharedDirector()->getWinSize();
+	sprite->setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+}
+
+void WaitLoading::stop()
+{
+	CCScene *scene = UiMgr::getInstance()->getCurScene();
+	scene->removeChildByTag(WCT_WaitLoading);
+}
+

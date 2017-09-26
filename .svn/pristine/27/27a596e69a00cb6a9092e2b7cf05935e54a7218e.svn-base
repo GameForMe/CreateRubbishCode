@@ -1,0 +1,407 @@
+/**
+ *	@file		SecondRechargeUi.cpp
+ *	@author		guantiejun
+ *	@date		2016/06/02
+ *	@version	
+ *	@brief		次冲豪礼
+ */
+
+#include "SecondRechargeUi.h"
+#include "World.h"
+#include "CfgReader.h"
+#include "UiResourceMgr.h"
+#include "ChongZhiActivityFarmeUI.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "BaseDefine.h"
+#include "DBMgr.h"
+#include "ItemNode.h"
+#include "WorldPacket.h"
+#include "TCPClient.h"
+#include "CommonMsgDefine.h"
+#include "ChongZhiActivityMgr.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "GameActionNode.h"
+#include "PackageManager.h"
+#include "GameEventDefine.h"
+#include "Helper.h"
+
+SecondRechargeUi * SecondRechargeUi::getInstance()
+{
+	static SecondRechargeUi instance;
+	return &instance;
+}
+
+SecondRechargeUi::SecondRechargeUi()
+{
+
+}
+
+SecondRechargeUi::~SecondRechargeUi()
+{
+
+}
+
+void SecondRechargeUi::open()
+{
+	if(isOpen())
+		return;
+
+	ChongZhiActivityFarmeUILayer *uiLayer = GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer();
+	if(uiLayer != NULL)
+	{
+		CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+		ccNodeLoaderLibrary->registerCCNodeLoader("SecondRechargeUiLayer", SecondRechargeUiLoader::loader());
+		cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+		CCNode *node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "cichonghaoli.ccbi").c_str());
+		_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+		UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+		ccbReader->release();
+		if(node != NULL) {
+			node->setTag(CZA_SecondRechargeCue);
+			uiLayer->getChildByTag(0)->getChildByTag(0)->addChild(node,10);
+		}
+	}
+}
+
+void SecondRechargeUi::close()
+{
+
+	if(!isOpen())
+		return;
+
+	ChongZhiActivityFarmeUILayer *uiLayer = GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->getChildByTag(0)->getChildByTag(0)->removeChildByTag(CZA_SecondRechargeCue);
+	}
+
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+}
+
+bool SecondRechargeUi::isOpen()
+{
+	return (getUiLayer() != NULL);
+}
+
+SecondRechargeUiLayer * SecondRechargeUi::getUiLayer()
+{
+
+	ChongZhiActivityFarmeUILayer *uiLayer = GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer();
+	if(uiLayer != NULL)
+	{
+		SecondRechargeUiLayer *uiNode = dynamic_cast<SecondRechargeUiLayer*>(uiLayer->getChildByTag(0)->getChildByTag(0)->getChildByTag(CZA_SecondRechargeCue));
+		if(uiNode != NULL)
+			return uiNode;
+	}
+	return NULL;
+}
+
+void SecondRechargeUi::updateDisplay()
+{
+
+}
+
+void SecondRechargeUi::setVisible(bool isVisible)
+{
+	if (isOpen())
+	{
+		getUiLayer()->setVisible(isVisible);
+		getUiLayer()->setTouchEnabled(isVisible);
+	}
+}
+
+void SecondRechargeUi::setFirstRechargeBtnEnabled(bool canUse)
+{
+	if (isOpen()){
+		getUiLayer()->setFirstRechargeBtnEnabled(canUse);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler SecondRechargeUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler SecondRechargeUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRechargeBtnPressed", SecondRechargeUiLayer::onRechargeBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRechargeRewaredBtnPressed", SecondRechargeUiLayer::onRechargeRewaredBtnPressed);
+
+	return NULL;
+}
+
+void SecondRechargeUiLayer::onRechargeBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);//vv
+	int yuanbaoNum = PackageManager::getInstance()->getTotalChargeYuanBao();
+	if (yuanbaoNum<=0)
+	{
+		OPEN_UI(WCT_ShouChongUi);
+	}
+	else
+	{
+		jump_to_recharge evt;
+		SEND_EVENT(&evt);
+	}
+}
+
+void SecondRechargeUiLayer::onRechargeRewaredBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_20);//vv
+	unsigned char tmpState = ChongZhiActivityMgr::getInstance()->get_second_recharge_state();
+	// 	if (tmpState == 0)//0=未首冲
+	// 	{	
+	// 		//你今日没有充值
+	// 		ToolTip::getInstance()->push(STRING_TABLE["not_second_recharge"]);
+	// 	}
+	// 	else
+	//{
+	if (tmpState == 2)//2=已领取奖励
+	{
+		ToolTip::getInstance()->push(GET_STR(7110));
+		firstRechargeRewardButton->setEnabled(false);
+	}
+	else
+	{
+		firstRechargeRewardButton->setEnabled(false);
+		WorldPacket C2G_Msg(NET_C2G_REQUEST_GET_DAY_SECOND_RECHARGE_REWARD);//组装消息头 
+		TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_IDLE, false);//发送
+	}
+	//}
+
+}
+
+bool SecondRechargeUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if(isTouchOnNodeContent(_containNode, pTouch))
+	{
+		return true;
+	}
+	else
+	{
+		CLOSE_UI(WCT_ChongZhiActivityFarmeUI);//关闭充值活动界面
+		return false;
+	}
+}
+
+void SecondRechargeUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	init_reward_data();
+
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(0));
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+	std::string sSESurround = sSEDir + "E1_148.plist";
+	_plist.insert(sSESurround);
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSESurround.c_str());
+
+	fisrtRechargeItem_0 = dynamic_cast<CCNode*>(_frame->getChildByTag(SECONDRECHARGEITEM_0));//物品1
+	fisrtRechargeItem_1 = dynamic_cast<CCNode*>(_frame->getChildByTag(SECONDRECHARGEITEM_1));//物品2
+	fisrtRechargeItem_2 = dynamic_cast<CCNode*>(_frame->getChildByTag(SECONDRECHARGEITEM_2));//物品3
+	fisrtRechargeItem_3 = dynamic_cast<CCNode*>(_frame->getChildByTag(SECONDRECHARGEITEM_3));//物品4
+	fisrtRechargeItem_4 = dynamic_cast<CCNode*>(_frame->getChildByTag(SECONDRECHARGEITEM_4));//物品5
+	fisrtRechargeItemLabel_0 = (CCLabelTTF*)_frame->getChildByTag(SECONDRECHARGEITEMLABEL_0);
+	fisrtRechargeItemLabel_1 = (CCLabelTTF*)_frame->getChildByTag(SECONDRECHARGEITEMLABEL_1);
+	fisrtRechargeItemLabel_2 = (CCLabelTTF*)_frame->getChildByTag(SECONDRECHARGEITEMLABEL_2);
+	fisrtRechargeItemLabel_3 = (CCLabelTTF*)_frame->getChildByTag(SECONDRECHARGEITEMLABEL_3);
+	fisrtRechargeItemLabel_4 = (CCLabelTTF*)_frame->getChildByTag(SECONDRECHARGEITEMLABEL_4);
+	firstRechargeRewardButton = (CCControlButton*)_frame->getChildByTag(SECONDRECHARGEREWARDBUTTON);
+
+	_containNode = dynamic_cast<CCNode*>(getChildByTag(4));
+	_containNode->setVisible(false);
+
+	fisrtRechargeItemNumLabel_0 = CCLabelTTF::create();
+	fisrtRechargeItemNumLabel_1 = CCLabelTTF::create();
+	fisrtRechargeItemNumLabel_2 = CCLabelTTF::create();
+	fisrtRechargeItemNumLabel_3 = CCLabelTTF::create();
+	fisrtRechargeItemNumLabel_4 = CCLabelTTF::create();
+
+	fisrtRechargeItemNode_1 = ItemNode::create();//物品1
+	fisrtRechargeItemNode_1->setClickable(true);
+	fisrtRechargeItemNode_1->hideItemOpBtn();
+	fisrtRechargeItemNode_1->getSurroundSE("E1_148");//add by vvv 2015.01.05 奖励特效
+	_frame->addChild(fisrtRechargeItemNode_1,5);
+	fisrtRechargeItemNode_1->setPosition(fisrtRechargeItem_0->getPosition());
+	fisrtRechargeItemNode_2 = ItemNode::create();//物品2
+	fisrtRechargeItemNode_2->setClickable(true);
+	fisrtRechargeItemNode_2->hideItemOpBtn();
+	fisrtRechargeItemNode_2->getSurroundSE("E1_148");
+	_frame->addChild(fisrtRechargeItemNode_2,5);
+	fisrtRechargeItemNode_2->setPosition(fisrtRechargeItem_1->getPosition());
+	fisrtRechargeItemNode_3 = ItemNode::create();//物品3
+	fisrtRechargeItemNode_3->setClickable(true);
+	fisrtRechargeItemNode_3->hideItemOpBtn();
+	fisrtRechargeItemNode_3->getSurroundSE("E1_148");
+	_frame->addChild(fisrtRechargeItemNode_3,5);
+	fisrtRechargeItemNode_3->setPosition(fisrtRechargeItem_2->getPosition());
+	fisrtRechargeItemNode_4 = ItemNode::create();//物品4
+	fisrtRechargeItemNode_4->setClickable(true);
+	fisrtRechargeItemNode_4->hideItemOpBtn();
+	fisrtRechargeItemNode_4->getSurroundSE("E1_148");
+	_frame->addChild(fisrtRechargeItemNode_4,5);
+	fisrtRechargeItemNode_4->setPosition(fisrtRechargeItem_3->getPosition());
+	fisrtRechargeItemNode_5 = ItemNode::create();//物品5
+	fisrtRechargeItemNode_5->setClickable(true);
+	fisrtRechargeItemNode_5->hideItemOpBtn();
+	fisrtRechargeItemNode_5->getSurroundSE("E1_148");
+	_frame->addChild(fisrtRechargeItemNode_5,5);
+	fisrtRechargeItemNode_5->setPosition(fisrtRechargeItem_4->getPosition());
+	
+	fisrtRechargeItemNode_1->addChild(fisrtRechargeItemNumLabel_0,6);
+	fisrtRechargeItemNumLabel_0->setPosition(ccp(fisrtRechargeItemNode_1->getContentSize().width - 10 ,10));
+	fisrtRechargeItemNode_2->addChild(fisrtRechargeItemNumLabel_1,6);
+	fisrtRechargeItemNumLabel_1->setPosition(ccp(fisrtRechargeItemNode_2->getContentSize().width - 10 ,10));
+	fisrtRechargeItemNode_3->addChild(fisrtRechargeItemNumLabel_2,6);
+	fisrtRechargeItemNumLabel_2->setPosition(ccp(fisrtRechargeItemNode_3->getContentSize().width - 10 ,10));
+	fisrtRechargeItemNode_4->addChild(fisrtRechargeItemNumLabel_3,6);
+	fisrtRechargeItemNumLabel_3->setPosition(ccp(fisrtRechargeItemNode_4->getContentSize().width - 10 ,10));
+	fisrtRechargeItemNode_5->addChild(fisrtRechargeItemNumLabel_4,6);
+	fisrtRechargeItemNumLabel_4->setPosition(ccp(fisrtRechargeItemNode_5->getContentSize().width - 10 ,10));
+
+	Helper::getLabelFTByParentAndTag(_frame, 16);
+
+	int conut = _itemData.size();
+	for (int i = 0;i < conut;++i)
+	{
+		switch(i)
+		{
+		case 0:
+			{
+				fisrtRechargeItemNode_1->setDataId(_itemData.front()->id);
+				fisrtRechargeItemLabel_0->setString(_itemData.front()->name.c_str());
+				fisrtRechargeItemNumLabel_0->setString(CCString::createWithFormat("%d",_itemData.front()->number)->getCString());
+			}
+			break;
+		case 1:
+			{
+				fisrtRechargeItemNode_2->setDataId(_itemData.front()->id);
+				fisrtRechargeItemLabel_1->setString(_itemData.front()->name.c_str());
+				fisrtRechargeItemNumLabel_1->setString(CCString::createWithFormat("%d",_itemData.front()->number)->getCString());
+			}
+			break;
+		case 2:
+			{
+				fisrtRechargeItemNode_3->setDataId(_itemData.front()->id);
+				fisrtRechargeItemLabel_2->setString(_itemData.front()->name.c_str());
+				fisrtRechargeItemNumLabel_2->setString(CCString::createWithFormat("%d",_itemData.front()->number)->getCString());
+			}
+			break;
+		case 3:
+			{
+				fisrtRechargeItemNode_4->setDataId(_itemData.front()->id);
+				fisrtRechargeItemLabel_3->setString(_itemData.front()->name.c_str());
+				fisrtRechargeItemNumLabel_3->setString(CCString::createWithFormat("%d",_itemData.front()->number)->getCString());
+			}
+			break;
+		case 4:
+			{
+				fisrtRechargeItemNode_5->setDataId(_itemData.front()->id);
+				fisrtRechargeItemLabel_4->setString(_itemData.front()->name.c_str());
+				fisrtRechargeItemNumLabel_4->setString(CCString::createWithFormat("%d",_itemData.front()->number)->getCString());
+			}
+			break;
+		}
+		//_itemData.push_back(_itemData.front());
+		_itemData.pop_front();
+	}
+
+	unsigned char tmpState = ChongZhiActivityMgr::getInstance()->get_second_recharge_state();
+	if (tmpState == 2)
+	{
+		firstRechargeRewardButton->setEnabled(false);
+	}
+}
+
+void SecondRechargeUiLayer::onEnter()
+{
+	setTouchPriority(0);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+	setAllChildernButtonPriority(this,-1);
+}
+
+void SecondRechargeUiLayer::onExit()
+{
+	//cleanTmpData();
+
+	CCLayer::onExit();
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+}
+
+void SecondRechargeUiLayer::cleanTmpData()
+{
+// 	int _conut = _itemData.size();
+// 	for (int i = 0;i < _conut;++i)
+// 	{
+// 		CC_SAFE_DELETE(_itemData.front());
+// 		_itemData.pop_front();
+// 	}
+	
+	_itemData.clear();
+}
+
+void SecondRechargeUiLayer::setTouchEnabled( bool value )
+{
+	CCLayer::setTouchEnabled(value);
+
+	fisrtRechargeItemNode_1->setClickable(value);
+	fisrtRechargeItemNode_2->setClickable(value);
+	fisrtRechargeItemNode_3->setClickable(value);
+	fisrtRechargeItemNode_4->setClickable(value);
+	fisrtRechargeItemNode_5->setClickable(value);
+}
+
+void SecondRechargeUiLayer::setFirstRechargeBtnEnabled(bool canUse)
+{
+	if(firstRechargeRewardButton){
+		if(firstRechargeRewardButton->isVisible()){
+			firstRechargeRewardButton->setEnabled(canUse);
+		}
+	}
+}
+
+void SecondRechargeUiLayer::init_reward_data()
+{
+	f_data_set data_set;
+	std::list<std::string> fields;
+	bool ret =data_set.load("Config/db/DailyReceargeTwice.xml","RecNo",&fields);
+	CC_ASSERT(ret);
+	std::for_each(	fields.begin(),
+					fields.end(),
+					[&](std::string const& one)
+	{
+		second_recharge_ptr data_ptr(new secondRechargeData);
+		data_ptr->name = data_set.get_string("name",one.c_str(),"");
+		data_ptr->id = data_set.get_int("id",one.c_str());
+		data_ptr->iconId = data_set.get_int("icon",one.c_str(),0);
+		data_ptr->number = data_set.get_int("number",one.c_str(),0);
+
+		_itemData.push_back(data_ptr);
+
+	});
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM DailyReceargeTwice");
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		secondRechargeData* tempData = new secondRechargeData;
+// 		unsigned int idx = table->get_index("name");
+// 		tempData->name = table->get_text(idx);
+// 		idx = table->get_index("id");
+// 		tempData->id = table->get_integer32(idx);
+// 		idx = table->get_index("icon");
+// 		tempData->iconId = table->get_integer32(idx);
+// 		idx = table->get_index("number");
+// 		tempData->number = table->get_integer32(idx);
+// 		_itemData.push_back(tempData);
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+}

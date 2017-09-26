@@ -1,0 +1,397 @@
+#ifndef ROLE_H_INCLUDE
+#define ROLE_H_INCLUDE
+
+#include "CmdAdapter.h"
+#include "BaseDefine.h"
+#include "cocos2d.h"
+#include "GameEntity.h"
+#include "StateMachine.h"
+#include "Signals.h"
+#include "AnimationCache.h"
+#include "RoleDefine.h"
+#include "RoleInfoProto.h"
+#include "LandNode.h"
+#include "BSAnimate.h"
+
+#include <boost/function.hpp>
+
+using namespace cocos2d;
+
+class RoleHeadBloodUi;
+//class BSAnimate;
+
+//使用技能时的状态机数据
+struct RoleSkillStateData
+{
+	unsigned int skillId;
+	unsigned int targetId;
+
+	RoleSkillStateData()
+		: skillId((unsigned int) -1)
+		, targetId((unsigned int) -1)
+	{
+
+	}
+};
+
+class Role : public GameEntity
+{
+	friend class LocalPlayerStateRun;
+	friend class LocalPlayerStateStand;
+	friend class RoleStateRunTo;
+	friend class RoleStateStand;
+	friend class RoleStateStandTo;
+
+public:
+	enum eNodeTag
+	{
+		NT_LevelUpEffect = 0, //升级特效
+		NT_DizzyEffect, //眩晕特效
+		NT_AddHpHot, //加血特效
+		NT_AddShieldHot, //加盾特效
+		NT_FireDot, //灼烧特效
+		NT_HeighterEffect, //增强战斗力特效
+		NT_TransmitEffect,	//人物传送特效
+		NT_SpecialEffect,
+		NT_StoneEffect,
+		NT_MystreyBox,
+		NT_BuffTakeEffect,
+		NT_BuffActionTag,
+		NT_BodyEffect1,  //称号周身特效1
+		NT_BodyEffect2,  //
+		NT_BodyEffect3,
+	};
+	enum MoveRoleType
+	{
+		MV_PET,
+		MV_PLAYER,
+		MV_OTHER,
+	};
+	typedef std::list<CCPoint> WayPointList;
+
+	Role();
+	virtual ~Role();
+	const wchar_t *getName() const;
+	void setNameColor(int color);
+	virtual void setNameColor(const ccColor3B &color);
+	void setName(const wchar_t *name);//utf_16
+	void setName(const char *name);//utf_8
+	void setName(const wchar_t *name,bool flag);//utf_16
+	void setName(const char *name,bool flag);//utf_8
+	std::string getNameUtf8();
+	unsigned int getId() const { return _id; }
+	void setId(unsigned int val) { _id = val; }
+	void setTypeID(unsigned int tid) {_typeID = tid;}
+	unsigned int getTypeID() const   {
+		return _typeID;
+	}
+	unsigned int getOwnerId() const { return _owner; }
+	void set_owner_id(unsigned int val) { _owner = val; }
+	int getLevel() const { return _level; }
+	void setLevel(int val, bool isLevelUp = false);
+	virtual void setGuild(unsigned int gid);
+	unsigned int getGuildID() const {return _guildID;}
+	bool haveGuild();
+	const CCPoint &getPosition() const; 	
+	void setPosition(const CCPoint &pos);
+	CCPoint getDirection() const;
+	void setDirection(const CCPoint &dir);
+	virtual void addToMap(bool repetLogin = false);
+	//void SetClip(const CCRect& rc);
+	virtual void removeFromMap();
+
+	void updateRoleOrderOnMap();
+
+	eRoleType getRoleType();
+	const CCRect &getBoundBox() { return _boundBox; }
+	void setBoundBox(const CCRect &boundBox) { _boundBox = boundBox; }
+	float getZOrder() { return _node->getZOrder(); }
+	void initBloodUi();
+	void showRoleHeadHpUi(bool show = true);
+	void setVisiable(bool visiable = true);
+	StateMachine<Role> *stateMachine() { return _stateMechine; }
+	bool  HandleMessage(const Telegram& msg);
+	void setDestMovePoint(const CCPoint &dest) { _destMovePoint = dest; }
+	const CCPoint &getDestMovePoint() { return _destMovePoint; }
+	const CCPoint &getEndMovePoint()	{ return _endMovePoint;}
+	const CCPoint & getEndFace() { return _endFace;}
+	void setEndFace(const CCPoint &face) { _endFace = face;}
+	void setEndMovePoint(const CCPoint &dest) { _endMovePoint = dest; }
+	void setGuildName(const std::string &guildName);
+	void showWarGuild(bool isVisible);
+	void showGuidName(bool isVisible);
+	virtual void setGuildNameColor(const ccColor3B &color);
+	virtual bool needShowGuildColor(ccColor3B &color);
+	virtual void updateGuildNameColor(){};
+	void setAsNewMapRole(bool v) { _isNewMap = false; }
+	bool isNewMapRole() const { return _isNewMap; }
+	void setRoleState(EState state, bool set = true);
+	bool getRoleState(EState state);
+	void setSpouseName(const std::string &name, int sex);
+	virtual void runHeightenEffect(const std::string &animFile,eRoleZorderNum layerTag,eNodeTag effectTag);
+	virtual void stopHeightenEffect(eNodeTag effectTag);
+	virtual void runTransmitEffect();
+
+	virtual void runTransmitEffect_UP();
+	virtual void runCreatureSpreakPaoPao(int msgId,float ntime);
+	void runDizzyAnim(); //播放眩晕特效
+	void stopDizzyAnim(); //结束眩晕特效
+
+	void runAddHpRingHot(); //播放特戒回血特效
+	void stopAddHpRingHot(); //结束特戒回血特效
+
+	void runAddShieldRingHot(); //播放特戒加盾特效
+	void stopAddShieldRingHot(); //结束特戒加盾特效
+
+	void runAddFireRingDot(); //播放特戒灼烧特效
+	void stopAddFireRingDot(); //结束特戒灼烧特效
+
+	void stopAllRingEffect(); //结束所有特戒特效
+
+	void playStoneEffect();		//石头破碎特效
+	void stoneEffectCallback(CCNode *node);
+
+	virtual void playHitSound(){};//...播放受击音效
+
+	virtual void revertToPreviousState();
+	void setBloodUiDelay(CCObject *node, void *data);
+	void setBossHeighten(unsigned int dw_data_id,bool isHeighten);
+	bool getBossHeighten(unsigned int dw_data_id);	
+
+	//void setCurLine(UINT16 index) {_curLine = index;}
+	//inline UINT16 getCurLine()const {return _curLine;}
+	void setRoleTag(int tag);
+public:
+	virtual void updateRealPosition();
+	virtual void setAttribute(eRoleAttribute attr, int val);
+	virtual int getAttribute(eRoleAttribute attr);
+	virtual bool isDead() const;
+	virtual bool isAnimationFinished() const;
+	virtual CCPoint getHeadPos() const = 0;
+	virtual void update(float dt) = 0;
+	virtual void initFsm() = 0;
+	virtual void destroyFsm() = 0;
+	virtual void on_net_msg(s_net_cmd* pNetCmd);
+	virtual void runStandAni() = 0;
+	virtual void runRunAni() = 0;
+	virtual void runAttrackAni() = 0;
+	virtual void runAttrackedAni() = 0;
+	virtual void runPerAttackAni() { };
+	virtual void runSitAni() = 0;
+	virtual void runDeadAni() = 0;
+	virtual void stopAni() = 0;
+	virtual void setAlpha(bool alpha) = 0;
+	virtual bool loadAnimate(unsigned int id = 0) = 0;
+	virtual int getRoleDir() = 0;
+	virtual bool changeState(unsigned int mask, const Telegram& telegram);
+	virtual void setColorPoisoning(unsigned char r,unsigned char g,unsigned char b);
+	virtual void setColorHoc();
+	virtual void delColorHoc();
+ 	virtual std::string getMonsterHeadFrameName();
+ 	virtual std::string getNpcHeadFrameName();
+	virtual std::string getHeadFrameName();
+	virtual std::string getMonsterBossHeadFrameName();
+	CCNode * getRoleNode() { return _node; }
+	void setMovePositionState(bool state) { _stateMovePosition = true; }
+	bool getMovePositionState() const { return _stateMovePosition; }
+	virtual void updateTitleUi(){}
+	virtual void changeTitleUiShow() {}
+	virtual void setCreatureNameColor(Eaiaction type);
+	bool move(const CCPoint& pt, MoveRoleType checkState);
+public:
+	class RoleActionCallBack : public CCObject
+	{
+	public:
+		static RoleActionCallBack *getInstance()
+		{
+			static RoleActionCallBack instance;
+			//CC_ASSERT(instance.realRefCount() > 0);
+			return &instance;
+		}
+		void standCallBack(CCNode *node, void *data)
+		{
+			((Role*)data)->standCallback();
+		}
+		void runToCallBack(CCNode *node, void *data)
+		{
+			((Role*)data)->runToCallabck();
+		}
+	};
+
+
+	void runTo( const CCPoint &pos, bool stand = false );
+	void standCallback();
+	void runToCallabck();
+	void attrackFinish();
+	eCreatureType getCreatureType() const  { return _creatureType; }
+
+	float getRoleAngle();
+	void setCurrentSkillid(unsigned int id);
+	void setCurrentTargetid(unsigned int id);
+	void setCurrentTargetPos(const CCPoint& pt);
+	const CCPoint& getTargetPos();
+
+	int GetRoleData(int ntype){return _roledata[ntype];};
+
+	void addWayPoint(const CCPoint& pt);
+	bool hasWayPoint();
+	bool popFrontWayPoint(CCPoint& pt);
+	void clearWayPoint();
+	void setFirstUpdate(bool isFirst);
+	CCNode*  getNameNode();
+public:
+	void releaseAllLoadAnim();
+
+	void saveUsedAnim(AnimsUsed const&anim);
+
+	void setSrcRoleId(unsigned int srcRoleId){_dwSrcRoleID = srcRoleId;};
+	unsigned int getSrcRoleId(){return _dwSrcRoleID;};
+
+	bool is_landed()const{return _node && _node->getParent() && _node->isRunning();}
+protected:
+	wchar_t _name[X_SHORT_NAME];
+	unsigned int _id;
+	unsigned int _owner;//表示宝宝的所属关系
+	int _level;
+	LandNode *_node;
+	//LandNode *_nodeName;
+
+	//CCSprite *_shadow;
+	//CCNode* _balckNode;
+	//CCSprite* _blackSp;//遮罩圆圈
+	//CCNode* pClip;//遮罩
+	RoleHeadBloodUi *_roleHeadBloodUi;
+	int _roledata[RA_NUM];
+	typedef std::map<int,int> StateMap;
+	StateMap _role_data_state;
+	CCPoint _destMovePoint;
+	CCPoint _endMovePoint;
+	CCPoint _endFace;
+	CCRect _boundBox;
+	eCreatureType _creatureType;
+	StateMachine<Role> *_stateMechine;
+	bool _isAniLoaded;
+	bool _firstUpdate;
+	unsigned int _guildID;
+	//unsigned int _mapID;
+	unsigned int _typeID;
+	//UINT16 _curLine;	//当前线路
+	bool _stateMovePosition;
+	BSAnimate *_lastAni;
+	std::vector<AnimsUsed> _usedAnim;
+	bool _isNewMap;//是否是在地图跳转过程中加入的角色
+	unsigned int _roleState;//角色状态，对应EState 移位操作
+	unsigned int _currentSkillId;
+	unsigned int _skillTargetId;
+	std::map<unsigned int,bool> _boosHeightenMap;
+	bool _bBloodShowFlag;
+	CCPoint _skillTargetPos;
+	WayPointList _wayPointLists;
+	bool isRelease;
+	unsigned int _dwSrcRoleID;		//攻击者ID
+public:
+	enum
+	{
+		eNull = -1,
+		eBodyAction =1,
+		eWeaponAction,
+		eWingAction,
+		eRideAction,
+		eRideEffect1,
+		eRideEffect2,
+		eRideEffect3,
+		eMonster,
+		//eMonster5,
+		//eMonster8,
+		eMonsterSkill,
+	};
+
+	typedef boost::function<cocos2d::CCFiniteTimeAction*()> ActionSeqCreateFunc;
+	struct stAnimConfig 
+	{
+		int				type;
+		size_t			mnCurPos;
+		std::string		strModelFileName;
+		bool				bRepeat;
+		BSAnimate*  last;
+		ActionSeqCreateFunc actFnc;
+
+		stAnimConfig():mnCurPos(INVALID),bRepeat(false),last(NULL),type(eNull),actFnc(ActionSeqCreateFunc())
+		{
+
+		}
+
+		~stAnimConfig()
+		{
+			releaseLast();
+		}
+
+		eAnimsType convertAnimType() const
+		{
+			CC_ASSERT(this->type);
+			switch (this->type)
+			{
+			case 1:
+			case 4:
+			case 5:
+			case 6:
+			case 7:
+				return AT_Player;
+			case 2:
+				return AT_Weapon;
+			case 3:
+				return AT_Wing;
+			case eMonster:
+				return AT_Monster;
+			case eMonsterSkill:
+				return AT_Oct;
+			//case eMonster5:
+			//	return AT_Monster5;
+			//case eMonster8:
+			//	return AT_Monster8;
+			default:
+				CC_ASSERT("can not reach here!");
+				break;
+			}
+
+			return AT_Player;
+		}
+
+		void releaseLast()
+		{
+			//if(!strModelFileName.empty())
+			//	AnimationCache::getInstance()->releaseAnims(convertAnimType(),strModelFileName.c_str());
+			if (last)
+			{
+				last->stop();
+			}
+			CC_SAFE_RELEASE_NULL(last);
+		}
+
+		void setupLast(BSAnimate* newOne)
+		{
+			releaseLast();
+			CC_SAFE_RETAIN(newOne);
+			this->last = newOne;
+		}
+
+		void reset(){type=eNull;mnCurPos = INVALID;strModelFileName.clear(); bRepeat = false;releaseLast();actFnc = ActionSeqCreateFunc();}
+
+	};
+
+	typedef std::map<int,stAnimConfig> AnimConfigMap;	
+	AnimConfigMap mmapAnimConfig;
+	virtual void updateAnimConfig()=0;
+
+	void deleteConfig(int type);
+	bool resetConfig(int type,std::string const& modelName);
+	void resetAllActionConfig();
+	BSAnimate* makeAnimate(stAnimConfig const& config);
+	void runRoleAction(CCSprite* root,int type,size_t pos,bool bRepeat,ActionSeqCreateFunc func = ActionSeqCreateFunc());
+protected:
+	void runWithTarget(CCSprite* root,stAnimConfig const& config);
+};
+
+#define SAEF_STOP_ALL_ANIM(p) if(p)p->stopAllActions()
+
+#endif

@@ -1,0 +1,464 @@
+#include "MiniMapNode.h"
+#include "CfgReader.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ServerTime.h" 
+#include "World.h"
+#include "MiniMapUi.h"
+#include "InstanceMgr.h"
+#include "ActivityMgr.h"
+#include "PackageManager.h"
+#include "TaskTraceUi.h"
+#include "GameEventDefine.h"
+#include "RewardMgr.h"
+#include "GuildMgr.h"
+#include <boost/bind.hpp>
+#if 1
+#define SHOW_RANGE 41
+#define MAX_MYCOST 100000
+
+MiniMapNode::MiniMapNode()
+	: _curSpriteIndex(0)
+	,_scripttime(-1.0f)
+	,_btnexsittime(0.0f)
+//	,_sbkLeveTime(-1.0f)
+//	,_timeEnd(false)
+//	,_timeBegin(false)
+	,mpBatchNode(0)
+	,_local(NULL)
+{
+
+}
+
+bool MiniMapNode::init()
+{
+	//_scripttime = InstanceMgr::getInstance()->GetYanHuoTimeLeft(); //获取副本时间;
+	if(CCNode::init())
+	{
+		std::string path = CFGReader::instance()->get_profile_string("Art", "UI", "") + "ccbResources/rendui.png";
+		mpBatchNode = CCSpriteBatchNode::create(path.c_str());
+		this->addChild(mpBatchNode);
+
+		_local = CCSprite::createWithSpriteFrameName("rendui_localsign");
+		this->addChild(_local);
+
+		return true;
+	}
+
+	return false;
+}
+
+void MiniMapNode::update( float dt )
+{
+	hideAll();
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	CCPoint lpPos = lp->getPosition();
+	const RoleManager::RoleMap &roleMap = RoleManager::getInstance()->getRoleMap();
+	for(RoleManager::RoleMap::const_iterator iter = roleMap.begin(); iter != roleMap.end(); ++ iter)
+	{
+		Role *role = iter->second;
+		CCPoint rolePos = ccpSub(role->getPosition(), lpPos) / 10.f;
+		if(ccpDistance(rolePos, ccp(0, 0)) < SHOW_RANGE)
+		{
+			//ccColor4F color;
+			CCSpriteFrame *spriteFrame = NULL;
+			switch(role->getCreatureType())
+			{
+			case CT_NPC:
+				spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_green");//rendui 
+				break;
+			case CT_PLAYER:
+				{
+					Player *player = (Player*)role;
+					if((player->getGuildID() == lp->getGuildID() && player->getGuildID() != (unsigned int) -1)||
+						(player->getPlayerTeamID() == lp->getPlayerTeamID() && player->getPlayerTeamID() != (unsigned int) -1))
+						spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_blue");
+					else
+						spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_yellow");
+				}
+				break;
+			case CT_MONSTER:
+				spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_red");//vv 2014.10.6 改地图游标等
+				break;
+			}
+
+			if(spriteFrame != NULL)
+			{
+				CCSprite *sprite = getSprite();
+				sprite->setDisplayFrame(spriteFrame);
+				sprite->setVisible(true);
+				sprite->setPosition(rolePos);
+				sprite->setScale(0.6f);
+				if(sprite->getParent()==NULL)
+					mpBatchNode->addChild(sprite);
+			}
+
+		}
+	}
+
+	if(_local != NULL)
+	{
+		float angle = lp->getRoleAngle();
+		_local->setRotation(- angle * 180.0f / PI);
+	}
+
+	_severtime  = ServerTime::getInstance()->cal_current_server_dword_time();//获取服务器当前时间
+	MiniMapUi *minimapui = World::getInstance()->getMiniMapUi();
+	CC_ASSERT( minimapui != NULL);
+	minimapui->setSeverTime(_severtime);
+	minimapui->setTLTimeInfo(_severtime);
+
+	bool bStart = ActivityMgr::getInstance()->isThereActStart();	
+	//判断活动期间，传送按钮显示，2分钟后消失
+	if (bStart && ActivityMgr::getInstance()->GetStartActIndex() > 0)
+	{
+		if (minimapui->isActivityGroupShow())
+		{
+			minimapui->showActivityTransferBtn(false);
+		}
+		else
+		{
+			if (!ActivityMgr::getInstance()->isThereActStartForDayActivity())
+			{
+				minimapui->showActivityTransferBtn(false);
+				//_btnexsittime = 0.0f;
+				ActivityMgr::getInstance()->SetStartActIndex(0);
+				ActivityMgr::getInstance()->SetTransmitFlag(true);
+			}
+			else
+			{
+				_btnexsittime += dt;
+				//if (ActivityMgr::getInstance()->GetStartActIndex() != ACT_FIGHTCITY_INDEX && ActivityMgr::getInstance()->GetStartActIndex() != ACT_LUANDOU_INDEX )//7为沙城战，沙城战有专门的按钮(by zhang),2为天下乱斗会
+				{
+					minimapui->showActivityTransferBtn(true);
+				}
+			}
+		}
+	}
+	else if (bStart && ActivityMgr::getInstance()->isMoshenActivityState() && (MapManager::getInstance()->getCurMapId() != MOSHEN_HALL))
+	{
+		minimapui->showActivityTransferBtn(true);
+	}
+	else
+	{
+		minimapui->showActivityTransferBtn(false);
+		minimapui->showSBKActivityTransferBtnDisplay(false);		
+		if (!bStart)
+		{
+			_btnexsittime = 0.0f;
+			//ActivityMgr::getInstance()->SetTransmitFlag(false);
+		}
+	}
+	//对沙巴克活动进行特殊处理
+	if (ActivityMgr::getInstance()->GetCurrentSBKActivityState())
+	{		
+		GuildMgr::getInstance()->setSbkStatr(true);
+//		if (!_timeEnd) 
+//		{
+//			_sbkLeveTime = ActivityMgr::getInstance()->GetThereActLastTime() * 60; //此时间表示沙巴克活动前10分钟内的秒数			
+//		}
+//		_timeEnd = true;
+		//minimapui->showActivityTransferBtn(true);
+		//minimapui->showSBKActivityTransferBtnDisplay(true);	
+		
+//		if (_sbkLeveTime < 0)
+		{
+			//minimapui->showSBKActivityTransferBtnDisplay(false);	
+			//minimapui->showActivityTransferBtn(false);
+			//如果当前地图是沙巴克地图 
+			unsigned int mapId = MapManager::getInstance()->getCurMapId();
+			if (mapId == SBK_MAP_CRC_ID/* || mapId == SBK_CASTLE_MAP_CRC_ID*/)
+			{
+// 				if (!_timeBegin)
+// 				{				
+// 					World::getInstance()->getTaskTraceUi()->showUi(false);					
+// 				}				
+				//World::getInstance()->getTaskTraceUi()->hideUi(false);				
+				//设置显示战报按钮		modified by lpf				
+				//World::getInstance()->_fightRecord->setVisible(true);
+				minimapui->showZhanBaoBtn(true);
+				//World::getInstance()->_fightRecord->setTouchEnabled(true);
+				//_timeBegin = true;		 	
+			} 
+			else //如果不在沙巴克地图，就默认显示任务列表，隐藏战报图标
+			{			
+				//World::getInstance()->_fightRecord->setVisible(false);
+				minimapui->showZhanBaoBtn(false);
+				//World::getInstance()->_fightRecord->setTouchEnabled(false);
+				//World::getInstance()->getTaskTraceUi()->hideUi(true);				
+				//_timeBegin = false;	
+			}			
+		}		
+	}
+	else
+	{		
+		//minimapui->showSBKActivityTransferBtnDisplay(false);
+		//minimapui->showActivityTransferBtn(false);
+		if (ActivityMgr::getInstance()->GetStartActIndex() == ACT_FIGHTCITY_INDEX)
+		{
+			minimapui->showSBKActivityScriptTime(false);	
+		}
+		
+			
+		//设置显示战报按钮
+			
+		//World::getInstance()->_fightRecord->setVisible(false);
+		minimapui->showZhanBaoBtn(false);
+		//World::getInstance()->_fightRecord->setTouchEnabled(false);
+		//World::getInstance()->getTaskTraceUi()->hideUi(true);		
+	}	
+	//[bing] 判断是副本地图显示副本离开按钮
+	unsigned int t_mapID = MapManager::getInstance()->getCurMapId();
+	bool t_bCanShow = BF_BATTLE_MAP != t_mapID && GUILD_HOME_MAP !=t_mapID ;
+	if (InstanceMgr::getInstance()->IsPlayerInInstanceMap() && t_bCanShow)
+	{
+		minimapui->showLeaveScripteBtn(true);
+		minimapui->showExpLixianBtn(true);
+	}
+	else
+	{
+		minimapui->showLeaveScripteBtn(false);
+	}
+
+// 	if (ActivityMgr::getInstance()->GetThereActLastTime() > 0)
+// 	{		
+// 		CC_ASSERT(minimapui != NULL);
+// 		_sbkLeveTime -= dt  ;
+// 		int minutes = _sbkLeveTime/60.0;
+// 		int secondes = (int)(_sbkLeveTime)%60;
+// 		minimapui->showSBKActivityScriptTime(true);
+// 		minimapui->setSBKActivityScriptDaojiShi(minutes,secondes);
+// 	}
+// 	else
+// 	{
+// 		_sbkLeveTime = -1.0f;
+// 		minimapui->showSBKActivityScriptTime(false);
+// 	}
+
+	//天下乱斗会
+	if (minimapui)
+	{
+		//minimapui->showLuanDouHuiBtn(ActivityMgr::getInstance()->isLuanDouHuiPrepareState());
+	}
+
+	//签到图标显示
+	//int a = minimapui->isSignShowInfo();
+	//int b = IS_UI_OPEN(WCT_NewSignUi);
+	if(minimapui->isSignShowInfo() && !IS_UI_OPEN(WCT_NewSignUi))
+	{
+		int curday = lp->GetDayNumFromRoleCrateTime();
+		curday = curday % MAX_SIGN_DAY_NUM;
+		if (curday >= MAX_SIGN_DAY_NUM)
+			curday = MAX_SIGN_DAY_NUM-1;
+		if(curday < 0)
+			curday = 0;
+		//int c = RewardMgr::getInstance()->isSignedCurDay(curday);
+		if(RewardMgr::getInstance()->isSignedCurDay(curday))
+		{
+			World::getInstance()->setSignBtnAction();
+		}
+	}
+
+	/*功能引导屏蔽
+	if(minimapui->getZhanBaoShow())
+	{
+		minimapui->showFuncGuide(false);
+	}
+	else
+	{
+		//引导图标显示
+		if(lp->getLevel() >= FuncGuideMgr::getInstance()->getFGShowLevel())
+		{
+			if((IS_VALID(FuncGuideMgr::getInstance()->getFGShowLevel()) && !minimapui->getFuncGuideVis()) || FuncGuideMgr::getInstance()->getChangeShow())
+			{
+				if(FuncGuideMgr::getInstance()->getChangeShow()){
+					FuncGuideMgr::getInstance()->setChangeShow(false);
+				}
+
+				bool isOpenFunc;
+				if(lp->getLevel() >= FuncGuideMgr::getInstance()->getFGOpenLevel()){
+					isOpenFunc = true;
+				}else{
+					isOpenFunc = false;
+				}
+				minimapui->showFuncGuide(true, isOpenFunc);
+			}
+			else if(!IS_VALID(FuncGuideMgr::getInstance()->getFGShowLevel()))
+			{
+				minimapui->showFuncGuide(false);
+			}
+			else if(!minimapui->getFuncOpen() && lp->getLevel() >= FuncGuideMgr::getInstance()->getFGOpenLevel())
+			{
+				minimapui->setFuncOpen(true);
+			}
+		}else{
+			minimapui->showFuncGuide(false);
+		}
+	}*///功能引导屏蔽
+
+	if (!InstanceMgr::getInstance()->GetIsInYanHuo())
+	{
+		_scripttime = -1.0f;
+		minimapui->showScriptTime(false);
+		return;
+	}
+	if (_scripttime <= 0 )
+	{
+		minimapui->showScriptTime(false);
+		if (InstanceMgr::getInstance()->GetIsInYanHuo())
+		{
+			_scripttime = InstanceMgr::getInstance()->GetYanHuoTimeLeft(); //获取副本时间;
+		}
+	}
+	else
+	{
+		CC_ASSERT(minimapui != NULL);
+		_scripttime -= dt  ;
+		int minutes = _scripttime/60.0;
+		int secondes = (int)(_scripttime)%60;
+		minimapui->showScriptTime(true);
+		minimapui->setScriptDaojishi(minutes,secondes);
+	}
+}
+
+void MiniMapNode::onEnter()
+{
+	CCNode::onEnter();
+	schedule(SEL_SCHEDULE(&MiniMapNode::update), 0.2f);
+
+
+	REGISTER_EVENT(CloseMap,MiniMapNode,onEventCloseMap);
+}
+
+void MiniMapNode::onExit()
+{
+	CCNode::onExit();
+	unschedule(SEL_SCHEDULE(&MiniMapNode::update));
+	clearAll();
+
+	UNREGISTER_EVENT(CloseMap,MiniMapNode,onEventCloseMap);
+}
+
+void MiniMapNode::hideAll()
+{
+	std::for_each(_dots.begin(),_dots.end(),boost::bind(&CCSprite::setVisible,_1,false));
+	_curSpriteIndex = 0;
+}
+
+CCSprite * MiniMapNode::getSprite()
+{
+	CCSprite *sprite = NULL;
+	int size = _dots.size();
+	if(_curSpriteIndex >= size)
+	{
+		sprite = CCSprite::create();
+		//sprite->retain();
+		//addChild(sprite);
+		sprite->setVisible(false);
+		_dots.push_back(sprite);
+	}
+	else
+	{
+		sprite = _dots[_curSpriteIndex];
+	}
+	++ _curSpriteIndex;
+	return sprite;
+}
+
+
+void MiniMapNode::onEventCloseMap( CloseMap* pEvent )
+{
+	clearAll();
+}
+
+void MiniMapNode::clearAll()
+{
+	std::for_each(_dots.begin(),_dots.end(),boost::bind(&CCSprite::removeFromParent,_1));
+	_dots.clear();
+}
+
+#else
+bool MiniMapNode::init()
+{
+	if(!MaskRenderNode::init())
+		return false;
+	_mapWidth = 0;
+	_mapHeight = 0;
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile((uiDir + "minimap.plist").c_str());
+	initWithSpriteFrameName("minimap_mapmask", "minimap_mapmask");
+	return true;
+}
+
+void MiniMapNode::setFocusPoint( const CCPoint &focusPoint )
+{
+	CC_ASSERT(_mapWidth != 0 && _mapHeight != 0);
+	const CCSize &miniMapSize = _sprite->getContentSize();
+	int width = miniMapSize.width - _mapBorder*2;
+	int height = miniMapSize.height - _mapBorder*2;
+	float px = focusPoint.x * width / _mapWidth + _mapBorder;
+	float py = focusPoint.y * height / _mapHeight + _mapBorder;
+	setSpriteOffset(ccp(miniMapSize.width / 2 - px, miniMapSize.height / 2 - py));
+}
+
+void MiniMapNode::setMapSize( int width, int height )
+{
+	_mapWidth = width;
+	_mapHeight = height;
+}
+
+
+
+#endif
+
+// bool FightLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+// {
+// 	if (isVisible())
+// 	{
+// 		if (isTouchOnNodeContent(sprite, pTouch))
+// 		{
+// 			sprite->setScale(1.1f);
+// 			return true;
+// 		}
+// 	}	
+// 	return false;
+// }
+// 
+// bool FightLayer::init()
+// {
+// 	sprite = CCSprite::create();
+// 	sprite->setAnchorPoint(ccp(0.5f, 0.5f));
+// 	CCSpriteFrame *normalSprite = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("smallui_zhanbao");
+// 	if (normalSprite)
+// 		sprite->setDisplayFrame(normalSprite);
+// 	sprite->setPosition(ccp((sprite->boundingBox().size.width) / 2, -(sprite->boundingBox().size.height) / 2));
+// 	addChild(sprite);
+// 	return true;
+// }
+// 
+// void FightLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+// {
+// 	if (isVisible())
+// 	{
+// 		sprite->setScale(1.0f);
+// 		if (isTouchOnNodeContent(sprite, pTouch))
+// 		{
+// 			if (!IS_UI_OPEN(WCT_PACKAGEUI) && !IS_UI_OPEN(WCT_ROLEEQUIPUI) && !IS_UI_OPEN(WCT_SKILLUI) && !IS_UI_OPEN(WCT_WUXUEUI))
+// 			{
+// 				World::getInstance()->sendZhanBaoRequest();	
+// 			}
+// 		}
+// 	}
+// }
+// 
+// void FightLayer::onEnter()
+// {
+// 	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+// 	CCLayer::onEnter();
+// }
+// 
+// void FightLayer::onExit()
+// {
+// 	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+// 	CCLayer::onExit();
+// }

@@ -1,0 +1,3329 @@
+#include "QuestMgr.h"
+#include "cocos2d.h"
+//#include "FileInputStream.h"
+#include "CfgReader.h"
+#include "DBMgr.h"
+//#include "LuaMgr.h"
+#include "NPCTalkUi.h"
+#include "TCPClient.h"
+#include "ToolTip.h"
+#include "ServerTime.h"
+#include "QuestProto.h"
+#include "RoleManager.h"
+#include "ClientUpdate.h"
+#include "LocalPlayer.h"
+#include "MapManager.h"
+#include "TaskTraceUi.h"
+#include "MessageBoxUi.h"
+#include "World.h"
+#include <sstream>
+#include "StringMgr.h"
+#include "NewPlayerGuide.h"
+#include "VIPMgr.h"
+#include "RoleManager.h"
+#include "BaseDefine.h"
+#include "Auto_ActionMgr.h"
+#include "PackageManager.h"
+#include "InstanceMgr.h"
+#include "ExchangeBusinessMgr.h"
+#include "PlayerState.h"
+#include "ShopMgr.h"
+#include "TransmitMgr.h"
+#include "ExchangeMgr.h"
+#include "UpMgr.h"
+#include "MarryMgr.h"
+#include "StoreMgr.h"
+#include "CCLuaEngine.h"
+#include "DaRongLu.h"
+#include "CommonDefine.h"
+#include "GameEventDefine.h"
+#include "NewFuncGuider.h"
+#include "boost/lexical_cast.hpp"
+#include "RewardQuestMgr.h"
+#include "TaskTraceUi.h"
+#include "NPC.h"
+#include "InstanceProto.h"
+#include "NPCChatMgr.h"
+#include "f_string_table.h"
+#include "GuildMgr.h"
+#include "WorldLevelMgr.h"
+using namespace cocos2d;
+using namespace boost;
+QuestMgr::QuestMgr()
+	: _isInit(false)
+	,_isAutoAttackMonster(false)
+{	
+	autoQID = -1;
+
+	std::string filename = CFGReader::instance()->get_profile_string("Scheme" , "Script" , "Script/");
+	std::stringstream ss;
+	ss<<filename<<"npc.lua"<<'\0';
+	CCString* file_content= CCString::createWithContentsOfFile(ss.str().c_str(),true);
+	
+// 	FileInputStream script(ss.str().c_str(),EM_SMALL,true);
+// 	size_t sz = script.getSize();
+// 	char* mem = (char*)malloc(sz + 1);
+// 	script.readBlock(mem , sz);
+// 	mem[sz]  = 0;
+	CCLuaEngine* pEngine = CCLuaEngine::defaultEngine();
+	pEngine->executeString(file_content->getCString());
+	//free(mem);
+	reSetData();//gx add
+
+	init_junxu_reward();
+}
+//////////////////////////////////////////////////////////////////////////
+QuestMgr::~QuestMgr()
+{
+
+}
+//////////////////////////////////////////////////////////////////////////
+QuestMgr* QuestMgr::getInstance()
+{
+	static QuestMgr mgr;
+	return &mgr;
+}
+void QuestMgr::init()
+{
+	if(!_isInit)
+	{
+		TCP_CLIENT->register_net_cmd("NET_SIS_accept_quest" , this , &QuestMgr::onServerAccept);
+		TCP_CLIENT->register_net_cmd("NET_SIS_complete_quest" , this , &QuestMgr::onServerFinish);
+		TCP_CLIENT->register_net_cmd("NET_SIS_get_role_init_state_complete_quest" , this , &QuestMgr::onServerInitFinished);
+		TCP_CLIENT->register_net_cmd("NET_SIS_get_role_init_state_incomplete_quest" , this , &QuestMgr::onServerInitUnfinished);
+		TCP_CLIENT->register_net_cmd("NET_SIS_add_quest" , this , &QuestMgr::onServerAddQuest);
+		TCP_CLIENT->register_net_cmd("NET_SIS_quest_update_kill_creature" , this , &QuestMgr::onServerUpdateQuest);
+		TCP_CLIENT->register_net_cmd("NET_SIS_quest_update_item" , this , &QuestMgr::onQuestUpdateItem);
+		TCP_CLIENT->register_net_cmd("NET_SIS_delete_quest" , this , &QuestMgr::onServerDelDailyQuest);
+		TCP_CLIENT->register_net_cmd("NET_SIS_enter_quest_fuben" , this , &QuestMgr::onServerEnterQuestFuben);
+		TCP_CLIENT->register_net_cmd("NET_SIS_get_Last_Huan_Task_info", this, &QuestMgr::onServerInitCurrentCanGetHuan);
+		NewPlayerGuider::getInstance()->_sigEraseHoldQuest.connect(this,&QuestMgr::removeQuestState);
+		reSetData();
+		_isInit = true;
+	}
+}
+void QuestMgr::setTargetPosition(float x,float y)
+{
+	tempx = x;
+	tempy = y;
+}
+void QuestMgr::AutoFindPath(int qid, int taskId)
+{
+	//角色信息
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if( !lp )
+		return;
+	autoQID = qid;
+	const s_quest_detail* curQuest = getQuestDetail(qid);
+	if(curQuest == NULL)
+	{
+		return;
+	}
+	if(curQuest->type == Type_Main)
+		_wantOpenRoleidMain = taskId;//roleid是接任务的npc的id
+	else if(curQuest->type == Type_Sub)
+		_wantOpenRoleidSub = taskId;
+	else if(curQuest->type == Type_Daily)
+		_wantOpenRoleidEvery = taskId;
+	else if(curQuest->type == Type_Huan)
+		_wantOpenRoleidHuan = taskId;
+	else if(curQuest->type == Type_BiQi)
+		_wantOpenRoleidBiQi = taskId;
+	//检查当前场景是否为副本 add by XSea 2014.10.21
+	if( InstanceMgr::getInstance()->IsPlayerInInstanceMap() )
+	{
+		//副本中不可寻路
+		if (!TASK_IS_GUILD(qid))
+		{
+			ToolTip::getInstance()->push(GET_STR(9254));
+			return;
+		}
+	}
+	//RoleManager::CreatureInfo creatureInfo = RoleManager::getInstance()->getCreatureInfo(roleid);
+
+	stCreateProto const* proto = RoleManager::getInstance()->getCreatureProto(taskId);
+	if(proto == NULL)
+	{
+		return;
+	}
+	tempx = proto->nPosX;
+	tempy = proto->nPosY;
+	maptag = proto->strMapName;
+
+	if(tempx!=-1)
+		//!开始自动寻路 
+	{
+		if (AutoActionMgr::getInstance()->Get_Auto_Action())//gx add;
+		{
+			AutoActionMgr::getInstance()->Set_Auto_Action(false);
+		}
+		if (!lp->getAutoRunState())
+		{
+			lp->setAutoRunState(true);
+		}
+		if (!lp->getRunSELastState())
+			lp->setRunSEOutMap(true);
+
+		std::string animFile = proto->strAnimatorName;
+
+		animFile = animFile.substr(0, 1);
+		bool isNpc = animFile == "N"?true:false;
+		if(!isNpc)
+		{
+			lp->setAttackMonsterId(taskId);
+			lp->setAttackQuestId(qid);
+		}
+		else
+		{
+			lp->setAttackMonsterId(0);
+		}
+		UINT auto_qid = isNpc?INVALID:qid;
+		MapManager::getInstance()->setRandPos(animFile == "N"?true:false);
+
+		if(std::string("0") != maptag && !maptag.empty())
+		{
+			std::string str2 = maptag.substr(1,maptag.length());
+			int mapid = lexical_cast<int>(str2);
+			lp->runPathTo(ccp(tempx,tempy), mapid);
+			NewPlayerGuider::getInstance()->onBeginQuestRunpath(qid, ccp(tempx,tempy));
+			RoleHeadUi *ui = World::getInstance()->getRoleHeadUi();
+			if (ui)
+			{
+				CC_ASSERT(NULL != ui);
+				CC_ASSERT(NULL != ui->GetRoleUI());
+				lp->SetisMouseClick(false);
+				ui->GetRoleUI()->SetMapidStr(maptag);
+				ui->GetRoleUI()->SetQuestPosx(tempx);
+				ui->GetRoleUI()->SetQuestPosy(tempy);
+				if(isNpc)
+					ui->GetRoleUI()->SetNpcId(taskId);
+				else
+					ui->GetRoleUI()->SetNpcId(-1);
+			}
+			AutoActionMgr::getInstance()->setCurrentQuestID(auto_qid,AutoActionMgr::TraceTarget(taskId,isNpc));
+		}
+		ChangeMonsterName evt;
+		SEND_EVENT(&evt);
+	}
+}
+void QuestMgr::loadQuestProto()
+{
+	_quest.clear();
+	int nToRewardID = 2;
+	int nTmpPro = 0;
+	int nTmpSex = 0;
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM QuestInfo");
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		s_quest_detail quest;
+		unsigned int idx = table->get_index("qid");
+		quest.qid = table->get_integer32(idx);
+		idx = table->get_index("title");
+		quest.title = table->get_text(idx);
+		idx = table->get_index("description");
+		quest.desc = table->get_text(idx);
+		idx=table->get_index("beforeText");
+		quest.beforeText=table->get_text(idx);
+		idx=table->get_index("afterText");
+		quest.afterText=table->get_text(idx);
+		idx = table->get_index("target");
+		quest.target = table->get_text(idx);
+		idx = table->get_index("accept_id");
+		quest.accept_id = table->get_integer32(idx);
+		idx = table->get_index("complete_id");
+		quest.complete_id = table->get_integer32(idx);
+		idx = table->get_index("auto");
+		quest.autoc = table->get_integer32(idx);
+		idx= table->get_index("preQuest");
+		quest.preQuest_qid=table->get_integer32(idx);
+		idx = table->get_index("next");
+		quest.next_qid = table->get_integer32(idx);
+		idx = table->get_index("attack_id");
+		quest.attack_id = table->get_integer32(idx);
+		idx = table->get_index("complete_talk");
+		quest.complete_talk = table->get_text(idx);
+
+		idx = table->get_index("needItem");
+		quest.needItem = table->get_integer32(idx);
+		idx = table->get_index("itemNum");
+		quest.itemNum = table->get_integer32(idx);
+		idx = table->get_index("popup");
+		quest.popup = table->get_integer32(idx);
+		idx = table->get_index("autofind");
+		quest.autofind = table->get_integer32(idx);
+		idx = table->get_index("type");
+		quest.type = table->get_integer32(idx);
+		idx = table->get_index("reward0");
+		quest.reward_exp = table->get_integer32(idx);
+		idx = table->get_index("reward1");
+		quest.reward_gold = table->get_integer32(idx);
+		idx = table->get_index("robotTask");
+		quest.robotTask = table->get_integer32(idx);
+		std::string tmp;
+		std::list<std::string> _tmpNtmpID;
+		std::string ntmpID = "0";
+		for (int j = nToRewardID; j <= 7; ++j)
+		{
+			CCString* tmpRWStr = CCString::createWithFormat("reward%d", j);
+			CCString* tmpProStr = CCString::createWithFormat("class%d", j);
+			CCString* tmpSexStr = CCString::createWithFormat("sex%d", j);
+			idx = table->get_index(tmpProStr->getCString());
+			nTmpPro = table->get_integer32(idx);
+			idx = table->get_index(tmpSexStr->getCString());
+			nTmpSex = table->get_integer32(idx);
+			idx = table->get_index(tmpRWStr->getCString());
+			std::string tmpReward = table->get_text(idx);
+			++nToRewardID;
+			//修改不显示任务奖励物品
+			if ((_transform(tmpReward))|| (nTmpPro == 0)|| (nTmpSex == -1))
+			{
+				ntmpID = tmpReward;
+				_tmpNtmpID.push_back(tmpReward);
+			}
+		}
+		nToRewardID = 2;
+		//每次添加前要清空一次
+		quest.reward_item1 = 0;
+		quest.reward_item2 = 0;
+		quest.reward_item3 = 0;
+
+		quest.reward_class1 = 0;
+		quest.reward_class2 = 0;
+		quest.reward_class3 = 0;
+		for (int i = 1; i <= 3; ++i)
+		{
+
+			CCString* tmpRWStr = CCString::createWithFormat("class%d", i);
+			idx = table->get_index(tmpRWStr->getCString());
+			int Tmpvalue = table->get_integer32(idx);
+			switch (i)
+			{
+			case 1:
+				{
+					if (_tmpNtmpID.size() > 0)
+					{
+						quest.reward_item1 = _transform(_tmpNtmpID.front());
+						_tmpNtmpID.pop_front();
+					}
+					quest.reward_class1 = Tmpvalue;
+				}
+				break;
+			case 2:
+				{
+					if (_tmpNtmpID.size() > 0)
+					{
+						quest.reward_item2 = _transform(_tmpNtmpID.front());
+						_tmpNtmpID.pop_front();
+					}
+					quest.reward_class2 = Tmpvalue;
+				}
+				break;
+			case 3:
+				{
+					if (_tmpNtmpID.size() > 0)
+					{
+						quest.reward_item3 = _transform(_tmpNtmpID.front());
+						_tmpNtmpID.pop_front();
+					}
+					quest.reward_class3 = Tmpvalue;
+				}
+				break;
+			default:
+				break;
+			}
+		}
+		idx = table->get_index("level");
+		quest.level = table->get_integer32(idx);
+		idx = table->get_index("autoInterface");
+		quest.autoInterface=table->get_integer32(idx);
+		idx = table->get_index("lvmax");
+		quest.lvmax = table->get_integer32(idx);
+		idx = table->get_index("junxubiaozhi");
+		quest.loop_quest_step = table->get_integer32(idx);
+		idx = table->get_index("repeatable");
+		quest.repeatable = (table->get_integer32(idx) !=0);
+		idx = table->get_index("rew_contributions");
+		quest.contributions = table->get_integer32(idx);
+		idx = table->get_index("rew_guild_fund");
+		quest.fund = table->get_integer32(idx);
+		idx = table->get_index("rew_yuanbao");
+		quest.yuanBao = table->get_integer32(idx);
+		_quest[quest.qid] = quest;
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+}
+void QuestMgr::destroy()
+{
+	if(_isInit)
+	{
+		reSetData();
+		NewPlayerGuider::getInstance()->_sigEraseHoldQuest.disconnect(this,&QuestMgr::removeQuestState);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_accept_quest" , this , &QuestMgr::onServerAccept);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_complete_quest" , this , &QuestMgr::onServerFinish);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_get_role_init_state_complete_quest" , this , &QuestMgr::onServerInitFinished);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_get_role_init_state_incomplete_quest" , this , &QuestMgr::onServerInitUnfinished);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_add_quest" , this , &QuestMgr::onServerAddQuest);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_quest_update_kill_creature" , this , &QuestMgr::onServerUpdateQuest);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_quest_update_item" , this , &QuestMgr::onQuestUpdateItem);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_delete_quest" , this , &QuestMgr::onServerDelDailyQuest);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_enter_quest_fuben" , this , &QuestMgr::onServerEnterQuestFuben);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_get_Last_Huan_Task_info", this, &QuestMgr::onServerInitCurrentCanGetHuan);
+		_isInit = false;
+
+
+	}
+}
+void QuestMgr::reSetData()
+{
+	_activeNPCid = -1;
+	_wantOpenRoleidMain = -1;
+	_wantOpenRoleidSub = -1;
+	_wantOpenRoleidEvery = -1;
+	_wantOpenRoleidBiQi = -1;
+	_wantOpenRoleidHuan = -1;
+	_wantOpenRoleidEveryNPC = -1;
+	_curSubQuestID = -1;
+
+	_curEveryQuestID = -1;
+	_curBiQiQuestID = -1;
+	_everyQuestANum = 0;
+	_everyQuestBNum = 0;
+	_curMainQuestID = -1;
+	_curMainQuestID = -1;
+	_curGuildQuestID = -1;
+	_questState.clear();
+	_killCount.clear();
+	_finishedQuestList.clear();
+	_questCache.clear();
+	_subQDetails.clear();
+	tempx = tempy = 0;
+	maptag = "";
+	autoQID = 0;
+	//_isOneAccept = false;
+	canOpenNpcUi = false;
+	_isCloseBaoDianEffect = false;
+	return;
+}
+//////////////////////////////////////////////////////////////////////////
+void QuestMgr::doNPCScript(unsigned int npcid , unsigned int sid , bool reset)
+{		
+	if(reset)
+		autoQID = -1;
+	unsigned int curtime = ClientUpdate::getInstance()->getCurrentTime() ;
+	NPCTalkUi* talk_ui = World::getInstance()->getNPCDialog();
+	talk_ui->showSpecialButton1(false);
+	//if(curtime - _lasttime >500)
+	{
+		//!尝试更新一下每日任务		
+		_fillDetail(_curMainQuestID);		
+		talk_ui->show(true);
+		talk_ui->clear();
+		talk_ui->refresh_zhuzzai_info(npcid);
+		//!执行这个脚本
+		_activeNPCid = npcid;
+		/*CCLuaEngine* pEngine = CCLuaEngine::defaultEngine();
+		CCLuaStack * stack = pEngine->getLuaStack();
+		lua_State* state = stack->getLuaState();
+		lua_getglobal(state, "NPCDialog");
+		stack->pushInt(npcid);
+		stack->pushInt(_curMainQuestID);
+		stack->executeFunction(2);
+		stack->clean();*/		
+		{//ZHJL : 将LUA 脚本改成C++
+			showNPCName(npcid);//--显示NPC名字
+			showNPCTalk(npcid);//--显示NPC被对话内容
+
+			int state = getCurQuestState(_curMainQuestID , npcid);//--查看角色任务状态（1.已经接取；2.未接取；3.准备完成；4.非法）
+			if(state == 3)
+				addToCompleteQuestList(_curMainQuestID);//--显示完成任务对话
+			else if (state == 2)
+				addToAcceptQuestList(_curMainQuestID);//--添加任务标题并显示再UI中
+
+			//--???????????
+			int stateSubA = getSubQuestStateA(npcid);
+			if(stateSubA == 3)
+				addToCompleteQuestListSub(1);//--显示完成任务对话
+			else if(stateSubA == 2)
+				addToAcceptQuestListSub(1);//--添加任务标题并显示再UI中        
+			//--查看每日任务
+			int stateEvery = getEveryQuestState(4 ,npcid);
+			if(stateEvery == 3)
+				addToCompleteQuestListEvery(4);// --显示完成任务对话
+			else if(stateEvery == 2)
+				addToAcceptQuestListEvery(4);// --添加任务标题并显示在UI中
+		}
+		//查看比奇任务
+		int stateBiQi = getBiQiQuestState(npcid);
+		if(stateBiQi == 3)
+		{
+			addToCompleteQuestListBiQi();
+		}else if(stateBiQi == 2)
+		{
+			addToAcceptQuestListBiQi();
+		}
+		int stateHuan=getHuanQuestState(_curHuanQuestID,npcid);
+		if(stateHuan == 3)
+		{//显示完成任务对话
+			addToCompleteQuestHuan();
+		}else if(stateHuan == 2)
+		{//添加任务标题并显示在UI中
+			addToAcceptQuestHuan();
+		}
+		_lasttime = curtime;
+	}
+}
+
+eQuestState QuestMgr::getMainQuestState( unsigned short qid  , unsigned int npcid)
+{
+	//!是否已经做过了
+	std::set<unsigned short>::iterator iter2 = _finishedQuestList.find(qid);
+	if(iter2 != _finishedQuestList.end())
+		return QS_INVALID;
+	//!等级不够
+	if(_mainQDetail.level && RoleManager::getInstance()->getLocalPlayer()->getLevel() < _mainQDetail.level)
+		return QS_INVALID;
+	std::map<unsigned short , eQuestState>::iterator iter = _questState.find(qid);
+	if(iter ==_questState.end())
+		return QS_INVALID;
+	if(_mainQDetail.accept_id == 0xFFFFFFFF || _mainQDetail.complete_id == 0xFFFFFFFF)
+		return QS_INVALID;
+	if(iter->second == QS_CAN_GET && npcid == _mainQDetail.accept_id)
+		return QS_CAN_GET;
+	if(iter->second == QS_READY_FINISH && npcid == _mainQDetail.complete_id)
+		return QS_READY_FINISH;
+	return QS_INVALID;
+}
+
+eQuestState QuestMgr::getSubQuestState( unsigned short qid ,unsigned int npcid )
+{
+	//!是否已经做过了
+	std::set<unsigned short>::iterator iter2 = _finishedQuestList.find(qid);
+	if(iter2 != _finishedQuestList.end())
+		return QS_INVALID;
+	std::map<unsigned short , s_quest_detail>::iterator iterP = _subQDetails.find(qid);
+	if(iterP == _subQDetails.end())
+		return QS_INVALID;
+	std::map<unsigned short , eQuestState>::iterator iter = _questState.find(qid);
+	if(iter == _questState.end())
+		return QS_INVALID;
+	if(iterP->second.accept_id == 0xFFFFFFFF || iterP->second.complete_id == 0xFFFFFFFF)
+		return QS_INVALID;
+	if(iter->second == QS_CAN_GET && npcid == iterP->second.accept_id)
+		return QS_CAN_GET;
+	if(iter->second == QS_READY_FINISH && npcid == iterP->second.complete_id)
+		return QS_READY_FINISH;
+	return QS_INVALID;
+}
+eQuestState QuestMgr::getHuanQuestState(unsigned short qid,unsigned int npcid)
+{
+	//std::set<unsigned short>::iterator iter2 = _finishedQuestList.find(qid);
+	s_quest_detail curHuan;
+	curHuan.qid = 0;
+	std::map<unsigned short, s_quest_detail>::iterator curQuestIter = _quest.find(qid);
+	if(curQuestIter == _quest.end())
+		return QS_INVALID;
+	curHuan = curQuestIter->second;
+	if(curHuan.qid == 0)
+		return QS_INVALID;
+
+	//等级不够
+	if(RoleManager::getInstance()->getLocalPlayer()->getLevel() < curHuan.level)
+		return QS_INVALID;
+	std::map<unsigned short , eQuestState>::iterator iter = _questState.find(qid);
+	if(iter ==_questState.end())
+		return QS_INVALID;
+	if(curHuan.accept_id == 0xFFFFFFFF || curHuan.complete_id == 0xFFFFFFFF)
+		return QS_INVALID;
+	if(iter->second == QS_CAN_GET && npcid == curHuan.accept_id)
+		return QS_CAN_GET;
+	if(iter->second == QS_READY_FINISH && npcid == curHuan.complete_id)
+		return QS_READY_FINISH;
+	return QS_INVALID;
+}
+void QuestMgr::onSelect( unsigned short qid )
+{
+	NPCTalkUi* talkUi = World::getInstance()->getNPCDialog();
+	if(talkUi == NULL)
+	{
+		return;
+	}
+	talkUi->clear();
+	//!组织字符串
+	std::stringstream ss;
+
+	const s_quest_detail* qd = getQuestDetail(qid);
+	if(qd == NULL)
+	{
+		return;
+	}
+	std::string target;
+	if(!qd->autoc)//!需要格式化字符串
+	{
+		if (qd->target.size() > 0)
+		{
+			auto  pos = qd->target.find("$");
+			if (pos != std::string::npos)
+			{
+				std::string subs= qd->target.substr(0,pos);
+				std::string num = qd->target.substr(pos +1);
+				char buf[128];
+				sprintf(buf , subs.c_str() , atoi(num.c_str()));
+				target = buf;
+			}
+		}
+	}
+	else
+	{
+		target = qd->target;
+	}
+	talkUi->showButton(true);
+	if (qd->type == Type_Daily || qd->type == Type_BiQi)
+	{				
+		talkUi->showSpecialButton(true);		
+	}
+	else
+	{
+		talkUi->showSpecialButton1(false);		
+	}	
+
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if( NULL == lp )
+		return;
+
+	int index = 1;
+	if (qd->reward_exp != 0 )
+	{
+		eWorldLevelAddedType ptype = E_ADDED_EXP_NULL;
+		if(qd->type == Type_BiQi)
+		{
+			ptype = E_ADDED_BIQI_EXP_PER;
+		}
+		else
+		{
+			ptype = E_ADDED_QUEST_EXP_PER;
+		}
+		int t_worldLvPercent = WorldLevelMgr::getInstance()->getWorldLevelAddedExpPercentByType(ptype);
+		talkUi->setTaskAward(index++, eNT_AMOUNT, qd->reward_exp * t_worldLvPercent/100);
+	}
+	if (qd->reward_gold != 0)
+	{
+		talkUi->setTaskAward(index++, eNT_AMOUNT, qd->reward_gold);
+	}
+	const ItemTypeData &typeData1 = PackageManager::getInstance()->getItemTypeData(qd->reward_item1);
+	const ItemTypeData &typeData2 = PackageManager::getInstance()->getItemTypeData(qd->reward_item2);
+	const ItemTypeData &typeData3 = PackageManager::getInstance()->getItemTypeData(qd->reward_item3);
+
+	talkUi->setTaskAward(3, eNT_ITEMID, 0);
+	talkUi->setTaskAward(4, eNT_ITEMID, 0);
+	talkUi->setTaskAward(5, eNT_ITEMID, 0);
+	if (qd->contributions != 0)
+	{
+		talkUi->setTaskAward(index++, eNT_ITEMID, GUILD_GONGXIAN_ID, qd->contributions);
+	}
+	if (qd->fund != 0)
+	{
+		talkUi->setTaskAward(index++, eNT_ITEMID, GUILD_ZIJIN_ID, qd->fund);
+	}
+	if (qd->yuanBao != 0)
+	{
+		talkUi->setTaskAward(index++, eNT_ITEMID, YUANBAO_ITEM_ID, qd->yuanBao);
+	}
+	if(-1 == typeData1.profession || typeData1.profession == 1 << lp->getAttribute(RA_ROLETYPE)) 
+		talkUi->setTaskAward(index++, eNT_ITEMID, qd->reward_item1);
+
+	if(-1 == typeData2.profession || typeData2.profession == 1 << lp->getAttribute(RA_ROLETYPE)) 
+		talkUi->setTaskAward(index++, eNT_ITEMID, qd->reward_item2);
+
+	if(-1 == typeData3.profession || typeData3.profession == 1 << lp->getAttribute(RA_ROLETYPE)) 
+		talkUi->setTaskAward(index++, eNT_ITEMID, qd->reward_item3);
+	if(qd->type == Type_Daily)
+	{
+		talkUi->setFinishAward(qid, (lp->getRoleDayClearInfo(ERDCT_DAILY_TASKS_COUNT) + 1) <= VIPMgr::getInstance()->getLocalVipData().junxuRenwuTimes, "npcui_worldjx");
+		talkUi->setJingYanBeishushow(false);
+	}else if(qd->type == Type_BiQi)
+	{
+		talkUi->setFinishAward(qid, (lp->getRoleDayClearInfo(ERDCT_BIQI_TASKS_COUNT) + 1) <= VIPMgr::getInstance()->getLocalVipData().BiQiTasksCount, "npcui_world");
+		if(getQuestState(qid)/*_questState[qid]*/ == QS_CAN_GET)
+		{
+			talkUi->setJingYanBeishushow(true);
+		}
+		else
+		{
+			talkUi->setJingYanBeishushow(false);
+		}
+	}else if(qd->type == 5)
+	{
+		//World::getInstance()->getNPCDialog()->setFinishAward(qid,false);
+		talkUi->setFinishAward(qid, true, "npcui_worldhuan");
+		talkUi->setJingYanBeishushow(false);
+	}
+	else
+	{
+		ItemNode* node = dynamic_cast<ItemNode*>(World::getInstance()->getNPCDialog()->getChildByTag(NPCTalkUi::NTT_AWARDITEM + 4));
+		if(node != NULL)
+		{
+			node->setClickable(false);
+		}
+		talkUi->setJingYanBeishushow(false);
+	}
+	CCString* JunXuTaskName=CCString::createWithFormat("%s(%d/%d)",qd->title.c_str(),lp->getRoleDayClearInfo(ERDCT_DAILY_TASKS_COUNT) + 1,VIPMgr::getInstance()->getLocalVipData().junxuRenwuTimes);
+	CCString* BiQiTaskName=CCString::createWithFormat("%s(%d/%d)",qd->title.c_str(),lp->getRoleDayClearInfo(ERDCT_BIQI_TASKS_COUNT) + 1,VIPMgr::getInstance()->getLocalVipData().BiQiTasksCount);
+	if(getQuestState(qid)/*_questState[qid]*/ == QS_CAN_GET)
+	{
+		if(qd->type != Type_Daily && qd->type != Type_BiQi)
+		{
+			talkUi->setTaskText(eNT_TASKNAME, qd->title.c_str());
+		}else if(qd->type == Type_Daily)
+		{
+			talkUi->setTaskText(eNT_TASKNAME, JunXuTaskName->getCString());
+		}
+		else
+		{
+			talkUi->setTaskText(eNT_TASKNAME, BiQiTaskName->getCString());
+		}
+		talkUi->setTaskText(eNT_TASKGOAL, target.c_str());
+		talkUi->setTaskText(eNT_TASKDES, qd->desc.c_str());
+	}
+	else if (getQuestState(qid) == QS_GET && TASK_IS_GUILD(qid))
+	{
+		talkUi->setTaskText(eNT_TASKNAME,qd->title.c_str());
+		talkUi->setTaskText(eNT_TASKGOAL, target.c_str());
+		talkUi->setTaskText(eNT_TASKDES, qd->desc.c_str());
+	}
+	else if(/*_questState[qid]*/getQuestState(qid) == QS_READY_FINISH)
+	{
+		if(qd->type != Type_Daily && qd->type != Type_BiQi)
+		{
+			talkUi->setTaskText(eNT_TASKNAME, qd->title.c_str());
+		}else if(qd->type == Type_Daily)
+		{
+			talkUi->setTaskText(eNT_TASKNAME, JunXuTaskName->getCString());
+		}
+		else
+		{
+			talkUi->setTaskText(eNT_TASKNAME, BiQiTaskName->getCString());
+		}
+		talkUi->setTaskText(eNT_TASKGOAL, target.c_str());
+		talkUi->setTaskText(eNT_TASKDES, qd->complete_talk.c_str());
+	}
+	else;
+	talkUi->setText(ss.str().c_str());
+}
+
+void QuestMgr::onAccept( unsigned short qid )
+{
+	NET_SIC_npc_accept_quest cmd;
+	cmd.u16QuestID = qid;
+	cmd.dwNPCID = _activeNPCid;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+}
+
+void QuestMgr::onFinish( unsigned short qid )
+{
+	NET_SIC_complete_quest cmd;
+	cmd.u16QuestID = qid;
+	cmd.dwNPCID = _activeNPCid;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+}
+
+INT QuestMgr::checkQuestStateByID(UINT qid)
+{
+	if (_questState.empty())
+		return AQ_NOT_EXIST;
+	if (_questState.find(qid) == _questState.end())
+		return AQ_NOT_EXIST;
+	if(/*_questState[qid]*/getQuestState(qid) == QS_READY_FINISH)
+		return AQ_READY_FINISH;
+	return AQ_GET;
+}
+
+void QuestMgr::onQuestTraceSelect( unsigned short qid)
+{
+	//角色信息
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if( !lp )
+		return;
+	//检查当前场景是否为副本 add by XSea 2014.10.21
+	if( InstanceMgr::getInstance()->IsPlayerInInstanceMap() )
+	{
+		//副本中不可寻路
+		ToolTip::getInstance()->push(GET_STR(9254));
+		return;
+	}
+
+	int roleid = 0;
+	if(!isRewardQuest(qid))//如果是悬赏任务则不做此判断
+	{
+		if (_questState.find(qid) == _questState.end())
+			return;
+		std::map<unsigned short,s_quest_detail>::const_iterator iter = _quest.find(qid);
+		if(iter == _quest.end())
+		{
+			return;
+		}
+		s_quest_detail const& curSelectQuest = iter->second;
+		if(getQuestState(qid)/*_questState[qid]*/ == QS_CAN_GET)
+		{
+			roleid = curSelectQuest.accept_id;
+			lp->setAttackMonsterId(0);
+		}
+		else
+		{
+			if(curSelectQuest.autoc)
+			{
+				roleid = curSelectQuest.complete_id;
+				lp->setAttackMonsterId(0);
+			}
+
+			//!如果是打怪任务
+			else
+			{
+				//!如果当前任务状态为进行时，查找怪物点
+				//!如果当前任务状态为完成时，查找接收人
+				if(getQuestState(qid)/*_questState[qid]*/ == QS_READY_FINISH)
+				{
+					if (TASK_IS_GUILD(qid))
+					{
+						roleid = GUILD_BQCTRANS_NPCID;
+					}
+					else
+					{
+						roleid = curSelectQuest.complete_id;
+					}
+					lp->setAttackMonsterId(0);
+				}
+				else if(getQuestState(qid)/*_questState[qid]*/ == QS_GET)
+				{
+					if (curSelectQuest.robotTask == EQFT_Kill || curSelectQuest.robotTask == EQFT_Into)
+					{
+						std::string baseStr = GET_STR(9129);
+						MessageBoxUi *transUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,baseStr.c_str(), TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+						World::getInstance()->getScene()->addChild(transUi,WZ_MESSAGEBOX);
+						transUi->signalOkBtnPressed.connect(this, &QuestMgr::gotoQusetFuben);
+						return;
+					}
+					else
+					{
+						roleid = curSelectQuest.attack_id;
+						lp->setAttackQuestId(curSelectQuest.qid);
+						lp->setAttackMonsterId(curSelectQuest.attack_id);
+					}
+				}
+			}
+		}
+	}
+	else if(isRewardQuest(qid))//悬赏任务
+	{
+// 		if(getQuestState(qid)/*_questState[qid]*/ == QS_CAN_GET)
+// 		{
+// 		}
+// 		else
+		{
+			RewardQuestProto rewardQuest;
+			rewardQuest.questId = qid;
+			RewardQuestMgr::getInstance()->findRewardQusetInfo(rewardQuest);
+			if(rewardQuest.type == ERQT_Attact || rewardQuest.type == ERQT_Help)
+			{
+				roleid = rewardQuest.attactId;
+				lp->setAttackQuestId(rewardQuest.questId);
+				lp->setAttackMonsterId(roleid);
+			}
+		}
+	}
+
+	if(roleid < 10)//roleid是接任务的npc的id
+		return;
+	autoQID = qid;
+
+	//RoleManager::CreatureInfo creatureInfo = RoleManager::getInstance()->getCreatureInfo(roleid);
+	stCreateProto const* proto = RoleManager::getInstance()->getCreatureProto(roleid);
+	CC_ASSERT(proto);
+	tempx = proto->nPosX;
+	tempy = proto->nPosY;
+	maptag = proto->strMapName;
+
+	if(tempx!=-1)
+		//!开始自动寻路 
+	{
+		if (AutoActionMgr::getInstance()->Get_Auto_Action())//gx add;
+		{
+			AutoActionMgr::getInstance()->Set_Auto_Action(false);
+		}
+
+		if (!isRewardQuest(qid))
+		{
+			const s_quest_detail* curQuest = getQuestDetail(qid);
+
+			if(curQuest == NULL)
+			{
+				return;
+			}
+			if(curQuest->type == Type_Main)
+				_wantOpenRoleidMain = roleid;//roleid是接任务的npc的id
+			else if(curQuest->type == Type_Sub)
+				_wantOpenRoleidSub = roleid;
+			else if(curQuest->type == Type_Daily)
+				_wantOpenRoleidEvery = roleid;
+			else if(curQuest->type == Type_Huan)
+				_wantOpenRoleidHuan = roleid;
+			else if(curQuest->type == Type_BiQi)
+				_wantOpenRoleidBiQi = roleid;
+			if (_curMainQuestID == qid)
+			{
+				if (curQuest->level > lp->getLevel())
+				{
+					MessageBoxUi *transUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(6022).c_str(), TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+					World::getInstance()->getScene()->addChild(transUi, WZ_MESSAGEBOX);
+					transUi->signalOkBtnPressed.connect(this, &QuestMgr::ConfirmGotoRiChang);				
+					return;
+				}
+			}
+		}
+
+
+		if (!lp->getAutoRunState())
+		{
+			lp->setAutoRunState(true);
+		}
+		if (!lp->getRunSELastState())
+			lp->setRunSEOutMap(true);
+
+		std::string animFile = proto->strAnimatorName;
+
+		animFile = animFile.substr(0, 1);
+		bool isNpc = animFile == "N"?true:false;
+		MapManager::getInstance()->setRandPos(animFile == "N"?true:false);
+
+		if(std::string("0") != maptag && !maptag.empty())
+		{
+			std::string str2 = maptag.substr(1,maptag.length());
+			int mapid = lexical_cast<int>(str2);
+			lp->runPathTo(ccp(tempx,tempy), mapid);
+			NewPlayerGuider::getInstance()->onBeginQuestRunpath(qid, ccp(tempx,tempy));
+			RoleHeadUi *ui = World::getInstance()->getRoleHeadUi();
+			if (ui)
+			{
+				CC_ASSERT(NULL != ui);
+				CC_ASSERT(NULL != ui->GetRoleUI());
+				lp->SetisMouseClick(false);
+				ui->GetRoleUI()->SetMapidStr(maptag);
+				ui->GetRoleUI()->SetQuestPosx(tempx);
+				ui->GetRoleUI()->SetQuestPosy(tempy);
+				if(isNpc)
+					ui->GetRoleUI()->SetNpcId(roleid);
+				else
+					ui->GetRoleUI()->SetNpcId(-1);
+			}
+			UINT auto_qid = isNpc?INVALID:qid;
+			AutoActionMgr::getInstance()->setCurrentQuestID(auto_qid,AutoActionMgr::TraceTarget(roleid,isNpc));
+		}
+	}
+	else
+	{
+		_wantOpenRoleidMain = -1;
+		_wantOpenRoleidSub = -1;
+		_wantOpenRoleidHuan = -1;
+		_wantOpenRoleidBiQi = -1;
+		_wantOpenRoleidEveryNPC = -1;
+	}
+}
+void QuestMgr::ConfirmGotoRiChang()
+{
+	OPEN_UI(WCT_HuoyueUi);
+}
+unsigned int QuestMgr::onServerAccept( s_net_cmd *cmd2 )
+{
+	NET_SIS_accept_quest * msg= (NET_SIS_accept_quest*)cmd2;
+	if(msg->dw_error_code == 0)
+	{
+		if (TASK_IS_GUILD(msg->u16QuestID))
+		{
+			_curGuildQuestID = msg->u16QuestID;
+		}
+		unsigned short qid = msg->u16QuestID;
+		const s_quest_detail* curDetail = getQuestDetail(qid);
+		if(curDetail == NULL)
+		{
+			return NULL;
+		}
+		//_questState[qid] = QS_GET;
+		setQuestState(qid,QS_GET);
+		//!在这里需要将其添加到任务追踪列表里面去  
+		//!添加到任务追踪里面
+		if(curDetail->autoc)
+		{
+			//_questState[qid] = QS_READY_FINISH;
+			setQuestState(qid,QS_READY_FINISH);
+			appendTaskToUIView(qid,0,curDetail->target,false);
+			if(curDetail->autofind != 0)
+				AutoFindPath(qid, curDetail->complete_id);
+		}
+		else
+		{
+			auto  pos = curDetail->target.find("$");
+			std::string subs = curDetail->target;
+			std::string num;
+			if (pos != std::string::npos)
+			{
+				subs= curDetail->target.substr(0,pos);
+				num = curDetail->target.substr(pos +1);
+			}		
+			appendTaskToUIView(qid,0,subs.c_str(),false,NULL);
+			GuildMgr::getInstance()->onUpdateTargetItemInfo();
+
+			//!当前杀怪数量
+			s_kill_counter kc;
+			kc.curkill = 0;
+			kc.total = atoi(num.c_str());
+			_killCount[qid] = kc;
+			if(curDetail->autofind != 0)
+				AutoFindPath(qid, curDetail->attack_id );
+
+			//如果是交物品的任务则需要检测当前身上物品数 add by XSea 2014.10.15
+			int nItemID = curDetail->needItem; //所需物品id
+			int nItemCount = curDetail->itemNum; //所需物品数量
+			//如果需要交物品
+			if( nItemID != 0 && nItemCount != 0 )
+			{
+				int nCount = PackageManager::getInstance()->getItemNumber(EICT_Bag,nItemID);
+				if( nCount > 0 )
+				{
+					_killCount[qid].curkill = nCount;
+					if(_killCount[qid].curkill >= _killCount[qid].total)
+					{
+						//_questState[qid] = QS_READY_FINISH;
+						setQuestState(qid,QS_READY_FINISH);
+						World::getInstance()->getTaskTraceUi()->modifyTaskInfo(qid , nCount, true);
+					}
+				}
+			}
+		}
+		World::getInstance()->runAcceptTaskEffect();
+		_sigAcceptQuest.emit(msg->u16QuestID);
+	}
+	else if(msg->dw_error_code == 3)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["ToFarTo_Accept"]);
+	}
+	else if (14 == msg->dw_error_code)//任务已经接取
+	{
+		ToolTip::getInstance()->push(GET_STR(2026));
+	}
+	else if(11 == msg->dw_error_code)//等级不够
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["LevelNotEnough"]);
+	}
+	else if(62 == msg->dw_error_code)//背包已满，无法接取任务
+	{
+		ToolTip::getInstance()->push(GET_STR(2042));
+	}
+	else if (36 == msg->dw_error_code)//今日接取任务次数已满
+	{
+		//???????????
+	}
+	else if (101 == msg->dw_error_code)//组队无法接取该任务
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["Team_Unable_To_Accept"]);
+	}
+	else if (74 == msg->dw_error_code)//???????????????????????????????????????
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["All_JunXu_Finish"]);
+	}
+	else if (34 == msg->dw_error_code)	//背包空间不足无法接取或完成任务
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["Bag_Not_EnoughTo_Accept_Or_Finish"]);
+	}
+	else if (E_CanTakeQuest_FAILED_Not_Get_Num == msg->dw_error_code)  // 领取帮派任务时，没有足够的领取次数
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["guild_not_get_num"]);
+	}
+	else if (E_CanTakeQuest_FAILED_Not_Enough_Mission == msg->dw_error_code)  // 领取帮派任务时，没有足够的任务内存
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["guild_not_enough_mission"]);
+	}
+	return 0;
+}
+
+//???????
+unsigned int QuestMgr::onServerFinish( s_net_cmd* cmd2 )
+{
+	NET_SIS_complete_quest * msg= (NET_SIS_complete_quest*)cmd2;
+	if(msg->dw_error_code == 0)
+	{
+		unsigned short qid = msg->u16QuestID;
+		const s_quest_detail* curDetail = getQuestDetail(qid);
+		if(curDetail == NULL)
+		{
+			return NULL;
+		}
+		//!查询数据库,获取下一个任务id
+		if(curDetail->type == Type_Main)//!完成的是主线任务
+		{
+			World::getInstance()->runFinishedTaskEffect();
+			_curMainQuestID = curDetail->next_qid;
+			//!主线任务结束
+			if(!_curMainQuestID)
+			{
+				World::getInstance()->getTaskTraceUi()->erase(qid);
+				//World::getInstance()->getTaskTraceUi()->resetScrollPosition();
+				return 0;
+			}
+			//_questState[_curMainQuestID] = QS_CAN_GET;
+			setQuestState(_curMainQuestID,QS_CAN_GET);
+			//!添加到任务追踪，防止中断
+			_fillDetail(_curMainQuestID);
+
+			if(RoleManager::getInstance()->getLocalPlayer()->getLevel()>= _mainQDetail.level)
+			{
+				appendTaskToUIView(_mainQDetail.qid,0,_mainQDetail.beforeText,false);
+				_wantOpenRoleidMain = _mainQDetail.accept_id;
+
+				//自动开启任务UI
+				autoOpenQuestUI(qid, _mainQDetail.accept_id, _mainQDetail.qid);
+			}
+			else
+			{
+				s_quest_trace_cache qtc;
+				qtc.needlevel = _mainQDetail.level;
+				qtc.qid = _mainQDetail.qid;
+				qtc.title = _mainQDetail.title;
+				qtc.beforeText=_mainQDetail.beforeText;
+				qtc.afterText=_mainQDetail.afterText;
+				qtc.roleid = _mainQDetail.accept_id;
+				_questCache.push_back(qtc);
+			}
+
+		}
+		//!这是个每日任务
+		else if(curDetail->type == Type_Daily)
+		{
+			if (isDailyFullCircle())
+			{
+				removeQuestState(_curEveryQuestID);
+				_curEveryQuestID =-1;
+			}
+			else
+			{
+				_curEveryQuestID = curDetail->next_qid;
+				if(_curEveryQuestID != 0)
+				{
+					setQuestState(_curEveryQuestID,QS_CAN_GET);
+					//_questState[_curBiQiQuestID] = QS_CAN_GET;
+				}
+			}
+
+			doSthAfterFinished(curDetail,msg->nBeishu == 2);
+		}
+		//比奇任务
+		else if(curDetail->type == Type_BiQi)
+		{
+			// 			MiniMapUi* miniMapUi = World::getInstance()->getMiniMapUi();
+			// 			if(miniMapUi)
+			// 			{
+			// 				MiniMapUiLoaderLayer* loaderLayer = miniMapUi->getMinimapUILoaderLayer();
+			// 				if(loaderLayer && !_isCloseBaoDianEffect)
+			// 				{
+			// 					loaderLayer->closeBaoDianEffect(curDetail->accept_id);
+			// 					_isCloseBaoDianEffect = true;
+			// 				}
+			// 			}
+
+			if (isBiQiFullCircle())
+			{
+				removeQuestState(_curBiQiQuestID);
+				_curBiQiQuestID =-1;
+			}
+			else
+			{
+				_curBiQiQuestID = curDetail->next_qid;
+				if(_curBiQiQuestID != 0)
+				{
+					setQuestState(_curBiQiQuestID,QS_CAN_GET);
+					//_questState[_curBiQiQuestID] = QS_CAN_GET;
+				}
+			}
+
+			doSthAfterFinished(curDetail,msg->nBeishu == 2);
+		}
+		//支线任务
+		else if(curDetail->type == Type_Sub)
+		{
+			World::getInstance()->runFinishedTaskEffect();
+			//首先从缓冲列表里面删除当前的支线任务 
+			std::map<unsigned short , s_quest_detail>::iterator iter = _subQDetails.find(qid);			
+			if(qid == _curSubQuestID)
+				_curSubQuestID = 0xFFFF;
+			//!找到了一个
+			if(iter!= _subQDetails.end())
+			{
+				_subQDetails.erase(iter);
+			}
+			int nNextQid = curDetail->next_qid; //下一个支线任务id
+			//如果有下一个任务则去列表里找下一个指定的任务
+			if( nNextQid > 0 && _subQDetails.find(nNextQid) != _subQDetails.end() )
+			{
+				std::map<unsigned short , s_quest_detail>::iterator iter = _subQDetails.find(nNextQid);
+				//找到了
+				if(iter->first!=_curSubQuestID)
+				{
+					setQuestState(iter->second.qid,QS_CAN_GET);
+					//_questState[iter->second.qid] = QS_CAN_GET;
+					_wantOpenRoleidSub = iter->second.accept_id;								
+					if(_curSubQuestID == 0xFFFF)
+					{
+						_curSubQuestID = iter->second.qid;
+						appendTaskToUIView(iter->second.qid,0,iter->second.beforeText,false);
+
+						//自动开启任务UI
+						autoOpenQuestUI(qid, iter->second.accept_id, iter->second.qid);
+					}
+				}
+				if(_curSubQuestID == 0xFFFF)
+				{
+					World::getInstance()->getTaskTraceUi()->erase(qid);
+					//World::getInstance()->getTaskTraceUi()->resetScrollPosition();
+				}
+			}
+			else
+			{
+				//如果没有则去列表里找一个任务
+				std::map<unsigned short , s_quest_detail>::iterator iter2 = _subQDetails.begin();
+				for(;iter2!=_subQDetails.end() ; ++iter2)
+				{
+					//!找到了
+					if(iter2->first != _curSubQuestID)
+					{
+						setQuestState(iter2->second.qid,QS_CAN_GET);
+						//_questState[iter2->second.qid] = QS_CAN_GET;
+						_wantOpenRoleidSub = iter2->second.accept_id;								
+						if(_curSubQuestID == 0xFFFF)
+						{
+							_curSubQuestID = iter2->second.qid;
+							appendTaskToUIView(iter2->second.qid,0,iter->second.beforeText,false);
+							//自动开启任务UI
+							autoOpenQuestUI(qid, iter2->second.accept_id, iter2->second.qid);
+						}
+					}
+				}
+				if(_curSubQuestID == 0xFFFF)
+				{
+					World::getInstance()->getTaskTraceUi()->erase(qid);
+					//World::getInstance()->getTaskTraceUi()->resetScrollPosition();
+				}
+			}
+		}
+		//环任务
+		else if(curDetail->type == Type_Huan)
+		{
+			// 			MiniMapUi* miniMapUi = World::getInstance()->getMiniMapUi();
+			// 			if(miniMapUi)
+			// 			{
+			// 				MiniMapUiLoaderLayer* loaderLayer = miniMapUi->getMinimapUILoaderLayer();
+			// 				if(loaderLayer)
+			// 				{
+			// 					loaderLayer->closeBaoDianEffect(curDetail->accept_id);
+			// 				}
+			// 			}
+			World::getInstance()->runFinishedTaskEffect();
+			_curHuanQuestID = msg->next_quest_id;//下一个环任务id
+			if(_curHuanQuestID != 0xFFFF)
+			{
+				if(_curHuanQuestID != 0)
+				{
+					setQuestState(_curHuanQuestID,QS_CAN_GET);
+					//_questState[_curHuanQuestID] = QS_CAN_GET;
+				}
+				LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+				queryValidHuanQuest(lp->getLevel(),false);
+				//自动开启任务UI
+				std::map<unsigned short,s_quest_detail>::iterator iter2 = _quest.find(_curHuanQuestID);
+				if(iter2 != _quest.end())
+				{
+					autoOpenQuestUI(qid, iter2->second.accept_id, iter2->second.qid);
+				}
+			}
+			if(_curHuanQuestID == 0xFFFF)//如果没有环任务了
+			{
+				World::getInstance()->getTaskTraceUi()->erase(qid);
+				//World::getInstance()->getTaskTraceUi()->resetScrollPosition();
+			}
+		}
+		else if (curDetail->type == Type_Guild)
+		{
+			World::getInstance()->runFinishedTaskEffect();
+			if (curDetail->qid == GuildMgr::getInstance()->getGuildTaskID())
+			{
+				setQuestState(curDetail->qid,QS_CAN_GET);
+			}
+			else
+			{
+				removeQuestState(_curGuildQuestID);
+			}
+			_killCount[qid].curkill = 0;
+			GuildMgr::getInstance()->onUpdateTargetItemInfo();
+		}
+		_finishedQuestList.insert(qid);
+		//!在这里需要将其从任务追踪列表里面删除		
+		World::getInstance()->getTaskTraceUi()->erase(qid);
+
+		//[bing]因为等级不够有可能显示不出来下一个主线任务 现在允许显示出下一个任务
+		AppendNextMainTask();
+
+		FilterQuest(msg->u16QuestID);
+
+		//去除完成任务的追踪状态
+		removeQuestState(qid);
+
+		//重置自动战斗任务状态
+		if(AutoActionMgr::getInstance()->Get_Auto_Action())
+		{
+			//判断是否当前自动战斗正在做的任务
+			if (msg->u16QuestID == AutoActionMgr::getInstance()->getCurrentQuestID())
+			{
+				AutoActionMgr::getInstance()->setCurrentQuestID(INVALID, AutoActionMgr::TraceTarget());
+			}
+		}
+		else
+		{
+			AutoActionMgr::getInstance()->setCurrentQuestID(INVALID, AutoActionMgr::TraceTarget());
+		}	
+	}
+	//错误信息提示
+	else if (3 == msg->dw_error_code)//距离太远
+	{
+		ToolTip::getInstance()->push(GET_STR(9389));
+	}
+	else if (34 == msg->dw_error_code)//背包已满，无法获取奖励物品
+	{
+		ToolTip::getInstance()->push(GET_STR(2043));
+		std::map<unsigned short,s_quest_detail>::iterator  iter = _quest.find(msg->u16QuestID);
+		if(iter != _quest.end())
+		{
+			s_quest_detail const& detail = iter->second;
+			//比奇任务
+			if(detail.type == Type_BiQi)
+			{
+				_curBiQiQuestID = msg->u16QuestID;
+			}
+			else if(detail.type == Type_Daily)
+			{
+				_curEveryQuestID = msg->u16QuestID;
+			}
+			setQuestState(msg->u16QuestID,QS_READY_FINISH);
+			//_questState[msg->u16QuestID] = QS_READY_FINISH;
+			autoQID = msg->u16QuestID;
+		}
+	}
+	else if (255 == msg->dw_error_code )	//[bing] 什么提示也不显示
+	{
+
+	}
+	else//统一给提示：条件不足，无法完成该任务
+	{
+		ToolTip::getInstance()->push(GET_STR(2044));
+	}
+	return 0;
+}
+unsigned int QuestMgr::onServerInitCurrentCanGetHuan(s_net_cmd* cmd)
+{
+	NET_SIS_get_Last_Huan_Task_info * msg = (NET_SIS_get_Last_Huan_Task_info*)cmd;
+	_curHuanQuestID = msg->questId;
+	if(_curHuanQuestID != 0)
+	{
+		setQuestState(_curHuanQuestID,QS_CAN_GET);
+		//_questState[_curHuanQuestID] = QS_CAN_GET;
+	}
+	return 0;
+}
+
+unsigned int QuestMgr::onServerInitFinished( s_net_cmd* cmd )
+{
+	NET_SIS_get_role_init_state_complete_quest * msg= (NET_SIS_get_role_init_state_complete_quest*)cmd;
+	tagDWORDTime lastti;
+	bool _needResetEvery = false;
+	for(int i = 0; i< msg->n_num; i++)
+	{
+		_finishedQuestList.insert(msg->completeQuest[i].u16QuestID);
+		if (TASK_IS_GUILD(msg->completeQuest[i].u16QuestID))
+		{
+			_curGuildQuestID = msg->completeQuest[i].u16QuestID;
+		}
+		const s_quest_detail* curQuest = getQuestDetail(msg->completeQuest[i].u16QuestID);
+		if(curQuest == NULL)
+		{
+			continue;
+		}
+		//!这是一个每日任务
+		if(curQuest->type == Type_Daily || curQuest->type == Type_BiQi)
+		{
+			tagDWORDTime ti = ServerTime::getInstance()->cal_current_server_dword_time();
+			tagDWORDTime ati(msg->completeQuest[i].dwStartTime);
+			if(ti.year == ati.year && ti.month == ati.month && ti.day == ati.day)//??????
+			{
+				_needResetEvery = false;
+			}
+			else//不在同一天
+			{
+				_needResetEvery = true;
+			}
+			//!不需要重置则继续做下去,查询一下数据库
+			if(!_needResetEvery)
+			{
+				if(CalcTimeDiff2(ati , lastti) >0)
+				{
+					lastti = ati;
+					if(curQuest->type == Type_Daily)
+					{
+						_curEveryQuestID = curQuest->next_qid;
+					}
+					else if(curQuest->type == Type_BiQi)
+					{
+						_curBiQiQuestID = curQuest->next_qid;
+						/*
+						const s_quest_detail* curBiQi = getQuestDetail(_curBiQiQuestID);
+						if(curBiQi != NULL)
+						{
+						const s_quest_detail* nextQuest = getQuestDetail(curQuest->next_qid);
+						if(nextQuest != NULL)
+						{
+						_curBiQiQuestID = (curBiQi->junxubiaozhi > nextQuest->junxubiaozhi ? _curBiQiQuestID :curQuest->next_qid);
+						}
+						}
+						else
+						{
+						_curBiQiQuestID = curQuest->next_qid;
+						}*/
+					}
+				}
+			}
+		}
+	}
+	return 0;
+}
+
+unsigned int QuestMgr::onServerInitUnfinished( s_net_cmd* cmd2 )
+{
+	NET_SIS_get_role_init_state_incomplete_quest * msg= (NET_SIS_get_role_init_state_incomplete_quest*)cmd2;
+	unsigned int level = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	//!?????????????б?
+	//???????δ?????????????
+	bool hasmain = false;
+	std::for_each(msg->incompleteQuest,
+		msg->incompleteQuest +msg->n_num,
+		std::bind(&QuestMgr::updateQuestTraceState , this,std::placeholders::_1,std::ref(hasmain)));
+
+	if(!hasmain)
+		getMainQuestIDFromFinished();
+	//gx add 每日任务最后检查
+	queryValidEveryQuest(level, true);
+	queryValidBiQiQuest(level, true);
+
+	queryValidSubQuest(level, true);
+	//初始化环任务列表
+	queryValidHuanQuest(level, true);
+	queryValidGuildQuest(level, true);
+	return 0;
+}
+
+unsigned int QuestMgr::onServerAddQuest( s_net_cmd* cmd )
+{
+	//!玩家第一次进入，初始化
+	NET_SIS_add_quest * msg= (NET_SIS_add_quest*)cmd;
+	int questType = getQuestType(msg->u16QuestID);
+	if (TASK_IS_GUILD(msg->u16QuestID))
+	{
+		_curGuildQuestID = msg->u16QuestID;
+	}
+	if(questType == 1)
+	{
+		_curMainQuestID = msg->u16QuestID;
+	}
+	//加对配送物品的任务进行判断
+	//对每日任务特殊处理,脚本添加的任务，需要先删除客户端本身的任务追踪信息
+	if (questType == Type_Daily)
+	{
+		World::getInstance()->getTaskTraceUi()->erase(_curEveryQuestID);
+		removeQuestState(_curEveryQuestID);
+		//_questState.erase(_curEveryQuestID);
+	}
+	else if(questType == Type_BiQi)//比奇任务
+	{
+		World::getInstance()->getTaskTraceUi()->erase(_curBiQiQuestID);
+		removeQuestState(_curBiQiQuestID);
+		//_questState.erase(_curBiQiQuestID);
+	}
+	//_questState[msg->u16QuestID] = QS_GET;
+	setQuestState(msg->u16QuestID,QS_GET);
+	//[bing] 新手任务第一个
+	if(msg->u16QuestID == 1000
+		&& World::getInstance()->getTaskTraceUi())
+	{
+		//如果该任务已完成，则返回，否则继续
+		std::set<unsigned short>::iterator iter = _finishedQuestList.find(msg->u16QuestID);
+		if(iter != _finishedQuestList.end())
+		{
+			return 0;
+		}
+		_curMainQuestID = msg->u16QuestID;
+		_fillDetail(_curMainQuestID);
+		if(_mainQDetail.autoc)
+		{
+			//_questState[msg->u16QuestID] = QS_READY_FINISH;
+			setQuestState(msg->u16QuestID,QS_READY_FINISH);
+			appendTaskToUIView(msg->u16QuestID,0,_mainQDetail.target.c_str(),true);
+		}
+		NewPlayerGuider::getInstance()->AddFirstQuest();
+	}
+
+	return 0;
+}
+
+void QuestMgr::onPathFinished()//寻路结束后的操作,鼠标点地面走到后也执行此方法
+{
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if (lp == NULL)
+		return;
+
+	lp->setAutoRunState(false);
+
+	if(fabs(lp->getPosition().x-tempx)>PLAY_POS_RANK_CHECK)
+		return;
+	if(fabs(lp->getPosition().y-tempy)>PLAY_POS_RANK_CHECK)
+		return;
+
+	if(World::getInstance()->getNPCDialog()->isShow())
+		return ;
+
+	const RoleManager::RoleMap &map = RoleManager::getInstance()->getRoleMap();
+	RoleManager::RoleMap::const_iterator iter = map.begin(), iend = map.end();
+	for(iter = map.begin() ;iter!= iend; ++iter)
+	{
+		if(iter->second->getCreatureType() == CT_NPC)
+		{
+			if((iter->second->getTypeID() == _wantOpenRoleidMain)
+				&& (_mainQDetail.popup || (/*_questState[_mainQDetail.qid]*/
+				getQuestState(_mainQDetail.qid) == QS_READY_FINISH 
+				|| getQuestState(_mainQDetail.qid) == QS_CAN_GET 
+				)) && canOpenNpcUi)//??????????
+			{
+				_sigQuestPathFindEnd.emit(_curMainQuestID);
+				CCPoint lppos = RoleManager::getInstance()->getLocalPlayer()->getPosition();
+				CCPoint rpos = iter->second->getPosition();
+				//float dis = ccpDistance(lppos , rpos);
+				if(ccpDistance(lppos , rpos) < PLAY_POS_RANK_CHECK)
+				{
+					doNPCScript(_wantOpenRoleidMain , iter->second->getId() , false);
+					if(autoQID != (unsigned short)(-1))
+					{
+						World::getInstance()->getNPCDialog()->autoSelect(autoQID);
+					}
+				}
+				break;
+			}
+			if((iter->second->getTypeID() == _wantOpenRoleidSub)
+				&& (getSubDetail().popup || (/*_questState[_curSubQuestID]*/
+				getQuestState(_curSubQuestID) == QS_READY_FINISH
+				||getQuestState(_curSubQuestID) == QS_CAN_GET
+				)) && canOpenNpcUi)
+			{
+				_sigQuestPathFindEnd.emit(_curSubQuestID);
+				CCPoint lppos = RoleManager::getInstance()->getLocalPlayer()->getPosition();
+				CCPoint rpos = iter->second->getPosition();
+				if(ccpDistance(lppos , rpos) < PLAY_POS_RANK_CHECK)
+				{
+					doNPCScript(_wantOpenRoleidSub , iter->second->getId() , false);
+					if(autoQID != (unsigned short)(-1))
+					{
+						World::getInstance()->getNPCDialog()->autoSelect(autoQID);
+					}
+				}
+				break;
+			}
+			if((iter->second->getTypeID() == _wantOpenRoleidEvery)
+				&& canOpenNpcUi
+				&& World::getInstance()->getNPCDialog()->getFinishWay() != Finish_All)
+			{
+				//std::set<unsigned short>::iterator iterEvery = _finishedQuestList.find(_curEveryQuestID);
+				const s_quest_detail* curEveryQuest = getQuestDetail(_curEveryQuestID);
+				if(curEveryQuest == NULL)
+				{
+					continue;
+				}
+				if((curEveryQuest->loop_quest_step != Number10) || ((curEveryQuest->loop_quest_step == Number10) && World::getInstance()->getNPCDialog()->getFinishWay() != One_Key_Finish))
+				{
+					_sigQuestPathFindEnd.emit(_curEveryQuestID);
+					CCPoint lppos = RoleManager::getInstance()->getLocalPlayer()->getPosition();
+					CCPoint rpos = iter->second->getPosition();
+					if(ccpDistance(lppos , rpos) < PLAY_POS_RANK_CHECK)
+					{
+						doNPCScript(_wantOpenRoleidEvery , iter->second->getId() , false);
+						if(autoQID != (unsigned short)(-1))
+						{
+							World::getInstance()->getNPCDialog()->autoSelect(autoQID);
+						}
+					}
+					break;
+				}
+			}
+			if((iter->second->getTypeID() == _wantOpenRoleidBiQi) 
+				&& canOpenNpcUi && World::getInstance()->getNPCDialog()->getBiQiFinishWay() == 0)
+			{
+				if(RoleManager::getInstance()->getLocalPlayer()->getRoleDayClearInfo(ERDCT_BIQI_TASKS_COUNT) + 1 == VIPMgr::getInstance()->getLocalVipData().BiQiTasksCount)
+				{
+					canOpenNpcUi = false;
+				}
+				_sigQuestPathFindEnd.emit(_curBiQiQuestID);
+				CCPoint lppos = RoleManager::getInstance()->getLocalPlayer()->getPosition();
+				CCPoint rpos = iter->second->getPosition();
+				if(ccpDistance(lppos , rpos) < PLAY_POS_RANK_CHECK)
+				{
+					doNPCScript(_wantOpenRoleidBiQi , iter->second->getId() , false);
+					if(autoQID != (unsigned short)(-1))
+					{
+						World::getInstance()->getNPCDialog()->autoSelect(autoQID);
+					}
+				}
+				break;
+			}
+			if((iter->second->getTypeID()==_wantOpenRoleidHuan)
+				&& ((getQuestDetail(_curHuanQuestID) != NULL && getQuestDetail(_curHuanQuestID)->popup) || (/*_questState[_curHuanQuestID]*/getQuestState(_curHuanQuestID) != QS_READY_FINISH)|| canOpenNpcUi)){
+					_sigQuestPathFindEnd.emit(_curHuanQuestID);
+					CCPoint lppos = RoleManager::getInstance()->getLocalPlayer()->getPosition();
+					CCPoint rpos = iter->second->getPosition();
+					//float dis = ccpDistance(lppos , rpos);
+					if(ccpDistance(lppos , rpos) < PLAY_POS_RANK_CHECK)
+					{
+						doNPCScript(_wantOpenRoleidHuan , iter->second->getId() , false);
+						if(autoQID != (unsigned short)(-1))
+						{
+							World::getInstance()->getNPCDialog()->autoSelect(autoQID);
+						}
+					}
+
+					break;
+			}
+			if(iter->second->getTypeID() == _wantOpenRoleidEveryNPC && _wantOpenRoleidEveryNPC!= GUILD_MAP_BOSS)
+			{
+				//[bing] 打开NPC界面
+				CCPoint lppos = RoleManager::getInstance()->getLocalPlayer()->getPosition();
+				CCPoint rpos = iter->second->getPosition();
+				if(ccpDistance(lppos , rpos) < PLAY_POS_RANK_CHECK)
+				{
+					NPCChatMgr::getInstance()->openNPCChatUi(_wantOpenRoleidEveryNPC,iter->second->getId());
+				}
+				break;
+			}
+		}
+		else if(iter->second->getCreatureType() == CT_MONSTER)
+		{
+			// 			MiniMapUi* miniMapUi = World::getInstance()->getMiniMapUi();
+			// 			if(miniMapUi)
+			// 			{
+			// 				MiniMapUiLoaderLayer* loaderLayer = miniMapUi->getMinimapUILoaderLayer();
+			// 				if(loaderLayer)
+			// 				{
+			// 					loaderLayer->closeBaoDianEffect(iter->second->getTypeID());
+			// 				}
+			// 			}
+			//int id = iter->second->getTypeID();
+			if(isRewardQuest(lp->getQuestId()))
+			{
+				if (!AutoActionMgr::getInstance()->Get_Auto_Action())//gx add;
+				{
+					World::getInstance()->getMiniMapUi()->ClickAutoFightBtn();
+				}
+				if (_isAutoAttackMonster)
+				{
+					setIsAutoAttackMonster(false);
+				}
+				break;
+			}
+
+			if(iter->second->getTypeID() == _wantOpenRoleidMain
+				|| iter->second->getTypeID() == _wantOpenRoleidSub
+				|| iter->second->getTypeID() == _wantOpenRoleidEvery
+				|| iter->second->getTypeID() == _wantOpenRoleidHuan
+				|| iter->second->getTypeID() == _wantOpenRoleidBiQi
+				|| iter->second->getTypeID() == _wantOpenRoleidEveryNPC)
+			{
+				//CCPoint lppos = RoleManager::getInstance()->getLocalPlayer()->getPosition();
+				//CCPoint rpos = iter->second->getPosition();
+				//if(ccpDistance(lppos , rpos) < 60)
+				//{
+				//[bing] 自动打怪
+				if (!AutoActionMgr::getInstance()->Get_Auto_Action())//gx add;
+				{
+					World::getInstance()->getMiniMapUi()->ClickAutoFightBtn();
+				}
+				//}
+				break;
+			}
+		}
+	}
+
+	unsigned int id  = INVALID;
+	bool can_atk =  AutoActionMgr::getInstance()->getCurrentMonsterID(id);
+
+	if (!AutoActionMgr::getInstance()->Get_Auto_Action() &&can_atk&&id != INVALID)//gx add;
+	{
+		World::getInstance()->getMiniMapUi()->ClickAutoFightBtn();
+	}
+	if(!MapManager::getInstance()->isCrossMaping())
+	{
+		_wantOpenRoleidMain = -1;
+		_wantOpenRoleidSub = -1;
+		_wantOpenRoleidEvery = -1;
+		_wantOpenRoleidEveryNPC = -1;
+		_wantOpenRoleidBiQi = -1;
+		_wantOpenRoleidHuan = -1;
+		//canOpenNpcUi = false;
+	}
+	lp->setQuestId(-1);
+	//lp->setTargetMapId(INVALID);
+}
+
+int QuestMgr::getQuestType( unsigned short qid )
+{
+	int type;
+	std::map<unsigned short,s_quest_detail>::iterator iter = _quest.find(qid);
+	if(iter != _quest.end())
+	{
+		s_quest_detail const& quest = iter->second;
+		type = quest.type;
+		return type;
+	}
+	return NULL;
+}
+
+unsigned int QuestMgr::onServerUpdateQuest( s_net_cmd* cmd2 )
+{
+	NET_SIS_quest_update_kill_creature * msg= (NET_SIS_quest_update_kill_creature*)cmd2;
+	_killCount[msg->u16QuestID].curkill = msg->n16NewKillNum;
+	if(_killCount[msg->u16QuestID].curkill >= _killCount[msg->u16QuestID].total)
+	{
+		setQuestState(msg->u16QuestID,QS_READY_FINISH);
+		//_questState[msg->u16QuestID] = QS_READY_FINISH;
+		// 		s_quest_detail currentQuest;
+		// 		std::map<unsigned short, s_quest_detail>::iterator iter = _quest.find(msg->u16QuestID);
+		// 		if(iter != _quest.end())
+		// 		{
+		// 			currentQuest = iter->second;
+		// 		}
+		s_quest_detail const* cur_quest_ptr = getQuestDetail(msg->u16QuestID);
+		CC_ASSERT(cur_quest_ptr);
+		appendTaskToUIView(msg->u16QuestID,0,cur_quest_ptr->afterText,false);
+		//杀怪完成后先检测当前是否有已接任务需要杀同种类型的怪物，有则继续杀怪------------2015年11月15日
+		for(std::map<unsigned short , eQuestState>::const_iterator iter = _questState.begin(); iter != _questState.end(); ++iter)
+		{
+			if(iter->second == QS_GET)
+			{
+				s_quest_detail const* other_quest_detail = getQuestDetail(iter->first);
+				CC_ASSERT(other_quest_detail);
+
+				if((other_quest_detail->attack_id == msg->nMonsterTypeID) 
+					&&(_killCount[other_quest_detail->qid].total > _killCount[msg->u16QuestID].curkill))
+				{
+					return 0;
+				}
+			}
+		}
+
+		if(AutoActionMgr::getInstance()->Get_Auto_Action())
+		{
+			//判断是否当前自动战斗正在做的任务
+			if (msg->u16QuestID == AutoActionMgr::getInstance()->getCurrentQuestID())
+			{
+				AutoActionMgr::getInstance()->SetIsLastTaskFinish(true);
+				AutoActionMgr::getInstance()->SetTaskQuestId(msg->u16QuestID);
+				AutoActionMgr::getInstance()->SetCompleteTaskId(cur_quest_ptr->complete_id);
+				AutoActionMgr::getInstance()->setCurrentQuestID(INVALID, AutoActionMgr::TraceTarget());
+			}
+		}
+		else
+		{
+			QuestMgr::getInstance()->AutoFindPath(msg->u16QuestID,cur_quest_ptr->complete_id);
+			AutoActionMgr::getInstance()->setCurrentQuestID(INVALID, AutoActionMgr::TraceTarget());
+		}	
+		//[bing] 有一部分追踪需要任务杀怪够数量之后触发
+		NewPlayerGuider::getInstance()->onServerUpdateQuest(msg->u16QuestID);
+	}
+	else
+	{
+		if( msg->u16QuestID == _curMainQuestID  || 
+			msg->u16QuestID == _curSubQuestID   ||
+			//msg->u16QuestID == _curSubQuestID2 || 暂时取消，规划为一条支线任务 //add by XSea 2014.10.24
+			msg->u16QuestID == _curEveryQuestID ||
+			msg->u16QuestID == _curHuanQuestID  ||
+			msg->u16QuestID == _curBiQiQuestID  ||
+			TASK_IS_GUILD(msg->u16QuestID) )
+			World::getInstance()->getTaskTraceUi()->modifyTaskInfo(msg->u16QuestID , msg->n16NewKillNum , false);
+	}
+	return 0;
+}
+
+unsigned int QuestMgr::onQuestUpdateItem(s_net_cmd* cmd)
+{
+	NET_SIS_quest_update_item * msg= (NET_SIS_quest_update_item*)cmd;
+	_killCount[msg->u16QuestID].curkill = msg->n16NewItemNum;
+	if(_killCount[msg->u16QuestID].curkill >= _killCount[msg->u16QuestID].total)
+	{
+		setQuestState(msg->u16QuestID,QS_READY_FINISH);
+		//_questState[msg->u16QuestID] = QS_READY_FINISH;
+		World::getInstance()->getTaskTraceUi()->modifyTaskInfo(msg->u16QuestID , msg->n16NewItemNum , true);
+		//[bing] 有一部分追踪需要任务杀怪够数量之后触发
+		NewPlayerGuider::getInstance()->onServerUpdateQuest(msg->u16QuestID);
+	}
+	else
+	{
+		if(msg->u16QuestID == _curMainQuestID || 
+			msg->u16QuestID == _curSubQuestID ||
+			//msg->u16QuestID == _curSubQuestID2 || 暂时取消，规划为一条支线任务 //add by XSea 2014.10.24
+			msg->u16QuestID == _curEveryQuestID ||
+			msg->u16QuestID==_curHuanQuestID ||
+			msg->u16QuestID==_curBiQiQuestID ||
+			TASK_IS_GUILD(msg->u16QuestID)
+			)
+			World::getInstance()->getTaskTraceUi()->modifyTaskInfo(msg->u16QuestID , msg->n16NewItemNum , false);
+	}
+	return 0;
+}
+
+void QuestMgr::getMainQuestIDFromFinished()
+{
+	unsigned short qid(0);
+	for(std::set<unsigned short>::iterator  iter = _finishedQuestList.begin() ; iter != _finishedQuestList.end(); ++iter)
+	{
+		int questType = getQuestType(*iter);
+		//校正选取主线任务 //add by XSea 2015.02.05
+		if( questType == 1) //任务id大于等于1000为主线任务
+		{
+			qid = *iter;
+			//取已完成任务的下一个任务
+			unsigned short nextqid(0);
+
+			s_quest_detail const* cur = getQuestDetail(qid);
+			if (cur) nextqid = cur->next_qid;
+
+			// 			std::map<unsigned short,s_quest_detail>::iterator curIters = _quest.find(qid);
+			// 			if(curIters != _quest.end())
+			// 			{
+			// 				s_quest_detail quest = curIters->second;
+			// 				nextqid = quest.next_qid;
+			// 			}
+			//查看下一个任务是否在已完成任务列表中
+			std::set<unsigned short>::const_iterator tmpIt = _finishedQuestList.find( nextqid );
+			//如果不在则选取为所需要的下一个主线任务
+			if( tmpIt == _finishedQuestList.end() )
+			{
+				std::string title;
+				std::string beforeText;
+				std::string afterText;
+				int level = -1;
+				unsigned int roleid;
+
+				s_quest_detail const* next = getQuestDetail(nextqid);
+				if (next)
+				{
+					s_quest_detail const& quest = *next;
+					title = quest.title;
+					beforeText = quest.beforeText;
+					afterText = quest.afterText;
+					level = quest.level;
+					roleid = quest.accept_id;
+				}
+				// 				std::map<unsigned short, s_quest_detail>::iterator iters = _quest.find(nextqid);
+				// 				if(iters != _quest.end())
+				// 				{
+				// 					s_quest_detail quest = iters->second;
+				// 					title = quest.title;
+				// 					beforeText = quest.beforeText;
+				// 					afterText = quest.afterText;
+				// 					level = quest.level;
+				// 					roleid = quest.accept_id;
+				// 				}
+				if(level == -1)
+					return;
+
+				_curMainQuestID = nextqid;
+				//_questState[_curMainQuestID] = QS_CAN_GET;
+				setQuestState(_curMainQuestID,QS_CAN_GET);
+				_fillDetail(_curMainQuestID);
+
+				//!添加到任务追踪，防止中断
+				if(RoleManager::getInstance()->getLocalPlayer()->getLevel()>=level)
+					appendTaskToUIView(nextqid,0,beforeText,true);
+				else
+				{
+					s_quest_trace_cache qtc;
+					qtc.needlevel = level;
+					qtc.qid = nextqid;
+					qtc.title = title;
+					qtc.beforeText=beforeText;
+					qtc.afterText=afterText;
+					qtc.roleid = roleid;
+					_questCache.push_back(qtc);
+				}
+
+				break;
+			}
+		}
+	}
+	//[bing]因为等级不够有可能显示不出来下一个主线任务 现在允许显示出下一个任务
+	AppendNextMainTask();
+}
+
+void QuestMgr::checkValidMainQuestTrace()
+{
+	std::vector<s_quest_trace_cache>::iterator iter =  _questCache.begin();
+	for(;iter!=_questCache.end() ; ++iter)
+	{
+		if(RoleManager::getInstance()->getLocalPlayer()->getLevel()>=iter->needlevel)
+		{
+			appendTaskToUIView(iter->qid,0,iter->beforeText,false);
+			_questCache.erase(iter);
+			break;
+		}
+	} 
+}
+
+void QuestMgr::_fillDetail( unsigned short qid)
+{
+	std::map<unsigned short,s_quest_detail>::iterator iter = _quest.find(qid);
+	if(iter != _quest.end())
+	{
+		_mainQDetail = iter->second;
+	}
+}
+
+void QuestMgr::onFindTarget()
+{
+	onQuestTraceSelect(_mainQDetail.qid);
+}
+
+void QuestMgr::queryValidSubQuest(int level, bool needReset)
+{
+	for(std::map<unsigned short,s_quest_detail>::const_iterator iter=_quest.begin();iter!=_quest.end();++iter){
+		const s_quest_detail& quest = iter->second;
+		if((quest.type == Type_Sub) && (quest.level <= level))
+		{
+			//!然后再已接的任务列表里面查找，如果找到不能插入
+			if(_finishedQuestList.find(quest.qid) != _finishedQuestList.end())
+				continue;
+			if(_subQDetails.find(quest.qid) != _subQDetails.end())
+				continue;
+
+			//加入缓存列表，原来放在最下面，因为添加前置任务没完成也不能插入任务栏 导致跳出 没有将支线任务加入缓存列表 //add by XSea 2015.01.16
+			_subQDetails.insert(std::pair<unsigned short , s_quest_detail>(quest.qid , quest));
+
+			//前置任务没完成也不能插入 //add by XSea 2015.01.06
+			/*	if( _finishedQuestList.find(quest.preQuest_qid) == _finishedQuestList.end() )
+			continue;*/
+			//!如果当前还没支线的任务追踪，添加之
+			// 			if(_curSubQuestID == 0xFFFF)
+			// 			{
+			// 				_curSubQuestID = quest.qid;
+			// 				//_questState[_curSubQuestID] = QS_CAN_GET;
+			// 				setQuestState(_curSubQuestID,QS_CAN_GET);
+			// 				appendTaskToUIView(quest.qid,0,quest.beforeText,needReset);
+			// 
+			// 				break;
+			// 			}
+		}
+	}
+
+	if (!_subQDetails.empty() &&(_curSubQuestID == (unsigned short)(-1)))
+	{
+		_curSubQuestID = _subQDetails.begin()->first;
+		s_quest_detail const* qd = getQuestDetail(_curSubQuestID);
+		CC_ASSERT(qd);
+		//_questState[_curSubQuestID] = QS_CAN_GET;
+		setQuestState(_curSubQuestID,QS_CAN_GET);
+		appendTaskToUIView(_curSubQuestID,0,qd->beforeText,needReset);
+	}
+}
+
+void QuestMgr::queryValidHuanQuest(int level, bool needReset)
+{
+	//int num = RoleManager::getInstance()->getLocalPlayer()->getRoleDayClearInfoTwo(ERDCT_Huan_Circal_Num);
+	//CCLOG("VIPMgr::getInstance()->getLocalVipData().HuanTasksTotalNumber = %d",VIPMgr::getInstance()->getLocalVipData().HuanTasksTotalNumber);
+	//此函数需要保证_curHuanQuestID有效(不等于0或者不等于-1） 时一定加入了questState
+	if(! isHuanFullCircle()) //如果今天还有环任务可接
+	{
+		if (haveQuestState(_curHuanQuestID))
+		{
+			if(/*_questState[_curHuanQuestID]*/ getQuestState(_curHuanQuestID)== QS_CAN_GET)
+			{
+				std::map<unsigned short ,s_quest_detail>::iterator iter = _quest.find(_curHuanQuestID);
+				if(iter != _quest.end())
+				{
+					s_quest_detail quest = iter->second;
+					appendTaskToUIView(quest.qid,0,quest.beforeText,needReset);
+				}
+			}
+
+			return;
+		}
+
+		int tmp = level;
+		typedef std::map<unsigned short,s_quest_detail> ThisMap;
+		auto end = _quest.end();
+		auto finder = std::find_if(_quest.begin(),end,[this,tmp](ThisMap::value_type const& kv)->bool{
+			const s_quest_detail& quest = kv.second;
+			//bool max_fit = quest.lvmax==0?true:level <quest.lvmax;
+			return kv.second.type == Type_Huan && (quest.level<=tmp)&&this->max_fit(tmp,quest.lvmax);
+		});
+
+		if (finder != end && (_curHuanQuestID == 0 || _curHuanQuestID == 0xFFFF))
+		{
+			_curHuanQuestID = finder->first;
+			//_questState[_curHuanQuestID] = QS_CAN_GET;
+			setQuestState(_curHuanQuestID,QS_CAN_GET);
+			appendTaskToUIView(_curHuanQuestID,0,finder->second.beforeText,needReset);
+		}
+		// 		for(std::map<unsigned short,s_quest_detail>::const_iterator iter = _quest.begin(); iter != _quest.end(); ++iter)
+		// 		{
+		// 			const s_quest_detail& quest = iter->second;
+		// 			if((quest.type == Type_Huan) && (quest.level <= level)&&(level < quest.lvmax))
+		// 			{
+		// 				if(_curHuanQuestID == 0 || _curHuanQuestID == 0xFFFF)
+		// 				{
+		// 					_curHuanQuestID = quest.qid;
+		// 					_questState[_curHuanQuestID] = QS_CAN_GET;
+		// 					appendTaskToUIView(quest.qid,0,quest.beforeText,needReset);
+		// 				}
+		// 			}
+		// 		}
+	}
+}
+
+void QuestMgr::queryValidGuildQuest(int level, bool needReset)
+{
+	if (haveQuestState(_curGuildQuestID))
+	{
+		const s_quest_detail* quest = getQuestDetail(_curGuildQuestID);
+		if (getGuildQuestState() == QS_GET )
+		{
+			auto  pos = quest->target.find("$");
+			if (pos != std::string::npos)
+			{
+				std::string subs= quest->target.substr(0,pos);
+				int nCur = getCurTaskKillNumberByID(_curGuildQuestID);
+				appendTaskToUIView(quest->qid,0,subs.c_str(),true,nCur);
+			}
+		}
+		else if (getGuildQuestState() == QS_READY_FINISH)
+		{
+			appendTaskToUIView(quest->qid,0,quest->afterText,needReset);
+		}
+	}
+}
+
+void QuestMgr::queryValidEveryQuest(int level, bool needReset)
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	if((ploc->getRoleDayClearInfo(ERDCT_DAILY_TASKS_COUNT) + 1) > VIPMgr::getInstance()->getLocalVipData().junxuRenwuTimes)
+	{
+		return;
+	}
+
+	queryValidQuest(level,needReset,_curEveryQuestID,Type_Daily);
+	/*
+	for(std::map<unsigned short,s_quest_detail>::const_iterator iter = _quest.begin();iter != _quest.end();++iter)
+	{
+	const s_quest_detail& quest = iter->second;
+	if((quest.type == Type_Daily)&&(quest.level <= level)&&(level < quest.lvmax))
+	{
+	//!然后再已接的任务列表里面查找，如果找到不能插入
+	if(_finishedQuestList.find(quest.qid) != _finishedQuestList.end())
+	continue;
+	//!如果当前还没日常的任务追踪，添加之
+	if(_curEveryQuestID == (unsigned short)-1 || _curEveryQuestID == quest.qid)
+	{
+	//若当前任务列表中已存在，则无需再置位，gx add
+	if (_questState.find(quest.qid) == _questState.end())
+	{
+	_curEveryQuestID = quest.qid;
+	_questState[_curEveryQuestID] = QS_CAN_GET;
+	World::getInstance()->getTaskTraceUi()->appendTask(quest.qid , quest.title.c_str() ,quest.beforeText.c_str(),-1, needReset);
+	break;
+	}
+	}
+	//若当前有每日任务，若等级发生变化，则应该匹配最新等级的任务
+	else
+	{
+	const s_quest_detail* curEveryDetail = getQuestDetail(_curEveryQuestID);
+	if(curEveryDetail == NULL)
+	{
+	continue;
+	}
+	if ((ploc->getLevel()>=quest.level)&& (quest.level > curEveryDetail->level))
+	{
+	//先删除原来的
+	std::map<unsigned short , eQuestState>::iterator iter = _questState.find(_curEveryQuestID);
+	if (iter != _questState.end())
+	{
+	if (QS_CAN_GET != _questState[_curEveryQuestID])//已接取的任务不会由于任务级别的上升而刷新
+	break;
+	World::getInstance()->getTaskTraceUi()->erase(_curEveryQuestID);
+	_questState.erase(iter);
+	_curEveryQuestID = quest.qid;
+	_questState[_curEveryQuestID] = QS_CAN_GET;
+	World::getInstance()->getTaskTraceUi()->appendTask(quest.qid , quest.title.c_str() ,quest.beforeText.c_str(),-1, needReset);
+	break;
+	}
+	}
+	}
+	}
+	}*/
+}
+
+void QuestMgr::queryValidBiQiQuest(int level, bool needReset)
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	if(isBiQiFullCircle())
+	{
+		return;
+	}
+
+	queryValidQuest(level,needReset,_curBiQiQuestID,Type_BiQi);
+}
+
+bool QuestMgr::haveQuestState(unsigned short questID) const
+{
+
+	return _questState.find(questID) != _questState.end();
+}
+
+bool QuestMgr::canTracedByLevel(int playerLv,unsigned short questID) const
+{
+	//unsigned short no = -1;
+	if (questID == (unsigned short)(-1) || questID ==0 )
+	{
+		return false;
+	}
+
+	s_quest_detail const* qd = getQuestDetail(questID);
+	if (qd)
+	{
+		return qd->level <= playerLv && max_fit(playerLv,qd->lvmax);
+	}
+
+	return false;
+	//bool max_fit = qd->lvmax==0?true:playerLv <qd->lvmax;
+}
+
+void QuestMgr::appendTaskToUIView(unsigned short id, unsigned short oldID,std::string text, bool needReset,int number /* = -1*/,bool level_limit/*=false*/)
+{
+	if (oldID !=0)
+	{
+		World::getInstance()->getTaskTraceUi()->erase(oldID);
+	}
+	s_quest_detail const* qd = getQuestDetail(id);
+	CC_ASSERT(qd);
+	s_quest_detail const& quest = *qd;
+	World::getInstance()->getTaskTraceUi()->appendTask(quest.qid , quest.title.c_str() ,text.c_str(),number, needReset,!level_limit);
+}
+
+
+void QuestMgr::queryValidQuest(int level,bool needReset,unsigned short& curQuestId,QuestTypeEnum typeValue)
+{
+	unsigned short   oldQuestID = 0;
+	//bool needAppendToUi = false;
+	if (!haveQuestState(curQuestId))
+	{
+		if ( canTracedByLevel(level,curQuestId) )
+		{
+			setQuestState(curQuestId,QS_CAN_GET);
+			//_questState[curQuestId] = QS_CAN_GET;
+			//needAppendToUi = true;
+		}
+		else
+		{
+			unsigned short newid = getTracableQuestByLevel(level,typeValue);
+			if(newid)
+			{
+				curQuestId = newid;
+				setQuestState(curQuestId,QS_CAN_GET);
+				//_questState[curQuestId] = QS_CAN_GET;
+
+				//needAppendToUi = true;
+			}
+		}
+
+
+	}
+	else
+	{
+		CC_ASSERT(/*_questState[curQuestId]*/getQuestState(curQuestId) != QS_INVALID);
+		if (/*_questState[curQuestId]*/getQuestState(curQuestId) == QS_CAN_GET)
+		{
+			if ( canTracedByLevel(level,curQuestId) )
+			{
+				//_questState[curQuestId] = QS_CAN_GET;
+			}
+			else
+			{
+				removeQuestState(curQuestId);
+				//_questState.erase(curQuestId);
+				oldQuestID = curQuestId;
+				s_quest_detail const* qd  = getQuestDetail(oldQuestID);
+				CC_ASSERT(qd);
+
+				unsigned short newid = getTracableQuestByLevel(level,typeValue,qd->loop_quest_step);
+				CC_ASSERT(newid!=0);
+				curQuestId = newid;
+				setQuestState(curQuestId,QS_CAN_GET);
+				//_questState[curQuestId] = QS_CAN_GET;
+
+				//needAppendToUi = true;
+			}
+		}
+	}
+
+	if (haveQuestState(curQuestId) &&/* _questState[curQuestId]*/getQuestState(curQuestId)  != QS_INVALID && /*_questState[curQuestId]*/getQuestState(curQuestId)!= QS_GET)
+	{
+		const s_quest_detail* curQuest = getQuestDetail(curQuestId);
+		if(curQuest != NULL)
+		{
+			appendTaskToUIView(curQuestId,oldQuestID,getQuestInfoText(curQuestId),needReset);
+		}
+	}
+}
+s_quest_detail QuestMgr::getSubDetail()
+{
+	if(_curSubQuestID != 0xFFFF)
+	{
+		std::map<unsigned short,s_quest_detail>::iterator iter = _subQDetails.find(_curSubQuestID);
+		if(iter != _subQDetails.end())
+		{
+			return iter->second;
+		}
+	}
+	return s_quest_detail();
+}
+std::string QuestMgr::getItemName( unsigned int id )
+{
+	//!首先去装备表里面查找
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT Name FROM EquipData WHERE typeId = ?1");
+	cmd->set_integer32(1 , id);
+	s_quest_detail  qd;
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	std::string name = "fuck";
+	while(table->retrieve_row())
+	{
+		name = table->get_text(0);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	if(name == "fuck")//去物品表里面去查找
+	{
+		c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT Name FROM PackageData WHERE TypeId = ?1");
+		cmd->set_integer32(1 , id);
+		s_quest_detail  qd;
+		c_sql_table* table = c_db_manager::getSingleton()->create_table();
+		while(table->retrieve_row())
+		{
+			name = table->get_text(0);
+		}
+		c_db_manager::getSingleton()->destroy_table(table);
+		c_db_manager::getSingleton()->end_operation(cmd);
+	}
+	return name;
+}
+
+unsigned int QuestMgr::_transform( const std::string& str )
+{
+	//!是否是公式
+	int xpos = str.find('x');
+	int spos = str.find('s');
+	if(xpos == std::string::npos && spos == std::string::npos)
+	{
+		return atoi(str.c_str());
+	}
+	else
+	{
+		LocalPlayer* lp =RoleManager::getInstance()->getLocalPlayer();
+		RoleType  rt = (RoleType)lp->getAttribute(RA_ROLETYPE);
+		int sex = lp->getAttribute(RA_SEX);
+		std::string tmp;
+		if(xpos != std::string::npos && spos != std::string::npos)//!存在x,s
+		{
+			tmp = str.substr(0 , xpos);
+			switch(rt)
+			{
+			case RT_Warrior:
+				tmp +='1';
+				break;
+			case RT_Mage:
+				tmp +='2';
+				break;
+			case RT_Taoist:
+				tmp +='3';
+				break;
+			default:
+				break;
+			}
+			tmp += str.substr(xpos + 1 , spos - xpos - 1);
+			tmp += sex?'1':'0';
+			tmp += str.substr(spos + 1 , str.length() - spos - 1);
+			return atoi(tmp.c_str());
+		}
+		else if(xpos != std::string::npos && spos == std::string::npos)//!存在x,不存在s
+		{
+			tmp = str.substr(0 , xpos);
+			switch(rt)
+			{
+			case RT_Warrior:
+				tmp +='1';
+				break;
+			case RT_Mage:
+				tmp +='2';
+				break;
+			case RT_Taoist:
+				tmp +='3';
+				break;
+			}
+			tmp += str.substr(xpos + 1 , str.length() - xpos- 1);
+			return atoi(tmp.c_str());
+		}
+		else if(xpos == std::string::npos && spos != std::string::npos)//!存在x,不存在s
+		{
+			tmp = str.substr(0 , spos);
+			tmp += sex?'1':'0';
+			tmp += str.substr(spos + 1 , str.length() - spos- 1);
+			return atoi(tmp.c_str());
+		}
+		else
+			return 0;
+	}
+}
+
+void QuestMgr::initEvery()
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	//	setEveryANum(GET_VIP_DETAIL(ploc->getVIPLevel(),XIULUOSHILIAN_ADD));			//【Ji：】
+	//	setEveryBNum(GET_VIP_DETAIL(ploc->getVIPLevel(),MOWUSHOULIE_ADD));				//【Ji：】
+	//_everyQuestANum = QUESTA_NUM_LVL0;
+	//_everyQuestBNum = QUESTB_NUM_LVL0;
+}
+/*
+eQuestState QuestMgr::getEveryQuestAState(unsigned int npcid)
+{
+if(_curEveryQuestID1 == 0xFFFF)
+return QS_INVALID;
+else
+{
+std::map<unsigned short , eQuestState>::iterator iter = _questState.find(_curEveryQuestID1);
+if(iter ==_questState.end())
+return QS_INVALID;
+if(_everyADetail.accept_id == 0xFFFFFFFF || _everyADetail.complete_id == 0xFFFFFFFF)
+return QS_INVALID;
+if(iter->second == QS_CAN_GET && npcid == _everyADetail.accept_id)
+return QS_CAN_GET;
+if(iter->second == QS_READY_FINISH && npcid == _everyADetail.complete_id)
+return QS_READY_FINISH;
+return QS_INVALID;
+}
+}
+*/
+eQuestState QuestMgr::getEveryQuestStates(unsigned int npcid)
+{
+	if(_curEveryQuestID == 0xFFFF)
+		return QS_INVALID;
+	else
+	{
+		std::map<unsigned short , eQuestState>::iterator iter = _questState.find(_curEveryQuestID);
+		if(iter ==_questState.end())
+			return QS_INVALID;
+		const s_quest_detail* _everyDetail = getQuestDetail(_curEveryQuestID);
+		if(_everyDetail == NULL)
+		{
+			return QS_INVALID;
+		}
+		if(_everyDetail->accept_id == 0xFFFFFFFF || _everyDetail->complete_id == 0xFFFFFFFF)
+			return QS_INVALID;
+		if(iter->second == QS_CAN_GET && npcid == _everyDetail->accept_id)
+			return QS_CAN_GET;
+		if(iter->second == QS_READY_FINISH && npcid == _everyDetail->complete_id)
+			return QS_READY_FINISH;
+		return QS_INVALID;
+	}
+}
+eQuestState QuestMgr::getBiQiQuestStates(unsigned int npcid)
+{
+	if(_curBiQiQuestID == 0xFFFF)
+		return QS_INVALID;
+	else
+	{
+		std::map<unsigned short , eQuestState>::iterator iter = _questState.find(_curBiQiQuestID);
+		if(iter ==_questState.end())
+			return QS_INVALID;
+		const s_quest_detail* qd = getQuestDetail(_curBiQiQuestID);
+		if(qd == NULL)
+		{
+			return QS_INVALID;
+		}
+		if(qd->accept_id == 0xFFFFFFFF || qd->complete_id == 0xFFFFFFFF)
+			return QS_INVALID;
+		if(iter->second == QS_CAN_GET && npcid == qd->accept_id)
+			return QS_CAN_GET;
+		if(iter->second == QS_READY_FINISH && npcid == qd->complete_id)
+			return QS_READY_FINISH;
+		return QS_INVALID;
+	}
+}
+//gx add ???0????????????
+unsigned int QuestMgr::onServerDelDailyQuest( s_net_cmd* cmd )
+{
+	NET_SIS_delete_quest* msg = (NET_SIS_delete_quest*)cmd;
+	if (0 != msg->dw_error_code)
+		return 0;
+	int lvl = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	if (0 != msg->u16QuestID)//非特例
+	{
+		World::getInstance()->getTaskTraceUi()->erase(_curEveryQuestID);
+		World::getInstance()->getTaskTraceUi()->erase(_curBiQiQuestID);
+		_curEveryQuestID = -1;
+		_curBiQiQuestID=-1;
+	}
+	else
+	{
+		//清除已在任务追踪中的每日属性的任务信息
+		std::set<unsigned short>::iterator iter1;
+		for (iter1 = _finishedQuestList.begin();iter1 != _finishedQuestList.end();)
+		{
+			int questType = getQuestType(*iter1);
+			if (questType == Type_Daily || questType == Type_Huan || questType == Type_BiQi)//每日任务+比奇任务
+			{
+				_finishedQuestList.erase(iter1 ++);
+			}
+			else
+			{
+				++ iter1;
+			}
+		}
+		std::map<unsigned short , eQuestState>::iterator iter2;
+		for (iter2 = _questState.begin();iter2 != _questState.end();)
+		{
+			int questType = getQuestType(iter2->first);
+			if (questType == Type_Daily || questType == Type_Huan || questType == Type_BiQi)
+			{
+				World::getInstance()->getTaskTraceUi()->erase(iter2->first);
+				_questState.erase(iter2 ++);
+			}
+			else
+			{
+				++ iter2;
+			}
+		}
+		_curEveryQuestID = -1;
+		_curBiQiQuestID = -1;
+		_curHuanQuestID = 0xFFFF;
+		queryValidEveryQuest(lvl, false);
+		queryValidBiQiQuest(lvl, false);
+		queryValidHuanQuest(lvl,false);
+	}
+	return 0;
+}
+//军需任务规则
+//根据当前玩家的等级，得到等级下限，需保证相应的等级均有适合的每日任务可接 公式目的为了取出从自己等级向前找一个阶段，取这个区段的任务 例如 33 -> 40,33就是自己等级前一个区段的等级，也就是自己等级减去return的值
+int QuestMgr::calculateDifByRoleLevel( int level,bool bAA /*= true*/ )
+{
+	if (bAA)//若是军需 type4
+	{
+		if (level >= 33 && level < 50)
+		{
+			return 33;
+		}
+		else if (level >= 50 && level < 65)
+		{
+			return 50;
+		}
+		else if (level >= 65 && level < 80)
+		{
+			return 65;
+		}
+		else if (level >= 80 && level < 95)
+		{
+			return 80;
+		}
+		else if (level >= 95 && level < 100)
+		{
+			return 95;
+		}
+		else if (level >= 100)
+		{
+			return 100;
+		}
+		else
+		{
+			return 0;
+		}
+	}
+	else//若是试炼 type3
+	{
+		if (level >= 33 && level < 40)
+		{
+			return 6;
+		}
+		else if (level >= 40 && level < 45)
+		{
+			return 4;
+		}
+		else if (level >= 45 && level < 65)
+		{
+			return 9;
+		}
+		else if (level >= 65 && level < 75)
+		{
+			return 4;
+		}
+		else if (level >= 75)
+		{
+			return 4;
+		}
+		else
+		{
+			return 4;
+		}
+	}
+}
+
+void QuestMgr::AppendNextMainTask()
+{
+	//如果缓存里没有任务了不要添加
+	// 	std::vector<s_quest_trace_cache>::iterator IT = _questCache.begin();
+	// 	if(IT == _questCache.end())
+	// 		return;
+	if (_questCache.empty())
+	{
+		return;
+	}
+
+	//先判断追踪栏内是否没有主线任务
+	if(World::getInstance()->getTaskTraceUi()->HasMainQuest())
+		return;
+
+	std::vector<s_quest_trace_cache>::iterator IT = _questCache.begin();
+	s_quest_trace_cache& qData = *IT;
+
+	//需要等级达到xx
+	ostringstream ostr;
+	ostr << qData.needlevel;
+	CCString* strNote = CCString::createWithFormat("%s",(GET_STR(9388) + ostr.str()).c_str());
+	appendTaskToUIView(qData.qid,0,strNote->getCString(),false,-1,true);
+	//World::getInstance()->getTaskTraceUi()->appendTask(qData.qid, qData.title.c_str(), strNote->getCString(), -1, false, false);
+}
+
+eQuestState QuestMgr::getNowQuestState( unsigned short qid )
+{
+	std::map<unsigned short , eQuestState>::iterator IT = _questState.find(qid);
+	if(IT == _questState.end())
+		return QS_INVALID;
+
+	return IT->second;
+}
+
+eQuestState QuestMgr::getGuildQuestState()
+{
+	std::map<unsigned short,eQuestState>::iterator itor = _questState.find(_curGuildQuestID);
+	if (itor == _questState.end())
+	{
+		return QS_INVALID;
+	}
+	return itor->second;
+}
+
+//自动开启任务UI
+void QuestMgr::autoOpenQuestUI( unsigned short qid, unsigned int nextNpcid, unsigned short nextQid )
+{
+	//return;
+	int nCompleteNpcID = 0; //完成任务的npcid
+	int nAutoInterface = 0; //是否自动接取下一个任务 0=否,1=是
+	s_quest_detail const* currentQuest =getQuestDetail(qid);
+	if (currentQuest)
+	{
+		nCompleteNpcID = currentQuest->complete_id;
+		nAutoInterface = currentQuest->autoInterface;
+	}
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	// 	std::map<unsigned short,s_quest_detail>::iterator iter = _quest.find(qid);
+	// 	if(iter != _quest.end())
+	// 	{
+	// 		currentQuest = iter->second;
+	// 		nCompleteNpcID = currentQuest.complete_id;
+	// 		nAutoInterface = currentQuest.autoInterface;
+	// 	}
+	//如果是同一npc并且是自动接取下一个任务，则做任务接取页面弹出(一键完成必须弹出，全部完成不能弹出）
+	if(((nCompleteNpcID == nextNpcid && nAutoInterface > 0)
+		|| ((World::getInstance()->getNPCDialog()->getFinishWay() == One_Key_Finish) && (lp->getRoleDayClearInfo(ERDCT_DAILY_TASKS_COUNT) + 1 < VIPMgr::getInstance()->getLocalVipData().junxuRenwuTimes)))
+		&& World::getInstance()->getNPCDialog()->getFinishWay() != Finish_All)
+	{
+		doNPCScript(nextNpcid,-1,false);
+		if(nextQid != (unsigned short)(-1))
+		{
+			World::getInstance()->getNPCDialog()->autoSelect(nextQid);
+		}
+	}
+	else if( nCompleteNpcID != nextNpcid && nAutoInterface > 0 && (currentQuest->autofind != 2)) //如果当前完成任务的npc与接取下一个任务的Npc不是同一个npc，则自动寻找下一个npc
+	{
+		canOpenNpcUi = true;
+		AutoFindPath(currentQuest->next_qid, nextNpcid);
+	}
+	if(lp->getRoleDayClearInfo(ERDCT_DAILY_TASKS_COUNT) + 1 == VIPMgr::getInstance()->getLocalVipData().junxuRenwuTimes)
+	{
+		World::getInstance()->getNPCDialog()->setFinishWay(0);
+		World::getInstance()->getTaskTraceUi()->updateTaskList(true);
+	}
+}
+
+void QuestMgr::onSelectRunNpc( unsigned int dwNpcTypeID, bool alwaysRun /*= false*/ )
+{
+	//角色信息
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if( !lp )
+		return;
+
+	//检查当前场景是否为副本 add by XSea 2014.10.21
+	if( InstanceMgr::getInstance()->IsPlayerInInstanceMap() && !alwaysRun)
+	{
+		//副本中不可寻路
+		ToolTip::getInstance()->push(GET_STR(9254));
+		return;
+	}
+
+	//!去creatureInfo表中查找目标所在位置
+	stCreateProto const* proto = RoleManager::getInstance()->getCreatureProto(dwNpcTypeID);
+	int x = -1 , y = -1 ;//x是人物x坐标，y类似
+	if (proto)
+	{
+		tempx= x= proto->nPosX;
+		tempy= y= proto->nPosY;
+		maptag = proto->strMapName;
+	}
+
+	if(x!=-1)
+		//!开始自动寻路 
+	{
+		if (AutoActionMgr::getInstance()->Get_Auto_Action())//gx add;
+		{
+			AutoActionMgr::getInstance()->Set_Auto_Action(false);
+		}
+
+		_wantOpenRoleidEveryNPC = dwNpcTypeID;
+
+		if (!lp->getAutoRunState())
+		{
+			lp->setAutoRunState(true);
+			lp->playAutoRunEffectByVisible();
+		}
+		if (!lp->getRunSELastState())
+			lp->setRunSEOutMap(true);
+
+		std::string animFile = proto->strAnimatorName;
+		animFile = animFile.substr(0, 1);
+		MapManager::getInstance()->setRandPos(animFile == "M"?false:true);
+
+		if(std::string("0") != maptag && !maptag.empty())
+		{
+			std::string str2 = maptag.substr(1,maptag.length());
+			int mapid = lexical_cast<int>(str2);
+			lp->runPathTo(ccp(x, y), mapid);
+			RoleHeadUi *ui = World::getInstance()->getRoleHeadUi();
+			if (ui)
+			{
+				CC_ASSERT(NULL != ui);
+				CC_ASSERT(NULL != ui->GetRoleUI());
+				lp->SetisMouseClick(false);
+				ui->GetRoleUI()->SetMapidStr(maptag);
+				ui->GetRoleUI()->SetQuestPosx(tempx);
+				ui->GetRoleUI()->SetQuestPosy(tempy);
+				ui->GetRoleUI()->SetNpcId(dwNpcTypeID);
+			}
+		}
+	}
+	else
+	{
+		_wantOpenRoleidMain = -1;
+		_wantOpenRoleidSub = -1;
+		_wantOpenRoleidEveryNPC = -1;
+		_wantOpenRoleidBiQi = -1;
+		_wantOpenRoleidHuan = -1;
+	}
+}
+
+bool QuestMgr::queryQuestIsAccomlished(unsigned short uID) const
+{
+	BOOST_AUTO(finder,boost::find(_finishedQuestList,uID));
+	return finder != _finishedQuestList.end();
+}
+
+void QuestMgr::FilterQuest( unsigned short questID )
+{
+	QuestComplete evt;
+	evt.nQuestID = questID;
+	SEND_EVENT(&evt);
+
+	if (!NewFuncGuider::get_singleton().questIsInNewFuncGuide(questID))
+	{
+		_sigFinishQuest.emit(questID);
+
+	}
+}
+
+// std::map<unsigned short, s_quest_detail>QuestMgr::getQuestList()
+// {
+// 	return _quest;
+// }
+
+void QuestMgr::gotoQusetFuben()
+{
+	NET_SIC_enter_quest_fuben cmd;
+	cmd.u16QuestID = _mainQDetail.qid;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+}
+
+unsigned int QuestMgr::onServerEnterQuestFuben( s_net_cmd* cmd )
+{
+	NET_SIS_enter_quest_fuben* msg = (NET_SIS_enter_quest_fuben*)cmd;
+	if (msg)
+	{
+		switch (msg->dwError)
+		{
+		case E_CanTakeQuest_FAILED_Not_Need_Enter_Fuben:
+			ToolTip::getInstance()->push(GET_STR(9132));
+			break;
+		case E_CanTakeQuest_FAILED_Not_Find_Fuben:
+			ToolTip::getInstance()->push(GET_STR(9133));
+			break;
+		case E_CanTakeQuest_FAILED_Not_Enter_Fuben:
+			ToolTip::getInstance()->push(GET_STR(9134));
+			break;
+		}
+	}
+	return 0;
+}
+
+void QuestMgr::delayDestroy()
+{
+	reSetData();
+}
+
+void QuestMgr::updateBiqi()
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(ploc->getRoleDayClearInfo(ERDCT_BIQI_TASKS_COUNT)>=VIPMgr::getInstance()->getLocalVipData().BiQiTasksCount)
+	{
+		for (std::map<unsigned short , eQuestState>::iterator iter2 = _questState.begin();iter2 != _questState.end(); iter2++)
+		{
+			int questType = getQuestType(iter2->first);
+			if ((questType == 6) && iter2->second == QS_CAN_GET)
+			{
+				World::getInstance()->getTaskTraceUi()->erase(iter2->first);
+				//World::getInstance()->getTaskTraceUi()->resetScrollPosition();
+				break;
+			}
+		}
+	}
+}
+
+void QuestMgr::updateJunXu()
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(ploc->getRoleDayClearInfo(ERDCT_DAILY_TASKS_COUNT)>=VIPMgr::getInstance()->getLocalVipData().junxuRenwuTimes)
+	{
+		for (std::map<unsigned short , eQuestState>::iterator iter2 = _questState.begin();iter2 != _questState.end(); iter2++)
+		{
+			int questType = getQuestType(iter2->first);
+			if ((questType == Type_Daily) && iter2->second == QS_CAN_GET)
+			{
+				World::getInstance()->getTaskTraceUi()->erase(iter2->first);
+				//World::getInstance()->getTaskTraceUi()->resetScrollPosition();
+				break;
+			}
+		}
+	}
+}
+unsigned int QuestMgr::getComNPCID(unsigned short qid)
+{
+	std::map<unsigned short, s_quest_detail>::iterator iterTemp = _quest.find(qid);
+	if(iterTemp != _quest.end())
+		return iterTemp->second.complete_id;
+
+	return INVALID;
+}
+
+unsigned short QuestMgr::getTracableQuestByLevel( int nPlayerLv,QuestTypeEnum questType ,int step)
+{
+	for(std::map<unsigned short,s_quest_detail>::const_iterator iter = _quest.begin(); iter != _quest.end(); ++iter)
+	{
+		const s_quest_detail& quest = iter->second;
+
+		if((quest.type == questType)
+			&&(quest.level <= nPlayerLv) 
+			&& max_fit(nPlayerLv,quest.lvmax) 
+			&& quest.loop_quest_step == step)
+		{
+			return iter->first;
+		}
+	}
+
+	//CC_ASSERT(0 && "can not get quest!!!");
+	return 0;
+}
+
+void QuestMgr::updateQuestItemIfNess( s_quest_detail const* curQuest )
+{
+	int nItemID = curQuest->needItem; //???????id
+	int nItemCount = curQuest->itemNum; //???????????
+	//???????????
+	if( nItemID != 0 && nItemCount != 0 )
+	{
+		int nCount = PackageManager::getInstance()->getItemNumber(EICT_Bag,nItemID);
+		if( nCount > 0 )
+		{
+			_killCount[curQuest->qid].curkill = nCount;
+			if(_killCount[curQuest->qid].curkill >= _killCount[curQuest->qid].total)
+			{
+				appendTaskToUIView(curQuest->qid,0,curQuest->afterText,true);
+				//_questState[curQuest->qid] = QS_READY_FINISH;
+				setQuestState(curQuest->qid,QS_READY_FINISH);
+			}
+		}
+	}
+}
+
+void QuestMgr::updateQuestTraceState( tagIncompleteQuestMsgInfo const& info,bool& bHaveMainQuest )
+{
+	unsigned short qid = info.u16QuestID;
+	const s_quest_detail* curQuest = getQuestDetail(qid);
+	if (!curQuest)
+	{
+		return;
+	}
+
+	if (TASK_IS_GUILD(qid))
+	{
+		_curGuildQuestID = qid;
+	}
+
+	if (_finishedQuestList.find(qid) != _finishedQuestList.end())
+	{
+		s_quest_detail const& quest= *curQuest;
+		if (!quest.repeatable)
+		{
+			return;
+		}
+	}
+
+	if (curQuest->autoc)
+	{
+		setQuestState(qid,QS_READY_FINISH);
+		//_questState[qid] = QS_READY_FINISH;
+		appendTaskToUIView(qid,0,curQuest->target,true);
+	}
+	else
+	{
+		setQuestState(qid,QS_GET);
+		//_questState[qid] = QS_GET;
+		auto  pos = curQuest->target.find("$");
+		if (pos != std::string::npos)
+		{
+			std::string subs= curQuest->target.substr(0,pos);
+			std::string num = curQuest->target.substr(pos +1);
+
+			int nCur = info.n16CreatureNum[0];
+			int nTotal  = atoi(num.c_str());
+
+			_killCount[qid] .total = nTotal;
+			_killCount[qid].curkill = nCur;
+
+			if (nTotal <= nCur)
+			{
+				setQuestState(qid,QS_READY_FINISH);
+				//_questState[qid] = QS_READY_FINISH;
+				appendTaskToUIView(qid,0,curQuest->afterText,true,0);
+			}
+			else
+				appendTaskToUIView(qid,0,subs.c_str(),true,nCur);
+		}
+		else
+			updateQuestItemIfNess(curQuest);
+	}
+
+	switch (curQuest->type)
+	{
+	case  Type_Main:
+		_curMainQuestID = qid;
+		_fillDetail(qid);
+
+		bHaveMainQuest = true;
+		if(qid == 1000)
+			NewPlayerGuider::getInstance()->AddFirstQuest();
+		break;
+	case Type_Daily:
+		{	
+			if (RoleManager::getInstance()->getLocalPlayer()->getRoleDayClearInfo(ERDCT_DAILY_TASKS_COUNT) 
+				< VIPMgr::getInstance()->getLocalVipData().junxuRenwuTimes)
+			{
+				_curEveryQuestID = qid;
+			}
+		}
+		break;
+	case Type_BiQi:
+		{
+			if (RoleManager::getInstance()->getLocalPlayer()->getRoleDayClearInfo(ERDCT_BIQI_TASKS_COUNT) 
+				< VIPMgr::getInstance()->getLocalVipData().BiQiTasksCount)
+			{
+				_curBiQiQuestID = qid;
+			}
+		}
+		break;
+	case Type_Sub:
+		{
+			//World::getInstance()->getTaskTraceUi()->erase(_curSubQuestID);
+			_curSubQuestID = qid;
+			//setQuestState(_curSubQuestID,QS_GET);
+			//appendTaskToUIView(_curSubQuestID,0,curQuest->beforeText,true);
+		}
+		break;
+	case Type_Huan:
+		_curHuanQuestID = qid;
+		break;
+	}
+}
+
+bool QuestMgr::isDailyFullCircle() const
+{
+	int alreadyCompleteStep = RoleManager::getInstance()->getLocalPlayer()->getRoleDayClearInfo(ERDCT_DAILY_TASKS_COUNT);
+	return alreadyCompleteStep >= VIPMgr::getInstance()->getLocalVipData().junxuRenwuTimes;
+}
+
+bool QuestMgr::isBiQiFullCircle() const
+{
+	int alreadyCompleteStep = RoleManager::getInstance()->getLocalPlayer()->getRoleDayClearInfo(ERDCT_BIQI_TASKS_COUNT);
+	return alreadyCompleteStep >= VIPMgr::getInstance()->getLocalVipData().BiQiTasksCount;
+}
+
+bool QuestMgr::isRewardQuest( unsigned short qid ) const
+{
+	return qid >= 10000 && qid <= 10080;
+}
+
+std::string QuestMgr::getQuestInfoText( unsigned short id )
+{
+	s_quest_detail const* pqd = getQuestDetail(id);
+	CC_ASSERT(pqd);
+	if (haveQuestState(id))
+	{
+		switch (/*_questState[id]*/getQuestState(id))
+		{
+		case QS_GET:
+		case QS_CAN_GET:
+			return pqd->beforeText;
+		case QS_READY_FINISH:
+			return pqd->afterText;
+		default:
+			return pqd->beforeText;
+		}
+	}
+
+	return pqd->beforeText;
+}
+
+bool QuestMgr::isHuanFullCircle() const
+{
+	int num = RoleManager::getInstance()->getLocalPlayer()->getRoleDayClearInfoTwo(ERDCT_Huan_Circal_Num);
+	//CCLOG("VIPMgr::getInstance()->getLocalVipData().HuanTasksTotalNumber = %d",VIPMgr::getInstance()->getLocalVipData().HuanTasksTotalNumber);
+	return ( num >= VIPMgr::getInstance()->getLocalVipData().HuanTasksTotalNumber); //如果今天还有环任务可接
+}
+
+void QuestMgr::setQuestState( unsigned short questID,eQuestState state )
+{
+	if (!haveQuestState(questID))
+	{
+		CCLOG("quest: %d has not quest state!!!",questID);
+	}
+	else
+	{
+		if (/*_questState[questID]*/getQuestState(questID) != state)
+		{
+			CCLOG("quest: %d change state from %d to %d!!!",questID,_questState[questID],state );
+		}
+	}
+	_questState[questID]  = state;
+}
+
+eQuestState QuestMgr::getQuestState( unsigned short qid ) 
+{
+	CC_ASSERT(haveQuestState(qid) && "lost quest state!!!");
+
+	return _questState[qid];
+}
+
+void QuestMgr::removeQuestState( unsigned short qid )
+{
+	CC_ASSERT(haveQuestState(qid) && "lost quest state!!!");
+	bool isNeedHold = NewPlayerGuider::getInstance()->isQuestNeedHoldById(qid);
+	if (isNeedHold)
+		return;
+	_questState.erase(qid);
+}
+
+void QuestMgr::doSthAfterFinished(s_quest_detail const* curDetail,bool bFinishAll)
+{
+	RoleManager* roleMgr = RoleManager::getInstance();
+	int lvl = roleMgr->getLocalPlayer()->getLevel();
+	//NPCTalkUi* ui = World::getInstance()->getNPCDialog();
+	bool bDaily = curDetail->type == Type_Daily;
+	//bool bFinishAll = /*bDaily?ui->getFinishWay()== Finish_All : ui->getBiQiFinishWay()== Finish_All*/finish_all;
+
+	//显示完成任务特效
+	if (curDetail->type == Type_Daily
+		|| Type_BiQi == curDetail->type)
+	{
+		if (bFinishAll)
+		{
+			//VIPMgr* vipMgr = VIPMgr::getInstance();
+			//VipDataStruct const& vipData  = vipMgr->getLocalVipData();
+			//int stepCnt = bDaily?vipData.junxuRenwuTimes :vipData.BiQiTasksCount;
+			//ERoleDayClearType type  =bDaily? ERDCT_DAILY_TASKS_COUNT:ERDCT_BIQI_TASKS_COUNT;
+			bool bFull  = bDaily?isDailyFullCircle():isBiQiFullCircle();
+			if (/*roleMgr->getLocalPlayer()->getRoleDayClearInfo(type) >= stepCnt*/bFull)
+			{
+				World::getInstance()->runFinishedTaskEffect();
+			}
+		}
+		else
+		{
+			World::getInstance()->runFinishedTaskEffect();
+		}
+	}
+
+	if(!bFinishAll)
+		getNextQuestIfNess(curDetail,lvl);
+}
+
+void QuestMgr::getNextQuestIfNess( s_quest_detail const* finished_quest_detail,int player_lv )
+{
+	if (finished_quest_detail->type == Type_Daily
+		&&!isDailyFullCircle())
+	{
+		queryValidEveryQuest(player_lv, false);
+		const s_quest_detail* qd = getQuestDetail(_curEveryQuestID);
+		if(qd )
+		{
+			autoOpenQuestUI(finished_quest_detail->qid, qd->accept_id, qd->qid);				
+		}
+	}
+
+	if (finished_quest_detail->type == Type_BiQi
+		&&!isBiQiFullCircle())
+	{
+		queryValidBiQiQuest(player_lv, false);
+		const s_quest_detail* qd = getQuestDetail(_curBiQiQuestID);
+		if(qd)
+		{
+			autoOpenQuestUI(finished_quest_detail->qid,qd->accept_id,qd->qid);
+		}
+	}
+}
+
+void showNPCName( unsigned int npcid )
+{
+	stCreateProto const* proto =  RoleManager::getInstance()->getCreatureProto(npcid);
+	CC_ASSERT(proto);
+	//!ui中显示
+	World::getInstance()->getNPCDialog()->setTitle(proto->strName.c_str());
+}
+
+void showNPCTalk( unsigned int npcid )
+{
+	stCreateProto const* proto = RoleManager::getInstance()->getCreatureProto(npcid);
+	CC_ASSERT(proto);
+
+	std::string talk = proto->strContext;;
+	std::string portraitName = proto->strPortrait;
+	std::string sound[3];
+
+	sound[0] = proto->strSound1;
+	sound[1] = proto->strSound2;
+	sound[2] = proto->strSound3;
+
+	//ui中显示
+	World::getInstance()->getNPCDialog()->showButton(false); 
+	World::getInstance()->getNPCDialog()->setPortrait(portraitName.c_str());
+	World::getInstance()->getNPCDialog()->setText(talk.c_str());
+	int seed = 0;
+	for (; seed < 3 ;seed++)
+	{
+		if (sound[seed].length()<=1)
+			break;
+	}
+	//srand(ClientUpdate::getInstance()->getCurrentTime());
+	//
+	//int nMax = 32767;
+	if(seed==0)
+		return;
+
+	static int randNum=-1;
+	static int snpcid=npcid;
+	if (snpcid!=npcid)
+	{
+		snpcid=npcid;
+		randNum=-1;
+	}
+	randNum++;
+
+	int nCurMaxCount = seed;
+	if (randNum>=nCurMaxCount)
+	{
+		randNum = 0;
+	}
+
+	//int randNum=rand()%seed;
+	if (randNum >= 0 && randNum < 3 && !sound[randNum].empty())
+	{
+		World::getInstance()->getNPCDialog()->setPlayerAudioEffect(sound[randNum]);
+	}
+}
+
+int getCurQuestState(unsigned short qid , unsigned int npcid)
+{
+	int ret = QuestMgr::getInstance()->getMainQuestState(qid , npcid);
+	return ret;
+}
+
+int getSubQuestStateA(unsigned int npcid )
+{
+	unsigned short id = QuestMgr::getInstance()->getSubQA();
+	return QuestMgr::getInstance()->getSubQuestState(id , npcid);
+}
+
+int getEveryQuestState(int type , unsigned int npcid )
+{
+	return QuestMgr::getInstance()->getEveryQuestStates(npcid);
+}
+int getBiQiQuestState(unsigned int npcid )
+{
+	return QuestMgr::getInstance()->getBiQiQuestStates(npcid);
+}
+int getHuanShiQuestState(unsigned short qid , unsigned int npcid)
+{
+	int ret = QuestMgr::getInstance()->getHuanQuestState(qid , npcid);
+	return ret;
+}
+void addToCompleteQuestList( unsigned short qid)
+{
+	std::string title = QuestMgr::getInstance()->getDetail().title;
+	World::getInstance()->getNPCDialog()->appendItem(qid , title.c_str() , true , true);
+}
+
+void addToAcceptQuestList( unsigned short qid )
+{
+	std::string title = QuestMgr::getInstance()->getDetail().title;
+	World::getInstance()->getNPCDialog()->appendItem(qid , title.c_str() , true , false);
+}
+
+void addToCompleteQuestListSub(int id)
+{
+	s_quest_detail qd=  QuestMgr::getInstance()->getSubDetail();
+	World::getInstance()->getNPCDialog()->appendItem(qd.qid , qd.title.c_str() , true , true);
+}
+
+void addToAcceptQuestListSub(int id)
+{
+	s_quest_detail qd = QuestMgr::getInstance()->getSubDetail();
+	World::getInstance()->getNPCDialog()->appendItem(qd.qid , qd.title.c_str() , true , false);
+}
+
+void addToCompleteQuestListEvery( int id )
+{
+	const s_quest_detail* qd =  QuestMgr::getInstance()->getQuestDetail(QuestMgr::getInstance()->getCurEveryQuestID());
+	if(qd == NULL)
+	{
+		return;
+	}
+	World::getInstance()->getNPCDialog()->appendItem(qd->qid , qd->title.c_str() , true , true);
+}
+void addToAcceptQuestListEvery( int id )
+{
+	const s_quest_detail* qd=  QuestMgr::getInstance()->getQuestDetail(QuestMgr::getInstance()->getCurEveryQuestID());
+	if(qd == NULL)
+	{
+		return;
+	}
+	World::getInstance()->getNPCDialog()->appendItem(qd->qid , qd->title.c_str() , true , false);
+}
+void addToCompleteQuestListBiQi()
+{
+	const s_quest_detail* qd = QuestMgr::getInstance()->getQuestDetail(QuestMgr::getInstance()->getCurBiQiQuestID());
+	if(qd == NULL)
+	{
+		return;
+	}
+	World::getInstance()->getNPCDialog()->appendItem(qd->qid , qd->title.c_str() , true , true);
+}
+void addToAcceptQuestListBiQi()
+{
+	const s_quest_detail* qd=  QuestMgr::getInstance()->getQuestDetail(QuestMgr::getInstance()->getCurBiQiQuestID());
+	if(qd == NULL)
+	{
+		return;
+	}
+	World::getInstance()->getNPCDialog()->appendItem(qd->qid , qd->title.c_str() , true , false);
+}
+
+void addToAcceptQuestHuan()
+{
+	const s_quest_detail* qd = QuestMgr::getInstance()->getQuestDetail(QuestMgr::getInstance()->getCurHuanQuestID());
+	if(qd != NULL)
+	{
+		World::getInstance()->getNPCDialog()->appendItem(qd->qid,qd->title.c_str(),true,false);
+	}
+}
+void addToCompleteQuestHuan()
+{
+	const s_quest_detail* qd = QuestMgr::getInstance()->getQuestDetail(QuestMgr::getInstance()->getCurHuanQuestID());
+	if(qd != NULL)
+	{
+		World::getInstance()->getNPCDialog()->appendItem(qd->qid,qd->title.c_str(),true,true);
+	}
+}
+void hideButton()
+{
+	World::getInstance()->getNPCDialog()->showButton(false);
+}
+
+void stopRunPathTo(){
+	CCTMXTiledMap *_map = MapManager::getInstance()->getMap();
+	CCTMXObjectGroup *trigger = _map->objectGroupNamed("trigger");
+	if(trigger)
+	{
+		int objectName = 1;
+		CCString *str = CCString::createWithFormat("%d", objectName);
+		CCDictionary *director = trigger->objectNamed(str->getCString());
+		while(director != NULL)
+		{
+			int x = director->valueForKey("x")->intValue();
+			int y = director->valueForKey("y")->intValue();
+			int w = director->valueForKey("width")->intValue();
+			int h = director->valueForKey("height")->intValue();
+			int type = director->valueForKey("type")->intValue();
+			//int targeId = director->valueForKey("QuestTag")->intValue();
+			CCRect triggerRect(x, y, w, h);
+			Role *target = RoleManager::getInstance()->findRole(RoleManager::getInstance()->getLocalPlayer()->getId());
+			CCPoint position = target->getPosition();
+			if(triggerRect.containsPoint(position)){
+				if(type == 0){
+					RoleManager::getInstance()->getLocalPlayer()->runPathCallback();
+				}
+			}
+
+			objectName ++;
+			str = CCString::createWithFormat("%d", objectName);
+			director = trigger->objectNamed(str->getCString());	
+		}
+	}
+}
+
+void continueRunPathTo(){
+	bool gotoState = RoleManager::getInstance()->getLocalPlayer()->getPlayerState();
+	if(gotoState){
+		CCTMXTiledMap *_map = MapManager::getInstance()->getMap();
+		CCTMXObjectGroup *trigger = _map->objectGroupNamed("trigger");
+		if(trigger)
+		{
+			int objectName = 1;
+			CCString *str = CCString::createWithFormat("%d", objectName);
+			CCDictionary *director = trigger->objectNamed(str->getCString());
+			while(director != NULL)
+			{
+				// 				int x = director->valueForKey("x")->intValue();
+				// 				int y = director->valueForKey("y")->intValue();
+				// 				int w = director->valueForKey("width")->intValue();
+				// 				int h = director->valueForKey("height")->intValue();
+				// 				int type = director->valueForKey("type")->intValue();
+				int targeId = director->valueForKey("QuestTag")->intValue();
+				RewardQuestMgr::getInstance()->runToNPC(targeId);
+
+				objectName ++;
+				str = CCString::createWithFormat("%d", objectName);
+				director = trigger->objectNamed(str->getCString());	
+			}
+		}
+		RoleManager::getInstance()->getLocalPlayer()->setIsOutFuben();
+	}	
+}
+
+void gotoFubenState()
+{
+	RoleManager::getInstance()->getLocalPlayer()->setIsGotoFuben();
+}
+
+void QuestMgr::guild_assign()
+{
+	NPCTalkUi* talkUi = World::getInstance()->getNPCDialog();
+	if(talkUi == NULL)
+	{
+		return;
+	}
+	talkUi->clear();
+	talkUi->showButton(true);
+	talkUi->showSpecialButton(false);
+	talkUi->showButton(0);
+	talkUi->guild_assign_btn_show();		
+
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	GuildMgr* guildMgr = GuildMgr::getInstance();
+	if( NULL == lp || NULL == guildMgr)
+		return;
+
+	int index = 1;
+	talkUi->setTaskAward(index++, eNT_AMOUNT, guildMgr->getAssignExp());
+	talkUi->setTaskAward(index++, eNT_AMOUNT, guildMgr->getAssignSilver());
+	talkUi->setTaskAward(index++, eNT_ITEMID, GUILD_GONGXIAN_ITEM,guildMgr->getAssignContribution());
+	talkUi->setTaskAward(4,eNT_ITEMID,0);
+	talkUi->setTaskAward(5,eNT_ITEMID,0);
+
+	talkUi->setTaskText(eNT_TASKNAME, STRING_TABLE["guild_assign_title"]);
+	talkUi->setTaskText(eNT_TASKGOAL, STRING_TABLE["guild_assign_goal"]);
+	talkUi->setTaskText(eNT_TASKDES, STRING_TABLE["guild_assign_desc"]);
+
+}
+
+void QuestMgr::init_junxu_reward()
+{
+	f_data_set data_set;
+	std::list<std::string> fields;
+	bool ret =data_set.load("Config/db/JunxurewardData.xml","ID",&fields);
+	CC_ASSERT(ret);
+	std::for_each(	fields.begin(),
+					fields.end(),
+					[&](std::string const& one)
+	{
+		unsigned short qid = (unsigned short)data_set.get_int("ID",one.c_str());
+		int item_id = data_set.get_int("reward1",one.c_str(),0);
+		int item_num = data_set.get_int("number1",one.c_str(),0);
+		std::pair<int,int> p(item_id,item_num);
+		m_junxu_rewards.insert(std::make_pair(qid , p));
+	});
+}
+
+void QuestMgr::get_junxu_reward( unsigned short qid,int& item_id,int& item_num )
+{
+	auto finder = m_junxu_rewards.find(qid);
+	if(finder != m_junxu_rewards.end())
+	{
+		item_id = finder->second.first;
+		item_num = finder->second.second;
+	}
+}

@@ -1,0 +1,4683 @@
+#include "MiniMapUi.h"
+#include "CfgReader.h"
+#include "MiniMapNode.h"
+#include <math.h>
+#include "UiTools.h"
+#include "Auto_ActionMgr.h"
+#include "RewardUi.h"
+#include "AnimationCache.h"
+#include "BSAnimate.h"
+#include "RewardMgr.h"
+#include "RankUi.h"
+#include "SignInUi.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "HuoYueUi.h"
+#include "SystemMsg.h"
+#include "ToolTip.h"
+#include "UiManager.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "NewPlayerGuide.h"
+#include "StringMgr.h"
+#include "RewardMgr.h"
+#include "PackageManager.h"
+#include "InputSerialUi.h"
+#include "InstanceMgr.h"
+#include "ClientCfg.h"
+#include "ActivityMgr.h"
+#include "NoticeBoardUi.h"
+#include "ServerActivityUi.h"
+#include "WorldPacket.h"
+#include "CommonMsgDefine.h"
+#include "AudioPlayer.h"
+#include "NumericalIniMgr.h"
+#include "AudioProto.h"
+#include "MailRewardMgr.h"
+#include "UiResourceMgr.h"
+#include "ChongZhiActivityMgr.h"
+#include "OnLineReward.h"
+#include "GameActionNode.h"
+#include "FubenUI.h"
+#include "tools.h"
+#include "BossPKMgr.h"
+#include "DaRongLu.h"
+#include "VIPMgr.h"
+#include "ConcernMgr.h"
+#include "SocialMgr.h"
+#include "SQLCommand.h"
+#include "DBMgr.h"
+#include "ChatDefine.h"
+#include "SonghuaUi.h"
+#include "PackageProto.h"
+#include "NewFuncGuider.h"
+#include "GameEventDefine.h"
+#include "UIUtil.h"
+#include "CommonClient.h"
+#include "RewardQuestMgr.h"
+#include "CCDragButton.h"
+#include "TeamMgr.h"
+#include "RespItemView.h"
+#include "ChatUi.h"
+#include "KaifuHuodongMgr.h"
+#include "kaifuhudong_protocol.h"
+#include "ImmediateEquipUi.h"
+#include "ItemAutoUseDaojuTip.h"
+#include "Helper.h"
+#include "UiTools.h"
+#include "LongWeiBoxUi.h"
+#include "f_string_table.h"
+#include "FMBManager.h"
+#include "GuaJiManager.h"
+#include "BloodFightMgr.h"
+#include "f_zhuzai_mgr.h"
+#include "PlacardManager.h"
+#include "SBKSDManager.h"
+#include "GuildBossManager.h"
+#include "GuildMgr.h"
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+#include "wzolJni.h"
+#endif
+
+#define  LOCK_TAG 999
+
+//////////////////////////////////////////////////////////////////////////
+void ActivityBtnGroup::onNodeLoaded( CCNode * pNode, CCNodeLoader * pNodeLoader )
+{
+	setTouchPriority(0);
+	_showPos = getPosition();
+
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(getChildByTag(NT_TimeLabel)));
+	LabelFT *label = dynamic_cast<LabelFT*>(getChildByTag(NT_TimeLabel));
+	CC_ASSERT(label != NULL);
+	label->setString(" ");
+	label->setVisible(false);
+	//showFrame(false);
+	initBtns();
+	//公告
+	CCControlButton* noticeBtn = dynamic_cast<CCControlButton*>(getChildByTag(MiniMapUi::BT_NoticeBtn));
+	if (noticeBtn)
+	{
+		_noticeStartPt = noticeBtn->getPosition();
+	}
+	else
+	{
+		_noticeStartPt = ccp(0.0f,0.0f);
+	}
+}
+
+bool ActivityBtnGroup::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(!isTouchOnNodeContent(this, pTouch) && !isTouchOnNodeContent(_activityBtn, pTouch))
+	{
+		showFrame(false);
+		return false;
+	}
+	return false;
+}
+
+void ActivityBtnGroup::showFrame( bool show )
+{
+	_show = show;
+	if(show)
+	{
+		setPosition(_showPos);
+		setEnabelTouch(true);
+	}
+	else
+	{
+		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+		setPositionX(winSize.width * 2);
+		setEnabelTouch(false);
+	}
+
+	NewPlayerGuider::getInstance()->onMiniMapGroupBtnShow();
+
+	CCNode* tradeNode = dynamic_cast<CCNode*>(getChildByTag(MiniMapUi::BT_TradeBtn));
+	if (IS_VALID_PTR(tradeNode))
+	{
+		bool isShowTradeNode = KaifuHuodongMgr::getInstance()->getIosShowRecharge();
+		tradeNode->setVisible(isShowTradeNode);
+	}
+}
+void ActivityBtnGroup::setTime( const std::string &time )
+{
+	LabelFT *label = dynamic_cast<LabelFT*>(getChildByTag(NT_TimeLabel));	
+	//陆晓龙 2015-6-26 显示在线下面的时间
+	//设置所有的子节点中的button的优先级为2
+	
+	MiniMapUi* pUI = World::getInstance()->getMiniMapUi();
+	if (!pUI)
+		return;
+	CCNode*  fatherNode = dynamic_cast<CCNode*>(pUI->getChildByTag(0)->getChildByTag(1));
+	if (!fatherNode)
+		return;
+	//CCLabelTTF * timeShow =  dynamic_cast<CCLabelTTF*>(fatherNode->getChildByTag(8)->getChildByTag(11));
+	LabelFT* timeShow = dynamic_cast<LabelFT*>(fatherNode->getChildByTag(8)->getChildByTag(11));
+	timeShow->setString(time.c_str());
+	label->setString(time.c_str());
+}
+void ActivityBtnGroup::runAnimationOnButton( eNodeTag btnTag )
+{
+	/*
+	if(btnTag < NT_ChongzhiBtn || btnTag > NT_End)
+		return;
+
+	if(getChildByTag(btnTag + NT_AnimBegin) != NULL)
+		return;
+
+	CCNode *btnNode = getChildByTag(btnTag);
+	CC_ASSERT(btnNode != NULL);
+	CCSprite *sprite = dynamic_cast<CCSprite*>(btnNode->getChildByTag(btnTag + NT_AnimBegin));
+	if (sprite!=NULL)
+	{
+		return;
+	}
+
+	AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0, "huodongtexiao", anims);
+	BSAnimate *animste = anims[0];
+	sprite = CCSprite::create();
+	//sprite->setAnchorPoint(ccp(0.0f, 1.0f));
+	sprite->setTag(btnTag + NT_AnimBegin);
+	CCSize size = btnNode->getContentSize();
+	sprite->setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+	btnNode->addChild(sprite);
+	sprite->runAction(CCRepeatForever::create(animste));*/
+}
+
+void ActivityBtnGroup::stopAnimationOnButton( eNodeTag btnTag )
+{
+	if(btnTag < NT_ChongzhiBtn || btnTag > NT_End)
+		return;
+
+	CCNode *btnNode = getChildByTag(btnTag);
+	CCNode *node = btnNode->getChildByTag(btnTag + NT_AnimBegin);
+	if(node != NULL)
+	{
+		node->stopAllActions();
+		node->removeFromParent();
+	}
+}
+
+void ActivityBtnGroup::showBtn( eNodeTag btnTag,bool show )
+{
+	if(btnTag < NT_ChongzhiBtn || btnTag > NT_End)
+		return;
+	CCNode *btnNode = getChildByTag(btnTag);
+	CC_ASSERT(btnNode != NULL);
+	btnNode->setVisible(show);
+}
+void ActivityBtnGroup::initBtns()
+{
+	std::vector<CCNode*> nodes;
+	//nodes.push_back(getChildByTag(0));
+	nodes.push_back(getChildByTag(3));
+	//nodes.push_back(getChildByTag(2));
+	nodes.push_back(getChildByTag(100));
+	nodes.push_back(getChildByTag(6));
+	nodes.push_back(getChildByTag(1567));
+	nodes.push_back(getChildByTag(30));//龙卫按钮
+	//nodes.push_back(getChildByTag(8));
+
+	//std::vector<size_t> invisibleBtnPos;
+	//NewFuncGuider::get_singleton().getInvisibleActGroupBtns(invisibleBtnPos);
+	for (size_t i = 0; i <  nodes.size(); i++)
+	{
+		//BOOST_AUTO(finder,boost::range::find(invisibleBtnPos,i));
+		//nodes[i]->setVisible(true);
+		CCSprite* lock = CCSprite::createWithSpriteFrameName("smallui_tongyonghui");
+		CC_ASSERT(lock);
+		lock->setTag(LOCK_TAG);
+		UIUtil::childNodeAlign(nodes[i],lock,eha_center,eva_center,CCPointZero);
+		//CCNode* lock = nodes[i]->getChildByTag(LOCK_TAG);
+		lock->setVisible(!NewFuncGuider::get_singleton().isForceOpenByActPos((unsigned long)i));
+	}
+
+	setupNodes(nodes,ead_horizontal);
+
+	//第二排交易行按钮也需要上锁
+	CCNode* tradeNode = dynamic_cast<CCNode*>(getChildByTag(MiniMapUi::BT_TradeBtn));
+	if (tradeNode)
+	{
+		CCSprite* lock = CCSprite::createWithSpriteFrameName("smallui_tongyonghui");
+		CC_ASSERT(lock);
+		if (lock)
+		{
+			lock->setTag(LOCK_TAG);
+			UIUtil::childNodeAlign(tradeNode,lock,eha_center,eva_center,CCPointZero);
+			LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+			if (ploc && ploc->getLevel() >= NumericalIniMgr::getInstance()->get_trading_open_level())
+				lock->setVisible(false);
+			else
+				lock->setVisible(true);
+		}
+	}
+}
+
+void ActivityBtnGroup::onEventQuestInited( QuestDataInited* evt )
+{
+	//initBtns();
+}
+
+void ActivityBtnGroup::onEnter()
+{
+	CCNode::onEnter();
+
+	REGISTER_EVENT(LpLevelUpEvent,ActivityBtnGroup,onEventLevelUp);
+	
+}
+
+void ActivityBtnGroup::onExit()
+{
+	CCNode::onExit();
+
+	UNREGISTER_EVENT(LpLevelUpEvent,ActivityBtnGroup,onEventLevelUp);
+
+}
+
+void ActivityBtnGroup::enableBtns( size_t index,bool bEnable )
+{
+	CC_ASSERT(index < mvecNodes.size());
+	
+	CCNode* btn  =mvecNodes[index];
+	CCNode* lock = btn->getChildByTag(LOCK_TAG);
+	CC_ASSERT(lock);
+	lock->setVisible(!bEnable);
+}
+
+bool ActivityBtnGroup::isEnableBtn( size_t index ) const
+{
+	CC_ASSERT(index < mvecNodes.size());
+
+	CCNode* btn  =mvecNodes[index];
+	CCNode* lock = btn->getChildByTag(LOCK_TAG);
+	CC_ASSERT(lock);
+	return !lock->isVisible();
+}
+
+void ActivityBtnGroup::onEventLevelUp( LpLevelUpEvent* evt )
+{
+	for (size_t i = 0; i <  mvecNodes.size(); i++)
+	{
+		bool ret = NewFuncGuider::get_singleton().isForceOpenByActPos((unsigned long)i);
+		enableBtns(i,ret);
+	}
+
+	//第二排交易行按钮也需要上锁
+	CCNode* tradeNode = dynamic_cast<CCNode*>(getChildByTag(MiniMapUi::BT_TradeBtn));
+	if (tradeNode)
+	{
+		CCNode* lock = tradeNode->getChildByTag(LOCK_TAG);
+		CC_ASSERT(lock);
+		if (lock)
+		{
+			LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+			if (ploc && ploc->getLevel() >= NumericalIniMgr::getInstance()->get_trading_open_level())
+				lock->setVisible(false);
+			else
+				lock->setVisible(true);
+		}
+	}
+}
+
+void ActivityBtnGroup::sortBtnPos1()
+{
+	std::vector<CCNode*> vNode;
+	vNode.clear();
+
+	CCNode* node = NULL;
+	node = dynamic_cast<CCNode*>(getChildByTag(MiniMapUi::BT_GiftBtn));
+	if (node)
+	{
+		vNode.push_back(node);
+	}
+		//公告
+	node = dynamic_cast<CCNode*>(getChildByTag(MiniMapUi::BT_NoticeBtn));
+	if (node && node->isVisible())
+	{
+		vNode.push_back(node);
+	}
+
+	//经验池
+	node = dynamic_cast<CCNode*>(getChildByTag(MiniMapUi::BT_ExpLixianBtn));
+	if (node && node->isVisible())
+	{
+		vNode.push_back(node);
+	}
+
+	//签到
+	/*node = dynamic_cast<CCNode*>(getChildByTag(MiniMapUi::BT_InsideSignBtn));
+	if (node && node->isVisible())
+	{
+		vNode.push_back(node);
+	}*/
+
+	//修正第二个按钮的位置，为了排序
+	if (vNode.size() > 1)
+	{
+		CCNode* node = vNode[1];
+		if (node)
+		{
+			node->setPosition(_noticeStartPt);
+		}
+	}
+
+	AlignComponent::sortNodePos(vNode,ead_horizontal);
+}
+
+
+
+//////////////////////////////////////////////////////////////////////////
+
+
+bool MiniMapUi::init()
+{
+	_areaName = NULL;
+	_rewardAnim = NULL;
+	
+	_activityAnim = NULL;
+	_activityEffect = NULL;
+	
+    _shouChongEffect = NULL;
+	//_tradingBtn = NULL;
+	_severTime = NULL;
+	_enterScriptTime = NULL;
+	_leaveScripte = NULL;
+	_battleBtn = NULL;
+	_explixian = NULL;
+	_activitytransfer = NULL;
+	//_sbkactivitytransfer = NULL;
+	_serveractivityBtn = NULL;
+	_coretreeBtn=  NULL;
+	//_enterSBKScriptTime = NULL;
+	isSBKTransferFrame = false;
+	_xuanshangBtn = NULL;
+	//_luanDouHuiBtn = NULL;
+	_giftBtn = NULL;
+//	_leaveshow = false;
+	_isSignShow = true;
+	_isOfflineExpRedPoint = true;
+	_tlTimeNode = NULL;
+	_tlTimeInfo = NULL;
+	m_mfb_cue_btn = NULL;
+	m_mfb_bet_btn = NULL;
+
+	if(!CCLayer::init())
+		return false;
+
+
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("MiniMapUiLoaderLayer", MiniMapUiLoader::loader());
+	ccNodeLoaderLibrary->registerCCNodeLoader("MiniMapNode", UiNodeLoader<MiniMapNode>::loader());
+	ccNodeLoaderLibrary->registerCCNodeLoader("ActivityBtnGroup", UiNodeLoader<ActivityBtnGroup>::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	MiniMapUiLoaderLayer * node = (MiniMapUiLoaderLayer*)ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "smallmap.ccbi").c_str());//miniMapUi
+	m_pLayer = node;
+	ccbReader->release();
+	if(node != NULL) {
+		addChild(node);
+		node->setTag(0);
+
+		//设置所有的子节点中的button的优先级为2
+		setAllChildernButtonPriority(node, 2);
+
+		layer = (CCLayer*)node->getChildByTag(1);
+		CC_ASSERT(layer != NULL);
+
+		_areaName = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(layer->getChildByTag(1)));
+		CC_ASSERT(_areaName != NULL);
+		_areaNameFuben = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>((node->getChildByTag(22)->getChildByTag(1))));
+		CC_ASSERT(_areaNameFuben != NULL);
+		_severTime = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(layer->getChildByTag(30)));
+		CC_ASSERT(_severTime != NULL);
+		_enterScriptTime = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(layer->getChildByTag(31)));
+		CC_ASSERT(_enterScriptTime != NULL);
+		showScriptTime(false);
+
+		_activityBtnGroup = dynamic_cast<ActivityBtnGroup*>(layer->getChildByTag(NT_ActivityBtnGroup));
+
+		//测试悬赏功能
+		_xuanshangBtn = dynamic_cast<CCControlButton*>(_activityBtnGroup->getChildByTag(1567));
+		_xuanshangBtn->addTargetWithActionForControlEvents( this, cccontrol_selector(MiniMapUi::onXuanshangPressed), CCControlEventTouchUpInside );
+		_xuanshangBtn->setTouchPriority(2);
+		CCSprite* lock = CCSprite::createWithSpriteFrameName("smallui_tongyonghui");
+		if(RoleManager::getInstance()->getLocalPlayer()->getLevel() <35){
+			_xuanshangBtn->addChild(lock);
+			lock ->setPosition(ccp(35,25));
+			lock->setTag(10);
+		}
+		
+		//添加锁
+		//setupGoupBtnLock(_activityBtnGroup);
+		_serveractivityBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(25));
+		CC_ASSERT(_serveractivityBtn);
+		_serveractivityBtn->setVisible(false);
+		CCControlButton *mapPressedBtn=dynamic_cast<CCControlButton*>(layer->getChildByTag(200));
+		//mapPressedBtn->setBackgroundSpriteForState("smallui_bottomPicture",CCControlStateNormal);
+		mapPressedBtn->setHighlighted(false);
+		CC_ASSERT(_serveractivityBtn != NULL);
+		_battleBtn = dynamic_cast<CCControlButton*>(node->getChildByTag(BT_AutoFight));
+		_huoBtn = layer->getChildByTag(NT_HuoBtn);
+		CC_ASSERT( _activityBtnGroup != NULL && _battleBtn != NULL && _huoBtn != NULL);
+		setAllChildernButtonPriority(_activityBtnGroup, -1);
+		_miniMapNode = (MiniMapNode*)layer->getChildByTag(2);
+		//离开副本
+		_leaveScripte = dynamic_cast<CCControlButton*>(node->getChildByTag(BT_LeaveScripte));      
+		CC_ASSERT(_leaveScripte != NULL);
+		_leaveScripte->setVisible(false);
+		//离线经验
+		_explixian = dynamic_cast<CCControlButton*>(layer->getChildByTag(12)->getChildByTag(BT_ExpLixianBtn));
+		CC_ASSERT(_explixian != NULL);
+		_explixian->setVisible(true);
+		//公告
+		CCControlButton* noticeBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(12)->getChildByTag(BT_NoticeBtn));
+		if (noticeBtn)
+		{
+			_noticeStartPt = noticeBtn->getPosition();
+		}
+		else
+		{
+			_noticeStartPt = ccp(0.0f,0.0f);
+		}
+		//礼包
+		_giftBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(12)->getChildByTag(BT_GiftBtn));
+		CC_ASSERT(_giftBtn);
+		showGiftBtn(false);
+		/*
+		CCSize winSize0 = CCDirector::sharedDirector()->getWinSize();
+		_tradingBtn = CCControlButton::create();
+		_tradingBtn->setPosition(ccp(winSize0.width - 220.0f, winSize0.height - 95.0f));
+		_tradingBtn->setPreferredSize(CCSize(67.0f, 51.0f));
+		_tradingBtn->setBackgroundSpriteFrameForState(PackageManager::getInstance()->getIconFrameByName("SingleUI/smallui_jiaoyihang"), CCControlStateSelected);
+		_tradingBtn->setBackgroundSpriteFrameForState(PackageManager::getInstance()->getIconFrameByName("SingleUI/smallui_jiaoyihang"), CCControlStateNormal);
+		_tradingBtn->addTargetWithActionForControlEvents( this, cccontrol_selector(MiniMapUi::onjiaoyihangBtnPressed), CCControlEventTouchUpInside );
+		_tradingBtn->setTouchPriority(2);
+		node->addChild(_tradingBtn);
+		*/
+		//活动传送
+		_activitytransfer = dynamic_cast<CCControlButton*>(layer->getChildByTag(BT_ActivityTransfer));
+		CC_ASSERT(_activitytransfer != NULL);
+		_activitytransfer->setVisible(false);
+		//沙巴克活动传送按钮
+// 		_sbkactivitytransfer = dynamic_cast<CCControlButton*>(layer->getChildByTag(BT_SBKActivityTransfer));
+// 		CC_ASSERT(_sbkactivitytransfer != NULL);
+// 		_sbkactivitytransfer->setVisible(false);
+		//活动传送按钮倒计时
+// 		_enterSBKScriptTime = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(layer->getChildByTag(LB_SBKActivityTransferTime)));
+// 		CC_ASSERT(_enterSBKScriptTime != NULL);
+// 		_enterSBKScriptTime =  dynamic_cast<LabelFT*>(UIUtil::reAttachToParent(_enterSBKScriptTime,_sbkactivitytransfer,eha_center,eva_center,ccp(0,_sbkactivitytransfer->getContentSize().height*0.5f +4)));
+// 		_enterSBKScriptTime->setVisible(false);
+// 		_enterSBKScriptTime->setPosition(ccp(_enterSBKScriptTime->getPositionX(),_enterSBKScriptTime->getPositionY() - 10));
+		//摇钱树
+		_coretreeBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(7));
+		CC_ASSERT(_coretreeBtn != NULL); 
+		_coretreeBtn->setVisible(false);
+		//_coretreeBtn->setVisible(World::getInstance()->GetRechargeFeedback_Flag());
+		_shouChong= dynamic_cast<CCControlButton*>(_activityBtnGroup->getChildByTag(5));
+		_signBtn= dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_QianDao));   
+		_signBtn->setVisible(false);
+		//_signBtn=dynamic_cast<CCControlButton*>(layer->getChildByTag(31));
+		//_background=_activityBtnGroup->getChildByTag(1); 
+		//小秘
+		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+		//_baoDianBtn->setVisible(false);
+
+		CCScale9Sprite *sprite = CCScale9Sprite::createWithSpriteFrame(PackageManager::getInstance()->getIconFrameByName("brow"));
+		CCDragButton *browBtn =CCDragButton::create(sprite);
+		browBtn->setPosition(ccp(winSize.width-35.0f, winSize.height - 230.0f));
+		browBtn->setPreferredSize(CCSize(41.0f, 41.0f));
+		browBtn->setTouchPriority(-1);
+	//	node->addChild(browBtn);
+		
+		//天下乱斗会
+// 		_luanDouHuiBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(BT_LuanDouHui));
+// 		_luanDouHuiBtn->setVisible(false);
+
+		_zhanBaoBtn = dynamic_cast<CCControlButton*>(m_pLayer->getChildByTag(BT_ZhanBaoBtn));
+		if (_zhanBaoBtn)
+		{
+			_zhanBaoBtn->setVisible(false);
+			_zhanbaoIsShow = false;
+		}
+
+		_yunyingBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(BT_YunyingBtn));
+		showYunyingBtn(false);
+		
+		_invite_list_btn = dynamic_cast<CCControlButton*>(layer->getChildByTag(BT_Invite));
+		_invite_list_btn->setVisible(false);
+
+		_on_fire_btn = dynamic_cast<CCControlButton*>(layer->getChildByTag(BT_Fire));
+		_on_fire_btn->setVisible(false);
+
+		_guildBossBn = dynamic_cast<CCControlButton*>(layer->getChildByTag(BT_GuildBoss));
+		_guildBossBn->setVisible(false);
+        CCControlButton* MysteryBoxBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(12)->getChildByTag(BT_MysteryBox));
+		if(MysteryBoxBtn)
+		{
+			MysteryBoxBtn->setVisible(false);
+			MysteryBoxBtn->setTouchEnabled(false);
+			//_xuanshangBtn->setPosition(MysteryBoxBtn->getPosition());
+		}
+
+		_tlTimeNums = 0;
+		_tlTimeNode = node->getChildByTag(24);//勇闯天牢的时间信息显示
+		if(_tlTimeNode != NULL)
+		{
+			_tlTimeNode->setVisible(false);
+			_tlTimeInfo = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_tlTimeNode->getChildByTag(2)));
+			_tlTimeInfo->setAnchorPoint(ccp(0.f, 0.5f));//剩余时间
+			LabelFT* lastTimeStr = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_tlTimeNode->getChildByTag(1)));//剩余时间前面的文字描述
+			_tlTimeInfo->setPosition(ccp(lastTimeStr->getPositionX() + lastTimeStr->getContentSize().width * 0.5, lastTimeStr->getPositionY()));
+		}
+		
+	
+		/*//屏蔽
+		//功能引导
+		_funcGuideNode = (CCLayer*)node->getChildByTag(NT_FUNCGUIDE);
+		_funcGuideOpenLv = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_funcGuideNode->getChildByTag(4)));
+		_funcGuideTitle = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_funcGuideNode->getChildByTag(5)));
+		_funcGuideNode->setVisible(false);
+		_funcOpen = false;
+		CCControlButton* funcBtn = dynamic_cast<CCControlButton*>(_funcGuideNode->getChildByTag(1));
+		std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","") + "E1_56.plist";
+		_funcOpenEffe = GameActionNode::create();
+		_funcOpenEffe->InitWithPList(sSEDir.c_str(), "E1_56");
+		_funcOpenEffe->setPosition(ccp(funcBtn->getContentSize().width * 0.5, funcBtn->getContentSize().height * 0.5));
+		funcBtn->addChild(_funcOpenEffe, 2);
+		_funcOpenEffe->StopAction(false, true);
+		*/
+
+		CCPoint cp;
+		CCSize cs;
+		int nTag;
+
+		nTag = 13;
+		CCControlButton* activityBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(nTag));
+		setActivityBtn(activityBtn);
+		cp = layer->getChildByTag(nTag)->convertToWorldSpace(ccp(0, 0));
+		cs = layer->getChildByTag(nTag)->getContentSize();
+		_btnRec[0] = CCRect(cp.x, cp.y, cs.width, cs.height);
+
+		nTag = 21;
+		cp = node->getChildByTag(nTag)->convertToWorldSpace(ccp(0, 0));
+		cs = node->getChildByTag(nTag)->getContentSize();
+		_btnRec[1] = CCRect(cp.x, cp.y, cs.width, cs.height);
+
+		nTag = 22;
+		cp = layer->getChildByTag(nTag)->convertToWorldSpace(ccp(0, 0));
+		cs = layer->getChildByTag(nTag)->getContentSize();
+		_btnRec[2] = CCRect(cp.x, cp.y, cs.width, cs.height);
+
+		nTag = 3;
+		cp = layer->getChildByTag(12)->getChildByTag(nTag)->convertToWorldSpace(ccp(0, 0));
+		cs = layer->getChildByTag(12)->getChildByTag(nTag)->getContentSize();
+		_btnRec[3] = CCRect(cp.x, cp.y, cs.width, cs.height);
+
+		_activityBtnGroup->showFrame(false);
+
+		cp = _shouChong->convertToWorldSpace(ccp(0, 0));
+		cs = _shouChong->getContentSize();
+		_btnRec[4] = CCRect(cp.x, cp.y, cs.width, cs.height);
+		updateAnimation();
+		runShouChongAnimation();
+
+		nTag = 25;
+		cp = layer->getChildByTag(nTag)->convertToWorldSpace(ccp(0, 0));
+		cs = layer->getChildByTag(nTag)->getContentSize();
+		cs.width -= 8.0f;
+		_srcBtnRec[0] = CCRect(cp.x, cp.y, cs.width, cs.height);
+
+		nTag = 7;
+		cp = layer->getChildByTag(nTag)->convertToWorldSpace(ccp(0, 0));
+		cs = layer->getChildByTag(nTag)->getContentSize();
+		cs.width -= 8.0f;
+		_srcBtnRec[1] = CCRect(cp.x, cp.y, cs.width, cs.height);
+
+		nTag = 5;
+		cp = layer->getChildByTag(12)->getChildByTag(nTag)->convertToWorldSpace(ccp(0, 0));
+		cs = layer->getChildByTag(12)->getChildByTag(nTag)->getContentSize();
+		cs.width -= 8.0f;
+		_srcBtnRec[2] = CCRect(cp.x, cp.y, cs.width, cs.height);
+
+		nTag = 8;
+		cp = layer->getChildByTag(12)->convertToWorldSpace(layer->getChildByTag(12)->getChildByTag(nTag)->getPosition());
+		cs = layer->getChildByTag(12)->getChildByTag(nTag)->getContentSize();
+		cs.width -= 8.0f;
+		_srcBtnRec[3] = CCRect(cp.x, cp.y, cs.width, cs.height);
+		_btnRec[5] = _srcBtnRec[3];
+
+		nTag = 100;
+		cp = layer->getChildByTag(12)->convertToWorldSpace(layer->getChildByTag(12)->getChildByTag(nTag)->getPosition());
+		cs = layer->getChildByTag(12)->getChildByTag(nTag)->getContentSize();
+		cs.width -= 8.0f;
+		_srcBtnRec[4] = CCRect(cp.x, cp.y, cs.width, cs.height);
+		_btnRec[6] = _srcBtnRec[4];
+
+		nTag = 6;
+		cp = layer->getChildByTag(nTag)->convertToWorldSpace(ccp(0, 0));
+		cs = layer->getChildByTag(nTag)->getContentSize();
+		cs.width -= 8.0f;
+		_srcBtnRec[5] = CCRect(cp.x, cp.y, cs.width, cs.height);
+
+		nTag = NT_QianDao;
+		cp = layer->getChildByTag(nTag)->convertToWorldSpace(ccp(0, 0));
+		cs = layer->getChildByTag(nTag)->getContentSize();
+		cs.width -= 8.0f;
+		_btnRec[7] = CCRect(cp.x, cp.y, cs.width, cs.height);
+
+		nTag = NT_ChongZhiActivityFarmeBtn;
+		cp = layer->getChildByTag(nTag)->convertToWorldSpace(ccp(0, 0));
+		cs = layer->getChildByTag(nTag)->getContentSize();
+		cs.width -= 8.0f;
+		_btnRec[8] = CCRect(cp.x, cp.y, cs.width, cs.height);
+
+		nTag = 8;
+		cp = layer->getChildByTag(nTag)->convertToWorldSpace(ccp(0, 0));
+		cs = layer->getChildByTag(nTag)->getContentSize();
+		cs.width -= 8.0f;
+		_btnRec[9] = CCRect(cp.x, cp.y, cs.width, cs.height);
+
+		nTag = 36;
+		cp = layer->getChildByTag(nTag)->convertToWorldSpace(ccp(0, 0));
+		cs = layer->getChildByTag(nTag)->getContentSize();
+		_btnRec[10] = CCRect(cp.x, cp.y, cs.width, cs.height);
+
+		
+		m_pHand = GameActionNode::create();
+		m_pHand->AddTexture("NewGuide_00000", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00001", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00002", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00003", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00004", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00005", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00006", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00007", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00008", "ICON", "png");
+		m_pHand->AddTexture("NewGuide_00009", "ICON", "png");
+		layer->addChild(m_pHand, 10);
+		m_pHand->setVisible(false);
+
+
+		//陆晓龙 2015-6-25 外面的活动按钮显示，内部活动按钮隐藏
+
+		//找到父层
+		CCNode* fatherCoreTreeBtn = dynamic_cast<CCNode *>(layer->getChildByTag(NT_ActivityBtnGroup));
+		if(fatherCoreTreeBtn)
+		{
+			CCControlButton* coreTreeBtn = dynamic_cast<CCControlButton*>(fatherCoreTreeBtn->getChildByTag(NT_CoretreeBtn));
+			CCNode* timeShowOut = fatherCoreTreeBtn->getChildByTag(11);
+			if(timeShowOut && coreTreeBtn)
+			{
+				coreTreeBtn->setVisible(false);
+				timeShowOut->setVisible(false);
+
+			}
+		}
+		//查询在线图标
+		CCControlButton* treasureLoftBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_TreasureLoftBtn));
+		//时间显示
+		LabelFT * timeShow =  Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(dynamic_cast<CCLabelTTF*>(layer->getChildByTag(11))));
+		if(treasureLoftBtn && timeShow)
+		{
+			treasureLoftBtn->setVisible(true);  //一测隐藏藏宝阁按钮  2015-08-27
+			timeShow->removeFromParent();
+			UIUtil::childNodeAlign(treasureLoftBtn,timeShow,eha_center,eva_center,ccp(0,treasureLoftBtn->getContentSize().height*0.5f +4));
+			timeShow->setString("");
+			timeShow->setVisible(true);
+			//CCPoint timeShowPos = timeShow->getPosition();
+			//timeShow->setPosition(ccp(timeShowPos.x,timeShowPos.y-5));
+		}
+
+		create_fmb_btn();
+		create_bet_btn();
+
+		//隐藏在线奖励按钮
+		CCNode *zaixianBtn = layer->getChildByTag(NT_ZaiXIanBtn);
+		if (zaixianBtn)
+		{
+			zaixianBtn->setVisible(false);
+			this->scheduleUpdate();
+		}else
+		{
+			CCLog("zaixianBtn is null!");
+		}
+
+		flipSprites(m_pHand->getSprite(), true);
+		isOver = false;
+
+		std::vector<CCNode*>  inputNodes;
+		inputNodes.push_back(layer->getChildByTag(NT_QianDao));
+		inputNodes.push_back(layer->getChildByTag(NT_ZaiXIanBtn)); //在线按钮自动排序
+		inputNodes.push_back(m_mfb_cue_btn);
+		inputNodes.push_back(m_mfb_bet_btn);
+		//inputNodes.push_back(layer->getChildByTag(NT_TreasureLoftBtn));
+		inputNodes.push_back(_activitytransfer);
+		/*inputNodes.push_back(_luanDouHuiBtn);*/
+/*		inputNodes.push_back(_sbkactivitytransfer);*/
+		if (getBossBtn(BT_OutBoss, true))
+			inputNodes.push_back(getBossBtn(BT_OutBoss, true));
+		inputNodes.push_back(_on_fire_btn);
+		inputNodes.push_back(_guildBossBn);
+		setupNodes(inputNodes,ead_horizontal);
+		
+		
+		if (InstanceMgr::getInstance()->IsPlayerInInstanceMap())
+		{
+			hideUi(true);
+		}
+
+		refresh_fmb_btn_state();
+
+		return true;
+	}
+	return false;
+}
+
+void MiniMapUi::giftBtnShow( bool show )
+{
+	CCControlButton *giftBtn = dynamic_cast<CCControlButton*>(_activityBtnGroup->getChildByTag(_activityBtnGroup->NT_GiftBtn));
+	CC_ASSERT(giftBtn != NULL);
+	giftBtn->setVisible(show);
+}
+
+
+void MiniMapUi::changeAreaName( const char *areaName )
+{
+	CC_ASSERT(_areaName != NULL);
+	int mapId = MapManager::getInstance()->getCurMapId();
+	//如果在安全地图
+	if(MapManager::getInstance()->mapDangerousValue(mapId) == Map_Safe)
+	{
+		_areaName->setTextColor(Helper::converColor3B_2_4B(ccc3(0x3f,0xd4,0x16)));
+	}
+	//如果在危险地图
+	else if(MapManager::getInstance()->mapDangerousValue(mapId) == Map_NoSafe)
+	{
+		//红色
+		int color = 0xff0000;
+		int r = (color >> 16) & 0xff;
+		int g = (color >> 8) & 0xff;
+		int b = color & 0xff;
+		_areaName->setTextColor(Helper::converColor3B_2_4B(ccc3(r, g,b)));
+	}
+	//否则为PK地图
+	else if(MapManager::getInstance()->mapDangerousValue(mapId) == Map_PK)
+	{
+		_areaName->setTextColor(Helper::converColor3B_2_4B(ccc3(0xe5, 0xc0, 0x04)));
+	}
+	_areaName->setString(areaName);
+	_areaNameFuben->setString(areaName);
+}
+
+void MiniMapUi::setMapSize( int width, int height )
+{
+	CC_ASSERT(_miniMapNode != NULL);
+	//_miniMapNode->setMapSize(width, height);
+}
+
+void MiniMapUi::onFocusPointChanged(const CCPoint &pos)
+{
+	//_miniMapNode->setFocusPoint(pos);
+}
+void MiniMapUi::setOnlineTime( const std::string &time )
+{
+	//_activityBtnGroup->setTime(time);
+}
+
+void MiniMapUi::create_fmb_btn()
+{
+	m_mfb_cue_btn = layer->getChildByTag(NT_FMBCueBtn);
+	if(IS_VALID_PTR(m_mfb_cue_btn))
+	{
+// 		std::string effect_name = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_52.plist";
+// 		GameActionNode* effect = GameActionNode::create();
+// 		effect->InitWithPList(effect_name.c_str(), "E1_56");
+// 		CCSize size = m_mfb_cue_btn->getContentSize();
+// 		effect->setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+// 		m_mfb_cue_btn->addChild(effect);
+// 		effect->BeginAction(0.05f, true);
+
+		m_mfb_cue_btn->setVisible(false);
+	}
+}
+
+void MiniMapUi::refresh_fmb_btn_state()
+{
+	if(IS_VALID_PTR(m_mfb_cue_btn))
+	{
+		bool is_show = World::getInstance()->get_is_show_fmb_btn();
+		m_mfb_cue_btn->setVisible(is_show);
+
+		sortBtnPos1();
+		arrange();
+	}
+}
+
+void MiniMapUi::create_bet_btn()
+{
+	m_mfb_bet_btn = layer->getChildByTag(NT_FMBBetBtn);
+	if(IS_VALID_PTR(m_mfb_bet_btn))
+	{
+// 		std::string effect_name = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_52.plist";
+// 		GameActionNode* effect = GameActionNode::create();
+// 		effect->InitWithPList(effect_name.c_str(), "E1_56");
+// 		CCSize size = m_mfb_bet_btn->getContentSize();
+// 		effect->setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+// 		m_mfb_bet_btn->addChild(effect);
+// 		effect->BeginAction(0.05f, true);
+
+		m_mfb_bet_btn->setVisible(false);
+	}
+}
+
+void MiniMapUi::refresh_bet_btn_state(bool is_show)
+{
+	if(IS_VALID_PTR(m_mfb_bet_btn))
+	{
+		m_mfb_bet_btn->setVisible(is_show);
+
+		sortBtnPos1();
+		arrange();
+	}
+}
+
+void MiniMapUi::runActivityAnimation()
+{
+	/*if(_activityAnim == NULL)
+	{
+		AnimationCache::AnimateList anims;
+		AnimationCache::createDefList(1, anims);
+		AnimationCache::getInstance()->getSinEffect(0, "fangguangtexiao", anims);
+		BSAnimate *animste = anims[0];
+		_activityAnim = CCSprite::create();
+		//_activityAnim->setAnchorPoint(ccp(0.0f, 1.0f));
+		_huoBtn->addChild(_activityAnim,-1);
+		CCSize size = _huoBtn->getContentSize();
+		_activityAnim->setPosition(ccp(size.width / 2.0f+5.0f, size.height / 2.0f-9.f));
+		_activityAnim->runAction(CCRepeatForever::create(animste));
+	}
+	if (_activityEffect == NULL)
+	{
+		AnimationCache::AnimateList anims;
+		AnimationCache::createDefList(1, anims);
+		AnimationCache::getInstance()->getSinEffect(0,"lingjiangtexiao", anims);
+		BSAnimate *animste2 = anims[0];
+		_activityEffect = CCSprite::create();
+		//_activityEffect->setAnchorPoint(ccp(0.0f, 1.0f));
+		_huoBtn->addChild(_activityEffect);
+		CCSize size = _activityEffect->getContentSize();
+		_activityEffect->setPosition(ccp(size.width / 2.0f + 25.f, size.height / 20.f + 32));
+		_activityEffect->runAction(CCRepeatForever::create(animste2));
+	}*/
+}
+
+void MiniMapUi::runShouChongAnimation()
+{
+    if (_shouChongEffect == NULL) {
+        CCNode *node = _activityBtnGroup->getChildByTag(BT_ShouChong);
+        AnimationCache::AnimateList anims;
+        AnimationCache::createDefList(1, anims);
+        AnimationCache::getInstance()->getSinEffect(0, "E1_94", anims);						//diyici
+        BSAnimate *animste = anims[0];
+        _shouChongEffect = CCSprite::create();
+		_shouChongEffect->setPosition(ccp(node->getContentSize().width / 2.0f, node->getContentSize().height / 2.0f));
+        _shouChongEffect->setScale(0.8f);
+        node->addChild(_shouChongEffect);
+        _shouChongEffect->runAction(CCRepeatForever::create(animste));
+    }
+}
+
+void MiniMapUi::stopShouChongAnimation()
+{
+    if(_shouChongEffect != NULL)
+    {
+        _shouChongEffect->stopAllActions();
+        _shouChongEffect->removeFromParent();
+        _shouChongEffect = NULL;
+		
+
+    }
+}
+void MiniMapUi::stopActivityAnimation()
+{
+	if (_activityAnim != NULL)
+	{
+		_activityAnim->stopAllActions();
+		_activityAnim->removeFromParent();
+		_activityAnim = NULL;
+	}
+	if (_activityEffect != NULL)
+	{
+		_activityEffect->stopAllActions();
+		_activityEffect->removeFromParent();
+		_activityEffect = NULL;
+	}
+}
+
+void MiniMapUi::showActivityBtnGroup( bool show )
+{
+	_activityBtnGroup->showFrame(show);
+}
+
+void MiniMapUi::showUi( bool show )
+{
+	if (InstanceMgr::getInstance()->IsPlayerInInstanceMap())//bug 495 
+	{
+		return;
+	}
+	MiniMapUiLoaderLayer *node = dynamic_cast<MiniMapUiLoaderLayer*>(getChildByTag(0));
+
+	node->showUi(show);
+}
+
+void MiniMapUi::setOffPercent(LocalPlayer* ploc)
+{
+	MiniMapUiLoaderLayer *node = dynamic_cast<MiniMapUiLoaderLayer*>(getChildByTag(0));
+	if (node)
+	{
+		node->setOffPercent(ploc);
+	}
+}
+// void MiniMapUi::StartAutoFight()
+// {
+// 	MiniMapUiLoaderLayer *node = dynamic_cast<MiniMapUiLoaderLayer*>(getChildByTag(0));
+// 	if (node)
+// 	{
+// 		node->StartAutoFight();
+// 	}
+// }
+// 
+// void MiniMapUi::stopAutoFight()
+// {
+// 	MiniMapUiLoaderLayer *node = dynamic_cast<MiniMapUiLoaderLayer*>(getChildByTag(0));
+// 	if (node)
+// 	{
+// 		node->stopAutoFight();
+// 	}
+// }
+
+void MiniMapUi::ClickAutoFightBtn()
+{
+	MiniMapUiLoaderLayer *node = dynamic_cast<MiniMapUiLoaderLayer*>(getChildByTag(0));
+	if (node)
+	{
+		node->onHookPressed(_battleBtn, 0);
+	}
+	
+}
+
+void MiniMapUi::forceShowUi( bool show )
+{
+	MiniMapUiLoaderLayer *node = dynamic_cast<MiniMapUiLoaderLayer*>(getChildByTag(0));
+	if(node != NULL)
+		node->forceShowUi(show);
+}
+
+void MiniMapUi::updateAnimation()
+{
+	int sum = 0;
+
+	//gx add
+	if (RewardMgr::getInstance()->isNeedShowSign())//gx modify 2014.3.13 根据签到信息判断是否需要显示签到闪烁特效
+	{
+		_activityBtnGroup->runAnimationOnButton(ActivityBtnGroup::NT_QiandaoBtn);
+		sum ++;
+	}
+	else
+	{
+      	_activityBtnGroup->runAnimationOnButton(ActivityBtnGroup::NT_QiandaoBtn);
+	}
+
+// 	if(RewardMgr::getInstance()->isTimeArrivalOfOnlineReward())
+// 	{
+// 		runRewardAnimation(RF_ZAIXIAN);
+// 		sum += 1;
+// 	}
+// 	else
+// 	{
+// 		stopRewardAnimation(RF_ZAIXIAN);
+// 	}
+// 
+// 	if(sum == 0)
+// 		stopRewardAnimation();
+// 	else
+// 		runRewardAnimation();
+}
+
+void MiniMapUi::updateActivityAnimation()
+{
+	int sum = 0;
+	//摇钱树根据次数判断是否需要显示闪烁特效
+	INT64 nTotalNum = PackageManager::getInstance()->GetTotalPeriodRecharge_Feedback();
+	int lestCount = (int)(nTotalNum/1000 - PackageManager::getInstance()->GetFeedbackTimes());
+	bool flag = World::getInstance()->GetRechargeFeedback_Flag();
+	if (flag)
+	{
+		if (0 >= lestCount)
+		{
+			stopAnimationOnButton(NT_CoretreeBtn);
+		}
+		else
+		{
+			++sum;
+			runAnimationOnButton(NT_CoretreeBtn);
+		}
+	}
+
+	//是否能领取充值返利奖励
+// 	if (PackageManager::getInstance()->CanGetConsumeReplyReward())
+// 	{
+// 		++sum;
+// 		_activityBtnGroup->runAnimationOnButton(ActivityBtnGroup::NT_ConsumptionBtn);
+// 	}
+// 	else
+// 	{
+// 		_activityBtnGroup->stopAnimationOnButton(ActivityBtnGroup::NT_ConsumptionBtn);
+// 	}
+
+	//藏宝阁是否有免费的摇色子次数
+// 	LocalPlayer* pLocPlayer = RoleManager::getInstance()->getLocalPlayer();
+// 	if (pLocPlayer)
+// 	{
+// 		if (pLocPlayer->getRoleDayClearInfo(ERDCT_CBG_FreeGamble) < 1 && pLocPlayer->getLevel()>=45)
+// 		{
+// 			++sum;
+// 			_activityBtnGroup->runAnimationOnButton(ActivityBtnGroup::NT_TreasureBtn);
+// 		}
+// 		else
+// 		{
+// 			_activityBtnGroup->stopAnimationOnButton(ActivityBtnGroup::NT_TreasureBtn);
+// 		}
+// 	}
+
+	if (0 == sum)
+		stopActivityAnimation();
+	else
+		runActivityAnimation();
+}
+
+void MiniMapUi::setSeverTime(const tagDWORDTime time)
+{
+	CC_ASSERT(_severTime != NULL);
+	char severtime[20];
+	sprintf(severtime,"%02d:%02d",time.hour,time.min);
+	_severTime->setString(severtime);
+}
+
+void MiniMapUi::setScriptDaojishi(int min, int sec)
+{
+	CC_ASSERT(_enterScriptTime != NULL);
+	char scripttime[20];
+	sprintf(scripttime,"%02d:%02d", min , sec );
+	_enterScriptTime->setString(scripttime);
+	//_enterScriptTime->setColor(ccc3(0xfe, 0xf8, 0xd8));
+	_enterScriptTime->setTextColor(ccc4(0xfe, 0xf8, 0xd8, 255));
+}
+
+void MiniMapUi::showScriptTime(bool state)
+{
+	if (state)
+	{
+		_enterScriptTime->setVisible(true);
+	}
+	else
+	{
+		_enterScriptTime->setVisible(false);
+	}
+}
+
+void MiniMapUi::setSBKActivityScriptDaojiShi(int min, int sec)
+{
+// 	CC_ASSERT(_enterSBKScriptTime != NULL);
+// 	char scripttime[20];
+// 	sprintf(scripttime,"%02d:%02d", min , sec );
+// 	_enterSBKScriptTime->setString(scripttime);
+// 	//_enterSBKScriptTime->setColor(ccc3(0xfe, 0xf8, 0xd8));
+// 	_enterSBKScriptTime->setTextColor(ccc4(0xfe, 0xf8, 0xd8, 255));
+}
+
+void MiniMapUi::showSBKActivityScriptTime(bool state)
+{
+// 	if (state)
+// 	{
+// 		_enterSBKScriptTime->setVisible(true);
+// 	}
+// 	else
+// 	{
+// 		_enterSBKScriptTime->setVisible(false);
+// 	}
+}
+void MiniMapUi::showBFBattleUi(bool pIsShow)
+{
+	if (m_pLayer)
+	{
+		m_pLayer->showBFBattleUi(pIsShow);
+	}
+}
+
+void MiniMapUi::showBFBattlePrepareUi(bool isShow)
+{
+	if (m_pLayer)
+	{
+		m_pLayer->showBFBattlePrepareUi(isShow);
+	}
+}
+
+void MiniMapUi::setShowBFPrepareEff(bool isShow)
+{
+	if (m_pLayer)
+	{
+		m_pLayer->setShowBFPrepareEff(isShow);
+	}
+}
+
+void MiniMapUi::showIntruduce1Btn(bool isShow)
+{
+	if (m_pLayer)
+	{
+		m_pLayer->showIntruduce1Btn(isShow);
+	}
+}
+
+void MiniMapUi::showLeaveScripteBtn( bool show )
+{
+	_leaveScripte->setVisible(show);
+	if (show)
+	{
+		if (m_pHand && !m_pHand->isVisible() && isOver)
+		{
+			m_pHand->StopAction();
+			m_pHand->setPosition(_leaveScripte->getPosition());
+			m_pHand->setVisible(true);
+			m_pHand->BeginAction(0.1, true);
+		}
+		
+	}
+	else
+	{
+		isOver = false;
+		if (m_pHand)
+		{
+			m_pHand->StopAction();
+			m_pHand->setVisible(false);
+		}
+	}
+}
+
+void MiniMapUi::showActivityTransferBtn( bool show )
+{
+	if (_activitytransfer->isVisible() == show)
+		return;
+
+	if (_activitytransfer->getChildByTag(101))
+		_activitytransfer->removeChildByTag(101);
+	if (show)
+	{
+		DayActivityData t_ActData;
+		if (ActivityMgr::getInstance()->getActivityDataById(ActivityMgr::getInstance()->GetStartActIndex(),t_ActData))
+		{
+			
+			//GameActionNode* tmpSEAcNode = GameActionNode::create();
+			CCSprite* t_fSPEffect = CCSprite::create();
+			//t_fSPEffect->setAnchorPoint(CCPointZero);
+			t_fSPEffect->setPosition(_activitytransfer->getContentSize()/2);
+			t_fSPEffect->setTag(101);
+			_activitytransfer->addChild(t_fSPEffect,-1);
+
+			AnimationCache::AnimateList anims;
+			AnimationCache::createDefList(1, anims);
+			AnimationCache::getInstance()->getSinEffect(0,t_ActData.pic_eff.c_str(), anims);					//diyici
+			BSAnimate *animste = anims[0];
+			t_fSPEffect->runAction(CCRepeatForever::create(animste));
+
+			setButtonSpriteFrame(_activitytransfer,t_ActData.transfer_pic,t_ActData.transfer_pic,t_ActData.transfer_pic);
+
+		}
+	}
+	_activitytransfer->setVisible(show);
+	arrange();
+}
+
+void MiniMapUi::showSBKActivityTransferBtnDisplay(bool isNeed)
+{
+// 	if (_sbkactivitytransfer->isVisible() != isNeed)
+// 	{
+// 		_sbkactivitytransfer->setVisible(isNeed);
+// 		arrange();
+// 	}
+
+	//arrange(); //没必要每帧都在对齐逻辑
+	/*if (isNeed)
+	{
+	std::string FullFileName ="smallui_zidonghzandou";
+	CCSpriteFrame *BtnLightFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(FullFileName.c_str());
+	if(BtnLightFrame == NULL)
+	{
+	CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addImage(FullFileName.c_str());
+	BtnLightFrame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(BtnLightFrame, FullFileName.c_str());
+	}
+	_activitytransfer->setBackgroundSpriteFrameForState(BtnLightFrame, CCControlStateNormal);
+	isSBKTransferFrame = true;
+	}
+	else
+	{
+	std::string FullFileName ="smallui_huodongchuansong";
+	CCSpriteFrame *BtnLightFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(FullFileName.c_str());
+	if(BtnLightFrame == NULL)
+	{
+	CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addImage(FullFileName.c_str());
+	BtnLightFrame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(BtnLightFrame, FullFileName.c_str());
+	}
+	_activitytransfer->setBackgroundSpriteFrameForState(BtnLightFrame, CCControlStateNormal);
+	isSBKTransferFrame = false;
+	}	*/
+}
+void MiniMapUi::showExpLixianBtn( bool show )
+{
+	//陆晓龙 2016-6-30 暂时隐藏
+	_explixian->setVisible(show);
+}
+
+void MiniMapUi::showLuanDouHuiBtn(bool show)
+{
+	showActivityTransferBtn(show);
+// 	if (_luanDouHuiBtn == NULL)
+// 	{
+// 		return;
+// 	}
+// 	if (show)
+// 	{
+// 		if (!_luanDouHuiBtn->isVisible())
+// 		{
+// 			_luanDouHuiBtn->setVisible(show);
+// 			arrange();
+// 		}
+// 	}
+// 	else
+// 	{
+// 		if (_luanDouHuiBtn->isVisible())
+// 		{
+// 			_luanDouHuiBtn->setVisible(show);
+// 			arrange();
+// 		}
+// 	}
+}
+
+
+cocos2d::CCRect MiniMapUi::getAutoBattleBtnPos()
+{
+	CCPoint pos = _battleBtn->convertToWorldSpace(ccp(0, 0));
+	CCSize size = _battleBtn->getContentSize();
+	return CCRect(pos.x, pos.y, size.width, size.height);
+}
+
+cocos2d::CCPoint MiniMapUi::getOfflineExpBtnPos()
+{
+	return _explixian->getPosition();
+}
+cocos2d::CCPoint MiniMapUi::getActivityBtnPos()
+{
+	return _huoBtn->getPosition();
+}
+
+void MiniMapUi::showServerActivityBtn( bool show )
+{
+	m_pLayer->SetBtnVisible(1, show, true);
+	//_serveractivityBtn->setVisible(show);
+}
+CCControlButton* MiniMapUi::getServerActivityBtn()
+{
+	if (_serveractivityBtn != NULL)
+	{
+		return _serveractivityBtn;
+	}
+	return NULL;
+}
+
+void MiniMapUi::setServerActivityState()
+{
+	setButtonSpriteFrame(_serveractivityBtn,"rendui_serveractivity","rendui_serveractivity","rendui_serveractivity");
+}
+
+void MiniMapUi::setSynthesisActivityState()
+{
+	setButtonSpriteFrame(_serveractivityBtn,"rendui_synthesis","rendui_synthesis","rendui_synthesis");//mainui_synthesis
+}
+
+cocos2d::CCPoint MiniMapUi::getHuoBtnPosition()
+{
+	MiniMapUiLoaderLayer *node = dynamic_cast<MiniMapUiLoaderLayer*>(getChildByTag(0));
+	if (node->getMiniMapIsShow())
+	{
+		return node->convertToWorldSpace(_huoBtn->getPosition());
+	}
+	else
+	{
+		return node->convertToWorldSpace(_huoBtn->getPosition());
+	}
+   
+}
+
+void MiniMapUi::setShouChongIconVisible(bool show)
+{
+    CCNode *node = _activityBtnGroup->getChildByTag(BT_ShouChong);
+    node->setVisible(show);
+	//_shouChong->setVisible(show);//vvv
+}
+
+void MiniMapUi::updateDisplay()
+{
+	//接受服务器返回的摇钱树是否显示的消息;
+	bool flag = World::getInstance()->GetRechargeFeedback_Flag();
+	m_pLayer->SetBtnVisible(1, flag, true);//	一测隐藏
+}
+
+//begin
+//屏蔽功能引导
+//void MiniMapUi::showFuncGuide(bool show, bool funcOpen /* = false */)
+//{
+//	if(show)
+//	{
+//		_funcGuideNode->setVisible(true);
+//		funcguide_detail* fgDetail = FuncGuideMgr::getInstance()->getNowShowDetail();
+//		if(fgDetail != NULL)
+//		{	
+//			setFuncOpen(funcOpen);
+//
+//			std::stringstream showOpenLV;
+//			showOpenLV << fgDetail->openLevel;
+//			showOpenLV << "\xE7\xBA\xA7\xE5\xBC\x80\xE5\x90\xAF";//级开启
+//			_funcGuideOpenLv->setString(showOpenLV.str());
+//
+//			_funcGuideTitle->setString(fgDetail->title);
+//		}else{
+//			_funcGuideNode->setVisible(false);
+//		}
+//	}
+//	else
+//	{
+//		_funcGuideNode->setVisible(false);
+//	}
+//}
+//
+//void MiniMapUi::setFuncOpen(bool show)
+//{
+//	if(_funcOpen == show)
+//		return;
+//
+//	_funcOpen = show;
+//	if(show){
+//		_funcOpenEffe->BeginAction(0.1f, true);
+//	}else{
+//		_funcOpenEffe->StopAction(false, true);
+//	}
+//}
+//
+//bool MiniMapUi::getFuncGuideVis()
+//{
+//	bool isShow = _funcGuideNode->isVisible();
+//	return _funcGuideNode->isVisible();
+//}
+//end
+//屏蔽功能引导
+
+//			std::stringstream showOpenLV;
+//			showOpenLV << fgDetail->openLevel;
+//			showOpenLV << "\xE7\xBA\xA7\xE5\xBC\x80\xE5\x90\xAF";//级开启
+//			_funcGuideOpenLv->setString(showOpenLV.str());
+//
+//			_funcGuideTitle->setString(fgDetail->title);
+//		}else{
+//			_funcGuideNode->setVisible(false);
+//		}
+//	}
+//	else
+//	{
+//		_funcGuideNode->setVisible(false);
+//	}
+//}
+
+//void MiniMapUi::setFuncOpen(bool show)
+//{
+//	if(_funcOpen == show)
+//		return;
+//
+//	_funcOpen = show;
+//	if(show){
+//		_funcOpenEffe->BeginAction(0.1f, true);
+//	}else{
+//		_funcOpenEffe->StopAction(false, true);
+//	}
+//}
+//
+//bool MiniMapUi::getFuncGuideVis()
+//{
+//	bool isShow = _funcGuideNode->isVisible();
+//	return _funcGuideNode->isVisible();
+//}
+//*/
+
+void MiniMapUi::update(float delta)
+{
+	//判断今天还有无在线奖励
+	CCNode *zaixianBtn = layer->getChildByTag(NT_ZaiXIanBtn);
+	if (zaixianBtn)
+	{
+		if(!zaixianBtn->isVisible())
+		{
+			if (RewardMgr::getInstance()->isTimeArrivalOfOnlineReward() && RewardMgr::getInstance()->isHasOnlineReward())
+			{
+				zaixianBtn->setVisible(true);
+				arrange();
+			}
+		}
+		else
+		{
+			if (!(RewardMgr::getInstance()->isTimeArrivalOfOnlineReward() && RewardMgr::getInstance()->isHasOnlineReward()))
+			{
+				zaixianBtn->setVisible(false);
+				arrange();
+			}
+		}
+	}
+
+	
+//	else
+// 	{
+// 		CCLog("zaixianBtn is null or isVisible, %d, %d", zaixianBtn == NULL, zaixianBtn->isVisible());
+// 	}
+
+}
+
+void MiniMapUi::setBtnHighLight(int tag)
+{
+	if (World::getInstance()->getScene() == NULL)
+	{
+		return;
+	}
+	switch(tag)
+	{
+	case WCT_CoreTreeUi://摇钱树
+		{
+			bool flag = World::getInstance()->GetRechargeFeedback_Flag();
+			//如果图标显示则相应的添加红色叹号标志
+			if (flag)
+			{
+				INT64 nTotalNum = PackageManager::getInstance()->GetTotalPeriodRecharge_Feedback();
+				int _lestCount = (int)(nTotalNum / 1000 - PackageManager::getInstance()->GetFeedbackTimes());
+				if (_lestCount > 0)
+				{
+					CCControlButton* coreTreeBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_CoretreeBtn));
+					if (World::getInstance()->isHighLight(coreTreeBtn,WT_CCCONTROLBUTTON,WCT_CoreTreeUi))
+					{
+						World::getInstance()->SetHighLight(coreTreeBtn,WT_CCCONTROLBUTTON,WCT_CoreTreeUi,0,false);
+					}
+					World::getInstance()->SetHighLight(coreTreeBtn,WT_CCCONTROLBUTTON,WCT_CoreTreeUi,_lestCount,true,-9,15);
+				}
+			}
+		}
+		break;
+	//case WCT_TreasureLoftUi:
+	//	{
+	//		//藏宝阁是否有免费的摇色子次数
+	//		LocalPlayer* pLocPlayer = RoleManager::getInstance()->getLocalPlayer();
+	//		if (pLocPlayer)
+	//		{
+	//			if (pLocPlayer->getRoleDayClearInfo(ERDCT_CBG_FreeGamble) < 1)
+	//			{
+	//				CCControlButton* treasureLoftBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(12)->getChildByTag(NT_TreasureLoftBtn));
+	//				if (!World::getInstance()->isHighLight(treasureLoftBtn,WT_CCCONTROLBUTTON,WCT_TreasureLoftUi))
+	//				{
+	//					World::getInstance()->SetHighLight(treasureLoftBtn,WT_CCCONTROLBUTTON,WCT_TreasureLoftUi,1,true,-9,15);
+	//				}
+	//			}
+	//		}
+	//	}
+	//	break;
+	//case WCT_MysteryBoxUi://神秘宝箱
+	//	{
+	//		int count = World::getInstance()->GetIsShowMysteryEffect();
+	//		//如果图标显示则相应的添加红色叹号标志
+	//		if (count > 0)
+	//		{
+	//			CCControlButton* MysteryBoxBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(12)->getChildByTag(BT_MysteryBox));
+	//			if (World::getInstance()->isHighLight( MysteryBoxBtn,WT_CCCONTROLBUTTON,WCT_MysteryBoxUi))
+	//			{
+	//				World::getInstance()->SetHighLight(MysteryBoxBtn,WT_CCCONTROLBUTTON,WCT_MysteryBoxUi,0,false);
+	//			}
+	//			World::getInstance()->SetHighLight(MysteryBoxBtn,WT_CCCONTROLBUTTON,WCT_MysteryBoxUi,count,true,-9,15);
+	//		}	
+	//	}
+	//	break;
+	case WCT_ServerActivityUi://开服7天活动
+		{
+			CCControlButton* serverActivityBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_SERVERACTIVITYBTN));
+			if (World::getInstance()->isHighLight(serverActivityBtn,WT_CCCONTROLBUTTON,WCT_ServerActivityUi))
+			{
+				World::getInstance()->SetHighLight(serverActivityBtn,WT_CCCONTROLBUTTON,WCT_ServerActivityUi,0,false);
+			}
+			World::getInstance()->SetHighLight(serverActivityBtn,WT_CCCONTROLBUTTON,WCT_ServerActivityUi,1,true,-9,15);
+		}
+		break;
+	case WCT_SynthesisServerUi://合服7天活动
+		{
+			CCControlButton* serverActivityBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_SERVERACTIVITYBTN));
+			if (World::getInstance()->isHighLight(serverActivityBtn,WT_CCCONTROLBUTTON,WCT_ServerActivityUi))
+			{
+				World::getInstance()->SetHighLight(serverActivityBtn,WT_CCCONTROLBUTTON,WCT_ServerActivityUi,0,false);
+			}
+			World::getInstance()->SetHighLight(serverActivityBtn,WT_CCCONTROLBUTTON,WCT_ServerActivityUi,1,true,-9,15);
+		}
+		break;
+	case WCT_ChongZhiActivityFarmeUI://充值活动
+		{
+			if (KaifuHuodongMgr::getInstance()->getIosShowRecharge())
+			{
+				int count = (int)ChongZhiActivityMgr::getInstance()->getChongzhiActivitySignList().size();
+				if ( count > 0)
+				{
+					CCControlButton* serverActivityBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_ChongZhiActivityFarmeBtn));
+					if (World::getInstance()->isHighLight(serverActivityBtn,WT_CCCONTROLBUTTON,WCT_ChongZhiActivityFarmeUI))
+					{
+						World::getInstance()->SetHighLight(serverActivityBtn,WT_CCCONTROLBUTTON,WCT_ChongZhiActivityFarmeUI,0,false);
+					}
+					World::getInstance()->SetHighLight(serverActivityBtn,WT_CCCONTROLBUTTON,WCT_ChongZhiActivityFarmeUI,count,true,-9,15);
+				}
+			}
+		}
+		break;
+	case WCT_NewSignUi://签到
+		{
+			CCControlButton* signBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_QianDao));
+			if (signBtn)
+			{
+				if (!World::getInstance()->isHighLight(signBtn,WT_CCCONTROLBUTTON,WCT_NewSignUi))
+				{
+					World::getInstance()->SetHighLight(signBtn,WT_CCCONTROLBUTTON,WCT_NewSignUi,1,true,-9,15);
+				}	
+			}
+		}
+		break;
+	case WCT_HuoyueUi://活跃奖励
+		{
+			int count = getHuoYueRewardNum();
+			CCControlButton* huoYueBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_HUOYUE));
+			if (huoYueBtn/* && count > 0*/)
+			{
+				if (World::getInstance()->isHighLight(huoYueBtn,WT_CCCONTROLBUTTON,WCT_HuoyueUi))
+				{
+					World::getInstance()->SetHighLight(huoYueBtn,WT_CCCONTROLBUTTON,WCT_HuoyueUi,0,false);
+				}
+				World::getInstance()->SetHighLight(huoYueBtn,WT_CCCONTROLBUTTON,WCT_HuoyueUi,count,true,-9,15);
+			}
+		}
+		break;
+	case WCT_ZAIXIANCHARGE://在线奖励
+		{
+			CCControlButton* zaixianBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_ZaiXIanBtn));
+			if (zaixianBtn)
+			{
+				if (!World::getInstance()->isHighLight(zaixianBtn,WT_CCCONTROLBUTTON,WCT_ZAIXIANCHARGE))
+				{
+					World::getInstance()->SetHighLight(zaixianBtn,WT_CCCONTROLBUTTON,WCT_ZAIXIANCHARGE,1,true,-9,15);
+				}
+			}
+		}
+		break;
+	case WCT_HUODONGBTN://活动按钮
+		{
+			if (RewardMgr::getInstance()->getActivitySignList().size() > 0)
+			{
+				int count = (int)RewardMgr::getInstance()->getActivitySignList().size();
+				CCControlButton* huodongBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_HuoBtn));
+				if (World::getInstance()->isHighLight(huodongBtn,WT_CCCONTROLBUTTON,WCT_HUODONGBTN))
+				{
+					World::getInstance()->SetHighLight(huodongBtn,WT_CCCONTROLBUTTON,WCT_HUODONGBTN,0,false);
+				}
+				World::getInstance()->SetHighLight(huodongBtn,WT_CCCONTROLBUTTON,WCT_HUODONGBTN,count,true,-9,15);
+			}
+			//先清除所有叹号标识
+			CCControlButton* zaixianBtn_1 = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_ActivityBtnGroup)->getChildByTag(7));
+			if (zaixianBtn_1)
+			{
+				if (World::getInstance()->isHighLight(zaixianBtn_1,WT_CCCONTROLBUTTON,WCT_ZAIXIANCHARGE))
+				{
+					World::getInstance()->SetHighLight(zaixianBtn_1,WT_CCCONTROLBUTTON,WCT_ZAIXIANCHARGE,0,false);
+				}
+			}
+			//CCControlButton* signBtn_1 = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_ActivityBtnGroup)->getChildByTag(31));
+			//if (signBtn_1)
+			//{
+			//	if (World::getInstance()->isHighLight(signBtn_1,WT_CCCONTROLBUTTON,WCT_SignInUi))
+			//	{
+			//		World::getInstance()->SetHighLight(signBtn_1,WT_CCCONTROLBUTTON,WCT_SignInUi,0,false);
+			//	}
+			//}
+			CCControlButton* bossBtn_1 = NULL;
+			if (BossPKMgr::getInstance()->getFuctionOpen() == false)
+			{
+				bossBtn_1 = getBossBtn(BT_OldBoss,false);
+			}
+			else
+			{
+				bossBtn_1 = getBossBtn(BT_InsideBoss,false);
+			}
+			if (bossBtn_1)
+			{
+				if (World::getInstance()->isHighLight(bossBtn_1,WT_CCCONTROLBUTTON,WCT_BOSSPKUI))
+				{
+					World::getInstance()->SetHighLight(bossBtn_1,WT_CCCONTROLBUTTON,WCT_BOSSPKUI,0,false);
+				}
+			}
+			//CCControlButton* huoYueBtn_1 = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_ActivityBtnGroup)->getChildByTag(22));
+			//if (huoYueBtn_1)
+			//{
+			//	if (World::getInstance()->isHighLight(huoYueBtn_1,WT_CCCONTROLBUTTON,WCT_HuoyueUi))
+			//	{
+			//		World::getInstance()->SetHighLight(huoYueBtn_1,WT_CCCONTROLBUTTON,WCT_HuoyueUi,0,false);
+			//	}
+			//}
+			//CCControlButton* fuBenBtn_1 = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_ActivityBtnGroup)->getChildByTag(3));
+			//if (fuBenBtn_1)
+			//{
+			//	if (World::getInstance()->isHighLight(fuBenBtn_1,WT_CCCONTROLBUTTON,WCT_FubenUI))
+			//	{
+			//		World::getInstance()->SetHighLight(fuBenBtn_1,WT_CCCONTROLBUTTON,WCT_FubenUI,0,false);
+			//	}
+			//}
+			CCControlButton* treasureLoftBtn_1 = dynamic_cast<CCControlButton*>(layer->getChildByTag(12)->getChildByTag(NT_TreasureLoftBtn));
+			if (World::getInstance()->isHighLight(treasureLoftBtn_1,WT_CCCONTROLBUTTON,WCT_TreasureLoftUi))
+			{
+				World::getInstance()->SetHighLight(treasureLoftBtn_1,WT_CCCONTROLBUTTON,WCT_TreasureLoftUi,1,false);
+			}
+// 			CCControlButton* MysteryBoxBtn_1 = dynamic_cast<CCControlButton*>(layer->getChildByTag(12)->getChildByTag(BT_MysteryBox));
+// 			if (World::getInstance()->isHighLight( MysteryBoxBtn_1,WT_CCCONTROLBUTTON,WCT_MysteryBoxUi))
+// 			{
+// 				World::getInstance()->SetHighLight(MysteryBoxBtn_1,WT_CCCONTROLBUTTON,WCT_MysteryBoxUi,0,false);
+// 			}
+			//设置活动按钮下的所有叹号标识
+			std::list<eWroldChildTag> tempSignList = RewardMgr::getInstance()->getActivitySignList();
+			int tempSize = (int)tempSignList.size();
+			eWroldChildTag tmpTag;
+			for (int i = 0;i < tempSize;++i)
+			{
+				switch(tempSignList.front())
+				{
+				//case WCT_ZAIXIANCHARGE://在线奖励
+				//	{
+				//		CCControlButton* zaixianBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_ActivityBtnGroup)->getChildByTag(7));
+				//		if (zaixianBtn)
+				//		{
+				//			if (!World::getInstance()->isHighLight(zaixianBtn,WT_CCCONTROLBUTTON,WCT_ZAIXIANCHARGE))
+				//			{
+				//				World::getInstance()->SetHighLight(zaixianBtn,WT_CCCONTROLBUTTON,WCT_ZAIXIANCHARGE,1,true,-9,15);
+				//			}
+				//		}
+				//	}
+				//	break;
+				//case WCT_SignInUi://签到
+				//	{
+				//		CCControlButton* signBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_ActivityBtnGroup)->getChildByTag(31));
+				//		if (signBtn)
+				//		{
+				//			if (World::getInstance()->isHighLight(signBtn,WT_CCCONTROLBUTTON,WCT_SignInUi))
+				//			{
+				//				World::getInstance()->SetHighLight(signBtn,WT_CCCONTROLBUTTON,WCT_SignInUi,0,false);
+				//			}
+				//			World::getInstance()->SetHighLight(signBtn,WT_CCCONTROLBUTTON,WCT_SignInUi,1,true,-9,15);
+				//		}
+				//	}
+				//	break;
+				case WCT_BOSSPKUI://boss
+					{
+						int count = BossPKMgr::getInstance()->getBossCount();
+						if (count > 0)
+						{
+							CCControlButton* bossBtn = NULL;
+							if (BossPKMgr::getInstance()->getFuctionOpen() == false)
+							{
+ 								bossBtn = getBossBtn(BT_OldBoss,false);
+							}
+							else
+							{
+								bossBtn = getBossBtn(BT_InsideBoss,false);
+							}
+							if (bossBtn)
+							{
+								if (!World::getInstance()->isHighLight(bossBtn,WT_CCCONTROLBUTTON,WCT_BOSSPKUI))
+								{
+									World::getInstance()->SetHighLight(bossBtn, WT_CCCONTROLBUTTON, WCT_BOSSPKUI, 0, true, 29, 15);
+								}	
+							}
+						}
+					}
+					break;
+				//case WCT_HuoyueUi://活跃奖励
+				//	{
+				//		int count = getHuoYueRewardNum();
+				//		CCControlButton* huoYueBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_ActivityBtnGroup)->getChildByTag(22));
+				//		if (huoYueBtn && count > 0)
+				//		{
+				//			if (World::getInstance()->isHighLight(huoYueBtn,WT_CCCONTROLBUTTON,WCT_HuoyueUi))
+				//			{
+				//				World::getInstance()->SetHighLight(huoYueBtn,WT_CCCONTROLBUTTON,WCT_HuoyueUi,0,false);
+				//			}
+				//			World::getInstance()->SetHighLight(huoYueBtn,WT_CCCONTROLBUTTON,WCT_HuoyueUi,count,true,-9,15);
+				//		}
+				//	}
+// 				case WCT_TreasureLoftUi:
+// 					{
+// 						//藏宝阁是否有免费的摇色子次数
+// 						LocalPlayer* pLocPlayer = RoleManager::getInstance()->getLocalPlayer();
+// 						if (pLocPlayer)
+// 						{
+// 							if (pLocPlayer->getRoleDayClearInfo(ERDCT_CBG_FreeGamble) < 1 && pLocPlayer->getLevel() >= 50)
+// 							{
+// 								CCControlButton* treasureLoftBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(12)->getChildByTag(NT_TreasureLoftBtn));
+// 								if (!World::getInstance()->isHighLight(treasureLoftBtn,WT_CCCONTROLBUTTON,WCT_TreasureLoftUi))
+// 								{
+// 									World::getInstance()->SetHighLight(treasureLoftBtn,WT_CCCONTROLBUTTON,WCT_TreasureLoftUi,1,true,-9,15);
+// 								}
+// 							}
+// 						}
+// 					}
+// 					break;
+// 				case WCT_MysteryBoxUi://神秘宝箱
+// 					{
+// 						int count = World::getInstance()->GetIsShowMysteryEffect();
+// 						LocalPlayer* pLocPlayer = RoleManager::getInstance()->getLocalPlayer();
+// 						//如果图标显示则相应的添加红色叹号标志
+// 						if (count > 0 && pLocPlayer && pLocPlayer->getLevel() >= 37)
+// 						{
+// 							CCControlButton* MysteryBoxBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(12)->getChildByTag(BT_MysteryBox));
+// 							if (World::getInstance()->isHighLight( MysteryBoxBtn,WT_CCCONTROLBUTTON,WCT_MysteryBoxUi))
+// 							{
+// 								World::getInstance()->SetHighLight(MysteryBoxBtn,WT_CCCONTROLBUTTON,WCT_MysteryBoxUi,0,false);
+// 							}
+// 							World::getInstance()->SetHighLight(MysteryBoxBtn,WT_CCCONTROLBUTTON,WCT_MysteryBoxUi,count,true,-9,15);
+// 						}	
+// 					}
+// 					break;
+				//case WCT_FubenUI:
+				//	{
+				//		CCControlButton* fuBenBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_ActivityBtnGroup)->getChildByTag(3));
+				//		LocalPlayer* lPlayer = RoleManager::getInstance()->getLocalPlayer();
+				//		if (fuBenBtn && lPlayer->getAttribute(RA_TiLiZhi) >= VIPMgr::getInstance()->getLocalVipData().tiliTop
+				//			&& RoleManager::getInstance()->getLocalPlayer()->getLevel() >= 20)
+				//		{
+				//			if (World::getInstance()->isHighLight(fuBenBtn,WT_CCCONTROLBUTTON,WCT_FubenUI))
+				//			{
+				//				World::getInstance()->SetHighLight(fuBenBtn,WT_CCCONTROLBUTTON,WCT_FubenUI,0,false);
+				//			}
+				//			World::getInstance()->SetHighLight(fuBenBtn,WT_CCCONTROLBUTTON,WCT_FubenUI,1,true,-9,15);
+				//		}
+				//	}
+				//  break;
+				//竞技场
+				case WCT_ARENAMAINUI:
+					{
+						if (NewFuncGuider::get_singleton_ptr()->isForceOpen(NewFuncGuider::eArena))
+						{
+							CCControlButton *arenaBtn = dynamic_cast<CCControlButton*>(_activityBtnGroup->getChildByTag(6));
+							if (arenaBtn)
+							{
+								if (!World::getInstance()->isHighLight(arenaBtn, WT_CCCONTROLBUTTON, WCT_ARENAMAINUI)) 
+								{
+									World::getInstance()->SetHighLight(arenaBtn, WT_CCCONTROLBUTTON, WCT_ARENAMAINUI, 0, true, 29, 15);
+								}
+							}
+						}
+					}
+					break;
+				//战役
+				case WCT_FubenUI:
+					{
+						if (NewFuncGuider::get_singleton_ptr()->isForceOpen(NewFuncGuider::eBattle))
+						{
+							CCControlButton *zhanyiBtn = dynamic_cast<CCControlButton*>(_activityBtnGroup->getChildByTag(3));
+							if (zhanyiBtn)
+							{
+								if (!World::getInstance()->isHighLight(zhanyiBtn, WT_CCCONTROLBUTTON, WCT_FubenUI))
+								{
+									World::getInstance()->SetHighLight(zhanyiBtn, WT_CCCONTROLBUTTON, WCT_FubenUI, 0, true, 29, 15);
+								}
+							}
+						}
+					}
+					break;
+				case WCT_RewardQuestUi:
+					{
+						if (_xuanshangBtn)
+						{
+							if (!World::getInstance()->isHighLight(_xuanshangBtn, WT_CCCONTROLBUTTON, WCT_RewardQuestUi))
+							{
+								World::getInstance()->SetHighLight(_xuanshangBtn, WT_CCCONTROLBUTTON, WCT_RewardQuestUi, 0, true, 29, 15);
+							}
+						}
+					}
+					break;
+				case WCT_OffLineExpUi:
+					{
+						if (_explixian && _isOfflineExpRedPoint)
+						{
+							if (!World::getInstance()->isHighLight(_explixian, WT_CCCONTROLBUTTON, WCT_OffLineExpUi))
+							{
+								World::getInstance()->SetHighLight(_explixian, WT_CCCONTROLBUTTON, WCT_OffLineExpUi, 0, true, 29, 15);
+							}
+						}
+					}
+					break;
+				}
+				//把队列头放尾巴
+				tmpTag = tempSignList.front();
+				tempSignList.pop_front();
+				tempSignList.push_back(tmpTag);
+			}
+		}
+		break;
+	case WCT_BusinessUi://运营活动按钮
+		if(_yunyingBtn)
+		{
+			if (KaifuHuodongMgr::getInstance()->getIosShowRecharge())
+			{
+				if (!World::getInstance()->isHighLight(_yunyingBtn, WT_CCCONTROLBUTTON, WCT_BusinessUi)){
+					World::getInstance()->SetHighLight(_yunyingBtn, WT_CCCONTROLBUTTON, WCT_BusinessUi, 1, true, -9, 15);
+				}
+			}
+		}
+		break;
+	case WCT_TradingUI:
+		CCControlButton *tradingbtn = dynamic_cast<CCControlButton*>(_activityBtnGroup->getChildByTag(55));
+		if(tradingbtn)
+		{
+			if (!World::getInstance()->isHighLight(tradingbtn, WT_CCCONTROLBUTTON, WCT_TradingUI))
+			{
+				World::getInstance()->SetHighLight(tradingbtn, WT_CCCONTROLBUTTON, WCT_TradingUI, 0, true, 29, 15);
+			}
+		}
+		
+		break;
+		
+	}
+
+}
+
+void MiniMapUi::revokeBtnHighLight(int tag)
+{
+	if (World::getInstance()->getScene() == NULL)
+	{
+		return;
+	}
+	switch(tag)
+	{
+	case WCT_CoreTreeUi://摇钱树
+		{
+			bool flag = World::getInstance()->GetRechargeFeedback_Flag();
+			//如果图标显示则相应的添加红色叹号标志
+			if (flag)
+			{
+				CCControlButton* coreTreeBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_CoretreeBtn));
+				if (World::getInstance()->isHighLight(coreTreeBtn,WT_CCCONTROLBUTTON,WCT_CoreTreeUi))
+				{
+					World::getInstance()->SetHighLight(coreTreeBtn,WT_CCCONTROLBUTTON,WCT_CoreTreeUi,0,false);
+				}
+			}
+		}
+		break;
+	case WCT_TreasureLoftUi://藏宝阁
+		{
+			CCControlButton* TreasureLoftBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(12)->getChildByTag(NT_TreasureLoftBtn));
+			if (World::getInstance()->isHighLight(TreasureLoftBtn,WT_CCCONTROLBUTTON,WCT_TreasureLoftUi))
+			{
+				World::getInstance()->SetHighLight(TreasureLoftBtn,WT_CCCONTROLBUTTON,WCT_TreasureLoftUi,0,false);
+			}
+		}
+		break;
+// 	case WCT_MysteryBoxUi://神秘宝箱
+// 		{
+// 			CCControlButton* MysteryBoxBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(12)->getChildByTag(BT_MysteryBox));
+// 			if (World::getInstance()->isHighLight(MysteryBoxBtn,WT_CCCONTROLBUTTON,WCT_MysteryBoxUi))
+// 			{
+// 				World::getInstance()->SetHighLight(MysteryBoxBtn,WT_CCCONTROLBUTTON,WCT_MysteryBoxUi,0,false);
+// 			}
+// 		}
+// 		break;
+	case WCT_ServerActivityUi://开服7天活动
+		{
+			CCControlButton* serverActivityBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_SERVERACTIVITYBTN));
+			if (World::getInstance()->isHighLight(serverActivityBtn,WT_CCCONTROLBUTTON,WCT_ServerActivityUi))
+			{
+				World::getInstance()->SetHighLight(serverActivityBtn,WT_CCCONTROLBUTTON,WCT_ServerActivityUi,0,false);
+			}
+		}
+		break;
+	case WCT_ChongZhiActivityFarmeUI://充值活动
+		{
+			if (ChongZhiActivityMgr::getInstance()->getChongzhiActivitySignList().size() < 1)
+			{
+				CCControlButton* serverActivityBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_ChongZhiActivityFarmeBtn));
+				if (World::getInstance()->isHighLight(serverActivityBtn,WT_CCCONTROLBUTTON,WCT_ChongZhiActivityFarmeUI))
+				{
+					World::getInstance()->SetHighLight(serverActivityBtn,WT_CCCONTROLBUTTON,WCT_ChongZhiActivityFarmeUI,0,false);
+				}
+			}
+		}
+		break;
+	case WCT_NewSignUi://签到
+		{
+			CCControlButton* signBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_QianDao));
+			if (signBtn)
+			{
+				if (World::getInstance()->isHighLight(signBtn,WT_CCCONTROLBUTTON,WCT_NewSignUi))
+				{
+					World::getInstance()->SetHighLight(signBtn,WT_CCCONTROLBUTTON,WCT_NewSignUi,1,false);
+				}	
+			}
+		}
+		break;
+	case WCT_HuoyueUi://活跃奖励
+		{
+			CCControlButton* huoYueBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_HUOYUE));
+			if (huoYueBtn)
+			{
+				if (World::getInstance()->isHighLight(huoYueBtn,WT_CCCONTROLBUTTON,WCT_HuoyueUi))
+				{
+					World::getInstance()->SetHighLight(huoYueBtn,WT_CCCONTROLBUTTON,WCT_HuoyueUi,0,false);
+				}
+			}
+		}
+		break;
+	case WCT_ZAIXIANCHARGE://在线奖励
+		{
+			CCControlButton* zaixianBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_ZaiXIanBtn));
+			if (zaixianBtn)
+			{
+				if (World::getInstance()->isHighLight(zaixianBtn,WT_CCCONTROLBUTTON,WCT_ZAIXIANCHARGE))
+				{
+					World::getInstance()->SetHighLight(zaixianBtn,WT_CCCONTROLBUTTON,WCT_ZAIXIANCHARGE,0,false);
+				}
+			}
+			break;
+		}
+	case WCT_HUODONGBTN://活动按钮
+		{
+			if (RewardMgr::getInstance()->getActivitySignList().size() < 1)
+			{
+				CCControlButton* huodongBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_HuoBtn));
+				if (World::getInstance()->isHighLight(huodongBtn,WT_CCCONTROLBUTTON,WCT_HUODONGBTN))
+				{
+					World::getInstance()->SetHighLight(huodongBtn,WT_CCCONTROLBUTTON,WCT_HUODONGBTN,0,false);
+				}
+				//CCControlButton* zaixianBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_ActivityBtnGroup)->getChildByTag(7));
+				//if (zaixianBtn)
+				//{
+				//	if (World::getInstance()->isHighLight(zaixianBtn,WT_CCCONTROLBUTTON,WCT_ZAIXIANCHARGE))
+				//	{
+				//		World::getInstance()->SetHighLight(zaixianBtn,WT_CCCONTROLBUTTON,WCT_ZAIXIANCHARGE,0,false);
+				//	}
+				//}
+				//CCControlButton* signBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_ActivityBtnGroup)->getChildByTag(30));
+				//if (signBtn)
+				//{
+				//	if (World::getInstance()->isHighLight(signBtn,WT_CCCONTROLBUTTON,WCT_SignInUi))
+				//	{
+				//		World::getInstance()->SetHighLight(signBtn,WT_CCCONTROLBUTTON,WCT_SignInUi,0,false);
+				//	}
+				//}
+				CCControlButton* huoYueBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_ActivityBtnGroup)->getChildByTag(22));
+				if (huoYueBtn)
+				{
+					if (World::getInstance()->isHighLight(huoYueBtn,WT_CCCONTROLBUTTON,WCT_HuoyueUi))
+					{
+						World::getInstance()->SetHighLight(huoYueBtn,WT_CCCONTROLBUTTON,WCT_HuoyueUi,0,false);
+					}
+				}
+				//CCControlButton* fuBenBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(NT_ActivityBtnGroup)->getChildByTag(3));
+				//if (fuBenBtn)
+				//{
+				//	if (World::getInstance()->isHighLight(fuBenBtn,WT_CCCONTROLBUTTON,WCT_FubenUI))
+				//	{
+				//		World::getInstance()->SetHighLight(fuBenBtn,WT_CCCONTROLBUTTON,WCT_FubenUI,0,false);
+				//	}
+				//}
+// 				CCControlButton* treasureLoftBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(12)->getChildByTag(NT_TreasureLoftBtn));
+// 				if (World::getInstance()->isHighLight(treasureLoftBtn,WT_CCCONTROLBUTTON,WCT_TreasureLoftUi))
+// 				{
+// 					World::getInstance()->SetHighLight(treasureLoftBtn,WT_CCCONTROLBUTTON,WCT_TreasureLoftUi,1,false);
+// 				}
+// 				CCControlButton* MysteryBoxBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(12)->getChildByTag(BT_MysteryBox));
+// 				if (World::getInstance()->isHighLight( MysteryBoxBtn,WT_CCCONTROLBUTTON,WCT_MysteryBoxUi))
+// 				{
+// 					World::getInstance()->SetHighLight(MysteryBoxBtn,WT_CCCONTROLBUTTON,WCT_MysteryBoxUi,0,false);
+// 				}
+
+			}
+		}
+		break;
+	case WCT_ARENAMAINUI:
+		{
+			CCControlButton *arenaBtn = dynamic_cast<CCControlButton*>(_activityBtnGroup->getChildByTag(6));
+			if (arenaBtn)
+			{
+				if (World::getInstance()->isHighLight(arenaBtn,WT_CCCONTROLBUTTON,WCT_ARENAMAINUI))
+				{
+					World::getInstance()->SetHighLight(arenaBtn,WT_CCCONTROLBUTTON,WCT_ARENAMAINUI,0,false);
+				}
+			}
+		}
+		break;
+	case WCT_FubenUI:
+		{
+			CCControlButton *zhanyiBtn = dynamic_cast<CCControlButton*>(_activityBtnGroup->getChildByTag(3));
+			if (zhanyiBtn)
+			{
+				if (World::getInstance()->isHighLight(zhanyiBtn, WT_CCCONTROLBUTTON, WCT_FubenUI))
+				{
+					World::getInstance()->SetHighLight(zhanyiBtn, WT_CCCONTROLBUTTON, WCT_FubenUI, 0, false);
+				}
+			}
+		}
+		break;
+	case WCT_RewardQuestUi:
+		{
+			if (_xuanshangBtn)
+			{
+				if (World::getInstance()->isHighLight(_xuanshangBtn, WT_CCCONTROLBUTTON, WCT_RewardQuestUi))
+				{
+					World::getInstance()->SetHighLight(_xuanshangBtn, WT_CCCONTROLBUTTON, WCT_RewardQuestUi, 0, false);
+				}
+			}
+		}
+		break;
+	case WCT_OffLineExpUi:
+		{
+			if (_explixian)
+			{
+				if (World::getInstance()->isHighLight(_explixian, WT_CCCONTROLBUTTON, WCT_OffLineExpUi))
+				{
+					World::getInstance()->SetHighLight(_explixian, WT_CCCONTROLBUTTON, WCT_OffLineExpUi, 0, false);
+					_isOfflineExpRedPoint = false;
+				}
+			}
+		}
+		break;
+	case WCT_BOSSPKUI://boss
+		{
+			CCControlButton* bossBtn = NULL;
+			if (BossPKMgr::getInstance()->getFuctionOpen() == false)
+			{
+				bossBtn = getBossBtn(BT_OldBoss,false);
+			}
+			else
+			{
+				bossBtn = getBossBtn(BT_InsideBoss,false);
+			}
+			if (bossBtn)
+			{
+				if (World::getInstance()->isHighLight(bossBtn,WT_CCCONTROLBUTTON,WCT_BOSSPKUI))
+				{
+					World::getInstance()->SetHighLight(bossBtn, WT_CCCONTROLBUTTON, WCT_BOSSPKUI, 0, false);
+				}
+			}
+		}
+		break;
+	case WCT_BusinessUi://运营活动按钮
+		if(_yunyingBtn)
+		{
+			if (KaifuHuodongMgr::getInstance()->getIosShowRecharge())
+			{
+				if (World::getInstance()->isHighLight(_yunyingBtn, WT_CCCONTROLBUTTON, WCT_BusinessUi)){
+					World::getInstance()->SetHighLight(_yunyingBtn, WT_CCCONTROLBUTTON, WCT_BusinessUi, 0, false);
+				}
+			}
+		}
+		break;
+	case WCT_TradingUI:
+		CCControlButton *tradingbtn = dynamic_cast<CCControlButton*>(_activityBtnGroup->getChildByTag(55));
+		if(tradingbtn)
+		{
+			if (World::getInstance()->isHighLight(tradingbtn, WT_CCCONTROLBUTTON, WCT_TradingUI))
+			{
+				World::getInstance()->SetHighLight(tradingbtn, WT_CCCONTROLBUTTON, WCT_TradingUI, 0, false);
+			}
+		}
+
+		break;
+	}
+}
+
+void MiniMapUi::runAnimationOnButton( eNodeTag btnTag )
+{
+// 	if(btnTag < (MiniMapUi::eNodeTag)ActivityBtnGroup::NT_ChongzhiBtn || btnTag > (MiniMapUi::eNodeTag)ActivityBtnGroup::NT_End)
+// 		return;
+// 
+// 	if(getChildByTag(btnTag + (MiniMapUi::eNodeTag)ActivityBtnGroup::NT_AnimBegin) != NULL)
+// 		return;
+
+// 	CCNode *btnNode = layer->getChildByTag(btnTag);
+// 	CC_ASSERT(btnNode != NULL);
+// 
+// 	GameActionNode* seAcNode = this->getActiveSuperEffect();
+// 	btnNode->addChild(seAcNode, 1000);
+// 	CCSize size = btnNode->getContentSize();
+// 	seAcNode->setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+// 	seAcNode->BeginAction(0.05f, true);
+// 	CCSprite *sprite = dynamic_cast<CCSprite*>(btnNode->getChildByTag(btnTag + (MiniMapUi::eNodeTag)ActivityBtnGroup::NT_AnimBegin));
+// 	if (sprite!=NULL)
+// 	{
+// 		return;
+// 	}
+// 	AnimationCache::AnimateList anims;
+// 	AnimationCache::createDefList(1, anims);
+// 	AnimationCache::getInstance()->getSinEffect(0, "huodongtexiao", anims);
+// 	BSAnimate *animste = anims[0];
+// 	sprite = CCSprite::create();
+// 	//sprite->setAnchorPoint(ccp(0.0f, 1.0f));
+// 	sprite->setTag(btnTag + (MiniMapUi::eNodeTag)ActivityBtnGroup::NT_AnimBegin);
+// 	CCSize size = btnNode->getContentSize();
+// 	sprite->setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+// 	btnNode->addChild(sprite);
+// 	sprite->runAction(CCRepeatForever::create(animste));
+}
+
+void MiniMapUi::stopAnimationOnButton( eNodeTag btnTag )
+{
+// 	if(btnTag < (MiniMapUi::eNodeTag)ActivityBtnGroup::NT_ChongzhiBtn || btnTag > (MiniMapUi::eNodeTag)ActivityBtnGroup::NT_End)
+// 		return;
+
+// 	CCNode *btnNode = layer->getChildByTag(btnTag);
+// 	btnNode->removeAllChildren();
+// 	CCNode *node = btnNode->getChildByTag(btnTag + (MiniMapUi::eNodeTag)ActivityBtnGroup::NT_AnimBegin);
+// 	if(node != NULL)
+// 	{
+// 		node->stopAllActions();
+// 		node->removeFromParent();
+// 	}
+}
+
+CCRect MiniMapUi::GetMiniMapBtnPos(int nTag)
+{
+	/*
+	if(nTag == 13 || nTag == 24 || nTag == 8 || nTag == 21 || nTag == 22)
+	{
+		SetNodeTintTo(dynamic_cast<CCNode*>(layer->getChildByTag(nTag)));
+		CCPoint cp = layer->getChildByTag(nTag)->convertToWorldSpace(ccp(0, 0));
+		CCSize cs = layer->getChildByTag(nTag)->getContentSize();
+		return CCRect(cp.x, cp.y, cs.width, cs.height);
+	}
+	*/
+	switch(nTag)
+	{
+	case 13:
+		SetNodeTintTo(dynamic_cast<CCNode*>(layer->getChildByTag(13)));
+		return _btnRec[0];
+	case 21:
+		SetNodeTintTo(dynamic_cast<CCNode*>(layer->getChildByTag(21)));
+		return _btnRec[1];
+	case 22:
+		SetNodeTintTo(dynamic_cast<CCNode*>(layer->getChildByTag(12)->getChildByTag(22)));
+		return _btnRec[2];
+	case 3:
+		SetNodeTintTo(dynamic_cast<CCNode*>(layer->getChildByTag(12)->getChildByTag(3)));
+		return _btnRec[3];
+	case 5:
+		{
+			/*if(_shouChong->isVisible() == false)
+				break;*/
+			CCPoint cp = _shouChong->convertToWorldSpace(ccp(0, 0));
+			CCSize cs = _shouChong->getContentSize();
+			return CCRect(cp.x, cp.y, cs.width, cs.height);
+		}
+	case 200:
+		{
+			//活下面的在线
+			CCPoint cp = layer->getChildByTag(12)->getChildByTag(8)->convertToWorldSpace(ccp(0, 0));
+			CCSize cs = layer->getChildByTag(12)->getChildByTag(8)->getContentSize();
+			return CCRect(cp.x, cp.y, cs.width, cs.height);
+		}
+	case 8:
+		{
+			return _btnRec[9];
+		}
+	case 100:
+		{
+			CCPoint cp = layer->getChildByTag(12)->getChildByTag(100)->convertToWorldSpace(ccp(0, 0));
+			CCSize cs = layer->getChildByTag(12)->getChildByTag(100)->getContentSize();
+			return CCRect(cp.x, cp.y, cs.width, cs.height);
+		}
+	case NT_QianDao:
+		{
+			if (layer->getChildByTag(NT_QianDao)->isVisible())
+				return _btnRec[7]; 
+		}
+		break;
+	case NT_ChongZhiActivityFarmeBtn:
+		return _btnRec[8]; 
+	case 38:
+		{
+			CCPoint cp = layer->getChildByTag(12)->getChildByTag(38)->convertToWorldSpace(ccp(0, 0));
+			CCSize cs = layer->getChildByTag(12)->getChildByTag(38)->getContentSize();
+			return CCRect(cp.x, cp.y, cs.width, cs.height);
+		}
+	case BT_Store:
+		{
+			//CCPoint cp = layer->getChildByTag(36)->convertToWorldSpace(ccp(0, 0));
+			//CCSize cs = layer->getChildByTag(36)->getContentSize();
+			//return CCRect(cp.x, cp.y, cs.width, cs.height);
+
+			return _btnRec[10];
+		}
+	}
+
+	return CCRect(0.0f, 0.0f, 0.0f, 0.0f);
+}
+
+CCNode* MiniMapUi::getAutoFightNode()
+{
+	return _battleBtn;
+}
+
+void MiniMapUi::LPLvSetBtnVisible( int nLevel, bool bIsInit )
+{
+	m_pLayer->LPLvSetBtnVisible(nLevel, bIsInit);
+}
+
+void MiniMapUi::setBaoDianBtnVisible( bool bSet )
+{
+	//if(!_baoDianBtn)
+	//	return;
+
+	//_baoDianBtn->setVisible(bSet);
+}
+
+void MiniMapUi::SetxuanshangLockVisible(bool bset){
+	if(!_xuanshangBtn){
+		return;
+	}
+	CCSprite *lock = dynamic_cast<CCSprite*>(_xuanshangBtn->getChildByTag(10));
+	if(lock){
+		lock ->setVisible(bset);
+	}
+}
+
+cocos2d::CCRect MiniMapUi::GetBaoDianBtnPos()
+{
+	/*if(!_baoDianBtn)
+		return CCRect(0.0f, 0.0f, 0.0f, 0.0f);
+
+	CCPoint cp = _baoDianBtn->convertToWorldSpace(ccp(0.0f, 0.0f));
+	CCSize cs = _baoDianBtn->getContentSize();
+	return CCRect(cp.x, cp.y, cs.width, cs.height);*/
+	return 	CCRect(0,0,0,0);
+}
+int  MiniMapUi::getHuoYueRewardNum()
+{
+	int count = 0;
+	const std::vector<tagHuoYueReward>&huoYueReward = Attres::getInstance()->getHuoYueRewardList();
+	std::vector<tagHuoYueReward>::const_iterator iter= huoYueReward.begin();
+	const tagActiveData &activityData = RoleManager::getInstance()->getLocalPlayer()->getActiveData();
+	int index = 0;
+	while(iter != huoYueReward.end())
+	{
+		if((iter->HuoYueReward <= activityData.m_n32_active_num) && activityData.m_b_active_receive[index] == 0)
+		{
+			++count;
+		}
+		++index;
+		++iter;
+	}
+	return count;
+}
+
+void MiniMapUi::setupGoupBtnLock( CCNode* root )
+{
+	CCNode* node  =  root->getChildByTag(0);
+	CC_ASSERT(node);
+	CCSprite* lock = CCSprite::createWithSpriteFrameName("smallui_tongyonghui");
+	lock->setTag(LOCK_TAG);
+	lock->setVisible(true);
+	UIUtil::childNodeAlign(node,lock,eha_center,eva_center,CCPointZero);
+}
+
+bool MiniMapUi::getTLTimeIsShow()
+{
+	if(_tlTimeNode){
+		if(_tlTimeNode->isVisible()){
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void MiniMapUi::setTLTimeHide(bool isHide)
+{
+	MiniMapUiLoaderLayer *node = dynamic_cast<MiniMapUiLoaderLayer*>(getChildByTag(0));
+	if (node)
+	{
+		node->hideTianlaoTimeInfo(isHide);
+		//防止第一个主线任务在切近天牢地图后不消失
+		NewPlayerGuider::getInstance()->onTaskTraceUiShow(false);
+	}
+}
+
+void MiniMapUi::setTLTimeInfo(tagDWORDTime serverTime)
+{
+	if(getTLTimeIsShow() && ActivityMgr::getInstance()->isTianLaoTime())
+	{
+		int tlEndhour = ActivityMgr::getInstance()->getActEndTimes(ACT_TIANLAO_INDEX, true);
+		int tlEndMin = ActivityMgr::getInstance()->getActEndTimes(ACT_TIANLAO_INDEX, false);
+		if(!IS_VALID(tlEndhour) || !IS_VALID(tlEndMin))
+			return;
+
+		int showTime = (tlEndhour * 3600 + tlEndMin * 60) - (serverTime.hour * 60 * 60 + serverTime.min * 60 + serverTime.sec);
+		if(showTime >= 0 && _tlTimeNums != showTime)
+		{
+			_tlTimeNums = showTime;
+			CCString* showTimeCStr = CCString::createWithFormat("%d:%.2d:%.2d", showTime / 3600, showTime % 3600 / 60, showTime % 60);
+			_tlTimeInfo->setString(showTimeCStr->getCString());
+		}
+	}
+}
+
+// GameActionNode* MiniMapUi::getActiveSuperEffect()
+// {
+// 	GameActionNode* activeSEAcNode = GameActionNode::create();
+// 	for (int i=1; i<99; ++i)
+// 	{
+// 		CCString* activeStr = CCString::createWithFormat("%s%02d", "E1_60", i);
+// 		if(!activeSEAcNode->AddTexture(activeStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+// 	return activeSEAcNode;
+// }
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler MiniMapUiLoaderLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler MiniMapUiLoaderLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHookPressed", MiniMapUiLoaderLayer::onHookPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onguajiPressed", MiniMapUiLoaderLayer::onGuaJiPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onNoticePressed", MiniMapUiLoaderLayer::onNoticePressed)
+	
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "activitiesPressed", MiniMapUiLoaderLayer::activitiesPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "rankPressed", MiniMapUiLoaderLayer::rankPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "hideBtnPressed", MiniMapUiLoaderLayer::hidePressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "mapPressed", MiniMapUiLoaderLayer::mapPressed);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLeaveScripteBtnPressed", MiniMapUiLoaderLayer::onLeaveScripteBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onActivityTransferBtnPressed", MiniMapUiLoaderLayer::onActivityTransferBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onExpLixianBtnPressed", MiniMapUiLoaderLayer::onExpLixianBtnPressed); 
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "gongchengPressed", MiniMapUiLoaderLayer::gongchengPressed);
+	
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onZaixianPressed", MiniMapUiLoaderLayer::onZaixianPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onQiandaoPressed", MiniMapUiLoaderLayer::onQiandaoPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "emailPressed", MiniMapUiLoaderLayer::emailPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGiftPressed", MiniMapUiLoaderLayer::onGiftPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHuoyuePressed", MiniMapUiLoaderLayer::onHuoyuePressed);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHuodongPressed", MiniMapUiLoaderLayer::onHuodongPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onFubenPressed", MiniMapUiLoaderLayer::onFubenPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBiblePressed", MiniMapUiLoaderLayer::onBiblePressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onShouChongBtnPressed", MiniMapUiLoaderLayer::onShouChongPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCoretreePressed", MiniMapUiLoaderLayer::onCoreTreePressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onTreasurePressed",MiniMapUiLoaderLayer::onTreasurePressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onServerActivityBtnPressed", MiniMapUiLoaderLayer::onServerActivityBtnPressed);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onArenaPressed",MiniMapUiLoaderLayer::onArenaPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBossPressed",MiniMapUiLoaderLayer::onBossPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onNewBossPressed",MiniMapUiLoaderLayer::onNewBossPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onMystreyBoxPressed",MiniMapUiLoaderLayer::onMysteryPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onJuHuaSuanPressed",MiniMapUiLoaderLayer::onJuHuaSuanPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onQiangHongBaoPressed",MiniMapUiLoaderLayer::QiangHongBaoPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCanReceiveBtnPressed",MiniMapUiLoaderLayer::onCanReceiveBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onStorePressed",MiniMapUiLoaderLayer::onStorePressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLuanDouHuiPressed",MiniMapUiLoaderLayer::onLuanDouHuiPressed);	  
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onjiaoyihangPressed",MiniMapUiLoaderLayer::onjiaoyihangBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onbaodianPressed",MiniMapUiLoaderLayer::onbaodianBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onzhanbaoPressed",MiniMapUiLoaderLayer::onzhanbaoPressed);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onyugaoPressed",MiniMapUiLoaderLayer::onyugaoPressed);//屏蔽
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onhuodongzhongxinPressed",MiniMapUiLoaderLayer::onhuodongzhongxinPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onClickedFMBCue",MiniMapUiLoaderLayer::onFMBTransmit);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onClickFMBBet",MiniMapUiLoaderLayer::onFMBBetCue);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onshenlongbaozangPressed",MiniMapUiLoaderLayer::onshenlongbaozangPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onwanfashuomingPressed",MiniMapUiLoaderLayer::onwanfashuomingPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onlongweitiaozhanPressed",MiniMapUiLoaderLayer::onlongweitiaozhanPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onjiaoyihangBtnPressed",MiniMapUiLoaderLayer::onjiaoyihangBtnPressed);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onStore1Pressed",MiniMapUiLoaderLayer::onStore1Pressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onwanfashuoming1Pressed",MiniMapUiLoaderLayer::onwanfashuoming1Pressed);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(MiniMapUiLoaderLayer,onTeamNotice);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBloodFightBtnPressed",MiniMapUiLoaderLayer::onBloodFightBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onZhuZaiZheGouHuoPressed",MiniMapUiLoaderLayer::on_fire);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHangHuiBossPressed",MiniMapUiLoaderLayer::onGuildBossBtnPressed);
+
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(MiniMapUiLoaderLayer,onyaoqingPressed);
+	return NULL;
+}
+
+
+void MiniMapUiLoaderLayer::onjiaoyihangBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (NULL == ploc)
+		return ;
+
+	if(NumericalIniMgr::getInstance()->get_trading_open_level() > ploc->getLevel())
+	{
+		ToolTip::getInstance()->push(GET_STR(9395));
+		return;
+	}
+
+	ImmediateEquipUi::getInstance()->close();
+	ItemAutoUseDaojuTip::getInstace()->close();
+	CLOSE_ALL_UI();
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if(ui != NULL)
+	{
+		if(ui->isActivityGroupShow())
+		{
+			ui->showActivityBtnGroup(false);
+		}
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	OPEN_UI(WCT_TradingUI);
+}
+
+bool MiniMapUiLoaderLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,mpTeamNotice);
+	//SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_pTradingRedPoint)
+	return false;
+}
+
+void MiniMapUiLoaderLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_showState = true;
+
+	CCLayer *layer = (CCLayer*)getChildByTag(1);
+	_srcPos = layer->getPosition();
+
+	_auto_act_btn = dynamic_cast<CCControlButton*>(this->getChildByTag(BT_AutoAction));
+	setButtonSpriteFrame(_auto_act_btn,"smallui_zidonghzandou","smallui_zidonghzandou","smallui_zidonghzandou");
+
+	CCControlButton* t_btn = dynamic_cast<CCControlButton*>(this->getChildByTag(MM_Btn_BFPrepare));
+	setButtonSpriteFrame(t_btn,"smallui_zhunbeicanzhanbtnn","smallui_zhunbeicanzhanbtnn","smallui_zhunbeicanzhanbtnn");
+	t_btn->setVisible(false);
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string sSEActivity2 = sSEDir + "E1_56.plist";
+	_plist.insert(sSEActivity2);
+	sSEActivity2 = sSEDir + "E1_178.plist";
+	_plist.insert(sSEActivity2);
+	//对引导资源
+	std::string funcPlist = "Art/UI/ccbResources/gongnengyugao.plist";
+	_plist.insert(funcPlist);
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+
+	_tmpAcNode1 = this->getTmpSuperEffect(1);
+	_tmpAcNode2 = this->getTmpSuperEffect(2);
+	//_tmpAcNode3 = this->getTmpSuperEffect(3);  //2015-08-28 一测隐藏开服活动按钮
+	_tmpAcNode4 = this->getTmpSuperEffect(4);
+	_tmpAcNode5 = this->getTmpSuperEffect(5);
+	_tmpAcNode6 = this->getTmpSuperEffect(6);
+
+	
+	_tmpAcNode1->setPosition(ccp(layer->getChildByTag(12)->getChildByTag(MMT_RedPacket)->getContentSize().width / 2.0f, layer->getChildByTag(12)->getChildByTag(MMT_RedPacket)->getContentSize().height / 2.0f));
+	_tmpAcNode2->setPosition(ccp(layer->getChildByTag(MMT_MoneyTree)->getContentSize().width / 2.0f, layer->getChildByTag(MMT_MoneyTree)->getContentSize().height / 2.0f));
+	//一测隐藏开服活动按钮
+	//_tmpAcNode3->setPosition(ccp(layer->getChildByTag(MMT_NewSever)->getContentSize().width / 2.0f, layer->getChildByTag(MMT_NewSever)->getContentSize().height / 2.0f));
+	_tmpAcNode4->setPosition(ccp(layer->getChildByTag(MMT_GoodTimePaying)->getContentSize().width / 2.0f, layer->getChildByTag(MMT_GoodTimePaying)->getContentSize().height / 2.0f));
+	_tmpAcNode5->setPosition(ccp(layer->getChildByTag(12)->getChildByTag(MMT_Mystery)->getContentSize().width / 2.0f, layer->getChildByTag(12)->getChildByTag(MMT_Mystery)->getContentSize().height / 2.0f));
+	_tmpAcNode6->setPosition(ccp(layer->getChildByTag(12)->getChildByTag(MMT_TreasureLoft)->getContentSize().width / 2.0f, layer->getChildByTag(12)->getChildByTag(MMT_TreasureLoft)->getContentSize().height / 2.0f));
+	layer->getChildByTag(12)->getChildByTag(MMT_RedPacket)->addChild(_tmpAcNode1, RZN_EFFECT);
+	layer->getChildByTag(MMT_MoneyTree)->addChild(_tmpAcNode2, RZN_EFFECT);
+	//一测隐藏开服活动按钮
+	//layer->getChildByTag(MMT_NewSever)->addChild(_tmpAcNode3, RZN_EFFECT);
+	layer->getChildByTag(MMT_GoodTimePaying)->addChild(_tmpAcNode4, RZN_EFFECT);
+	layer->getChildByTag(12)->getChildByTag(MMT_Mystery)->addChild(_tmpAcNode5, RZN_EFFECT);
+	layer->getChildByTag(12)->getChildByTag(MMT_TreasureLoft)->addChild(_tmpAcNode6, RZN_EFFECT);
+	_tmpAcNode1->BeginAction(0.1f, true);
+	_tmpAcNode2->BeginAction(0.1f, true);
+	//一测隐藏开服活动按钮
+	//_tmpAcNode3->BeginAction(0.1f, true);
+	_tmpAcNode4->BeginAction(0.1f, true);
+	////不开启不播放效果
+	//bool bShow = NewFuncGuider::get_singleton_ptr()->isForceOpen(NewFuncGuider::eTreasureBox);
+	//if (bShow)
+	//{
+	//	_tmpAcNode5->BeginAction(0.1f, true);
+	//}
+	//bShow = NewFuncGuider::get_singleton_ptr()->isForceOpen(NewFuncGuider::eTreasureRoom);
+	//if (bShow)
+	//{
+	//	_tmpAcNode6->BeginAction(0.1f, true);
+	//}
+
+	/*屏蔽
+	_funcGuideNode = this->getChildByTag(24);
+	_funcGuidePos = _funcGuideNode->getPosition();*/
+
+
+
+	m_pBtnArray[0] = (CCControlButton*)layer->getChildByTag(25);
+	m_pBtnArray[1] = (CCControlButton*)layer->getChildByTag(7);
+	m_pBtnArray[2] = (CCControlButton*)layer->getChildByTag(12)->getChildByTag(5);
+	m_pBtnArray[3] = (CCControlButton*)layer->getChildByTag(12)->getChildByTag(8);
+	m_pBtnArray[4] = (CCControlButton*)layer->getChildByTag(12)->getChildByTag(100);
+	m_pBtnArray[5] = (CCControlButton*)layer->getChildByTag(6);
+	_background=(CCScale9Sprite*)layer->getChildByTag(12)->getChildByTag(1);
+	//[bing] 一上来全隐藏
+	m_pBtnArray[0]->setVisible(false);
+	m_pBtnArray[1]->setVisible(false);
+	m_pBtnArray[2]->setVisible(false);
+	//m_pBtnArray[3]->setVisible(false);
+	//m_pBtnArray[4]->setVisible(false);
+	//m_pBtnArray[5]->setVisible(false);  //一测隐藏 充值福利
+
+	m_BtnPos[0] = m_pBtnArray[0]->getPosition();
+	m_BtnPos[1] = m_pBtnArray[1]->getPosition();
+	m_BtnPos[2] = m_pBtnArray[2]->getPosition();
+	m_BtnPos[3] = m_pBtnArray[3]->getPosition();
+	m_BtnPos[4] = m_pBtnArray[4]->getPosition();
+	m_BtnPos[5] = m_pBtnArray[5]->getPosition();
+
+	//layer->getChildByTag(22)->setPosition(m_BtnPos[5]);  //一测 调整日常按钮位置
+	CCControlButton * intruduce= dynamic_cast<CCControlButton*>(this->getChildByTag(28));//玩法说明
+	m_old_intruducepos = intruduce->getPosition(); //根据需求移动Pos 记录原位置点
+	//特效球
+	_tmpAcNode7 = getTmpBallEffect();
+	_tmpAcNode7->setPosition(ccp(layer->getChildByTag(12)->getChildByTag(23)->getContentSize().width / 2.0f + 1, layer->getChildByTag(12)->getChildByTag(23)->getContentSize().height / 2.0f  - 4));
+	layer->getChildByTag(12)->getChildByTag(23)->addChild(_tmpAcNode7, RZN_EFFECT);
+	_tmpAcNode7->BeginAction(0.1f, true);
+	m_Sprite = CCSprite::create();
+	std::string filePath = CCString::createWithFormat("%s%s","Art/ICON/","smallui_lixianjingyanzhezhao.png")->getCString();
+	m_Sprite->setPositionY(m_Sprite->getPositionY() + 9.5);
+	m_Sprite->initWithFile(filePath.c_str());
+	//m_Sprite->setZOrder(5);
+
+	_expProgress = new ProgressBar;
+	_expProgress->initBarWithSprite(m_Sprite);
+	_expProgress->addToParent(_tmpAcNode7);
+	_expProgress->setRotate(90.0f);
+	_expProgress->setProgress(100,100);
+	_expProgress->setLabelVisible(false);
+
+	m_Sprite2 = CCSprite::create();
+	layer->getChildByTag(12)->getChildByTag(23)->addChild(m_Sprite2, RZN_EFFECT + 1);
+	m_Sprite2->setPosition(ccp(layer->getChildByTag(12)->getChildByTag(23)->getContentSize().width / 2 + 1 , (layer->getChildByTag(12)->getChildByTag(23)->getContentSize().height) / 2.0f));
+	std::string dir2 = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "SingleUI/";
+	std::string	str2 = dir2 + "smallui_lixianjingyantouming.png";
+
+	CCSpriteFrame* Frame2 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str2.c_str());
+	if(Frame2 == NULL)
+	{
+		CCTexture2D *texture2 = CCTextureCache::sharedTextureCache()->addImage(str2.c_str());
+		Frame2 = CCSpriteFrame::createWithTexture(texture2, CCRect(0.0, 0.0, texture2->getPixelsWide(), texture2->getPixelsHigh()));
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(Frame2, str2.c_str());
+	}
+	if (Frame2)
+		m_Sprite2->setDisplayFrame(Frame2);
+
+	mpTeamNotice->setVisible(false);
+
+	GameActionNode* eft = GameActionNode::create();
+	eft->InitWithPList(sSEActivity2.c_str(),"E1_178");
+	eft->setZOrder(RZN_EFFECT);
+	eft->BeginAction(1.0f/8.0f,true);
+
+	UIUtil::childNodeAlign(mpTeamNotice,eft,eha_center,eva_center,ccp(eft->getContentSize().width*0.5,-eft->getContentSize().height*0.5));
+// 	std::vector<CCNode*>  alignNodes;
+// 	alignNodes.push_back(layer->getChildByTag(6));
+// 	alignNodes.push_back(layer->getChildByTag(36));
+// 	alignNodes.push_back(layer->getChildByTag(22));
+// 	setupNodes(alignNodes,ead_move_to_left);
+
+	/*CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	m_pTradingRedPoint->setPosition(ccp(winSize.width - 235.0f, winSize.height - 80.0f));  */
+	//m_pTradingRedPoint->setVisible(false);
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	_tmpAcNode10 = NULL;
+	
+
+ //添加小手
+	std::string sSEDir01= CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string sSEPlist = sSEDir01 + "E1_151.plist";
+	CCControlButton * btn=(CCControlButton *)getChildByTag(20);
+	m_btnGuaJi = dynamic_cast<CCNode*>(layer->getChildByTag(47));
+	_hand = GameActionNode::create();
+	_hand->InitWithPList(sSEPlist.c_str(),"E1_151");
+	//_handNode->setPosition(ccp(270.f,180.f));
+	_hand->setPosition(btn->getPosition());
+	this->addChild(_hand);
+	_hand->setVisible(false);
+
+	m_btnLongWeiBox= dynamic_cast<CCNode*>(this->getChildByTag(25));
+	m_btnLongWeiDes= dynamic_cast<CCNode*>(this->getChildByTag(26));
+
+
+	_fmLefetTimeNode= this->getChildByTag(27);//封魔榜显示时间
+
+	if(_fmLefetTimeNode != NULL)
+	{
+		_fmLefetTimeNode->setVisible(false);
+		_fmLeftTimeLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_fmLefetTimeNode->getChildByTag(1)));
+	}
+	return;
+}
+
+void MiniMapUiLoaderLayer::setBallEffct()
+{	
+	CCLayer *layer = (CCLayer*)getChildByTag(1);
+	if(NULL != layer && NULL == _tmpAcNode9)
+	{	
+		_tmpAcNode9 = getTmpBoomEffect();
+		if(NULL != _tmpAcNode9)
+		{
+			layer->getChildByTag(12)->getChildByTag(23)->removeChild(_tmpAcNode9);
+			_tmpAcNode9->setPosition(ccp(layer->getChildByTag(12)->getChildByTag(23)->getContentSize().width / 2.0f, layer->getChildByTag(12)->getChildByTag(23)->getContentSize().height / 2.0f + 3));
+			layer->getChildByTag(12)->getChildByTag(23)->addChild(_tmpAcNode9,RZN_EFFECT);
+			_tmpAcNode9->BeginAction(0.1f, true);
+		}
+	}
+
+	if(NULL != _tmpAcNode9 && !_tmpAcNode9->isVisible())
+		_tmpAcNode9->setVisible(true);
+}
+
+void MiniMapUiLoaderLayer::setOffPercent(LocalPlayer* ploc)
+{
+	if(NULL == ploc)
+		return;
+
+	CCLayer *layer = (CCLayer*)getChildByTag(1);
+	unsigned int totalexp = ploc->GetOffLineTotalExp();
+	float percent = 0;
+	if(0 != ploc->GetOffLineMaxExp())
+		percent = (float)totalexp / (float)ploc->GetOffLineMaxExp();
+
+
+	//percent *= 100;
+	//保留小数点后两位
+	percent =((int)((percent + 0.0005f) * 1000)) / 10.0f;
+
+	//percent = 90;
+	_expProgress->setProgress(100 - percent,100);
+
+
+	//特效波浪
+	if(NULL == _tmpAcNode8)
+	{	
+		_tmpAcNode8 = getTmpWaveEffect();
+		if(NULL != _tmpAcNode8)
+		{
+			_tmpAcNode8->setPositionX(layer->getChildByTag(12)->getChildByTag(23)->getContentSize().width / 2.0f + 1);
+			layer->getChildByTag(12)->getChildByTag(23)->addChild(_tmpAcNode8,RZN_EFFECT);
+			_tmpAcNode8->BeginAction(0.1f, true);
+		}
+	}
+
+	if(0 == (int)percent  || 90 < (int)percent)
+	{
+		_tmpAcNode8->setVisible(false);
+		return;
+	}
+
+	if(50 >= (int)percent)
+	{	
+		_tmpAcNode8->setPositionY(m_Sprite->getContentSize().height  * (percent / 100) + 3);
+
+		if(10 < (int)percent && 20 >= (int)percent)
+		{
+			_tmpAcNode8->setScaleX(0.8f);
+			_tmpAcNode8->setPositionY(m_Sprite->getContentSize().height  * (percent / 100) + 2);
+		}
+
+		else if(0 < (int)percent && 10 >= (int)percent)
+		{
+			_tmpAcNode8->setScaleX(0.7f);
+			_tmpAcNode8->setPositionY(m_Sprite->getContentSize().height  * (percent / 100) + 6);
+		}
+	}
+	else
+	{
+		_tmpAcNode8->setPositionY(m_Sprite->getContentSize().height  * (percent / 100) + 3);
+		if(75<= (int)percent && 80 > (int)percent)
+				_tmpAcNode8->setScaleX(0.75f);
+
+		else if( 80 <= (int)percent && 90 >= (int)percent)
+		{
+			_tmpAcNode8->setScaleX(0.9f);
+			_tmpAcNode8->setPositionY(m_Sprite->getContentSize().height  * (percent / 100) + 1);
+		}
+
+		else if( 90 <= (int)percent && 95 >= (int)percent)
+		{
+			_tmpAcNode8->setScaleX(0.3f);
+			_tmpAcNode8->setPositionY(m_Sprite->getContentSize().height  * (percent / 100));
+		}
+	}
+}
+
+
+void MiniMapUiLoaderLayer::showUi( bool show )
+{
+	if(!_showState && show != _showState)
+		return;
+
+	CCLayer *layer = (CCLayer*)getChildByTag(1);
+	CC_ASSERT(layer != NULL);
+
+	CCPoint dest;
+	if(show)
+		dest = _srcPos;
+	else
+		dest = ccpAdd(_srcPos, ccp(200.f, 200.f));
+
+	CCAction *moveTo = createMoveTo(layer->getPosition(), dest);
+	layer->stopAllActions();
+	layer->runAction(moveTo);
+
+	/*屏蔽
+	if(!show){
+		_funcGuideNode->stopAllActions();
+		_funcGuideNode->runAction(CCMoveTo::create(0.5f, ccp(_funcGuidePos.x + _funcGuideNode->getContentSize().width * 2, _funcGuidePos.y)));
+	}else{
+		_funcGuideNode->stopAllActions();
+		_funcGuideNode->runAction(CCMoveTo::create(0.5f, _funcGuidePos));
+	}*/
+}
+
+void MiniMapUiLoaderLayer::hidePressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	_showState = !_showState;
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showUi(_showState);
+}
+
+void MiniMapUiLoaderLayer::onLeaveScripteBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//Todo 离开副本;
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);//vv
+	InstanceMgr::getInstance()->LeaveInstanceMap();
+	CLOSE_UI(WCT_FubenRankUI);
+	
+}
+
+void MiniMapUiLoaderLayer::onActivityTransferBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	//gx add 2013.11.12 摆摊，交易，双修状态锁死
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isInRoleStateAny(RA_Stall))
+	{
+		ToolTip::getInstance()->push(GET_STR(2102));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return;
+	}
+	/*//Todo 活动传送;
+	if (RoleManager::getInstance()->getLocalPlayer()->isInRoleStateAny(RA_Stall))
+	{
+		ToolTip::getInstance()->push(GET_STR(2102));
+		return;
+	}*/
+	ActivityMgr::getInstance()->OneKeyTrans();
+}
+
+void MiniMapUiLoaderLayer::gongchengPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	//Todo 活动传送;
+	//gx add 2013.11.12 摆摊，交易，双修状态锁死
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isInRoleStateAny(RA_Stall))
+	{
+		ToolTip::getInstance()->push(GET_STR(2102));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return;
+	}
+	/*if (RoleManager::getInstance()->getLocalPlayer()->isInRoleStateAny(RA_Stall))
+	{
+		ToolTip::getInstance()->push(GET_STR(2102));
+		return;
+	}*/
+
+	//已经在沙巴克不传送
+	unsigned int mapId = MapManager::getInstance()->getCurMapId();
+	if (mapId == SBK_MAP_CRC_ID/* || mapId == SBK_CASTLE_MAP_CRC_ID*/)
+		return;
+	ActivityMgr::getInstance()->sbkKeyTransfer(); 
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+}
+
+void MiniMapUiLoaderLayer::onhuodongzhongxinPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	KaifuHuodongMgr::getInstance()->requestYunyingAllData();
+}
+
+void MiniMapUiLoaderLayer::onFMBTransmit(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	MessageBoxUi* ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, STRING_TABLE["sure_fmb_transmit"], TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+	World::getInstance()->getScene()->addChild(ui, WZ_MESSAGEBOX);
+	ui->signalOkBtnPressed.connect(this,&MiniMapUiLoaderLayer::on_sure_fmb_transmit);
+
+	return;
+}
+
+void MiniMapUiLoaderLayer::onFMBBetCue(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	FMBManager::getInstance()->try_open_bet_layer();
+	return;
+}
+
+void MiniMapUiLoaderLayer::onExpLixianBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	//Todo 离线池经验;
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if(ui != NULL)
+	{
+		ui->_activityBtnGroup->showFrame(false);
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	OPEN_UI(WCT_OffLineExpUi);
+
+}
+void MiniMapUiLoaderLayer::SetGuaJiBtn( bool isShow )
+{
+	if(m_btnGuaJi != NULL)
+	{
+		m_btnGuaJi->setVisible(isShow);
+	}
+}
+void MiniMapUiLoaderLayer::onHookPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//响应挂机;
+	AutoActionMgr* auto_mgr = AutoActionMgr::getInstance();
+	//RoleManager::getInstance()->autoSelectCanAttackRole();
+	if (pCCControlEvent == 32 && !auto_mgr->Get_Auto_Action())
+	{
+		auto_mgr->setCurrentQuestID(INVALID, AutoActionMgr::TraceTarget());
+	}
+
+	select_enemy_immediately evt;
+	SEND_EVENT(&evt);
+
+	
+	AutoActionMgr::getInstance()->BeginOrEnd();
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	//点击挂机（自动战斗），显示停止战斗;
+	//on_event_refresh_autoact_btn(NULL);
+}
+void MiniMapUiLoaderLayer::onGuaJiPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if( !player )
+		return;
+	int nLevel = player->getLevel();
+
+	if (player->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return ;
+	}
+	else if (player->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return ;
+	}
+	else if (player->isInRoleStateAny(RA_Stall))
+	{
+		ToolTip::getInstance()->push(GET_STR(2102));
+		return ;
+	}
+	else if(nLevel < NumericalIniMgr::getInstance()->Get_GuaJi_Start_Level())
+	{
+		ToolTip::getInstance()->push(GET_STR(9563));
+		return;
+	}
+	else
+	{
+		OPEN_UI(WCT_GuiJiUi);
+	}
+	
+}
+void MiniMapUiLoaderLayer::onNoticePressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);//vv
+	NoticeBoardUi::getInstance()->open();
+}
+
+// void MiniMapUiLoaderLayer::StartAutoFight()
+// {
+// 	//setButtonSpriteFrame(dynamic_cast<CCControlButton*>(getChildByTag(20)),"smallui_tingzhizhandou","smallui_tingzhizhandou","smallui_tingzhizhandou");
+// }
+// void MiniMapUiLoaderLayer::stopAutoFight()
+// {
+// 	//setButtonSpriteFrame(dynamic_cast<CCControlButton*>(getChildByTag(20)),"smallui_zidonghzandou","smallui_zidonghzandou","smallui_zidonghzandou");
+// }
+
+void MiniMapUiLoaderLayer::activitiesPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )//右上角活动按钮事件
+{
+	//gx add 2013.11.12 摆摊，交易，双修状态锁死
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isInRoleStateAny(RA_Stall))
+	{
+		ToolTip::getInstance()->push(GET_STR(2102));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return;
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_12);
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if(ui != NULL)
+	{
+		if(ui->isActivityGroupShow())
+		{
+			ui->showActivityBtnGroup(false);
+		}
+		else
+		{
+			ui->showActivityBtnGroup(true);
+		}
+	//	ui->showActivityTransferBtn(false);
+	}
+	//setBackGroundSize();
+}
+
+void MiniMapUiLoaderLayer::mapPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	OPEN_UI(WCT_WorldMapUi);
+}
+void MiniMapUiLoaderLayer::onZaixianPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if(ui != NULL)
+	{
+		//ui->_rewardBtnGroup->stopAnimationOnButton(RewardBtnGroup::NT_ZaixianBtn);
+		ui->_activityBtnGroup->showFrame(false);
+		GET_UI(RewardUi, WCT_RewardUi)->setTitle("\xE6\x81\xAD\xE5\x96\x9C\xE4\xBD\xA0\xE8\x8E\xB7\xE5\xBE\x97");
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);//vv	
+		LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+		if (!ploc)
+			return;
+		if (ploc->isInRoleStateAny(RA_Stall))
+		{
+			ToolTip::getInstance()->push(GET_STR(2102));
+			return;
+		}
+		else if (ploc->isInRoleStateAny(RA_ShuangXiu))
+		{
+			ToolTip::getInstance()->push(GET_STR(2101));
+			return;
+		}
+		else if (ploc->isInRoleStateAny(RA_Exchange))
+		{
+			ToolTip::getInstance()->push(GET_STR(7218));
+			return;
+		}
+		SendRewardMgrInfo info = RewardMgr::getInstance()->GetReceiveRewardInfo();
+		if(info._receivebCal)
+		{
+			//OPEN_UI(WCT_ZAIXIANLINGJIANG);
+			OnlineUiMgr::GetInstance()->openOnlineUi();
+		}
+		else
+		{
+			ToolTip::getInstance()->push(GET_STR(6009));
+		}	
+	}
+	/*World::getInstance()->setZaixianBtnAction();*/
+}
+
+
+void MiniMapUiLoaderLayer::onQiandaoPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if(ui != NULL)
+	{
+		//ui->_rewardBtnGroup->stopAnimationOnButton(RewardBtnGroup::NT_QiandaoBtn);
+		ui->_activityBtnGroup->showFrame(false);
+		//int Index =	MailRewardMgr::getInstance()->getCheckedMailIndex();
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);//vv
+		LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+		if (!ploc)
+			return;
+		if (ploc->isInRoleStateAny(RA_Stall))
+		{
+			ToolTip::getInstance()->push(GET_STR(2102));
+			return;
+		}
+		else if (ploc->isInRoleStateAny(RA_ShuangXiu))
+		{
+			ToolTip::getInstance()->push(GET_STR(2101));
+			return;
+		}
+		else if (ploc->isInRoleStateAny(RA_Exchange))
+		{
+			ToolTip::getInstance()->push(GET_STR(7218));
+			return;
+		}
+		OPEN_UI(WCT_NewSignUi);
+		//OPEN_UI(WCT_SignInUi);
+	}
+}
+
+void MiniMapUiLoaderLayer::emailPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if(ui != NULL)
+	{
+		//ui->_rewardBtnGroup->stopAnimationOnButton(RewardBtnGroup::NT_QiandaoBtn);
+		ui->_activityBtnGroup->showFrame(false);
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_12);
+		//std::list<tagMailReward> tempList = MailRewardMgr::getInstance()->getMailDataList();
+		if (MailRewardMgr::getInstance()->getMailConut()== 0)
+		{
+			ToolTip::getInstance()->push(GET_STR(2377).c_str());
+		} 
+		else
+		{
+			OPEN_UI(WCT_MAILREWARDUI);		
+		}	
+	}
+}
+
+void MiniMapUiLoaderLayer::onzhanbaoPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if (!IS_UI_OPEN(WCT_PACKAGEUI) && !IS_UI_OPEN(WCT_ROLEEQUIPUI) && !IS_UI_OPEN(WCT_SKILLUI) && !IS_UI_OPEN(WCT_WUXUEUI))
+	{
+		World::getInstance()->sendZhanBaoRequest();	
+	}
+}
+
+void MiniMapUiLoaderLayer::onGiftPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//根据序列号领取礼包;
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if (ui != NULL)
+	{
+		ui->_activityBtnGroup->showFrame(false);
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);//vv
+	InputSerialUi::getInstace()->open();
+
+
+}
+void MiniMapUiLoaderLayer::rankPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//gx add 2013.11.12 摆摊，交易，双修状态锁死;
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return;
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_12);
+	OPEN_UI(WCT_RankUi);
+}
+void MiniMapUiLoaderLayer::onHuoyuePressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if(ui != NULL)
+	{
+		ui->_activityBtnGroup->showFrame(false);
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);//vv	
+	OPEN_UI(WCT_HuoyueUi);	
+}
+
+void MiniMapUiLoaderLayer::onHuodongPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if(ui != NULL)
+	{
+		ui->_activityBtnGroup->showFrame(false);
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);//vv
+	OPEN_UI(WCT_DayActivity);
+}
+void MiniMapUiLoaderLayer::onArenaPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+
+	if (ui)
+	{
+		bool bLock =  !ui->isGroupBtnEnable(ActivityBtnGroup::EBP_Arena);
+		if (bLock)
+		{
+			ToolTip::getInstance()->push(GET_STR(7267));
+			return;
+		}
+// 		ui->showActivityBtnGroup(false);
+// 		ui->showActivityTransferBtn(true);
+	}
+
+// 	int nOpenLevel = GetFunOpenLevel(EFOL_JJC);
+// 	if (RoleManager::getInstance()->getLocalPlayer()->getLevel() < nOpenLevel) //竞技场开启等级
+// 	{
+// 		ToolTip::getInstance()->push(GET_STR(2373));
+// 	}
+// 	else
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);//vv
+		OPEN_UI(WCT_ARENAMAINUI);
+		//CLOSE_UI();
+		//bug 249
+		MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+		if(ui != NULL)
+		{
+			if(ui->isActivityGroupShow())
+			{
+				ui->showActivityBtnGroup(false);
+			}
+		}
+	}
+
+}
+void MiniMapUiLoaderLayer::onMysteryPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if(ui != NULL)
+	{
+
+		bool bLock =  !ui->isGroupBtnEnable(ActivityBtnGroup::EBP_TB);
+		if (bLock)
+		{
+			ToolTip::getInstance()->push(GET_STR(7268));
+			return;
+		}
+
+		ui->_activityBtnGroup->showFrame(false);
+
+	}
+	this->eraseTmpSE(5);
+// 	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+// 	if (RoleManager::getInstance()->getLocalPlayer()->getLevel() < 40)
+// 	{
+// 		ToolTip::getInstance()->push(GET_STR(2346));
+// 	}
+// 	else
+// 	{
+// 		OPEN_UI(WCT_ARENAPKUI);
+// 	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_2);
+// 	//检查开放等级
+// 	int nOpenLevel = GetFunOpenLevel(EFOL_SecretTreasure);
+// 	if( RoleManager::getInstance()->getLocalPlayer()->getLevel() < nOpenLevel ) //神秘宝箱开启等级
+// 	{
+// 		ToolTip::getInstance()->push(GET_STR(2374));
+// 	}
+// 	else
+	{
+		//OPEN_UI(WCT_MysteryBoxUi);
+	}
+	
+}
+void MiniMapUiLoaderLayer::onJuHuaSuanPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	//this->eraseTmpSE(4);
+
+	//MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);//开启充值活动界面
+
+}
+
+void MiniMapUiLoaderLayer::onBloodFightBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CCControlButton* t_pBtn = dynamic_cast<CCControlButton*>(pSender);
+	if (t_pBtn)
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_12);
+/*		this->setShowBFPrepareEff(!t_toPrepareShow);*/
+		bf_prepare_pressed t_evt;
+		SEND_EVENT(&t_evt);
+	}
+}
+
+void MiniMapUiLoaderLayer::showBFBattleUi(bool pIsShow)
+{
+	this->getChildByTag(21)->setVisible(!pIsShow);
+}
+
+
+void MiniMapUiLoaderLayer::showBFBattlePrepareUi(bool isShow)
+{
+	CCControlButton * intruduce= dynamic_cast<CCControlButton*>(this->getChildByTag(28));
+	CCNode* pNode = this->getChildByTag(MM_Btn_BFPrepare);
+	CCControlButton * store= dynamic_cast<CCControlButton*>(this->getChildByTag(29));
+	pNode->setVisible(isShow);
+	intruduce->setVisible(isShow);
+	
+	setShowBFPrepareEff(false);
+	if (isShow)
+		intruduce->setPosition(store->getPosition());
+	else
+		intruduce->setPosition(m_old_intruducepos);
+}
+
+void MiniMapUiLoaderLayer::showIntruduce1Btn(bool isShow)
+{
+	CCControlButton * intruduce= dynamic_cast<CCControlButton*>(this->getChildByTag(28));
+	CCControlButton * store= dynamic_cast<CCControlButton*>(this->getChildByTag(29));
+	intruduce->setVisible(isShow);
+
+	if (isShow)
+		intruduce->setPosition(store->getPosition());
+	else
+		intruduce->setPosition(m_old_intruducepos);
+}
+
+void MiniMapUiLoaderLayer::setShowBFPrepareEff(bool pIsShow)
+{
+	if (pIsShow)
+	{
+		if (this->getChildByTag(MM_Eff_BFPreEff) != NULL)
+			return;
+		CCNode* pNode = this->getChildByTag(MM_Btn_BFPrepare);
+		CCPoint pLoc = pNode->getPosition()/*  + ccp(- pNode->getContentSize().width , 0.0f)*/;
+		CCSprite* t_fSPEffect = CCSprite::create();
+		t_fSPEffect->setPosition(pLoc);
+		t_fSPEffect->setTag(MM_Eff_BFPreEff);
+		this->addChild(t_fSPEffect);
+		AnimationCache::AnimateList anims;
+		AnimationCache::createDefList(1, anims);
+		AnimationCache::getInstance()->getSinEffect(0,"E1_242", anims);
+		BSAnimate *animste = anims[0];
+		t_fSPEffect->runAction(CCRepeatForever::create(animste));
+	}
+	else
+	{
+		if (this->getChildByTag(MM_Eff_BFPreEff) == NULL)
+			return;
+		this->removeChildByTag(MM_Eff_BFPreEff);
+	}
+}
+
+
+void MiniMapUi::onXuanshangPressed(cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent){
+	//等级判断
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(ploc))
+		return;
+	if (ploc->getLevel() < 35)
+	{
+		ToolTip::getInstance()->push("\xE8\xAF\xA5\xE5\x8A\x9F\xE8\x83\xBD\xE5\xB0\x86\xE4\xBA\x8E\x33\x35\xE7\xBA\xA7\xE5\xBC\x80\xE5\x90\xAF");
+	}else{
+		_activityBtnGroup->showFrame(false);
+
+		RewardQuestMgr::getInstance()->sendUpdateQuestState();
+		RewardQuestMgr::getInstance()->sendUpdateQuestList(0);
+		OPEN_UI(WCT_RewardQuestUi);
+	}
+}
+
+
+
+
+void MiniMapUi::hideUi( bool isHide )
+{
+	MiniMapUiLoaderLayer *node = dynamic_cast<MiniMapUiLoaderLayer*>(getChildByTag(0));
+	if (node)
+	{
+		node->hideUi(isHide);
+	}
+}
+
+//void MiniMapUi::setTradingRedPoint( bool value )
+//{
+//	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+//	if (NULL == ploc)
+//		return ;
+//
+//	if(NumericalIniMgr::getInstance()->get_trading_open_level() > ploc->getLevel())
+//		return;
+//	MiniMapUiLoaderLayer *node = dynamic_cast<MiniMapUiLoaderLayer*>(getChildByTag(0));
+//	if (node)
+//		node->setTradingRedPoint(value);
+//}
+void MiniMapUi::SetGuaJiBtn( bool isShow )
+{
+	MiniMapUiLoaderLayer *node = dynamic_cast<MiniMapUiLoaderLayer*>(getChildByTag(0));
+	if (node)
+		node->SetGuaJiBtn(isShow);
+}
+void MiniMapUi::showZhanBaoBtn( bool isShow )
+{
+	if (_zhanBaoBtn)
+	{
+		SetGuaJiBtn(!isShow);
+		_zhanbaoIsShow = isShow;
+		_zhanBaoBtn->setVisible(isShow);
+	}
+}
+
+void MiniMapUi::showLongWeiBtn(bool isShow)
+{
+	MiniMapUiLoaderLayer *node = dynamic_cast<MiniMapUiLoaderLayer*>(getChildByTag(0));
+	if (node)
+		node->showLongWeiBoxBtn(isShow);
+}
+
+void MiniMapUi::showIntruduceBtn(bool isShow)
+{
+	MiniMapUiLoaderLayer *node = dynamic_cast<MiniMapUiLoaderLayer*>(getChildByTag(0));
+	if (node)
+		node->showIntruduceBtn(isShow);
+}
+
+void MiniMapUi::showIosRechargeFunction( bool isShow )
+{
+	//showGiftBtn(isShow);
+	showServeractivityBtn(isShow);
+	//showYunyingBtn(isShow);
+}
+
+void MiniMapUi::showGiftBtn( bool isShow )
+{
+	if (_giftBtn)
+	{
+		_giftBtn->setVisible(isShow);
+	}
+	sortBtnPos1();
+}
+
+void MiniMapUi::showServeractivityBtn( bool isShow )
+{
+	if (_serveractivityBtn)
+	{
+		if (_serveractivityBtn->isVisible() != isShow)
+		{
+			_serveractivityBtn->setVisible(isShow);
+		}
+	}
+}
+
+void MiniMapUi::showYunyingBtn( bool isShow )
+{
+	if (_yunyingBtn)
+	{
+		if (_yunyingBtn->isVisible() != isShow)
+		{
+			_yunyingBtn->setVisible(isShow);
+		}
+	}
+}
+void MiniMapUi::sortBtnPos1()
+{
+	if (_activityBtnGroup)
+	{
+		_activityBtnGroup->sortBtnPos1();
+	}
+}
+
+void MiniMapUi::showHand( bool show )
+{
+	MiniMapUiLoaderLayer *node = dynamic_cast<MiniMapUiLoaderLayer*>(getChildByTag(0));
+	if (node)
+		node->showHand(show);
+}
+
+CCControlButton* MiniMapUi::getBossBtn( eButtonTag index, bool isOut )
+{
+	CCControlButton* btn = NULL;
+	if (isOut)
+	{
+		if (BT_OutBoss == index)
+		{
+			if (layer)
+				btn = dynamic_cast<CCControlButton*>(layer->getChildByTag(BT_OutBoss));
+		}
+	}
+	else
+	{
+		if (BT_OldBoss == index)
+		{
+			if (_activityBtnGroup)
+				btn = dynamic_cast<CCControlButton*>(_activityBtnGroup->getChildByTag(BT_OldBoss));
+		}
+		else if (BT_InsideBoss == index)
+		{
+			if (_activityBtnGroup)
+				btn = dynamic_cast<CCControlButton*>(_activityBtnGroup->getChildByTag(BT_InsideBoss));
+		}
+	}
+	CC_ASSERT(btn);
+	return btn;
+}
+
+void MiniMapUi::showOutBoss( bool isShow )
+{
+	CCControlButton* outBtn = getBossBtn(BT_OutBoss,true);
+	if (outBtn)
+	{
+		if (outBtn->isVisible() != isShow)
+		{
+			outBtn->setVisible(isShow);
+			if (isShow)
+			{
+				CCSize size = outBtn->getContentSize();
+				CCSprite* sprite = dynamic_cast<CCSprite*>(outBtn->getChildByTag(0));
+				if (sprite == NULL)
+				{
+					sprite = CCSprite::create();
+					sprite->setTag(0);
+					sprite->setPosition(ccp(size.width/2,size.height/2));
+					outBtn->addChild(sprite);
+				}
+
+				if (sprite)
+				{
+					AnimationCache::AnimateList anims;
+					AnimationCache::createDefList(1, anims);
+					AnimationCache::getInstance()->getSinEffect(0, "E1_56", anims);
+					sprite->runAction(CCRepeatForever::create(anims[0]));
+				}
+			}
+			else
+			{
+				CCSprite* sprite = dynamic_cast<CCSprite*>(outBtn->getChildByTag(0));
+				if (sprite)
+				{
+					sprite->stopAllActions();
+					sprite->removeFromParentAndCleanup(true);
+				}
+			}
+			arrange();
+		}
+	}
+}
+
+void MiniMapUi::showNewBoss( bool isShow )
+{
+	CCControlButton* oldBtn = getBossBtn(BT_OldBoss,false);
+	if (oldBtn)
+	{
+		oldBtn->setVisible(!isShow);
+	}
+	
+	CCControlButton* insideBtn = getBossBtn(BT_InsideBoss,false);
+	if (insideBtn)
+	{
+		insideBtn->setVisible(isShow);
+	}
+}
+
+void MiniMapUi::showLeftTimeLabel( bool _show )
+{
+	MiniMapUiLoaderLayer *node = dynamic_cast<MiniMapUiLoaderLayer*>(getChildByTag(0));
+	if (node)
+		node->showLeftTimeLabel(_show);
+}
+
+void MiniMapUi::updateLeftTimeLabel( string str)
+{
+	MiniMapUiLoaderLayer *node = dynamic_cast<MiniMapUiLoaderLayer*>(getChildByTag(0));
+	if (node)
+		node->updateLeftTimeLabel(str);
+}
+
+void MiniMapUi::on_event_change_map( change_map* evt )
+{
+	refresh_leave_btn(evt->map_crc_id);
+}
+
+void MiniMapUi::onEnter()
+{
+	CCLayer::onEnter();
+
+	REGISTER_EVENT(change_map,MiniMapUi,on_event_change_map);
+	REGISTER_EVENT(refresh_invitation_list,MiniMapUi,on_event_refresh_invite_btn);
+	REGISTER_EVENT(notify_on_fire,MiniMapUi,on_event_on_fire);
+	REGISTER_EVENT(GuildBossButtonState,MiniMapUi,showGuildBossBtn);
+
+	unsigned int map_id = MapManager::getInstance()->getCurMapId();
+	refresh_leave_btn(map_id);
+
+	refresh_invitation_list evt;
+	evt.invitation_num = f_zhuzai_mgr::get_singleton().get_invitation_num();
+	on_event_refresh_invite_btn(&evt);
+}
+
+void MiniMapUi::onExit()
+{
+	CCLayer::onExit();
+
+	UNREGISTER_EVENT(change_map,MiniMapUi,on_event_change_map);
+	UNREGISTER_EVENT(refresh_invitation_list,MiniMapUi,on_event_refresh_invite_btn);
+	UNREGISTER_EVENT(notify_on_fire,MiniMapUi,on_event_on_fire);
+	UNREGISTER_EVENT(GuildBossButtonState,MiniMapUi,showGuildBossBtn);
+}
+
+void MiniMapUi::refresh_leave_btn( unsigned int map_id )
+{
+	if (map_id == MANOR_MAP_ID)//庄园地图
+	{
+		setButtonSpriteFrame(_leaveScripte,"smallui_likaizhuangyuanbtnn","smallui_likaizhuangyuanbtnh","smallui_likaizhuangyuanbtnn");
+	}
+	else
+	{
+		setButtonSpriteFrame(_leaveScripte,"smallui_likaifuben","smallui_likaifubenbtnh","smallui_likaifuben");
+	}
+}
+
+void MiniMapUi::on_event_refresh_invite_btn( refresh_invitation_list* evt )
+{
+	_invite_list_btn->setVisible(evt->invitation_num > 0);
+
+	World::getInstance()->SetHighLight(_invite_list_btn,WT_CCCONTROLBUTTON,999,evt->invitation_num,true,2,20);
+}
+
+int const FIRE_BTN_EFT = 123221;
+
+void MiniMapUi::on_event_on_fire( notify_on_fire* evt )
+{
+	if (_on_fire_btn->isVisible() == evt->show) return;
+
+	_on_fire_btn->setVisible(evt->show);
+	arrange();
+	if(evt->show)
+	{
+		float disappear_time =CFG(float,"transfer_disappear",500) ;
+		schedule(schedule_selector(MiniMapUi::hide_fire),disappear_time);
+
+		if (_on_fire_btn->getChildByTag(FIRE_BTN_EFT))
+			_on_fire_btn->removeChildByTag(FIRE_BTN_EFT);
+
+		CCSprite* eft_root = CCSprite::create();
+		//t_fSPEffect->setAnchorPoint(CCPointZero);
+		eft_root->setPosition(_on_fire_btn->getContentSize()/2);
+		//eft_root->setTag(FIRE_BTN_EFT);
+		_on_fire_btn->addChild(eft_root,-100,FIRE_BTN_EFT);
+
+		AnimationCache::AnimateList anims;
+		AnimationCache::createDefList(1, anims);
+		AnimationCache::getInstance()->getSinEffect(0,"E1_245", anims);
+		BSAnimate *animste = anims[0];
+		eft_root->runAction(CCRepeatForever::create(animste));
+	}
+}
+
+void MiniMapUi::hide_fire( float )
+{
+	_on_fire_btn->setVisible(false);
+	arrange();
+	unschedule(schedule_selector(MiniMapUi::hide_fire));
+}
+
+void MiniMapUi::onGetName( unsigned int roleid , const std::string& name )
+{
+	f_zhuzai_mgr& mgr = f_zhuzai_mgr::get_singleton();
+	if(mgr.get_manor_owner_id() == roleid
+		&& mgr.is_in_manor_map())
+	{
+		std::string title = MapManager::getInstance()->getMapName(MapManager::getInstance()->getCurMapId());
+		changeAreaName(title.c_str());
+	}
+}
+
+int const GUILD_BOSS_EFT = 123 ;
+
+void MiniMapUi::showGuildBossBtn(GuildBossButtonState* trans)
+{
+	_guildBossBn->setVisible(trans->isShow);
+	if (trans->isShow)
+	{
+		CCSprite* effect_sprite = dynamic_cast<CCSprite*>(_guildBossBn->getChildByTag(GUILD_BOSS_EFT));
+		if (!effect_sprite)
+		{
+			effect_sprite = CCSprite::create();
+			effect_sprite->setPosition(_guildBossBn->getContentSize()/2);
+			_guildBossBn->addChild(effect_sprite,-100,GUILD_BOSS_EFT);
+		}
+
+		AnimationCache::AnimateList anims;
+		AnimationCache::createDefList(1, anims);
+		AnimationCache::getInstance()->getSinEffect(0,"E1_245", anims);
+		BSAnimate *animste = anims[0];
+		effect_sprite->runAction(CCRepeatForever::create(animste));
+	}
+	else
+	{
+		if (_guildBossBn->getChildByTag(GUILD_BOSS_EFT))
+		{
+			_guildBossBn->removeChildByTag(GUILD_BOSS_EFT);
+		}
+	}
+	
+	arrange();
+}
+
+MiniMapUiLoaderLayer::MiniMapUiLoaderLayer()
+	:_tmpAcNode8(NULL)
+	,_tmpAcNode9(NULL)
+	,m_pTradingRedPoint(NULL)
+	,_hand(NULL)
+	,_auto_act_btn(NULL)
+	,m_pBtnBFPrepare(NULL)
+	,m_pBtnBFCancel(NULL)
+	,m_bf_prepare_btn_state_pre(false)
+{
+
+}
+
+void MiniMapUiLoaderLayer::QiangHongBaoPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	this->eraseTmpSE(1);
+	//MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if (RoleManager::getInstance()->getLocalPlayer()->getLevel() < 40)
+	{
+		ToolTip::getInstance()->push(GET_STR(7046));
+	}
+	else
+	{
+		ToolTip::getInstance()->push(GET_STR(7046));
+	}
+}
+
+void MiniMapUiLoaderLayer::onCanReceiveBtnPressed(cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);//vv
+	OPEN_UI(WCT_LevelRewardUi);
+}
+
+void MiniMapUiLoaderLayer::onBossPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if(ui != NULL)
+	{
+		ui->_activityBtnGroup->showFrame(false);
+// 		bool bLock =  !ui->isGroupBtnEnable(ActivityBtnGroup::EBP_Boss);
+// 		if (bLock)
+// 		{
+// 			ToolTip::getInstance()->push(GET_STR(7265));
+// 			return;
+// 		}
+	}
+
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);//vv
+
+    WorldPacket C2G_Msg(NET_C2G_REQUEST_BOSS_LIST);
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);
+	BossPKMgr::getInstance()->setOpenBossUi(true);
+}
+
+void MiniMapUiLoaderLayer::onNewBossPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if(ui != NULL)
+	{
+		ui->_activityBtnGroup->showFrame(false);
+		// 		bool bLock =  !ui->isGroupBtnEnable(ActivityBtnGroup::EBP_Boss);
+		// 		if (bLock)
+		// 		{
+		// 			ToolTip::getInstance()->push(GET_STR(7265));
+		// 			return;
+		// 		}
+	}
+
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);//vv
+
+	WorldPacket C2G_Msg(NET_C2G_REQUEST_BOSS_LIST);
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);
+	BossPKMgr::getInstance()->setOpenBossUi(true);
+}
+
+
+
+void MiniMapUiLoaderLayer::onFubenPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if(ui != NULL)
+	{
+ 		bool bLock =  !ui->isGroupBtnEnable(ActivityBtnGroup::EBP_Battle);
+ 		if (bLock)
+ 		{
+ 			ToolTip::getInstance()->push(GET_STR(7266));
+ 			return;
+ 		}
+		ui->_activityBtnGroup->showFrame(false);
+
+	}
+// 
+// 	OPEN_UI(WCT_InstanceUi);
+// 	NewPlayerGuider::getInstance()->onMiniMapBtnClicked(MiniMapUi::BT_Instance);
+	//[bing] debug
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);//vv
+	//OPEN_UI(WCT_FubenUI);
+	FubenMgr::GetInstance().openFenUi();
+	//OPEN_UI(WCT_RechargeUi);
+}
+
+void MiniMapUiLoaderLayer::onBiblePressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if(ui != NULL)
+	{
+		ui->_activityBtnGroup->showFrame(false);
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);//vv
+	OPEN_UI(WCT_NewGuildBibleUi);
+	
+}
+void MiniMapUiLoaderLayer::onShouChongPressed(cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if(ui != NULL)
+	{
+		ui->_activityBtnGroup->showFrame(false);
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_14);//vv
+    OPEN_UI(WCT_ShouChongUi);
+}
+
+
+void MiniMapUiLoaderLayer::onServerActivityBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	std::map<int, SPacket_Activity> activityList = KaifuHuodongMgr::getInstance()->GetActivityList();
+	if (activityList.size() <= 0)
+	{
+		ToolTip::getInstance()->push(GET_STR(9330));//当前没有开启的开服活动
+		return;
+	}
+	OPEN_UI(WCT_KaifuActivity);
+	if (1 == World::getInstance()->getOpenStage())
+	{
+		//打开开服活动
+		/*eraseTmpSE(3);
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_2);
+		OPEN_UI(WCT_ServerActivityUi);*/
+	}
+	/*
+	else
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_2);
+		OPEN_UI(WCT_SynthesisServerUi);
+	}
+	*/
+
+}
+
+void MiniMapUiLoaderLayer::onCoreTreePressed( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	this->eraseTmpSE(2);
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if(ui != NULL)
+	{
+		ui->_activityBtnGroup->showFrame(false);
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_2);
+	OPEN_UI(WCT_CoreTreeUi);
+}
+
+void MiniMapUiLoaderLayer::onTreasurePressed( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+	if(ui != NULL)
+	{
+
+		bool bLock =  !ui->isGroupBtnEnable(ActivityBtnGroup::EBP_OR);
+		if (bLock)
+		{
+			ToolTip::getInstance()->push(GET_STR(7269));
+			return;
+		}
+		ui->_activityBtnGroup->showFrame(false);
+		
+	}
+	if (IS_UI_OPEN(WCT_RoleTitleUi) ||  IS_UI_OPEN(WCT_RoleInfoUi) ||  IS_UI_OPEN(WCT_SKILLUI)||  IS_UI_OPEN(WCT_FRIENDUI) ||  IS_UI_OPEN(WCT_PACKAGEUI) ||  IS_UI_OPEN(WCT_HookSetUi) ||IS_UI_OPEN(WCT_ROLEATTRUI) ||IS_UI_OPEN(WCT_ROLEEQUIPUI))
+	{
+		return;
+	}
+
+// 	int nOpenLevel = GetFunOpenLevel(EFOL_TreasureHouse);
+// 	if (RoleManager::getInstance()->getLocalPlayer()->getLevel() < nOpenLevel)
+// 	{
+// 		ToolTip::getInstance()->push(GET_STR(2346));
+// 	}
+// 	else
+	{
+		this->eraseTmpSE(6);
+
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_2);
+		OPEN_UI(WCT_TreasureLoftUi);
+	}
+}
+void MiniMapUiLoaderLayer::forceShowUi( bool show )
+{
+	_showState = show;
+	showUi(_showState);
+}
+
+void MiniMapUiLoaderLayer::onExit()
+{
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+
+	this->eraseTmpSE(7);
+	AnimationCache::releaseDefList(_ballAnims);
+	AnimationCache::releaseDefList(_waveAnims);
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+
+	unscheduleUpdate();
+	UNREGISTER_EVENT(GUAJIBTNNEEDCANGET,MiniMapUiLoaderLayer,guaJiBtnSetHeightLight);
+	UNREGISTER_EVENT(refresh_auto_btn,MiniMapUiLoaderLayer,on_event_refresh_autoact_btn);
+	UNREGISTER_EVENT(refresh_bfprepare_btn,MiniMapUiLoaderLayer,on_event_refresh_bfPrepare_btn);
+}
+
+GameActionNode* MiniMapUiLoaderLayer::getTmpSuperEffect( int idx )
+{
+	GameActionNode* tmpSEAcNode = GameActionNode::create();
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string sSEActivity2 = sSEDir + "E1_56.plist";
+
+	tmpSEAcNode->InitWithPList(sSEActivity2.c_str(), "E1_56");
+
+	/*
+	for (int i=1; i<99; ++i)
+	{
+		CCString* seStr = CCString::createWithFormat("%s%02d", tmpSEStr.c_str(), i);
+		if(!tmpSEAcNode->AddTexture(seStr->getCString(), "Effect", "png"))
+			break;
+	}
+	*/
+	return tmpSEAcNode;
+}
+
+
+GameActionNode* MiniMapUiLoaderLayer::getTmpBallEffect()
+{
+	GameActionNode* tmpSEAcNode = GameActionNode::create();
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string sSEActivity2 = sSEDir + "E1_166.plist";
+
+	tmpSEAcNode->InitWithPList(sSEActivity2.c_str(), "E1_166");
+
+	return tmpSEAcNode;
+}
+
+GameActionNode* MiniMapUiLoaderLayer::getTmpWaveEffect()
+{
+	GameActionNode* tmpSEAcNode = GameActionNode::create();
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string sSEActivity2 = sSEDir + "E1_167.plist";
+
+	tmpSEAcNode->InitWithPList(sSEActivity2.c_str(), "E1_167");
+
+	return tmpSEAcNode;
+}
+
+GameActionNode* MiniMapUiLoaderLayer::getTmpBoomEffect()
+{
+	GameActionNode* tmpSEAcNode = GameActionNode::create();
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string sSEActivity2 = sSEDir + "E1_168.plist";
+
+	tmpSEAcNode->InitWithPList(sSEActivity2.c_str(), "E1_168");
+
+	return tmpSEAcNode;
+}
+
+
+void MiniMapUiLoaderLayer::eraseTmpSE(int idx)
+{
+	switch(idx)
+	{
+	case 1:
+		if(_tmpAcNode1)
+		{
+			_tmpAcNode1->StopAction();
+			_tmpAcNode1->removeFromParent();
+			_tmpAcNode1 = NULL;
+		}
+		break;
+	case 2:
+		if(_tmpAcNode2)
+		{
+			_tmpAcNode2->StopAction();
+			_tmpAcNode2->removeFromParent();
+			_tmpAcNode2 = NULL;
+		}
+		break;
+	case 3:
+		if(_tmpAcNode3)
+		{
+			_tmpAcNode3->StopAction();
+			_tmpAcNode3->removeFromParent();
+			_tmpAcNode3 = NULL;
+		}
+		break;
+	case 4:
+		if(_tmpAcNode4)
+		{
+			_tmpAcNode4->StopAction();
+			_tmpAcNode4->removeFromParent();
+			_tmpAcNode4 = NULL;
+		}
+		break;
+	case 5:
+		if(_tmpAcNode5)
+		{
+			_tmpAcNode5->StopAction();
+			_tmpAcNode5->removeFromParent();
+			_tmpAcNode5 = NULL;
+		}
+		break;
+	case 6:
+		if(_tmpAcNode6)
+		{
+			_tmpAcNode6->StopAction();
+			_tmpAcNode6->removeFromParent();
+			_tmpAcNode6 = NULL;
+		}break;
+
+	case 7:
+		if(_tmpAcNode7)
+		{
+			_tmpAcNode7->StopAction();
+			_tmpAcNode7->removeFromParent();
+			_tmpAcNode7 = NULL;
+		} break;
+
+	case 8:
+		if(_tmpAcNode8)
+		{
+			_tmpAcNode8->StopAction();
+			_tmpAcNode8->removeFromParent();
+			_tmpAcNode8 = NULL;
+		}
+		break;
+
+	case 9:
+		if(_tmpAcNode9)
+		{
+			_tmpAcNode9->StopAction();
+			_tmpAcNode9->removeFromParent();
+			_tmpAcNode9 = NULL;
+		}
+		break;
+	case 10:
+		if(_tmpAcNode10)
+		{
+			_tmpAcNode10->StopAction();
+			_tmpAcNode10->removeFromParent();
+			_tmpAcNode10 = NULL;
+		}
+	}
+			
+}
+
+void MiniMapUiLoaderLayer::SetBtnVisible(int idx, bool bVisible, bool bSort)
+{
+	if(idx < 0 || idx >= 6)
+		return;
+
+	bool bFind = false;
+	std::list<int>::iterator IT = m_ShowBtnList.begin();
+	while(IT != m_ShowBtnList.end())
+	{
+		if(*IT == idx)
+		{
+			bFind = true;
+
+			if(!bVisible)
+			{
+				m_pBtnArray[*IT]->setVisible(false);
+				m_pBtnArray[*IT]->setPosition(m_BtnPos[*IT]);
+				m_ShowBtnList.erase(IT);
+			}
+			break;
+		}
+
+		IT++;
+	}
+
+	if(bVisible && !bFind)
+	{
+		m_pBtnArray[idx]->setVisible(true);
+		if(1 == idx
+			&& m_pBtnArray[idx]->getPosition().equals(m_BtnPos[idx]))
+		{//...摇钱树按钮
+			m_pBtnArray[idx]->setPosition(m_pBtnArray[idx]->getPositionX()-m_pBtnArray[idx]->getContentSize().width*2, m_pBtnArray[idx]->getPositionY());
+		}
+		m_ShowBtnList.push_back(idx);
+	}
+	else if(bVisible)
+		return;
+/*
+	if(bSort)
+	{
+		int i = 0;
+		IT = m_ShowBtnList.begin();
+		while(IT != m_ShowBtnList.end())
+		{
+			m_pBtnArray[*IT]->setPosition(m_BtnPos[i]);
+
+			switch(*IT)
+			{
+				case 3:
+					World::getInstance()->getMiniMapUi()->_btnRec[5] = World::getInstance()->getMiniMapUi()->_srcBtnRec[i];
+					break;
+				case 4:
+					World::getInstance()->getMiniMapUi()->_btnRec[6] = World::getInstance()->getMiniMapUi()->_srcBtnRec[i];
+					break;
+			}
+
+			i++;
+			IT++;
+		}
+	}
+
+	
+	float fw = World::getInstance()->getMiniMapUi()->_btnRec[0].size.width;
+	float fh = World::getInstance()->getMiniMapUi()->_btnRec[0].size.height;
+	float fx = m_pBtnArray[3]->getPosition().x;
+	float fy = m_pBtnArray[3]->getPosition().y;
+	World::getInstance()->getMiniMapUi()->_btnRec[0].setRect(fx, fy, fw - 8.0f, fh);
+
+	fw = World::getInstance()->getMiniMapUi()->_btnRec[6].size.width;
+	fh = World::getInstance()->getMiniMapUi()->_btnRec[6].size.height;
+	fx = m_pBtnArray[4]->getPosition().x;
+	fy = m_pBtnArray[4]->getPosition().y;
+	World::getInstance()->getMiniMapUi()->_btnRec[6].setRect(fx, fy, fw - 8.0f, fh);
+	*/
+}
+
+void MiniMapUiLoaderLayer::LPLvSetBtnVisible( int nLevel, bool bIsInit )
+{
+	if(nLevel >= 1 && nLevel<37)
+	{
+		//SetBtnVisible(5, true, true);		//充值活动
+		//_background->setContentSize(ccp(255,155));
+	}
+	if(nLevel >= 37 && nLevel<50)
+	{
+		//SetBtnVisible(5, true, true);		//充值活动
+		//SetBtnVisible(4, true, true);		//神秘宝箱
+		//_background->setContentSize(ccp(330,155));
+	}
+	if(nLevel >= 50)
+	{
+		//SetBtnVisible(5, true, true);		//充值活动
+		//SetBtnVisible(4, true, true);		//神秘宝箱
+		//SetBtnVisible(3, true, true);		//藏宝阁
+		//_background->setContentSize(ccp(395,155));
+	}
+}
+
+void MiniMapUiLoaderLayer::onStorePressed( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return;
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_14);
+	OPEN_UI(WCT_STOREUI);
+	static bool palyAudioFlag = false;
+	palyAudioFlag = !palyAudioFlag;
+	if (palyAudioFlag)
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundNpcEffect(SOUND_STORE1,false);
+	}
+	else
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundNpcEffect(SOUND_STORE2,false);
+	}
+
+	//OPEN_UI(WCT_VIPUI);
+}
+
+void MiniMapUiLoaderLayer::setBackGroundSize()
+{
+	if (m_pBtnArray[5]->isVisible())
+	{
+		_background->setContentSize(ccp(255,155));
+	}
+	if (m_pBtnArray[4]->isVisible())
+	{
+		_background->setContentSize(ccp(330,155));
+	}
+	if (m_pBtnArray[3]->isVisible())
+	{
+		_background->setContentSize(ccp(395,155));
+	}
+}
+
+void MiniMapUiLoaderLayer::onTeamNotice( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	RespListView* view = RespListView::createFromCCBI("shenqing",NULL);
+	view->popShow();
+
+	this->getParent()->addChild(view,WZ_POPUI,WCT_TeamResp);
+
+	
+}
+
+void MiniMapUiLoaderLayer::update( float )
+{
+	TeamMgr* mgr = TeamMgr::getInstance();
+	mpTeamNotice->setVisible(!mgr->isQueueEmpty());
+}
+
+void MiniMapUiLoaderLayer::onEnter()
+{
+	CCLayer::onEnter();
+
+	scheduleUpdate();
+	REGISTER_EVENT(GUAJIBTNNEEDCANGET,MiniMapUiLoaderLayer,guaJiBtnSetHeightLight);
+
+	REGISTER_EVENT(refresh_auto_btn,MiniMapUiLoaderLayer,on_event_refresh_autoact_btn);
+
+	REGISTER_EVENT(refresh_bfprepare_btn,MiniMapUiLoaderLayer,on_event_refresh_bfPrepare_btn);
+}
+
+void MiniMapUiLoaderLayer::hideUi( bool isHide )
+{
+	this->getChildByTag(1)->setVisible(!isHide);
+	this->getChildByTag(2)->setVisible(!isHide);
+	this->getChildByTag(21)->setVisible(isHide);
+	this->getChildByTag(22)->setVisible(isHide);
+	if(!isHide){
+		hideTianlaoTimeInfo(!isHide);//当isHide为false时,离开副本不显示，勇闯天牢时间不显示
+	}
+
+	/*屏蔽
+	if(isHide){
+		_funcGuideNode->setPosition(ccp(_funcGuidePos.x + _funcGuideNode->getContentSize().width * 2, _funcGuidePos.y));
+	}else{
+		_funcGuideNode->setPosition(_funcGuidePos);
+	}*/
+
+	//this->getChildByTag(1)->setPosition(_srcPos);
+}
+
+void MiniMapUiLoaderLayer::hideTianlaoTimeInfo(bool isHide)//勇闯天牢是否显示时间
+{
+	//勇闯天牢 显示时间
+	CCNode* tlTimeNode = this->getChildByTag(24);
+	if(tlTimeNode){
+		if(tlTimeNode->isVisible() && isHide){
+			tlTimeNode->setVisible(false);
+		}else if(!tlTimeNode->isVisible() && !isHide){
+			tlTimeNode->setVisible(true);
+		}
+	}
+}
+
+bool MiniMapUiLoaderLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCNode *areaNameNode = getChildByTag(22);
+	if (areaNameNode && areaNameNode->isVisible())
+	{
+		if (isTouchOnNodeContent(areaNameNode, pTouch))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void MiniMapUiLoaderLayer::onLuanDouHuiPressed( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_12);
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isInRoleStateAny(RA_Stall))
+	{
+		ToolTip::getInstance()->push(GET_STR(2102));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return;
+	}
+	if (InstanceMgr::getInstance()->IsCannotFindWayOutTheMap())
+	{
+		ToolTip::getInstance()->push(GET_STR(7264));
+		return;
+	}
+	ActivityMgr::getInstance()->activityTrans(2);
+}
+
+//void MiniMapUiLoaderLayer::setTradingRedPoint( bool value )
+//{
+//	if(NULL != m_pTradingRedPoint)
+//		m_pTradingRedPoint->setVisible(value);
+//}
+
+void MiniMapUiLoaderLayer::onbaodianBtnPressed( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	static bool palyAudioBaoDianFlag=false;
+	palyAudioBaoDianFlag=!palyAudioBaoDianFlag;
+	if (palyAudioBaoDianFlag)
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundNpcEffect(SOUND_32);//vv
+	}
+	else
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundNpcEffect(SOUND_33);//vv
+	}
+	OPEN_UI(WCT_MirValuableBookUi);
+	CCLayer *layer = (CCLayer*)getChildByTag(1);
+	CCControlButton* button = dynamic_cast<CCControlButton*>(layer->getChildByTag(BT_BaoDian));
+	if(button)
+	{
+		GameActionNode* node = dynamic_cast<GameActionNode*>(button->getChildByTag(TMP_AC_NODE10));
+		if(node != NULL)
+		{
+			this->eraseTmpSE(10);
+		}
+	}
+	
+}
+
+//屏蔽
+//void MiniMapUiLoaderLayer::onyugaoPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+//{
+//	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+//	OPEN_UI(WCT_FuncGuideUi);
+//}
+
+void MiniMapUiLoaderLayer::closeBaoDianEffect(int functionValue)
+{
+	//新手宝典相关
+	std::vector<GrowthPathItemData> const& data_vector = MirValuableBookMgr::getInstance()->getDataFromDB();
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	CC_ASSERT(lp != NULL);
+	if(lp != NULL)
+	{
+		GrowthPathItemData const* pathItem = NULL;
+		for(std::vector<GrowthPathItemData>::const_iterator iter = data_vector.begin();iter != data_vector.end(); ++iter)
+		{
+			//GrowthPathItemData itemData = *iter;
+			if((*iter).btnFunction == functionValue)
+			{
+				pathItem = &(*iter);
+				break;
+			}
+		}
+		if(pathItem != NULL)
+		{
+			if(pathItem->openyesno == 1)
+			{
+				GET_UI(MirValuableBookUi,WCT_MirValuableBookUi)->setIsShowRedPoint(false);
+				CCLayer *layer = (CCLayer*)this->getChildByTag(1);
+				if(layer != NULL)
+				{
+					CCControlButton* button = dynamic_cast<CCControlButton*>(layer->getChildByTag(BT_BaoDian));
+					if(button)
+					{
+						GameActionNode* node = dynamic_cast<GameActionNode*>(button->getChildByTag(TMP_AC_NODE10));
+						if(node)
+						{
+							this->eraseTmpSE(10);
+						}
+					}
+				}
+
+			}
+		}
+	}
+}
+
+
+void MiniMapUiLoaderLayer::showHand(bool show)
+{
+
+	if(_hand)
+	{
+		_hand->setVisible(show);
+		_hand->StopAction();
+		if(show)
+		{
+			_hand->BeginAction(0.09f,true);
+		}
+	}
+
+
+}
+
+//龙卫
+
+void MiniMapUiLoaderLayer::onshenlongbaozangPressed( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	OPEN_UI(WCT_LongWeiBoxUi);
+
+	LongWeiBoxUiLayer *uilayer = getUiNodeByTag<LongWeiBoxUiLayer>(WCT_LongWeiBoxUi);
+	if(uilayer)
+		uilayer->setShowDes(false);
+	
+}
+
+void MiniMapUiLoaderLayer::showLongWeiBoxBtn( bool show )
+{
+	if(m_btnLongWeiBox&&m_btnLongWeiDes)
+	{
+		m_btnLongWeiBox->setVisible(show);
+		m_btnLongWeiDes->setVisible(show);
+	}
+		
+}
+
+void MiniMapUiLoaderLayer::showIntruduceBtn(bool show)
+{
+
+	CCControlButton * intruduce= dynamic_cast<CCControlButton*>(this->getChildByTag(28));
+	CCControlButton * store= dynamic_cast<CCControlButton*>(this->getChildByTag(29));
+	if(intruduce&&store)
+	{
+		intruduce->setVisible(show);
+		store->setVisible(show);
+	}
+}
+
+void MiniMapUiLoaderLayer::onStore1Pressed( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	else if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return;
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_14);
+	OPEN_UI(WCT_STOREUI);
+	static bool palyAudioFlag = false;
+	palyAudioFlag = !palyAudioFlag;
+	if (palyAudioFlag)
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundNpcEffect(SOUND_STORE1,false);
+	}
+	else
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundNpcEffect(SOUND_STORE2,false);
+	}
+}
+void MiniMapUiLoaderLayer::onwanfashuoming1Pressed( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+		unsigned int curMapID = MapManager::getInstance()->getCurMapId();
+		if ( curMapID == BF_PREPARE_MAP || curMapID == BF_BATTLE_MAP)
+		{
+			BloodFightMgr::getInstance()->try_open_battle_notice_layer();
+			return;
+		}
+		if ( SBKSDManager::get_singleton_ptr()->isInShenDianMap(curMapID))
+		{
+			PlacardManager::getInstance()->open_placard_node(SHENDIANDESCID);
+			return;
+		}
+		FMBManager::getInstance()->try_open_notice_layer();
+}
+
+
+void MiniMapUiLoaderLayer::onwanfashuomingPressed( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+// 	OPEN_UI(WCT_LongWeiBoxUi);
+// 
+// 	LongWeiBoxUiLayer *uilayer = getUiNodeByTag<LongWeiBoxUiLayer>(WCT_LongWeiBoxUi);
+// 	if(uilayer)
+// 		uilayer->setShowDes(true);
+	PlacardManager::getInstance()->open_placard_node(20);
+}
+
+void MiniMapUiLoaderLayer::onlongweitiaozhanPressed( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+// 	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());
+// 
+// 	if (ui)
+// 	{
+// 		bool bLock =  !ui->isGroupBtnEnable(ActivityBtnGroup::EBP_Dragon);
+// 		if (bLock)
+// 		{
+// 			ToolTip::getInstance()->push(GET_STR(9630));
+// 			return;
+// 		}
+// 	}
+	
+	if(!InstanceMgr::getInstance()->m_canEnterDragon)
+	{
+		ToolTip::getInstance()->push(GET_STR(9640));
+		return;
+	}
+
+	bool ret = NewFuncGuider::get_singleton().isForceOpenByActPos(ActivityBtnGroup::EBP_Dragon);
+	if(!ret)
+	{
+		ToolTip::getInstance()->push(GET_STR(9635));
+		return;
+	}
+
+	MiniMapUi *ui = dynamic_cast<MiniMapUi*>(getParent());//隐藏小按钮
+	if(ui != NULL)
+	{
+		if(ui->isActivityGroupShow())
+		{
+			ui->showActivityBtnGroup(false);
+		}
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	OPEN_UI(WCT_LongWeiDesUi);
+}
+
+
+
+void MiniMapUiLoaderLayer::showLeftTimeLabel(bool _show)
+{
+	if(_fmLefetTimeNode)
+	{
+		_fmLefetTimeNode->setVisible(_show);
+	}
+	
+}
+void MiniMapUiLoaderLayer::updateLeftTimeLabel(string str)
+{
+	if(_fmLefetTimeNode&&_fmLeftTimeLabel&&_fmLefetTimeNode->isVisible())
+	{
+		_fmLeftTimeLabel->setString(str.c_str());
+	}
+
+}
+
+void MiniMapUiLoaderLayer::on_sure_fmb_transmit()
+{
+	NET_SIC_posthouse cmd;
+	cmd.dwPosID = 2030;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+
+	World::getInstance()->set_is_show_fmb_btn(false);
+	MiniMapUi* ui = World::getInstance()->getMiniMapUi();
+	if(ui)
+	{
+		ui->refresh_fmb_btn_state();
+	}
+}
+
+void MiniMapUiLoaderLayer::guaJiBtnSetHeightLight(GUAJIBTNNEEDCANGET* btnCanGet)
+{
+	CCLayer *layer = (CCLayer*)getChildByTag(1);
+	CCControlButton* guaJiBtn = dynamic_cast<CCControlButton*>(layer->getChildByTag(47));
+	if (btnCanGet->needHeightLight)
+	{
+		if (World::getInstance()->isHighLight(guaJiBtn,WT_CCCONTROLBUTTON,WCT_GuiJiUi))
+		{
+			World::getInstance()->SetHighLight(guaJiBtn,WT_CCCONTROLBUTTON,WCT_GuiJiUi,0,false);
+		}
+		World::getInstance()->SetHighLight(guaJiBtn,WT_CCCONTROLBUTTON,WCT_GuiJiUi,1,true,-9,15);
+	}
+	else
+	{
+		if (World::getInstance()->isHighLight(guaJiBtn,WT_CCCONTROLBUTTON,WCT_GuiJiUi))
+		{
+			World::getInstance()->SetHighLight(guaJiBtn,WT_CCCONTROLBUTTON,WCT_GuiJiUi,0,false);
+		}
+	}
+}
+
+void MiniMapUiLoaderLayer::on_event_refresh_autoact_btn( refresh_auto_btn* evt )
+{
+	m_auto_act_btn_state_cache = evt->auto_act;
+
+	CCAction* act = CCSequence::createWithTwoActions(CCDelayTime::create(0.1f)
+		,CCCallFunc::create(this,callfunc_selector(MiniMapUiLoaderLayer::delay_refresh_autoact_btn)));
+
+	this->runAction(act);
+}
+
+void MiniMapUiLoaderLayer::delay_refresh_autoact_btn()
+{
+	std::string btn_sprte_frame_name = m_auto_act_btn_state_cache?"smallui_tingzhizhandou" :"smallui_zidonghzandou";
+
+	setButtonSpriteFrame(_auto_act_btn,btn_sprte_frame_name,btn_sprte_frame_name,btn_sprte_frame_name);
+
+	if(_hand&&_hand->isVisible())
+		showHand(false);
+}
+
+void MiniMapUiLoaderLayer::on_event_refresh_bfPrepare_btn( refresh_bfprepare_btn* evt )
+{
+	m_bf_prepare_btn_state_pre = evt->isPrepare;
+	if (evt->isHide)
+	{
+		delay_refresh_bfPrepare_btn();
+		CCControlButton* t_btn = dynamic_cast<CCControlButton*>(this->getChildByTag(MM_Btn_BFPrepare));
+		t_btn->setVisible(false);
+		setShowBFPrepareEff(false);
+		return;
+	}
+	else
+	{
+		setShowBFPrepareEff(evt->isPrepare);
+	}
+
+	CCAction* act = CCSequence::createWithTwoActions(CCDelayTime::create(0.1f)
+		,CCCallFunc::create(this,callfunc_selector(MiniMapUiLoaderLayer::delay_refresh_bfPrepare_btn)));
+
+	this->runAction(act);
+}
+
+void MiniMapUiLoaderLayer::delay_refresh_bfPrepare_btn()
+{
+	std::string btn_sprte_frame_name = m_bf_prepare_btn_state_pre?"smallui_zhunbeicanzhanbtnh" :"smallui_zhunbeicanzhanbtnn";
+	CCControlButton* t_btn = dynamic_cast<CCControlButton*>(this->getChildByTag(MM_Btn_BFPrepare));
+	setButtonSpriteFrame(t_btn,btn_sprte_frame_name,btn_sprte_frame_name,btn_sprte_frame_name);
+}
+
+void MiniMapUiLoaderLayer::onyaoqingPressed( cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	OPEN_UI(WCT_ZHUZAI_INVITE_LIST_UI);
+}
+
+void MiniMapUiLoaderLayer::on_fire( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	MessageBoxUi* mb = MessageBoxUi::createWithTwoBtn_LabelEx(TEXT_UTF8_TISHI
+		,STRING_TABLE["teleport_notice"]
+		,TEXT_UTF8_QUEDING
+		,TEXT_UTF8_QUXIAO);
+	World::getInstance()->getScene()->addChild(mb, WZ_MESSAGEBOX);
+	mb->signalOkBtnPressed.connect(this,&MiniMapUiLoaderLayer::confirm_teleport);
+}
+
+void MiniMapUiLoaderLayer::confirm_teleport()
+{
+	f_zhuzai_mgr::get_singleton().teleport_to_fire();
+
+	notify_on_fire evt;
+	evt.show = false;
+	SEND_EVENT(&evt);
+}
+
+void MiniMapUiLoaderLayer::onGuildBossBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	MessageBoxUi* mb = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI
+		,STRING_TABLE["boss_exist_and_to_challenge"]
+	,TEXT_UTF8_QUEDING
+		,TEXT_UTF8_QUXIAO);
+	mb->signalOkBtnPressed.connect(this,&MiniMapUiLoaderLayer::toChallengeBoss);
+	World::getInstance()->getScene()->addChild(mb, WZ_MESSAGEBOX);
+}
+
+void MiniMapUiLoaderLayer::toChallengeBoss()
+{
+	GuildMgr::getInstance()->getBossManager()->goToChallenge();
+}

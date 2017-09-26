@@ -1,0 +1,1821 @@
+
+#include "UiManager.h"
+#include "UiTools.h"
+#include "WorldPacket.h"
+#include "CommonMsgDefine.h"
+#include "TCPClient.h"
+#include "PackageManager.h"
+#include "ToolTip.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "NameMgr2.h"
+#include "Loading.h"
+#include "MysteryShop.h"
+#include "UiResourceMgr.h"
+#include "Helper.h"
+#include "UiLoader.h"
+#include "BuySetUi.h"
+#include "ToolTip.h"
+#include "RechargeUi.h"
+#include "StringMgr.h"
+#include "World.h"
+#include "NPCTalkUi.h"
+#include "ItemTip.h"
+#include "SecondVerifyMgr.h"
+MysteryShopItem::MysteryShopItem()
+{
+	
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("MysteryShopItemFrame", MysteryShopItemFrameLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	m_frameLeft = dynamic_cast<MysteryShopItemFrame*>(ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "shenmishangdianitem.ccbi").c_str()));
+	_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+	UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+	ccbReader->release();
+
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary1 = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary1->registerCCNodeLoader("MysteryShopItemFrame", MysteryShopItemFrameLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader1 = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary1);
+	m_frameRight = dynamic_cast<MysteryShopItemFrame*>(ccbReader1->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "shenmishangdianitem.ccbi").c_str()));
+	_usedPlistFile1 = ccbReader1->getLoadedSpriteSheet();
+	UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile1);
+	ccbReader1->release();
+	if(m_frameLeft != NULL)
+	{
+		m_frameLeft->retain();
+		
+	}
+	if(m_frameRight != NULL)
+	{
+		m_frameRight->retain();
+
+	}
+	float temp1 = (m_frameLeft->getContentSize().width/2)*0.95;
+	float temp2 = (m_frameLeft->getContentSize().width/2)*0.05;
+	m_frameLeft->setPosition(ccp(temp1, -m_frameRight->getContentSize().height/2));
+	m_frameLeft->setTag(NT_LEFT);
+	_node->addChild(m_frameLeft);
+	m_frameRight->setTag(NT_RIGHT);
+	m_frameRight->setPosition(ccp(temp2+m_frameLeft->getContentSize().width+m_frameRight->getContentSize().width/2, -m_frameRight->getContentSize().height/2));
+	_node->addChild(m_frameRight);
+}
+MysteryShopItem::~MysteryShopItem()
+{
+	if(m_frameLeft != NULL)
+	{
+		//CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(_uiFrame);
+		m_frameLeft->release();
+		m_frameLeft = NULL;
+	}
+	if(m_frameRight != NULL)
+	{
+		//CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(_uiFrame);
+		m_frameRight->release();
+		m_frameRight = NULL;
+	}
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile1);
+	_usedPlistFile1.clear();
+}
+
+void MysteryShopItem::onTouch(CCTouch *touch)
+{
+	MysteryShopUi* ui = GET_UI(MysteryShopUi, WCT_MysteryShopUi);
+	if(ui != NULL)
+	{
+		if(ui->IsLeftItem(touch))
+		{
+			if(m_frameLeft)
+			{
+				m_frameLeft->ShowItemTip(touch);
+			}
+			if(ui->HideSelectSprite(touch,true))
+			{
+				ui->SetSelectIndex(m_frameLeft->GetVersionIndex());
+				SetLeftItemSelectSpriteVisiabl(true);
+				if(m_frameLeft)
+				{
+					m_frameLeft->ShowItemTip(touch);
+				}
+				
+			}
+			
+		}
+		else if(ui->IsRightItem(touch))
+		{
+			if(m_frameRight)
+			{
+				m_frameRight->ShowItemTip(touch);
+			}
+			if(ui->HideSelectSprite(touch,false))
+			{
+				ui->SetSelectIndex(m_frameRight->GetVersionIndex());
+				SetRightItemSelectSpriteVisiabl(true);
+				if(m_frameRight)
+				{
+					m_frameRight->ShowItemTip(touch);
+				}
+			}
+		}
+		else
+		{
+			ui->ShopCanTouchEnable(true);
+			return;
+		}
+	}
+	ui->ShopCanTouchEnable(true);
+	
+
+}
+bool MysteryShopItem::IsTouchItemNode(CCTouch *touch)
+{
+	MysteryShopUi* ui = GET_UI(MysteryShopUi, WCT_MysteryShopUi);
+	if(ui != NULL)
+	{
+		if(ui->IsLeftItem(touch))
+		{
+			if(m_frameLeft)
+			{
+				return m_frameLeft->IsTouchItemNode(touch);
+			}
+
+		}
+		else if(ui->IsRightItem(touch))
+		{
+			if(m_frameRight)
+			{
+				return m_frameRight->IsTouchItemNode(touch);
+			}
+			
+		}
+		else
+		{
+			
+			return false;
+		}
+	}
+	return false;
+}
+CCNode* MysteryShopItem::getLeftItemNode()
+{
+	return m_frameLeft;
+}
+CCNode* MysteryShopItem::getRightItemNode()
+{
+	return m_frameRight;
+}
+cocos2d::CCSize MysteryShopItem::getContentSize()
+{
+	return _contentSize;
+}
+float MysteryShopItem::getItemHeight() 
+{
+	return _contentSize.height;
+} 
+void MysteryShopItem::SetLeftItemSelectSpriteVisiabl(bool nCanSee)
+{
+	if(m_frameLeft)
+	{
+		m_frameLeft->SetItemSelectSpriteVisiabl(nCanSee);
+	}
+		
+}
+void MysteryShopItem::SetRightItemSelectSpriteVisiabl(bool nCanSee)
+{
+	if(m_frameRight)
+		m_frameRight->SetItemSelectSpriteVisiabl(nCanSee);
+}
+void MysteryShopItem::SetLeftVerSionIndex(int nVersionIndex)
+{
+	if(m_frameLeft)
+		m_frameLeft->SetVerSionIndex(nVersionIndex);
+}
+void MysteryShopItem::SetRightVerSionIndex(int nVersionIndex)
+{
+	if(m_frameRight)
+		m_frameRight->SetVerSionIndex(nVersionIndex);
+}
+void MysteryShopItem::setLeftData(int unItemId,int nItemPrice,ItemNode* item,int nTipType,int nItemMoneyType)
+{
+	if(m_frameLeft)
+	{	
+		std::string ItemName;
+		ItemName = PackageManager::getInstance()->getItemTypeData(unItemId).name;
+		m_frameLeft->SetItemName(ItemName);
+		CCString* str2 = CCString::createWithFormat("%d",nItemPrice);
+		m_frameLeft->SetItemPrice(str2->getCString());
+		m_frameLeft->SetItemTip(nTipType);
+		m_frameLeft->SetMoneyType(nItemMoneyType);
+		m_frameLeft->SetItemNode(item);
+	}
+	
+	updateContent();
+}
+void MysteryShopItem::setRightData(int unItemId,int strPrice,ItemNode* item,int nTipType,int nItemMoneyType)
+{
+	if(m_frameRight)
+	{	
+		std::string ItemName;
+		ItemName = PackageManager::getInstance()->getItemTypeData(unItemId).name;
+		m_frameRight->SetItemName(ItemName);
+		CCString* str2 = CCString::createWithFormat("%d",strPrice);
+		m_frameRight->SetItemPrice(str2->getCString());
+		m_frameRight->SetItemTip(nTipType);
+		m_frameRight->SetMoneyType(nItemMoneyType);
+		m_frameRight->SetItemNode(item);
+	}
+
+	updateContent();
+}
+void MysteryShopItem::updateContent()
+{
+	
+	if(m_frameLeft != NULL && m_frameRight != NULL)
+	{
+		MysteryShopUi* ui = GET_UI(MysteryShopUi, WCT_MysteryShopUi);
+		if(ui == NULL)
+		{
+			return;
+		}
+		float totalheight = ui->GetGroundHight();
+		float singleheight = (totalheight)/3.0;
+		_contentSize.height = singleheight;
+
+		
+		if(m_frameRight != NULL)
+		{
+			_contentSize.width = m_frameLeft->getContentSize().width + m_frameRight->getContentSize().width;
+		}
+	}
+		
+	
+}
+cocos2d::SEL_MenuHandler MysteryShopItemFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler MysteryShopItemFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+bool MysteryShopItemFrame::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_pItemCCNode",CCNode*,m_pItemCCNode);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_pItemName",CCLabelTTF*,m_pItemName);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_pPriceNum",CCLabelTTF*,m_pPriceNum);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_pItemSelect",CCSprite*,m_pItemSelect);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"stateSp",CCSprite*,MoneyType);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_ItemTip",CCSprite*,m_ItemTip);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_ItemSellOut",CCSprite*,m_ItemSellOut);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_ItemLimit",CCSprite*,m_ItemLimit);
+	return true;
+}
+MysteryShopItemFrame::MysteryShopItemFrame()
+{
+	m_pItemCCNode = NULL;
+	m_pItemName = NULL;
+	m_pPriceNum = NULL;
+	m_pItemSelect = NULL;
+	MoneyType = NULL;
+	m_pNewItemName = NULL;
+	m_pNewPriceNum = NULL;	
+	m_ItemTip = NULL;
+	m_ItemSellOut = NULL;
+	m_ItemLimit = NULL;
+	versionIndex = -1;
+	
+}
+MysteryShopItemFrame::~MysteryShopItemFrame()
+{
+	
+}
+
+
+bool MysteryShopItemFrame::IsTouchItemNode( CCTouch *pTouch)
+{
+	if(pTouch == NULL)
+	{
+		return false;
+	}
+	if(isTouchOnNodeContent(m_pItemCCNode, pTouch))
+	{
+		return true;
+	}
+	return false;
+	
+}
+
+void MysteryShopItemFrame::ShowItemTip( CCTouch *pTouch)
+{
+	if(pTouch == NULL)
+	{
+		return;
+	}
+	MysteryShopUi* ui = GET_UI(MysteryShopUi, WCT_MysteryShopUi);
+	if(ui != NULL)
+	{
+		if(IS_UI_OPEN(WCT_MysteryShopUi))
+		{
+			int curSelectItemNode = ui->GetSelectItemNode();
+			if(versionIndex == curSelectItemNode)
+			{
+				if(ItemTip::getInstace()->isOpen())
+					return;
+			}
+		}
+	}
+	
+	if(isTouchOnNodeContent(m_pItemCCNode, pTouch))
+	{
+		ItemNode* pItemNode = dynamic_cast<ItemNode*>(m_pItemCCNode->getChildByTag(1));
+		if(pItemNode !=NULL)
+		{
+
+			if (pItemNode->GetTypeId() == CLASSIC_UPPER_TYPE_ID
+				|| pItemNode->GetTypeId() == CLASSIC_WEAPON_TYPE_ID )		// 特殊商品使用特殊Tip
+			{
+				std::vector<MysteryShopUiData>& vecList = PackageManager::getInstance()->getMysteryShopGoodsList();
+				SpecialStoreItemTip::getInstance()->open(pItemNode->GetTypeId(),vecList[versionIndex].nPrice);
+			}
+			else if (pItemNode->GetTypeId() == CLASSIC_MONTH_CARD_TYPE_ID)
+			{
+				MonthCardItemTip::getInstance()->open();
+			}
+			else
+			{
+				ItemTip::getInstace()->close();
+				pItemNode->SetItemData();
+				ItemTip::getInstace()->hideAllTipsButton();
+			}
+
+			
+			if(ui != NULL)
+			{
+				if(IS_UI_OPEN(WCT_MysteryShopUi))
+				{
+					ui->SetSelectItemNode(versionIndex);
+				}
+			}
+			
+		}
+	}
+}
+
+bool MysteryShopItemFrame::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{	
+	return false;
+}
+void MysteryShopItemFrame::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+
+}
+void MysteryShopItemFrame::SetVerSionIndex(int nVersionIndex)
+{
+	versionIndex = nVersionIndex;
+}
+void MysteryShopItemFrame:: SetItemSelectSpriteVisiabl(bool nCanSee)
+{
+	m_pItemSelect->setVisible(nCanSee);
+}
+void MysteryShopItemFrame:: SetItemName(string strname)
+{
+	if(m_pNewItemName != NULL)
+	{
+		m_pNewItemName->setString(strname.c_str());
+	}
+	
+}
+void MysteryShopItemFrame::SetMoneyType(int nType)
+{
+	//0金币
+	//1元宝
+	//2钻石
+	switch(nType)
+	{
+	case 1:
+		MoneyType->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("shenmi_jinbi"));
+		break;
+	case 2:
+		MoneyType->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("shenmi_yuanbao"));
+		break;
+	case 3:
+		MoneyType->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("shenmi_zuanshi"));
+		break;
+	default:
+		break;
+	}
+}
+void MysteryShopItemFrame:: SetItemPrice(string strPrice)
+{
+	if(m_pNewPriceNum != NULL)
+	{
+		m_pNewPriceNum->setString(strPrice.c_str());
+	}
+}
+void MysteryShopItemFrame:: SetItemNode(ItemNode* pItemNode)
+{
+	if(m_pItemCCNode != NULL&& pItemNode != NULL)
+	{
+		m_pItemCCNode->setAnchorPoint(ccp(0.5,0.5));
+		pItemNode->setAnchorPoint(ccp(0.5,0.5));
+		pItemNode->setPosition(ccp(pItemNode->getContentSize().width/2,pItemNode->getContentSize().height/2));
+		pItemNode->setTag(1);
+		m_pItemCCNode->addChild(pItemNode);
+	}
+}
+void MysteryShopItemFrame:: SetItemTip(int nTip)
+{
+	//0
+	if(m_ItemTip != NULL)
+	{
+		m_ItemTip->setVisible(true);
+		switch(nTip)
+		{
+		case 1:
+			m_ItemTip->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("shenmi_huasuan"));
+			break;
+		case 2:
+			m_ItemTip->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("shenmi_chaohuasuan"));
+			break;
+		case 3:
+			m_ItemTip->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("shenmi_renmai"));
+			break;
+		case 4:
+			m_ItemTip->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("shenmi_qianggou"));
+			break;
+		case 5:
+			m_ItemTip->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("shenmi_baokuan"));
+			break;
+		case 6:
+			m_ItemTip->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("shenmi_banjia"));
+			break;
+		case 7:
+			m_ItemTip->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("shenmi_qingcang"));
+			break;
+		case 11:
+			m_ItemTip->setVisible(false);
+			m_ItemLimit->setVisible(false);
+			m_ItemSellOut->setVisible(true);
+			break;
+		case 12:
+			m_ItemTip->setVisible(false);
+			m_ItemLimit->setVisible(true);
+			m_ItemSellOut->setVisible(false);
+			break;
+		default:
+			m_ItemTip->setVisible(false);
+			break;
+		}
+
+	}
+	
+}
+void MysteryShopItemFrame:: RemoveCCLabelTTF()
+{
+	m_pNewItemName = Helper::replaceLabelTTFWithLabelFTAndRemove(m_pItemName);
+	CC_ASSERT(NULL != m_pNewItemName);
+
+	m_pNewPriceNum =  Helper::replaceLabelTTFWithLabelFTAndRemove(m_pPriceNum);
+	CC_ASSERT(NULL != m_pNewPriceNum);
+}
+
+
+void MysteryShopItemFrame::onEnter()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	CCSprite::onEnter();
+}
+
+void MysteryShopItemFrame::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCSprite::onExit();
+}
+
+
+void MysteryShopItemFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	RemoveCCLabelTTF();
+}
+
+
+MysteryShopUi::MysteryShopUi()
+{
+
+}
+
+MysteryShopUi::~MysteryShopUi()
+{
+
+}
+
+CCNode* MysteryShopUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["MysteryShopUiLayer"] = UiLayerLoader<MysteryShopUiLayer>::loader();
+	CCNode* uiNode = readUiFromCCBI("shenmishangdian", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+void MysteryShopUi::getTresureData(s_net_cmd* cmd )
+{
+	//MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	//if(ui != NULL)
+	//	//ui->setOpenResult(cmd);
+	//else
+	//	return;
+}
+void MysteryShopUi::ShopCanTouchEnable(bool bCanTouch)
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		ui->ShopCanTouchEnable(bCanTouch);
+	else
+		return;
+}
+float MysteryShopUi::GetGroundHight()
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		return ui->GetGroundHight();
+	else
+		return 0.0;
+}
+void MysteryShopUi::UpdateNoticeList()
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		ui->upDataNoticeList();
+	else
+		return;
+}
+void MysteryShopUi::UpdateNoticeList1()
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		ui->upDataNoticeList1();
+	else
+		return;
+}
+void MysteryShopUi::upDataItemList1()
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		ui->upDataItemList1();
+	else
+		return;
+}
+void MysteryShopUi::upDataItemList()
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		ui->upDataItemList();
+	else
+		return;
+}
+void MysteryShopUi::upDataFreshTime(unsigned int FreshTime)
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		ui->upDataFreshTime(FreshTime);
+	else
+		return;
+}
+void MysteryShopUi::upDataMysteryItemList()
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		ui->upDataMysteryItemList();
+	else
+		return;
+}
+
+void MysteryShopUi::updateRoleName( int id, const std::string& name )
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		ui->updateRoleName(id,name);
+	else
+		return;
+}
+void MysteryShopUi::updateMoney()
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		ui->updateMoney();
+	else
+		return;
+}
+void MysteryShopUi::InitFrame()
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		ui->InitFrame();
+	else
+		return;
+}
+bool MysteryShopUi::HideSelectSprite(CCTouch *pTouch,bool IsLeft)
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		return ui->HideSelectSprite(pTouch,IsLeft);
+	else
+		return false;
+}
+void MysteryShopUi::SetSelectIndex(int nIndex)
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		ui->SetSelectIndex(nIndex);
+	else
+		return;
+}
+void MysteryShopUi::SetSelectItemNode(int nIndex)
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		ui->SetSelectItemNode(nIndex);
+	else
+		return;
+}
+int MysteryShopUi::GetSelectItemNode()
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		return ui->GetSelectItemNode();
+	else
+		return -1;
+}
+void MysteryShopUi::ClearSelectItemNode()
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		ui->ClearSelectItemNode();
+	else
+		return ;
+}
+bool MysteryShopUi::IsLeftItem(CCTouch *pTouch)
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		return ui->IsLeftItem(pTouch);
+	else
+		return false;
+}
+bool MysteryShopUi::IsRightItem(CCTouch *pTouch)
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		return ui->IsRightItem(pTouch);
+	else
+		return false;
+}
+bool MysteryShopUi::IsTouchItemNode(CCTouch *pTouch)
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+		return ui->IsTouchItemNode(pTouch);
+	else
+		return false;
+}
+void MysteryShopUi::showErrorMessage(unsigned int errorNum)
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+	{
+		ui->showErrorMessage(errorNum);
+	}
+	else
+	{
+		return;
+	}
+}
+void MysteryShopUi::IsMysteryShop(bool bIsMystery)
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+	{
+		ui->IsMysteryShop(bIsMystery);
+		updateMoney();
+		InitFrame();
+	}
+	else
+	{
+		return;
+	}
+		
+}
+bool MysteryShopUi::GetIsMysteryShop()
+{
+	MysteryShopUiLayer* ui = getUiNodeByTag<MysteryShopUiLayer>(WCT_MysteryShopUi);
+	if(ui != NULL)
+	{
+		return ui->GetIsMysteryShop();
+	}
+	else
+	{
+		return false;
+	}
+
+}
+
+
+
+MysteryShopUiLayer::MysteryShopUiLayer()
+{
+	frame = NULL;
+	m_YuanBaoNum = NULL;
+	m_MoneyNum = NULL;
+	m_DiamondNum = NULL;
+	m_FreshTime = NULL;
+	m_MysteryShop = NULL;
+	m_TreasureShop = NULL;
+	buttonClose = NULL;
+	buttonFresh = NULL;
+	buttonBuy = NULL;
+	_verticalItemList = NULL;
+	_verticalNoticeList = NULL;
+	m_IsMystery = true;
+	m_CanTouch = true;
+	curSelect = NULL;
+	m_SelectItem = -1;
+	m_SelectItemNode = -1;
+	ptBegin.x = 0;
+	ptBegin.y = 0;
+	m_FreshTimeText = NULL;
+	//setTouchEnabled(true);
+	m_IsLeft = false;
+	m_num = 0;
+	m_pDelaySp = NULL;
+}
+
+MysteryShopUiLayer::~MysteryShopUiLayer()
+{
+	_verticalItemList->clear();
+	_verticalNoticeList->clear();
+	curSelect = NULL;
+}
+
+cocos2d::SEL_MenuHandler MysteryShopUiLayer::onResolveCCBCCMenuItemSelector( CCObject* pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler MysteryShopUiLayer::onResolveCCBCCControlSelector( CCObject* pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", MysteryShopUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onshuaxinBtnPressed", MysteryShopUiLayer::onFreshPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "ongoumaiBtnPressed", MysteryShopUiLayer::onBuyPressed);
+	
+	return NULL;
+}
+void MysteryShopUiLayer::onNodeLoaded( cocos2d::CCNode* pNode, cocos2d::extension::CCNodeLoader* pNodeLoader )
+{//初始化数据
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if( !player )
+		return;
+	frame = dynamic_cast<CCSprite*>(getChildByTag(1));
+	_contentNotice = frame->getChildByTag(MTN_NoticeNode);
+	_contentItem = frame->getChildByTag(MTN_ItemNode);
+	m_YuanBaoNum = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(frame->getChildByTag(MTN_YuanBaoNum))));
+	m_DiamondNum = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(frame->getChildByTag(MTN_DiamondNum))));
+	m_MoneyNum = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(frame->getChildByTag(MTN_MoneyNum))));
+	m_FreshTime = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(frame->getChildByTag(MTN_FreshTime))));
+	m_FreshTimeText = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(frame->getChildByTag(MTN_FreshTimeText))));
+	m_MysteryShop = dynamic_cast<CCSprite*>(frame->getChildByTag(MTN_MysteryShop));
+	m_TreasureShop = dynamic_cast<CCSprite*>(frame->getChildByTag(MTN_TreasureShop));
+	Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(frame->getChildByTag(MTN_FreshText))));
+	Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(frame->getChildByTag(MTN_OtherBuyInfo))));
+	buttonClose = frame->getChildByTag(MTN_CloseButton);
+	buttonFresh =frame->getChildByTag(MTN_FreshButton);
+	buttonBuy =frame->getChildByTag(MTN_BuyButton);
+
+	_scrollViewnItem = createScrollViewWithContent(_contentItem);
+	CC_ASSERT(_scrollViewnItem != NULL);
+	_contentItem->addChild(_scrollViewnItem);
+	_verticalItemList = new VerticalList<MysteryShopItem>;
+	_verticalItemList->addToScrollView(_scrollViewnItem);
+	_verticalItemList->setMinSize(_contentItem->getContentSize());
+	_verticalItemList->setLineSpace(0.0);
+	_scrollViewnItem->getContainer()->set_enable_rect(false);
+
+	_scrollViewnNotice = createScrollViewWithContent(_contentNotice);
+	CC_ASSERT(_scrollViewnNotice != NULL);
+	_contentNotice->addChild(_scrollViewnNotice);
+	_verticalNoticeList = new VerticalList<MysteryBoxItem>;
+	_verticalNoticeList->addToScrollView(_scrollViewnNotice);
+	_verticalNoticeList->setMinSize(_contentNotice->getContentSize());
+	_verticalNoticeList->setLineSpace(0.0);
+	_scrollViewnNotice->getContainer()->set_enable_rect(false);
+	SetLoadingImage();
+	//this->schedule(schedule_selector(KaiBaoXiangUiLayer::updateGoldBoxTime), 1.0f);
+}
+float MysteryShopUiLayer::GetGroundHight()
+{
+	CCSize nSize = _contentItem->getContentSize();
+	return nSize.height;
+};
+float MysteryShopUiLayer::GetGroundNoticeHight()
+{
+	CCSize nSize = _contentNotice->getContentSize();
+	return nSize.height;
+};
+void MysteryShopUiLayer::updateRoleName( int id, const std::string& name )
+{
+	for (int i = 0; i < _verticalNoticeList->getItemCount(); i++)
+	{
+		_verticalNoticeList->getItem(i)->updateRoleName(id, name);
+	}
+}
+void MysteryShopUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	
+}
+void MysteryShopUiLayer::SetDelayShow(bool value)
+{
+	if(NULL != m_pDelaySp)
+		m_pDelaySp->setVisible(value);
+}
+
+void MysteryShopUiLayer::SetLoadingImage()
+{
+	if(NULL == frame)
+		return ;
+
+	CCSize size = frame->getContentSize();
+	if(NULL == m_pDelaySp)
+	{
+		m_pDelaySp = CCSprite::create("Art/ICON/SingleUI/loading.png");
+		m_pDelaySp->setPosition(ccp(size.width/2,size.height/2));
+		m_pDelaySp->setAnchorPoint(ccp(0.5,0.5));
+
+		CCRotateBy* rotate = CCRotateBy::create(2,360);
+		m_pDelaySp->runAction(CCRepeatForever::create(rotate));
+		m_pDelaySp->setVisible(false);
+		frame->addChild(m_pDelaySp);
+	}
+}
+void MysteryShopUiLayer::IsMysteryShop(bool bIsMystery)
+{
+	m_IsMystery = bIsMystery;
+}
+void MysteryShopUiLayer::InitFrame()
+{
+	//更新背包空格信息
+	if(m_IsMystery)
+	{
+		m_MysteryShop->setVisible(true);
+		m_TreasureShop->setVisible(false);
+		buttonFresh->setVisible(true);
+		WorldPacket C2G_Msg(NET_C2G_BUY_TREASURESHOP);
+		C2G_Msg << 13;
+/*		TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);*/
+		SEND_SAFE_VERIFY_WORLD_MESSAGE(C2G_Msg,NP_INSIGNIFICANT)
+		m_FreshTime->setVisible(false);
+		m_FreshTimeText->setVisible(false);
+		SetDelayShow(true);
+
+		
+	}
+	else
+	{
+		m_MysteryShop->setVisible(false);
+		m_TreasureShop->setVisible(true);
+		buttonFresh->setVisible(false);
+		WorldPacket C2G_Msg(NET_C2G_BUY_TREASURESHOP);
+		C2G_Msg << 14;
+		TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+// 		std::function<void(bool)> func = [C2G_Msg](bool isSuccess){
+// 			if (isSuccess)
+// 				TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+// 		};
+// 		SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+
+		m_FreshTime->setVisible(false);
+		m_FreshTimeText->setVisible(false);
+		SetDelayShow(true);
+		
+	}
+	
+}
+void MysteryShopUiLayer::updateMoney()
+{
+	INT nPlayerMoney = PackageManager::getInstance()->getJinBi();
+	std::ostringstream ostr;
+	if (nPlayerMoney >= 100000)
+	{
+		ostr << nPlayerMoney/10000 << GET_STR(9033).c_str();
+	}
+	else
+	{
+		ostr << nPlayerMoney;
+	}
+	m_MoneyNum->setString(ostr.str().c_str());
+
+	ostr.str("");
+	INT nPlayerYuanBao = PackageManager::getInstance()->getYuanBao();
+// 	if(nPlayerYuanBao >= 100000)
+// 	{
+// 		ostr << nPlayerYuanBao / 10000 << GET_STR(9033).c_str();
+// 	}
+// 	else
+// 	{
+		ostr << nPlayerYuanBao;
+//	}
+	m_YuanBaoNum->setString(ostr.str().c_str());
+
+	ostr.str("");
+	INT nPlayerDiamond = PackageManager::getInstance()->getDiamond();
+// 	if(nPlayerDiamond >= 100000)
+// 	{
+// 		ostr << nPlayerDiamond / 10000 << GET_STR(9033).c_str();
+// 	}
+// 	else
+// 	{
+		ostr << nPlayerDiamond;
+//	}
+	m_DiamondNum->setString(ostr.str().c_str());
+}
+void MysteryShopUiLayer::onExit()
+{
+	SecondVerifyMgr::getInstance()->destroyRequsetVerityData();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+	
+}
+bool MysteryShopUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(!m_CanTouch)
+	{
+		return true;
+	}
+	if(isTouchOnNodeContent(buttonClose, pTouch))
+		return false;
+
+	if(isTouchOnNodeContent(buttonFresh, pTouch))
+	{
+		if(m_IsMystery)
+		{
+			return false;
+		}
+		else
+		{
+			return true;
+		}
+	}
+		
+	if(isTouchOnNodeContent(buttonBuy, pTouch))
+		return false;
+	if(isTouchOnNodeContent(_contentItem, pTouch))
+	{
+		ptBegin = frame->convertTouchToNodeSpace(pTouch);
+		/*MysteryShopItem* ItemSelect = _verticalItemList->getTouchdItem(pTouch);
+
+		if(ItemSelect)
+		{
+		ItemSelect->onTouch(pTouch);
+		}*/
+	}
+		
+	CCPoint framePoint = frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+
+	if(frameRect.containsPoint(framePoint))
+	{
+		return true;
+	}
+
+	return false;
+
+}
+bool MysteryShopUiLayer::HideSelectSprite(CCTouch *pTouch,bool IsLeft)
+{
+	MysteryShopItem* ItemSelect = _verticalItemList->getTouchdItem(pTouch);
+	if(ItemSelect != NULL)
+	{
+		if(curSelect != NULL)
+		{	
+			if(ItemSelect == curSelect&&m_IsLeft == IsLeft)
+			{
+				return false;
+			}
+			curSelect->SetLeftItemSelectSpriteVisiabl(false);
+			curSelect->SetRightItemSelectSpriteVisiabl(false);
+		}
+		curSelect = ItemSelect;
+		m_IsLeft = IsLeft;
+	}
+	return true;
+}
+void MysteryShopUiLayer::SetSelectIndex(int nIndex)
+{
+	m_SelectItem = nIndex;
+}
+void MysteryShopUiLayer::SetSelectItemNode(int nIndex)
+{
+	m_SelectItemNode = nIndex;
+}
+bool MysteryShopUiLayer::IsLeftItem(CCTouch *pTouch)
+{
+	return _verticalItemList->SelectIsLeftItem(pTouch);
+}
+bool MysteryShopUiLayer::IsRightItem(CCTouch *pTouch)
+{
+	return _verticalItemList->SelectIsRightItem(pTouch);
+}
+void MysteryShopUiLayer::upDataFreshTime(unsigned int FreshTime)
+{
+	if(m_FreshTime != NULL)
+	{
+		int t = FreshTime;
+		std::ostringstream ostr;
+		ostr << t;
+		//CCString* str1 = CCString::createWithFormat("%d",t);
+		m_FreshTime->setString(ostr.str());
+		m_FreshTime->setVisible(true);
+		m_FreshTimeText->setVisible(true);
+	}
+}
+	
+void MysteryShopUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(!m_CanTouch)
+	{
+		return;
+	}
+	CCPoint pt = frame->convertTouchToNodeSpace(pTouch);
+	if(ccpDistance(pt, ptBegin) < TOUCH_MOVE_DIS)
+	{
+		MysteryShopItem* ItemSelect = _verticalItemList->getTouchdItem(pTouch);
+		if(ItemSelect != NULL)
+		{
+			m_CanTouch = false;
+			ItemSelect->onTouch(pTouch);
+			
+		}
+	}
+}
+bool MysteryShopUiLayer::IsTouchItemNode(CCTouch *pTouch)
+{
+	if(pTouch == NULL)
+	{
+		return false;
+	}
+	MysteryShopItem* ItemSelect = _verticalItemList->getTouchdItem(pTouch);
+	if(ItemSelect != NULL)
+	{
+		return ItemSelect->IsTouchItemNode(pTouch);
+	}
+
+	return false;
+}
+void MysteryShopUiLayer::ccTouchMoved(CCTouch *pTouch, CCEvent *pEvent)
+{
+
+}
+void MysteryShopUiLayer::upDataItemList()
+{
+	if(m_IsMystery)
+	{
+		return;
+	}
+	SetDelayShow(true);
+	_verticalItemList->clear();
+	std::vector<MysteryShopUiData>& vecList = PackageManager::getInstance()->getMysteryShopGoodsList();
+	int nVecSize = vecList.size();
+	MysteryShopItem *Myitem = NULL;
+	for(int i = 0; i< nVecSize; i++)
+	{
+		ItemNode* itemNode = ItemNode::create();
+		itemNode->setDataId(vecList[i].ItemId,vecList[i].nQuality);
+		//itemNode->setDataId(_BoxItemVec.at(i));
+		//int itemNum = getBoxItemNum(_BoxItemVec.at(i));
+		if(vecList[i].nItemNum> 1&& vecList[i].nItemNum<10000)
+		{
+			itemNode->setNum(0,vecList[i].nItemNum);
+		}
+		else
+		{
+			itemNode->SetShowNum(false);
+		}
+		
+
+		if(i%2 == 0)
+		{	
+			Myitem = new MysteryShopItem;
+			Myitem->SetLeftVerSionIndex(i);
+			if(m_SelectItem == i)
+			{
+				Myitem->SetLeftItemSelectSpriteVisiabl(true);
+				curSelect = Myitem;
+			}
+			Myitem->setLeftData(vecList[i].ItemId,vecList[i].nPrice,itemNode,vecList[i].nTipType,vecList[i].nMoneyType);
+		}
+		else
+		{
+			if(Myitem == NULL)
+			{
+				SetDelayShow(false);
+				return;
+			}
+			Myitem->SetRightVerSionIndex(i);
+			if(m_SelectItem == i)
+			{
+				Myitem->SetRightItemSelectSpriteVisiabl(true);
+				curSelect = Myitem;
+			}
+			Myitem->setRightData(vecList[i].ItemId,vecList[i].nPrice,itemNode,vecList[i].nTipType,vecList[i].nMoneyType);
+			_verticalItemList->addItem(Myitem);
+		}
+		
+	}
+	_verticalItemList->updateDisplay();
+	//curSelect = NULL;
+	//m_SelectItem = -1;
+	ptBegin.x = 0;
+	ptBegin.y = 0;
+	//setTouchEnabled(true);
+	//m_IsLeft = false;
+	SetDelayShow(false);
+}
+void MysteryShopUiLayer::upDataItemList1()
+{
+	if(!m_IsMystery)
+	{
+		return;
+	}
+	SetDelayShow(true);
+	_verticalItemList->clear();
+	std::vector<MysteryShopUiData>& vecList = PackageManager::getInstance()->getMysteryShopGoodsList1();
+	int nVecSize = vecList.size();
+	MysteryShopItem *Myitem = NULL;
+	for(int i = 0; i< nVecSize; i++)
+	{
+		ItemNode* itemNode = ItemNode::create();
+		itemNode->setDataId(vecList[i].ItemId,vecList[i].nQuality);
+		//itemNode->setDataId(_BoxItemVec.at(i));
+		//int itemNum = getBoxItemNum(_BoxItemVec.at(i));
+		if(vecList[i].nItemNum> 1&&vecList[i].nItemNum<10000)
+
+		{
+			itemNode->setNum(0,vecList[i].nItemNum);
+		}
+		else
+		{
+			itemNode->SetShowNum(false);
+		}
+
+
+		if(i%2 == 0)
+		{	
+			Myitem = new MysteryShopItem;
+			Myitem->SetLeftVerSionIndex(i);
+			if(m_SelectItem == i)
+			{
+				Myitem->SetLeftItemSelectSpriteVisiabl(true);
+				curSelect = Myitem;
+			}
+			Myitem->setLeftData(vecList[i].ItemId,vecList[i].nPrice,itemNode,vecList[i].nTipType,vecList[i].nMoneyType);
+		}
+		else
+		{
+			if(Myitem == NULL)
+			{
+				SetDelayShow(false);
+				return;
+			}
+			Myitem->SetRightVerSionIndex(i);
+			if(m_SelectItem == i)
+			{
+				Myitem->SetRightItemSelectSpriteVisiabl(true);
+				curSelect = Myitem;
+			}
+			Myitem->setRightData(vecList[i].ItemId,vecList[i].nPrice,itemNode,vecList[i].nTipType,vecList[i].nMoneyType);
+			_verticalItemList->addItem(Myitem);
+		}
+
+	}
+	_verticalItemList->updateDisplay();
+	//curSelect = NULL;
+	//m_SelectItem = -1;
+	ptBegin.x = 0;
+	ptBegin.y = 0;
+	//setTouchEnabled(true);
+	//m_IsLeft = false;
+	SetDelayShow(false);
+	
+}
+void MysteryShopUiLayer::upDataMysteryItemList()
+{
+	if(m_IsMystery)
+	{
+		return;
+	}
+	SetDelayShow(true);
+	_verticalItemList->clear();
+	std::vector<MysteryShopUiData>& vecList = PackageManager::getInstance()->getMysteryShopGoodsList();
+	int nVecSize = (int)vecList.size();
+	MysteryShopItem *Myitem = NULL;
+	for(int i = 0; i< nVecSize; i++)
+	{
+		ItemNode* itemNode = ItemNode::create();
+		itemNode->setDataId(vecList[i].ItemId,vecList[i].nQuality);
+		//itemNode->setDataId(_BoxItemVec.at(i));
+		//int itemNum = getBoxItemNum(_BoxItemVec.at(i));
+		if(vecList[i].nItemNum> 1)
+		{
+			itemNode->setNum(0,vecList[i].nItemNum);
+		}
+		else
+		{
+			itemNode->SetShowNum(false);
+		}
+
+
+		if(i%2 == 0)
+		{	
+			Myitem = new MysteryShopItem;
+			Myitem->SetLeftVerSionIndex(i);
+			Myitem->setLeftData(vecList[i].ItemId,vecList[i].nPrice,itemNode,vecList[i].nTipType,vecList[i].nMoneyType);
+		}
+		else
+		{
+			if(Myitem == NULL)
+			{
+				return;
+				//SetDelayShow(false);
+			}
+			Myitem->SetRightVerSionIndex(i);
+			Myitem->setRightData(vecList[i].ItemId,vecList[i].nPrice,itemNode,vecList[i].nTipType,vecList[i].nMoneyType);
+			_verticalItemList->addItem(Myitem);
+		}
+
+	}
+	_verticalItemList->updateDisplay();
+	//curSelect = NULL;
+	//m_SelectItem = -1;
+	ptBegin.x = 0;
+	ptBegin.y = 0;
+	//setTouchEnabled(true);
+	//m_IsLeft = false;
+	SetDelayShow(false);
+}
+void MysteryShopUiLayer::ShopCanTouchEnable(bool bCanTouch)
+{
+	m_CanTouch = bCanTouch;
+}
+void MysteryShopUiLayer::upDataNoticeList()
+{
+	if(m_IsMystery)
+	{
+		return;
+	}
+	SetDelayShow(true);
+	_verticalNoticeList->clear();
+	std::vector<MysteryBoxUiData> vecBoxList = PackageManager::getInstance()->getMysteryShopList();
+	std::vector<MysteryBoxUiData>::iterator it = vecBoxList.begin();
+	bool bNeedUpdateList = false;
+	for(;it!=vecBoxList.end();it++)
+	{
+		bNeedUpdateList = true;
+		MysteryBoxItem *item = new MysteryBoxItem;
+		item->setData(it->PlayerId,it->ItemId,it->nQuality,true,it->num);
+		if(it == vecBoxList.begin())
+		{
+			_verticalNoticeList->addItem(item);
+		}
+		else
+		{
+			_verticalNoticeList->insertItem(item,0,false);
+		}
+
+	}
+	if(bNeedUpdateList)
+	{
+		_verticalNoticeList->updateDisplay();
+	}
+	SetDelayShow(false);
+}
+void MysteryShopUiLayer::upDataNoticeList1()
+{
+	if(!m_IsMystery)
+	{
+		return;
+	}
+	SetDelayShow(true);
+	_verticalNoticeList->clear();
+	std::vector<MysteryBoxUiData> vecBoxList = PackageManager::getInstance()->getMysteryShopList1();
+	std::vector<MysteryBoxUiData>::iterator it = vecBoxList.begin();
+	bool bNeedUpdateList = false;
+	for(;it!=vecBoxList.end();it++)
+	{
+		bNeedUpdateList = true;
+		MysteryBoxItem *item = new MysteryBoxItem;
+		item->setData(it->PlayerId,it->ItemId,it->nQuality,true,it->num);
+		if(it == vecBoxList.begin())
+		{
+			_verticalNoticeList->addItem(item);
+		}
+		else
+		{
+			_verticalNoticeList->insertItem(item,0,false);
+		}
+
+	}
+	if(bNeedUpdateList)
+	{
+		_verticalNoticeList->updateDisplay();
+	}
+	SetDelayShow(false);
+	
+}
+
+
+
+void MysteryShopUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	ItemTip::getInstace()->close();
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_MysteryShopUi);
+	NPCTalkUi* ui = World::getInstance()->getNPCDialog();
+	if(ui != NULL)
+	{
+		ui->show(false);
+	}
+}
+void MysteryShopUiLayer::onFreshPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	ItemTip::getInstace()->close();
+
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	m_CanTouch = false;
+	MessageBoxUi *ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, GET_STR(9514).c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+	ui->signalOkBtnPressed.connect(this, &MysteryShopUiLayer::TipOK1);
+	UiMgr::getInstance()->getCurScene()->addChild(ui, WZ_POPUI);
+	m_CanTouch = true;
+	return;
+	
+	INT nPlayerYuanBao = PackageManager::getInstance()->getYuanBao();
+	if(nPlayerYuanBao < 50)
+	{
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+		m_CanTouch =true;
+	}
+	WorldPacket C2G_Msg(NET_C2G_BUY_TREASURESHOP);
+	C2G_Msg << 15;
+	//TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+	std::function<void(bool)> func = [C2G_Msg](bool isSuccess){
+		if (isSuccess)
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+	};
+	SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+
+	SetDelayShow(true);
+	
+}
+void MysteryShopUiLayer::onBuyPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{	
+	ItemTip::getInstace()->close();
+	m_CanTouch = false;
+	std::vector<MysteryShopUiData> vecList;
+	if(m_IsMystery)
+	{
+		vecList = PackageManager::getInstance()->getMysteryShopGoodsList1();
+	}
+	else
+	{
+		vecList = PackageManager::getInstance()->getMysteryShopGoodsList();
+	}
+	
+	int nVecSize = vecList.size();
+	INT bagSpace = PackageManager::getInstance()->getBlankCount();
+	if(bagSpace < 1)
+	{
+		ToolTip::getInstance()->push(GET_STR(2027));
+		m_CanTouch =true;
+		return;
+	}
+	if(nVecSize <= m_SelectItem||m_SelectItem<0)
+	{
+		ToolTip::getInstance()->push(GET_STR(9396));
+		m_CanTouch =true;
+		return;
+	}
+	if(vecList[m_SelectItem].nItemNum < 1 )
+	{
+		ToolTip::getInstance()->push(GET_STR(9456));
+		m_CanTouch =true;
+		return;
+	}
+	if(vecList[m_SelectItem].nCanbuyNum < 1 )
+	{
+		ToolTip::getInstance()->push(GET_STR(9445));
+		m_CanTouch =true;
+		return;
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	MysteryShopUiData MySelectItem = vecList[m_SelectItem];
+	BuySetUi::getInstance()->open();
+	BuySetUi::getInstance()->setDataId(MySelectItem.ItemId,MySelectItem.nQuality);
+	BuySetUi::getInstance()->setPrice(MySelectItem.nPrice);
+	BuySetUi::getInstance()->setNum(1);
+	switch(MySelectItem.nMoneyType)
+	{
+	case 1:
+		{
+			BuySetUi::getInstance()->setChangeIcon("buysetui_gold");
+			break;
+		}
+	case 2:
+		{
+			BuySetUi::getInstance()->setChangeIcon("buysetui_yuanbao");
+			break;
+		}
+	case 3:
+		{
+			BuySetUi::getInstance()->setChangeIcon("buysetui_zuanshi");
+			break;
+		}
+
+	}
+	if(MySelectItem.nIsLimit == 0)
+	{
+		BuySetUi::getInstance()->setMaxCount(MySelectItem.nItemNum);
+		BuySetUi::getInstance()->SetXianGouVisiabl(false);
+	}
+	else if(MySelectItem.nIsLimit == 1)
+	{
+		BuySetUi::getInstance()->SetXianGouVisiabl(true);
+		BuySetUi::getInstance()->SetXianGouNum(MySelectItem.nCanbuyNum);
+		BuySetUi::getInstance()->setMaxCount(MySelectItem.nCanbuyNum);
+	}
+	else
+	{
+		return;
+	}
+	m_CanTouch = true;
+	BuySetUi::getInstance()->_signalBtnPressed->connect(this, &MysteryShopUiLayer::onBuyImpl);
+	
+	
+}
+void MysteryShopUiLayer::showErrorMessage( unsigned int errorNum )		//打开失败信息提示
+{
+	switch(errorNum)
+	{
+	case Gem_Version_Error:
+		{
+			
+			ToolTip::getInstance()->push(GET_STR(9455));
+			return;
+			break;
+		}
+	case Gem_Index_Error:
+		{
+
+			ToolTip::getInstance()->push(GET_STR(9455));
+			return;
+			break;
+		}
+	case Gem_Sell_Done:
+		{
+			ToolTip::getInstance()->push(GET_STR(9526));
+			return;
+			break;
+		}
+	case Gem_Can_Buy_Num:
+		{
+			ToolTip::getInstance()->push(GET_STR(9445));
+			return;
+			break;
+		}
+	case Gem_Money_Not_Enough:
+		{
+			ToolTip::getInstance()->push(GET_STR(2007));
+			return;
+			break;
+		}
+	case Gem_Diamond_Not_Enough:
+		{
+			ToolTip::getInstance()->push(GET_STR(9386));
+			return;
+			break;
+		}
+	case Gem_Bag_Space_Not_Enough:
+		{
+			ToolTip::getInstance()->push(GET_STR(161));
+			return;
+			break;
+		}
+	case Gem_YuanBao_Not_Enough:
+		{
+			RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+			return;
+			break;
+		}
+
+	}
+}
+void MysteryShopUiLayer::TipOK1()
+{
+	m_CanTouch = false;
+	INT nPlayerYuanBao = PackageManager::getInstance()->getYuanBao();
+	if(nPlayerYuanBao < 50)
+	{
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+		m_CanTouch =true;
+	}
+	WorldPacket C2G_Msg(NET_C2G_BUY_TREASURESHOP);
+	C2G_Msg << 15;
+	//TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+	std::function<void(bool)> func = [C2G_Msg](bool isSuccess){
+		if (isSuccess)
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+	};
+	SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+	SetDelayShow(true);
+	
+}
+void MysteryShopUiLayer::TipOK()
+{
+	m_CanTouch = false;
+	INT bagSpace = PackageManager::getInstance()->getBlankCount();
+	INT nPlayerMoney = PackageManager::getInstance()->getJinBi();
+	INT nPlayerYuanBao = PackageManager::getInstance()->getYuanBao();
+	INT nPlayerDiamond = PackageManager::getInstance()->getDiamond();
+	if(bagSpace < 1)
+	{
+		ToolTip::getInstance()->push(GET_STR(2027));
+		m_CanTouch =true;
+		return;
+	}
+	std::vector<MysteryShopUiData> vecList;
+	if(m_IsMystery)
+	{
+		vecList = PackageManager::getInstance()->getMysteryShopGoodsList1();
+	}
+	else
+	{
+		vecList = PackageManager::getInstance()->getMysteryShopGoodsList();
+	}
+	int nVecSize = vecList.size();
+	if(nVecSize <= m_SelectItem||m_SelectItem<0)
+	{
+		m_CanTouch =true;
+		return;
+	}
+	MysteryShopUiData MySelectItem = vecList[m_SelectItem];
+	if((unsigned int)MySelectItem.nItemNum < m_num )
+	{
+		ToolTip::getInstance()->push(GET_STR(9526));
+		m_CanTouch =true;
+		return;
+	}
+	if((unsigned int)MySelectItem.nCanbuyNum < m_num )
+	{
+		ToolTip::getInstance()->push(GET_STR(9445));
+		m_CanTouch =true;
+		return;
+	}
+	int iPrice = MySelectItem.nPrice*m_num;
+	switch(MySelectItem.nMoneyType)
+	{
+	case 1:
+		{
+			if(iPrice>nPlayerMoney)
+			{
+				ToolTip::getInstance()->push(GET_STR(2007));
+				m_CanTouch =true;
+				return;
+			}
+			break;
+		}
+	case 2:
+		{
+
+			if(iPrice>nPlayerYuanBao)
+			{
+				RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+				m_CanTouch =true;
+				return;
+			}
+			break;
+		}
+	case 3:
+		{
+			if(iPrice>nPlayerDiamond)
+			{
+				ToolTip::getInstance()->push(GET_STR(9386));
+				m_CanTouch =true;
+				return;
+			}
+			break;
+		}
+
+	}
+
+	WorldPacket C2G_Msg(NET_C2G_BUY_TREASURESHOP);
+	if(m_IsMystery)
+	{
+		C2G_Msg << 11;
+	}
+	else
+	{
+		C2G_Msg << 12;
+	}
+	C2G_Msg << PackageManager::getInstance()->GetFreshVersion();
+	C2G_Msg << m_SelectItem;
+	C2G_Msg << m_num;
+	if(m_IsMystery)
+	{
+		C2G_Msg << 1900004;
+	}
+	else
+	{
+		C2G_Msg << 1900005;
+	}
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+	
+}
+//void MysteryShopUiLayer::ShouTip()
+//{
+//	if(T_TradingSell == ui->getFrameTag())
+//	{
+//		if(!IS_UI_OPEN(WCT_TradingTipUI) && isTouchOnNodeContent(ui->getSellRightContainer(), pTouch))
+//		{
+//				OPEN_UI(WCT_TradingTipUI);	
+//			TradingEquipItemTipUILayer * uitip = getUiNodeByTag<TradingEquipItemTipUILayer>(WCT_TradingTipUI);
+//				if(NULL == uitip)
+//					return ;
+//				if(p_item != NULL)
+//				{
+//					uitip->initWithItem(p_item);
+//					uitip->hideCompose(false);
+//					uitip->SetBtnImage(ETT_BtnTypePriceUp);
+//				}
+//
+//				ItemTip::getInstace()->hideAllTipsButton();
+//		}
+//		}
+//		else
+//		{
+//			SetItemData();
+//			ItemTip::getInstace()->hideAllTipsButton();
+//		}
+//	
+//}
+void MysteryShopUiLayer::onBuyImpl( bool isOk, int num )
+{
+	m_CanTouch = false;
+	if (num <= 0)
+	{
+		//请输入购买数量
+		ToolTip::getInstance()->push(GET_STR(7157));
+		m_CanTouch =true;
+		return;
+	}
+	if(isOk)
+	{
+		std::vector<MysteryShopUiData> vecList;
+		if(m_IsMystery)
+		{
+			vecList = PackageManager::getInstance()->getMysteryShopGoodsList1();
+		}
+		else
+		{
+			vecList = PackageManager::getInstance()->getMysteryShopGoodsList();
+		}
+		int nVecSize = vecList.size();
+		if(nVecSize <= m_SelectItem||m_SelectItem<0)
+		{
+			m_CanTouch =true;
+			return;
+		}
+		MysteryShopUiData MySelectItem = vecList[m_SelectItem];
+		INT bagSpace = PackageManager::getInstance()->getBlankCount();
+		INT nPlayerMoney = PackageManager::getInstance()->getJinBi();
+		INT nPlayerYuanBao = PackageManager::getInstance()->getYuanBao();
+		INT nPlayerDiamond = PackageManager::getInstance()->getDiamond();
+		short stackNum  = PackageManager::getInstance()->onIsItemStackable(MySelectItem.ItemId);
+		float fStackNum = stackNum;
+		short fWantBuyNum = num;
+		UINT uNeedSpace = 10;
+		if(stackNum == 0)
+		{
+			uNeedSpace = num;
+		}
+		else
+		{
+			uNeedSpace = fWantBuyNum/fStackNum;
+			if(uNeedSpace<1)
+			{
+				uNeedSpace = 1;
+			}
+		}
+		if((unsigned int)bagSpace < uNeedSpace)
+		{
+			ToolTip::getInstance()->push(GET_STR(2027));
+			m_CanTouch =true;
+			return;
+		}
+		
+		if(MySelectItem.nItemNum < num )
+		{
+			ToolTip::getInstance()->push(GET_STR(9526));
+			m_CanTouch =true;
+			return;
+		}
+		if(MySelectItem.nCanbuyNum < num )
+		{
+			ToolTip::getInstance()->push(GET_STR(9445));
+			m_CanTouch =true;
+			return;
+		}
+		if(MySelectItem.nIsBind)
+		{
+			m_num = num;
+			m_CanTouch = true;
+
+			std::function<void(bool)> func = [this](bool isSuccess){
+				if (isSuccess)
+				{
+					MessageBoxUi *ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, GET_STR(9444).c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+					ui->signalOkBtnPressed.connect(this, &MysteryShopUiLayer::TipOK);
+					UiMgr::getInstance()->getCurScene()->addChild(ui, WZ_POPUI);
+				}
+			};
+			SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+			
+			return;
+		}
+		
+		int iPrice = MySelectItem.nPrice*num;
+		switch(MySelectItem.nMoneyType)
+		{
+		case 1:
+			{
+				if(iPrice>nPlayerMoney)
+				{
+					ToolTip::getInstance()->push(GET_STR(2007));
+					m_CanTouch =true;
+					return;
+				}
+				break;
+			}
+		case 2:
+			{
+
+				if(iPrice>nPlayerYuanBao)
+				{
+					RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+					m_CanTouch =true;
+					return;
+				}
+				break;
+			}
+		case 3:
+			{
+				if(iPrice>nPlayerDiamond)
+				{
+					ToolTip::getInstance()->push(GET_STR(9386));
+					m_CanTouch =true;
+					return;
+				}
+				break;
+			}
+
+		}
+	
+		WorldPacket C2G_Msg(NET_C2G_BUY_TREASURESHOP);
+		if(m_IsMystery)
+		{
+			C2G_Msg << 11;
+		}
+		else
+		{
+			C2G_Msg << 12;
+		}
+		C2G_Msg << PackageManager::getInstance()->GetFreshVersion();
+		C2G_Msg << m_SelectItem;
+		C2G_Msg << num;
+		if(m_IsMystery)
+		{
+			C2G_Msg << 1900004;
+		}
+		else
+		{
+			C2G_Msg << 1900005;
+		}
+		std::function<void(bool)> func = [C2G_Msg,this](bool isSuccess){
+			if (isSuccess)
+				TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+			else
+				m_CanTouch = true;
+		};
+		SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+		//TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);
+	}
+}

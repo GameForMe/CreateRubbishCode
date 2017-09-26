@@ -1,0 +1,270 @@
+#include "CmdAdapter.h"
+#include "SelectRoleViewNode.h"
+#include "TouchSprite.h"
+#include "StringMgr.h"
+#include "UiTools.h"
+#include "AnimationCache.h"
+#include "BSAnimate.h"
+
+
+SelectRoleViewNode::SelectRoleViewNode()
+{
+
+}
+
+SelectRoleViewNode::~SelectRoleViewNode()
+{
+	if(_roleInfoData != NULL)
+		delete _roleInfoData;
+
+	AnimationCache::getInstance()->releaseSpecislEffect("denglutexiao");
+}
+
+bool SelectRoleViewNode::init()
+{
+	_roleInfoData = NULL;
+	_roleViewState = 0;
+
+	CCSprite *RoleAnim1 = CCSprite::create();
+	RoleAnim1->setTag(RSP_FazhenEffect);
+	//RoleAnim1->setAnchorPoint(ccp(0.0f, 1.0f));
+	addChild(RoleAnim1, -1);
+
+	CCSprite *RoleAnim2 = CCSprite::create();
+	RoleAnim2->setTag(RSP_LiziEffect);
+	//RoleAnim2->setAnchorPoint(ccp(0.0f, 1.0f));
+	addChild(RoleAnim2, 2);
+
+
+	return true;
+}
+
+void SelectRoleViewNode::onNodeLoaded( CCNode * pNode, CCNodeLoader * pNodeLoader )
+{
+	static_cast<TouchSprite*>(getChildByTag(NT_NanWarrior))->signalTouched.connect(this, &SelectRoleViewNode::onRoleImgTouched);
+	static_cast<TouchSprite*>(getChildByTag(NT_NvWarrior))->signalTouched.connect(this, &SelectRoleViewNode::onRoleImgTouched);
+	static_cast<TouchSprite*>(getChildByTag(NT_NanMage))->signalTouched.connect(this, &SelectRoleViewNode::onRoleImgTouched);
+	static_cast<TouchSprite*>(getChildByTag(NT_NvMage))->signalTouched.connect(this, &SelectRoleViewNode::onRoleImgTouched);
+	static_cast<TouchSprite*>(getChildByTag(NT_NanTaoist))->signalTouched.connect(this, &SelectRoleViewNode::onRoleImgTouched);
+	static_cast<TouchSprite*>(getChildByTag(NT_NvTaoist))->signalTouched.connect(this, &SelectRoleViewNode::onRoleImgTouched);
+	static_cast<TouchSprite*>(getChildByTag(NT_RoleCreate))->signalTouched.connect(this, &SelectRoleViewNode::onRoleImgTouched);
+
+	runShowAnimation();
+}
+
+void SelectRoleViewNode::onRoleImgTouched(TouchSprite*, bool touched)
+{
+	if(touched)
+	{
+		signalRoleImgTouched.emit(this);
+	}
+}
+
+void SelectRoleViewNode::setState( int state )
+{
+	setAllVisible(false);
+	if(state == 0)
+	{
+		getChildByTag(NT_RoleCreate)->setVisible(true);
+		getChildByTag(NT_RoleInfo)->getChildByTag(NT_RoleInfoCreate)->setVisible(true);
+		getChildByTag(NT_RoleInfo)->getChildByTag(NT_RoleInfoName)->setVisible(false);
+		getChildByTag(NT_RoleInfo)->getChildByTag(NT_RoleInfoType)->setVisible(false);
+		getChildByTag(RSP_FazhenEffect)->setVisible(false);
+		getChildByTag(RSP_LiziEffect)->setVisible(false);
+	}
+	else if(state == 1)
+	{
+		setState1();
+		getChildByTag(NT_RoleInfo)->getChildByTag(NT_RoleInfoCreate)->setVisible(false);
+		getChildByTag(NT_RoleInfo)->getChildByTag(NT_RoleInfoName)->setVisible(true);
+		getChildByTag(NT_RoleInfo)->getChildByTag(NT_RoleInfoType)->setVisible(true);
+		getChildByTag(RSP_FazhenEffect)->setVisible(false);
+		getChildByTag(RSP_LiziEffect)->setVisible(false);
+	}
+	else if(state == 2)
+	{
+		setState2();
+		getChildByTag(NT_RoleInfo)->getChildByTag(NT_RoleInfoCreate)->setVisible(false);
+		getChildByTag(NT_RoleInfo)->getChildByTag(NT_RoleInfoName)->setVisible(true);
+		getChildByTag(NT_RoleInfo)->getChildByTag(NT_RoleInfoType)->setVisible(true);
+		getChildByTag(RSP_FazhenEffect)->setVisible(true);
+		getChildByTag(RSP_LiziEffect)->setVisible(true);
+	}
+
+	_roleViewState = state;
+}
+
+void SelectRoleViewNode::setRoleInfo( const RoleInfo &roleInfo )
+{
+	if(_roleInfoData != NULL)
+		delete _roleInfoData;
+	_roleInfoData = new RoleInfo(roleInfo);
+
+	std::ostringstream ostr;
+	if(roleInfo.type == RTE_MWARRIOR || roleInfo.type == RTE_WWARRIOR)
+	{
+		ostr << GET_STR(8).c_str() << roleInfo.level << GET_STR(77).c_str();
+	}
+	else if(roleInfo.type == RTE_MMASTER || roleInfo.type == RTE_WMASTER)
+	{ 
+		ostr << GET_STR(9).c_str() << roleInfo.level << GET_STR(77).c_str();
+	}
+	else if(roleInfo.type == RTE_MTAOIST || roleInfo.type == RTE_WTAOIST)
+	{
+		ostr << GET_STR(10).c_str() << roleInfo.level << GET_STR(77).c_str();
+	}
+
+	setRoleType(ostr.str());
+	setRoleName(convertName(roleInfo.name));
+}
+
+unsigned int SelectRoleViewNode::getRoleId()
+{
+	CC_ASSERT(_roleViewState != 0);
+	CC_ASSERT(_roleInfoData != NULL);
+	return _roleInfoData->id;
+}
+
+unsigned int SelectRoleViewNode::getRoleLevel()
+{
+	CC_ASSERT(_roleViewState != 0);
+	CC_ASSERT(_roleInfoData != NULL);
+	return _roleInfoData->level;
+}
+
+std::string SelectRoleViewNode::getRoleName()
+{
+	CC_ASSERT(_roleViewState != 0);
+	CC_ASSERT(_roleInfoData != NULL);
+	return convertName(_roleInfoData->name);
+}
+
+void SelectRoleViewNode::setAllVisible( bool visible )
+{
+	getChildByTag(NT_RoleCreate)->setVisible(visible);
+	getChildByTag(NT_NanWarrior)->setVisible(visible);
+	getChildByTag(NT_NvWarrior)->setVisible(visible);
+	getChildByTag(NT_NanMage)->setVisible(visible);
+	getChildByTag(NT_NvMage)->setVisible(visible);
+	getChildByTag(NT_NanTaoist)->setVisible(visible);
+	getChildByTag(NT_NvTaoist)->setVisible(visible);
+}
+
+void SelectRoleViewNode::setRoleType( const std::string &str )
+{
+	CCNode *node = getChildByTag(NT_RoleInfo);
+	CC_ASSERT(node != NULL);
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(node->getChildByTag(NT_RoleInfoType));
+	CC_ASSERT(label != NULL);
+	label->setString(str.c_str());
+}
+
+void SelectRoleViewNode::setRoleName( const std::string &name )
+{
+	CCNode *node = getChildByTag(NT_RoleInfo);
+	CC_ASSERT(node != NULL);
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(node->getChildByTag(NT_RoleInfoName));
+	CC_ASSERT(label != NULL);
+	label->setString(name.c_str());
+}
+
+void SelectRoleViewNode::setState1()
+{
+	if(_roleInfoData != NULL)
+	{
+		CCNode *node = NULL;
+		switch(_roleInfoData->type)
+		{
+		case RTE_MWARRIOR:
+			node = getChildByTag(NT_NanWarrior);
+			node->setVisible(true);
+			node->getChildByTag(0)->setVisible(false);
+			break;
+		case RTE_WWARRIOR:
+			node = getChildByTag(NT_NvWarrior);
+			node->setVisible(true);
+			node->getChildByTag(0)->setVisible(false);
+			break;
+		case RTE_MMASTER:
+			node = getChildByTag(NT_NanMage);
+			node->setVisible(true);
+			node->getChildByTag(0)->setVisible(false);
+			break;
+		case RTE_WMASTER:
+			node = getChildByTag(NT_NvMage);
+			node->setVisible(true);
+			node->getChildByTag(0)->setVisible(false);
+			break;
+		case RTE_MTAOIST:
+			node = getChildByTag(NT_NanTaoist);
+			node->setVisible(true);
+			node->getChildByTag(0)->setVisible(false);
+			break;
+		case RTE_WTAOIST:
+			node = getChildByTag(NT_NvTaoist);
+			node->setVisible(true);
+			node->getChildByTag(0)->setVisible(false);
+			break;
+		}
+	}
+}
+
+void SelectRoleViewNode::setState2()
+{
+	if(_roleInfoData != NULL)
+	{
+		CCNode *node = NULL;
+		switch(_roleInfoData->type)
+		{
+		case RTE_MWARRIOR:
+			node = getChildByTag(NT_NanWarrior);
+			node->setVisible(true);
+			node->getChildByTag(0)->setVisible(true);
+			break;
+		case RTE_WWARRIOR:
+			node = getChildByTag(NT_NvWarrior);
+			node->setVisible(true);
+			node->getChildByTag(0)->setVisible(true);
+			break;
+		case RTE_MMASTER:
+			node = getChildByTag(NT_NanMage);
+			node->setVisible(true);
+			node->getChildByTag(0)->setVisible(true);
+			break;
+		case RTE_WMASTER:
+			node = getChildByTag(NT_NvMage);
+			node->setVisible(true);
+			node->getChildByTag(0)->setVisible(true);
+			break;
+		case RTE_MTAOIST:
+			node = getChildByTag(NT_NanTaoist);
+			node->setVisible(true);
+			node->getChildByTag(0)->setVisible(true);
+			break;
+		case RTE_WTAOIST:
+			node = getChildByTag(NT_NvTaoist);
+			node->setVisible(true);
+			node->getChildByTag(0)->setVisible(true);
+			break;
+		}
+	}
+}
+
+void SelectRoleViewNode::runShowAnimation()
+{
+	AnimationCache::AnimateList animateList;
+	AnimationCache::createDefList(2, animateList);
+	AnimationCache::getInstance()->getSpecialEffect(0x3000,"denglutexiao", animateList);
+	BSAnimate *animste = animateList[0];
+	CCSize size = getChildByTag(RSP_FazhenEffect)->getContentSize();
+	getChildByTag(RSP_FazhenEffect)->setPosition(ccp(0.0f, size.height / 2.0f));
+	getChildByTag(RSP_FazhenEffect)->runAction(CCRepeatForever::create(animste));
+	getChildByTag(RSP_FazhenEffect)->setVisible(false);
+	BSAnimate *animste2 = animateList[1];
+	CCSize size2 = getChildByTag(RSP_LiziEffect)->getContentSize();
+	getChildByTag(RSP_LiziEffect)->setPosition(ccp(size2.width / 2.0f, size2.height / 2.0f));
+	getChildByTag(RSP_LiziEffect)->runAction(CCRepeatForever::create(animste2));
+	getChildByTag(RSP_LiziEffect)->setVisible(false);
+}
+
+

@@ -1,0 +1,182 @@
+#ifndef REMOTEROLESTATEMGR_H
+#define REMOTEROLESTATEMGR_H
+/**
+ *	@file		RemoteRoleStateMGr.h
+ *	@author		gx
+ *	@date		2013/5/31
+ *	@version	
+ *	@brief		远程玩家状态管理类（包括人物属性，装备属性）
+ */
+#include "CmdAdapter.h"
+#include "ItemDefine.h"
+#include "ActionProto.h"
+#include "RoleDefine.h"
+#include "TeamProto.h"
+#include "SocialProto.h"
+#include "ServerTime.h"
+#include "GongFa2Tip.h"
+#include "f_string_table.h"
+
+#pragma pack(push, 1)
+//消息定义
+//----------------------------------------------------------------------------------
+// 向服务器请求对方的装备
+//----------------------------------------------------------------------------------
+struct NET_SIC_get_remote_role_equip_info : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_get_remote_role_equip_info)
+	unsigned int	dw_role_id;
+};
+
+struct NET_SIS_get_remote_role_equip_info : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_get_remote_role_equip_info)
+	unsigned int	dw_role_id;
+	int				nEquipNum;					//装备个数
+	int				nLevel;						//玩家等级
+	int				nAtt[ERRA_End];				//远程玩家基本属性
+	unsigned int	dwGuildID;					//行会ID
+	unsigned int	dwSpouseID;					//配偶
+	unsigned char	byClass;					//职业
+	unsigned char	bySex;						//性别
+	//gx add 2013.8.19
+	int			nFightLi;					//战斗力
+	unsigned int	dwMeili;					//魅力值
+	int			nRongyu;					//荣誉点
+	int				nPKvalue;					//pk值
+	int				nPhysical;					//体力值
+	//int			nGongFaLevel;				//功法魔魂等级
+	//end
+
+	int             nSuitID[MAX_ROLE_SUIT_NUM];
+	int             nSuitCount[MAX_ROLE_SUIT_NUM];
+
+	tagAvatarEquip	AvatarEquip;				//装备外观
+	unsigned char	byEquip[1];					//装备
+};
+//若请求的远程玩家不在线，则发送该消息
+struct NET_SIS_get_remote_role_equip_info_offline : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_get_remote_role_equip_info_offline)
+};
+//end
+struct tagRoleInfo
+{
+	unsigned int uRoleID;
+	std::string strName;//玩家名称
+	int level;//玩家等级
+	int _roleData[ERRA_End];//玩家属性数组
+	tagOtherGongFa _otherGongFa;//远程玩家功法信息
+	tagRoleInfo():level(-1)
+				  ,strName("")
+				  ,uRoleID(INVALID)
+	{
+
+	}
+	void clear()
+	{
+		uRoleID = (unsigned int)INVALID;
+		strName = ("");
+		memset(_roleData,0,sizeof(_roleData));
+		level = -1;
+	}
+};
+#pragma pack(pop)
+
+class RemoteRoleStateMgr
+{
+public:typedef std::map<short, tagEquipViewInfo> RemoteRoleEquipInfo;
+private:
+	unsigned int m_RemoteRoleID;//远程玩家ID
+	unsigned int m_require_time;//向服务器请求玩家装备信息的时间
+	RemoteRoleEquipInfo m_map_remote_role_equip;//远程玩家装备信息
+	tagRoleInfo m_RemoteRole_Tag;//远程玩家信息结构体
+	unsigned int m_displayAttrId[PDA_End];//角色外观
+	tagRoleSocialInfo m_RemoteSocialData;//远程玩家社交数据相关
+	unsigned int m_GuildID;//行会ID
+	unsigned int m_SpouseID;//配偶ID
+	std::string m_GuildName;
+	std::string m_SpouseName;
+	
+	unsigned char m_ClassType;
+	unsigned char m_Sex;
+	int fightLi;//战斗力
+	unsigned int dwMeiLi;//魅力值
+	int rongYu;//荣誉点
+	int pkvalue;//pk值
+	int m_Physical; //体力值
+
+	std::map<int, int> m_remote_suit_num;
+
+	tagDWORDTime m_month_card_time;
+public:
+	RemoteRoleStateMgr();
+	~RemoteRoleStateMgr();
+	void init();
+	static RemoteRoleStateMgr* getInstance();
+	void Destroy();
+	//UI更新相关函数	lzz
+	void updateRoleEquipUi(unsigned int playerId);
+	void updateRoleAttrUi(unsigned int playerId);
+	void updateRoleInfoUi(unsigned int playerId);
+	//UI相关接口函数声明
+	void RefreshRemoteRoleAllInfo(unsigned int uRoleID);//UI初始化时调用
+	void RequestRemoteRoleEquipInfo(unsigned int uDestRoleID);//请求玩家的装备信息
+	unsigned int onServerGetRemoteRoleEquipInfo(s_net_cmd *cmd);
+	const tagEquipViewInfo* GetEquipInfoByIndex(EEquipPos posIndex);//根据装备位置获取对应的装备信息
+	void RequestRemoteRoleData(unsigned int uDestRoleID);//请求玩家的状态信息
+	unsigned int onServerGetRemoteRoleData(s_net_cmd *cmd);
+	unsigned int onServerGetRemoteRoleName(s_net_cmd *cmd);//获取远程玩家的姓名
+	inline const tagRoleInfo* GetRoleInfo() {return &m_RemoteRole_Tag;}
+	inline const RemoteRoleEquipInfo GetEuipInfo() {return m_map_remote_role_equip;}
+	const tagRoleSocialInfo* GetRemoteSocialData() {return &m_RemoteSocialData;}
+	tagDWORDTime GetMonthCardBeginTime() const { return m_month_card_time;}
+	std::string GetSpouseName() 
+	{
+		if (m_SpouseName.empty())
+		{
+			return STRING_TABLE["none"];
+		}
+		return m_SpouseName;
+	}//获取配偶的姓名
+	std::string GetGuildName() 
+	{
+		if (m_GuildName.empty())
+		{
+			return STRING_TABLE["none"];
+		}
+		return m_GuildName;
+	}//获取玩家所在帮会名称
+	unsigned int getDisplayAttr(ePlayerDisplayAttr dsa) { return m_displayAttrId[dsa];}
+	unsigned int onServerCanntGetRoleInfo(s_net_cmd *cmd);
+	unsigned int onServerGetRemoteSocialData(s_net_cmd *cmd);
+	unsigned int onServerGetMonthCardData(s_net_cmd *cmd);
+	inline EClassType GetClassType() {return (EClassType)m_ClassType;}
+	inline ESex GetSex() {return (ESex)m_Sex;}
+
+	inline int GetFightLi() {return fightLi;}
+	inline unsigned int GetMeiLi() {return dwMeiLi;}
+	inline int GetRongyu(){return rongYu;}
+	inline int GetPKValue(){return pkvalue;}
+	inline int GetPhysical(){ return m_Physical; }
+	int get_remote_suit_num_by_id(int suit_id);
+	bool bEquipBind(const tagEquipViewInfo *equipInfo);
+
+	bool tryToRefreshRemotePlayerInfo(unsigned int dwID);
+protected:
+	/*类辅助函数*/
+	void SetRemoteRoleID(unsigned int destRoleID) {m_RemoteRoleID = destRoleID;}
+	unsigned int GetRemoteRoleID() const {return m_RemoteRoleID;}
+	//设置向服务器发送人物装备请求的时间，若玩家在5秒内还是查看该玩家的装备
+	//信息，则不会重复向服务器发送请求
+	void SetRequestTime(unsigned int time) {m_require_time = time;}
+	tagDWORDTime GetRequestTime() const {return m_require_time;}
+	
+	void ResetAllEquip();
+	EEquipPos GetEquipPos(unsigned int typeID);//根据装备的typeid获取其应装备的位置
+	int GetRoleSignalDataInfo(int index);//根据索引值获取玩家的基本属性值
+	void setDisplayAttr(ePlayerDisplayAttr dsa, unsigned int id) { m_displayAttrId[dsa] = id;}
+	void OnServerGetGuildName(unsigned int , const std::string&);
+	void onGetName(unsigned int roleid , const std::string& name);
+};
+#endif

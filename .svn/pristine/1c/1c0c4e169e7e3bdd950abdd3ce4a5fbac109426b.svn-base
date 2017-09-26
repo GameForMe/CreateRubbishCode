@@ -1,0 +1,295 @@
+#include "JoyStick.h"
+#include "MessageDispatcher.h"
+#include "CfgReader.h"
+#include "BaseDefine.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "Auto_ActionMgr.h"
+#include "UiTools.h"
+#include "NewPlayerGuide.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "ExchangeBusinessMgr.h"
+#include "World.h"
+#include "NPCTalkUi.h"
+#include "DelayUi.h"
+#include "ChatUi.h"
+#include "ShortCutUi.h"
+#include "UiManager.h"
+
+#define JOYSTICK_POSX 75
+#define JOYSTICK_POSY 80
+#define JOYSTICK_RADIU 80
+
+CCNode * JoyStickUi::openUi()
+{
+	return Joystick::JoystickWithCenter(
+		ccp(CFG(int,"joystick_pos_x",JOYSTICK_POSX),CFG(int,"joystick_pos_y",JOYSTICK_POSY)),
+		CFG(int,"joystick_radius",62));
+}
+void JoyStickUi::showUi( bool show )
+{
+	Joystick *ui = getUiNodeByTag<Joystick>(WCT_JoyStick);
+	if(ui != NULL)
+		ui->showUi(show);
+}
+
+void JoyStickUi::setActivity( bool a )
+{
+	Joystick *ui = getUiNodeByTag<Joystick>(WCT_JoyStick);
+	if(ui != NULL)
+	{
+		if(a)
+			ui->Active();
+		else
+			ui->Inactive();
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+void Joystick::updatePos(float dt)
+{
+	//jsSprite->setPosition(ccpAdd(jsSprite->getPosition(),ccpMult(ccpSub(currentPoint, jsSprite->getPosition()),0.5)));
+	if(_push)
+	{
+		float angle = ccpToAngle(ccpSub(centerPoint, currentPoint));
+		float rot = 180.0f - (angle * 180.0f / PI);
+		jsSprite->setRotation(rot);
+		//jsSmallSprite->setRotation(rot);
+			//jsSmallSprite->setRotation(180.0f - (angle * 180.0f / PI) + 90.0f);
+		CCPoint dir = getDirection();
+		float skewing = 0.65f;
+		if (dir.x < 0.0f)
+			dir.x = (int)(dir.x - 0.5f);
+		else
+			dir.x = (int)(dir.x + 0.5f);
+		if (dir.y < 0.0f)
+			dir.y = (int)(dir.y - 0.5f) * skewing;
+		else
+			dir.y = (int)(dir.y + 0.5f) * skewing;
+		_data.setDirection(dir);
+		MessageDispatcher::Instance()->DispatchMsg(-1.0, NULL, RoleManager::getInstance()->getLocalPlayer(), M_JOYSTICKPRESS, &_data);
+	}
+}
+
+void Joystick::Active()
+{
+	if (!active) 
+	{
+		_push = false;
+		active=true;
+		schedule(schedule_selector(Joystick::updatePos));//添加刷新函数
+		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1,true);//添加触摸委托
+	}
+}
+
+//冻结摇杆
+void   Joystick::Inactive()
+{
+	if (active) 
+	{
+		_push = false;
+		active=false;
+		this->unschedule(schedule_selector(Joystick::updatePos));//删除刷新
+		CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);//删除委托
+	}
+}
+
+void Joystick::stopAct()
+{
+	_push = false;
+	currentPoint = centerPoint;
+	float angle = ccpToAngle(ccpSub(centerPoint, currentPoint));
+	float rot = 180.0f - (angle * 180.0f / PI);
+	jsSprite->setRotation(rot);
+	CCPoint dir = getDirection();
+	float skewing = 0.65f;
+	if (dir.x < 0.0f)
+		dir.x = (int)(dir.x - 0.5f);
+	else
+		dir.x = (int)(dir.x + 0.5f);
+	if (dir.y < 0.0f)
+		dir.y = (int)(dir.y - 0.5f) * skewing;
+	else
+		dir.y = (int)(dir.y + 0.5f) * skewing;
+	_data.setDirection(dir);
+	aJsBg->setVisible(false);
+	aJsSprite->setVisible(true);
+	jsSmallSprite->setVisible(false);
+	MessageDispatcher::Instance()->DispatchMsg(-1.0, NULL, RoleManager::getInstance()->getLocalPlayer(), M_LpStand, NULL);
+}
+
+bool Joystick::ccTouchBegan(CCTouch* touch, CCEvent* event)
+{
+	//if(RoleManager::getInstance()->isLoading())
+	//	return false;
+	if (!active)
+		return false;
+	if(!changeRocker)
+		return false;
+
+	if (DelayUi::getInstace()->isDelay())
+		return true;
+	CCPoint touchPoint = touch->getLocationInView();
+	touchPoint = CCDirector:: sharedDirector()->convertToGL(touchPoint);
+	if (ccpDistance(touchPoint, centerPoint) > radius)
+		return false;
+	_push = true;
+	currentPoint = touchPoint;
+	jsSmallSprite->setPosition(ccp(currentPoint.x - 35,currentPoint.y));
+	aJsBg->setVisible(true);
+	aJsSprite->setVisible(false);
+	jsSmallSprite->setVisible(true);
+
+	//取消NPC对话框
+	World::getInstance()->getNPCDialog()->show(false);
+	return true;
+}
+
+void  Joystick::ccTouchMoved(CCTouch* touch, CCEvent* event)
+{
+	/*if(RoleManager::getInstance()->isLoading())
+		return ;*/
+	if (DelayUi::getInstace()->isDelay())
+		return;
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(ploc))
+		return;
+	if (ploc->isInRoleStateAny(RA_ShuangXiu) || ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))
+	{
+		if (ploc->isInRoleStateAny(RA_Exchange))
+		{
+			ExchangeBusinessMgr::getInstance()->CancleExchange();
+		}
+		else if (ploc->isInRoleStateAny(RA_ShuangXiu))
+		{
+			//ToolTip::getInstance()->push(GET_STR(2147));
+		}
+		else
+		{
+			//ToolTip::getInstance()->push(GET_STR(2146));
+		}
+		return;
+	}
+
+	CCPoint touchPoint = touch->getLocationInView();
+	touchPoint = CCDirector:: sharedDirector()->convertToGL(touchPoint);
+
+	if (ccpDistance(touchPoint, centerPoint) > radius - 15)
+	{
+		currentPoint =ccpAdd(centerPoint,ccpMult(ccpNormalize(ccpSub(touchPoint, centerPoint)), radius - 15));
+	}
+	else 
+	{
+		currentPoint = touchPoint;
+	}
+	jsSmallSprite->setPosition(ccp(currentPoint.x - 35,currentPoint.y));
+
+/*
+	if (ccpDistance(touchPoint, centerPoint) > radius)
+	{
+		jsSmallSprite->setPosition(ccpMult(ccpNormalize(ccpSub(touchPoint, centerPoint)), radius));
+	}
+	else 
+	{
+		jsSmallSprite->setPosition(ccp(touchPoint.x - 30,touchPoint.y - 30));
+	}*/
+
+	//TODO：取消自动打怪（摇杆）
+	if (AutoActionMgr::getInstance()->Get_Auto_Action())//gx add
+	{
+		AutoActionMgr::getInstance()->Set_Auto_Action(false);
+	}
+	
+}
+
+void  Joystick::ccTouchEnded(CCTouch* touch, CCEvent* event)
+{
+	//if(RoleManager::getInstance()->isLoading())
+	//	return ;
+	LocalPlayer * Player = RoleManager::getInstance()->getLocalPlayer();
+	if(NULL == Player)
+		return ;
+
+	Player->m_bIsJock = false;
+	if(Player->m_bAttBtnClick)
+	{
+	  if(NULL != GET_UI(ShortCutUi, WCT_ShorCutUi))
+		  GET_UI(ShortCutUi, WCT_ShorCutUi)->AttBtnClick();
+	}
+
+	if (DelayUi::getInstace()->isDelay())
+		return;
+	_push = false;
+	currentPoint = centerPoint;
+	aJsBg->setVisible(false);
+	aJsSprite->setVisible(true);
+	jsSmallSprite->setVisible(false);
+	MessageDispatcher::Instance()->DispatchMsg(-1.0, NULL,Player, M_LpStand, NULL);
+}
+
+//获取摇杆方位,注意是单位向量
+CCPoint Joystick::getDirection()
+{
+	return ccpNormalize(ccpSub(currentPoint, centerPoint));
+}
+
+//获取摇杆力度
+float Joystick::getVelocity()
+{
+	return ccpDistance(centerPoint, currentPoint);
+}
+
+Joystick* Joystick:: JoystickWithCenter(CCPoint aPoint ,float aRadius)
+{
+	Joystick *jstick=Joystick::create();
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	std::string mainuiList = uiDir + std::string("ccbResources/rendui.plist");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(mainuiList.c_str());
+	jstick->initWithCenter(aPoint,aRadius);
+	return jstick;
+}
+
+Joystick* Joystick::initWithCenter(CCPoint aPoint ,float aRadius)
+{
+	active = false;
+	radius = aRadius;
+	centerPoint = aPoint;
+	currentPoint = centerPoint;
+	aJsSprite = CCSprite::createWithSpriteFrameName("joysticksmall");
+	jsSprite = aJsSprite;
+	jsSprite->setPosition(centerPoint);
+	jsSmallSprite = CCSprite::createWithSpriteFrameName("joystick");
+	jsSmallSprite->setAnchorPoint(ccp(0.5f,0.0f));
+	jsSmallSprite->setPosition(ccp(centerPoint.x,centerPoint.y));
+	jsSmallSprite->setRotation(90.0f);
+	jsSmallSprite->setVisible(false);
+	aJsBg = CCSprite::createWithSpriteFrameName("joystickback");
+	aJsBg->setPosition(centerPoint);
+	this->addChild(aJsBg);
+	aJsBg->setVisible(false);
+	this->addChild(jsSprite);
+	this->addChild(jsSmallSprite);
+	return this;
+}
+
+void Joystick::onExit()
+{
+	Inactive();
+	CCLayer::onExit();
+}
+
+void Joystick::showUi( bool show )
+{
+	CCPoint dest;
+	changeRocker=show;
+
+	if(show)
+		dest = ccp(0.f, 0.f);
+	else
+		dest = ccp(-2.0 * JOYSTICK_POSX, -2.0 * JOYSTICK_POSY);
+
+	CCAction *moveTo = createMoveTo(getPosition(), dest);
+	stopAllActions();
+	runAction(moveTo);
+}

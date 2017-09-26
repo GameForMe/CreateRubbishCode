@@ -1,0 +1,507 @@
+#include "KaifuhuodongItem.h"
+#include "World.h"
+#include "UiTools.h"
+#include "UiLoader.h"
+#include "ItemNode.h"
+#include "KaifuHuodongMgr.h"
+#include "CommonClient.h"
+#include "KaifuhuodongUi.h"
+#include "Helper.h"
+#include "LocalPlayer.h"
+#include "UIUtil.h"
+
+KaifuhuodongListItem::KaifuhuodongListItem()
+{
+	pLayer = NULL;
+	_marginH = 7.0f;
+	
+}
+
+KaifuhuodongListItem::~KaifuhuodongListItem()
+{
+	ccNodeList.clear();
+	indexVecForItem.clear();
+}
+
+void KaifuhuodongListItem::onTouch( CCTouch *touck )
+{
+
+}
+
+void KaifuhuodongListItem::setData( const SPacket_Activity &data, KaifuhuodongUiLayer* layer)
+{
+	_data = data;
+	pLayer = layer;
+	CCSpriteFrame* frame=CCSpriteFrameCache::sharedSpriteFrameCache()
+		->spriteFrameByName("kaifuhuodong_7tianbtnn");
+	CC_ASSERT(frame);
+	_bg_sprite = CCSprite::createWithSpriteFrame(frame);
+	//把节点大小设置成背景图片的大小
+	_node->setContentSize(_bg_sprite->getContentSize());
+	_node->setAnchorPoint(ccp(0,1.0f));
+
+	UIUtil::childNodeAlign(_node,_bg_sprite,eha_center,eva_center,CCPointZero);
+	//title->setAnchorPoint(ccp(0.f, 0.5f));
+	//_node->addChild(title, 0);
+
+	TTFConfig config;
+	config.fontFilePath=  FT_FONTFACE;
+	config.fontSize = 18;
+	config.outlineSize = 1;
+
+	ziti = LabelFT::createWithTTF(config,"");
+
+// 	ziti->setAnchorPoint(ccp(0.5f, 0.5f));
+// 	ziti->setPosition(ccp(76,-25));
+// 	_node->addChild(ziti, 1);
+
+	SProtoKaifuActivity* pInfo = KaifuHuodongMgr::getInstance()->getKaifuActivity(_data.m_iId);
+	//if (title)
+	//	title->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("kaifuhuodong_7tianbtnn"));
+	if (pInfo && ziti)
+		ziti->setString(pInfo->name.c_str());
+
+	UIUtil::childNodeAlign(_node,ziti,eha_center,eva_center,CCPointZero);
+
+
+
+	//if (pInfo->actType == 0)
+	//{
+	//	World::getInstance()->SetHighLight(_node, WT_CCNODE, WCT_KaifuActivity, 0, true,0,0);
+	//}
+	
+}
+
+float KaifuhuodongListItem::getItemHeight()
+{
+	return ListItem::getItemHeight();
+}
+
+void KaifuhuodongListItem::onSelectChanged( bool select )
+{
+	if (!select)
+		_bg_sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("kaifuhuodong_7tianbtnn"));
+	else
+		_bg_sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("kaifuhuodong_7tianbtnh"));
+	if (select && pLayer)
+	{
+		pLayer->setSelectActivity(_data.m_iId, this);
+	}
+}
+
+const char* KaifuhuodongListItem::getCCBIName(std::string& name)
+{
+	name = "kaifuhuodong1";
+	//switch (_data.m_iId)
+	//{
+	//case 1:
+	//	name = "kaifuhuodong1";
+	//	break;
+	//}
+	return name.c_str();
+}
+
+const char* KaifuhuodongListItem::getLayerName(std::string& name)
+{
+	switch (_data.m_iId)
+	{
+	case 1:
+		name = "Tian7leUiLayer";
+		break;
+	}
+	return name.c_str();
+}
+
+void KaifuhuodongListItem::updateData(CCNode* parent, VerticalList<KaifuhuodongListItemChild> *_verticalList, LabelFT* ziti)
+{
+	ziti->setVisible(false);
+	ccNodeList.clear();
+	_verticalList->clear();
+	indexVecForItem.clear();
+	std::string ccbiName;
+	SProtoKaifuActivity* pInfo = KaifuHuodongMgr::getInstance()->getKaifuActivity(_data.m_iId);
+	SPacket_Activity* pPacketInfo = KaifuHuodongMgr::getInstance()->getKaifuPacketActivity(_data.m_iId);
+	if (pInfo)
+	{
+		if (pInfo->describe.size() >= 2 )
+		{
+			ziti->setString(pInfo->describe.c_str());
+			ziti->setVisible(true);
+		}
+		else
+		{
+			for (size_t i = 0;i < pInfo->m_ActivityItem_VecProto.size();i++)
+			{
+				if (pPacketInfo->byData[i].m_iValue < 2)//没有领取过 不可领取活动 2016-3-24 金山
+				{
+					indexVecForItem.push_back(i);
+				}
+			}
+
+			for (size_t i = 0;i < pInfo->m_ActivityItem_VecProto.size();i++)
+			{
+				if (pPacketInfo->byData[i].m_iValue == 2)//领取过 2016-3-24 金山
+				{
+					indexVecForItem.push_back(i);
+				}
+			}
+
+			for (size_t i = 0;i < pInfo->m_ActivityItem_VecProto.size();i++)
+			{
+				KaifuhuodongListItemChild* item = new KaifuhuodongListItemChild;
+				KaifuhuodongListItemLayer* pLayer = item->createItem(getCCBIName(ccbiName), NULL);
+				_verticalList->addItem(item);
+				ccNodeList.push_back(pLayer);
+			}
+		}
+		
+		//ccParent->setContentSize(size);
+	}
+
+	for (size_t i = 0; i < indexVecForItem.size(); i++)
+	{
+		size_t index = indexVecForItem.at(i);
+		ccNodeList[i]->updateData(_data, index);
+	}
+	_verticalList->updateDisplay();
+}
+
+void KaifuhuodongListItem::update7DayLogin( CCNode* node )
+{
+	
+}
+
+void KaifuhuodongListItem::getLoader( std::map<std::string, CCNodeLoader*>& nodeLoaders )
+{
+	std::string layerName;
+	layerName = getCCBIName(layerName);
+	switch (_data.m_iId)
+	{
+	case 1:
+		nodeLoaders[layerName.c_str()] = UiNodeLoader<Tian7leUiLayer>::loader();
+		break;
+	}
+	
+}
+
+KaifuhuodongListItemLayer* KaifuhuodongListItemChild::createItem( const char* szFile,CCObject*pOwner,UiInterface* holder /*= NULL*/ )
+{
+	CCNodeLoaderLibrary* lib  = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string strFullPath  = CFGReader::instance()->get_ui_ccbi_filepath(szFile);
+	CCNode* node = reader->readNodeGraphFromFile(strFullPath.c_str(),pOwner);
+	CC_ASSERT(node);
+	node->ignoreAnchorPointForPosition(false);
+
+	KaifuhuodongListItemLayer* item = dynamic_cast<KaifuhuodongListItemLayer*>(node);
+	CCNode* backNode = node->getChildByTag(0);
+	item->setContentSize(backNode->getContentSize());
+	CC_ASSERT(item);
+
+	if (holder)
+		holder->mergeSheet(reader->getLoadedSpriteSheet());
+	_node->setContentSize(backNode->getContentSize());
+	_node->setAnchorPoint(ccp(0.5f,0.5f));
+	//_node->setAnchorPoint(ccp(0,1.0f));
+	UIUtil::childNodeAlign(_node,item,eha_center,eva_center,CCPointZero);
+	//node->setPosition(node->getContentSize().width*0.5f ,node->getContentSize().height*0.5f );
+	//_node->addChild(node);
+	ccNode = item;
+	return item;
+
+// 	m_busLeiItemNode = dynamic_cast<BusinessLeiItemNode*>(node);
+// 	m_itemBG = node->getChildByTag(0);
+// 	m_busLeiItemNode->setContentSize(m_itemBG->getContentSize());
+// 	m_busLeiItemNode->ignoreAnchorPointForPosition(false);
+// 	UIUtil::childNodeAlign(m_busLeiItemNode,m_itemBG,eha_center,eva_center,CCPointZero,true);
+// 	_node->setContentSize(m_itemBG->getContentSize());
+// 	_node->setAnchorPoint(ccp(0.5,0.5));
+// 	UIUtil::childNodeAlign(_node,m_busLeiItemNode,eha_center,eva_center,CCPointZero);
+}
+
+cocos2d::CCSize KaifuhuodongListItem::getContentSize()
+{
+	if (_bg_sprite)
+	{
+		return _bg_sprite->getContentSize();
+	}
+	return CCSize(0.f, 0.f);
+}
+
+void KaifuhuodongListItem::updateBtnState(int sendBefore)
+{
+	if (ccNodeList.size() > 0)
+	{
+		for (size_t i = 0; i < ccNodeList.size(); i++)
+		{
+			int index = indexVecForItem.at(i);
+			ccNodeList[i]->updateReceiveBtnState(index,sendBefore);
+		}
+	}
+}
+
+void KaifuhuodongListItem::updateDataListItem(bool isShow)
+{
+	SProtoKaifuActivity* pInfo = KaifuHuodongMgr::getInstance()->getKaifuActivity(_data.m_iId);
+	SPacket_Activity* pPacketInfo = KaifuHuodongMgr::getInstance()->getKaifuPacketActivity(_data.m_iId);
+	if (pInfo && pPacketInfo)
+	{
+		if (pInfo->actType == 0)
+		{
+			World::getInstance()->SetHighLight(_bg_sprite, WT_CCSPRITE, WCT_KaifuActivity, 0, isShow,120,25);
+			return;
+
+		}
+		else
+		{
+			for (size_t i = 0;i < pInfo->m_ActivityItem_VecProto.size();i++)
+			{
+				if (pPacketInfo->byData[i].m_iValue == 1)
+				{
+					World::getInstance()->SetHighLight(_bg_sprite, WT_CCSPRITE, WCT_KaifuActivity, 0, isShow,120,25);
+					break;
+				}
+			}
+		}
+	}
+}
+
+KaifuhuodongListItemLayer::KaifuhuodongListItemLayer() : m_Index(0)
+{
+
+}
+
+KaifuhuodongListItemLayer::~KaifuhuodongListItemLayer()
+{
+
+}
+
+cocos2d::SEL_MenuHandler KaifuhuodongListItemLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+void KaifuhuodongListItemLayer::updateData(const SPacket_Activity &data, int index)
+{
+	_data = data;
+	m_Index = index;
+
+}
+
+void KaifuhuodongListItemLayer::updateReceiveBtnState(int index,int sendBefore)
+{
+
+}
+
+Tian7leUiLayer::Tian7leUiLayer()
+{
+	firstWenzi =NULL;
+	secondWenzi =NULL;
+}
+
+Tian7leUiLayer::~Tian7leUiLayer()
+{
+	
+}
+
+void Tian7leUiLayer::updateData(const SPacket_Activity &data, int index)
+{
+	KaifuhuodongListItemLayer::updateData(data, index);
+	CCNode* node = getChildByTag(0);
+	
+	CCNode* itemSprite = node->getChildByTag(0);
+	if (itemSprite)
+	{
+		CCNode* itemMgr = itemSprite->getChildByTag(0);
+		SProtoKaifuActivity* pInfo = KaifuHuodongMgr::getInstance()->getKaifuActivity(_data.m_iId);
+		SPacket_Activity* pPacketInfo = KaifuHuodongMgr::getInstance()->getKaifuPacketActivity(_data.m_iId);
+		LocalPlayer* local = RoleManager::getInstance()->getLocalPlayer();
+		if (pInfo && local)
+		{
+			int count = 0;
+			for (int j = 0; j < MAX_Activity_Reward; j++)
+			{
+				if (pInfo->m_ActivityItem_VecProto[index].reward[j] > 0 && pInfo->m_ActivityItem_VecProto[index].m_Num[j] > 0)
+				{
+					ItemNode * node = ItemNode::create();
+					node->init();
+					node->setPosition((count + 1) * 60, 30);
+					node->setDataId(pInfo->m_ActivityItem_VecProto[index].reward[j]);
+					if (pPacketInfo->byData[index].m_iValue == 2)
+					{
+						node->stopAnimation();
+					}
+					else
+					{
+						node->runAnimation("E1_201");
+					}
+
+					node->setNum(pInfo->m_ActivityItem_VecProto[index].m_Num[j]);
+					if (pInfo->m_ActivityItem_VecProto[index].m_Num[j] == 1)
+					{
+						node->SetShowNum(true);
+					}
+					node->setClickable(true,0);
+					node->hideItemOpBtn();
+					itemMgr->addChild(node);
+					count++;
+				}
+			}
+		}
+		firstWenzi = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(node->getChildByTag(2))));//登陆满多少天||等级到多少级
+		secondWenzi = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(node->getChildByTag(3))));//天数||等级数
+	
+		string firstName = pInfo->m_ActivityItem_VecProto[index].btnName;
+		
+		firstWenzi->setString(firstName.c_str());
+		int _value = pInfo->m_ActivityItem_VecProto[index]._value;
+		secondWenzi->setString(CCString::createWithFormat("%d",_value)->getCString());
+
+		CCSpriteFrame* frameN = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("kaifuhuodong_lingqubtnn1");
+		CCSpriteFrame* frameH = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("kaifuhuodong_lingqubtnd");
+		CCControlButton* btn = dynamic_cast<CCControlButton*>(node->getChildByTag(1));//领取
+		CCSpriteFrame* afterLingqu = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("kaifuhuodong_yiling");
+		if (frameN && frameH && btn)//已经领取了
+		{
+			if (pPacketInfo->byData[index].m_iValue == 2)
+			{
+				btn->setEnabled(false);
+				btn->setVisible(false);
+				if (node->getChildByTag(201)==NULL)
+				{
+					CCSprite* afterLingquSP = CCSprite::createWithSpriteFrame(afterLingqu);
+					afterLingquSP->setPosition(btn->getPosition());
+					node->addChild(afterLingquSP, 2, 201);
+				}
+
+				World::getInstance()->SetHighLight(btn, WT_CCCONTROLBUTTON, WCT_KaifuActivity, 0, false,0,0);
+
+			}
+			else if (pPacketInfo->byData[index].m_iValue == 1)
+			{
+				World::getInstance()->SetHighLight(btn, WT_CCCONTROLBUTTON, WCT_KaifuActivity, 0, true,0,0);
+
+				btn->setEnabled(true);
+			}
+			else if (pPacketInfo->byData[index].m_iValue == 0)
+			{
+				World::getInstance()->SetHighLight(btn, WT_CCCONTROLBUTTON, WCT_KaifuActivity, 0, false,0,0);
+				btn->setEnabled(false);
+			}
+				
+		}
+		//std::map<int, SPacket_Activity> activityList = KaifuHuodongMgr::getInstance()->GetActivityList();
+		//std::map<int, SPacket_Activity>::iterator it = activityList.find(index);
+		//if (it != activityList.end())
+		//{
+		//}
+	}
+}
+
+cocos2d::extension::SEL_CCControlHandler Tian7leUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onlingquBtnPressed", Tian7leUiLayer::onlingquBtnPressed);
+	return NULL;
+}
+
+void Tian7leUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	CCNode* node = getChildByTag(0);
+	_node = node;
+}
+
+void Tian7leUiLayer::onEnter()
+{
+	setTouchEnabled(false);
+	CCLayer::onEnter();
+	setTouchPriority(2);
+	setTouchEnabled(true);
+	//setAllChildernButtonPriority(this,2);
+}
+
+void Tian7leUiLayer::onExit()
+{
+	CCLayer::onExit();
+}
+
+void Tian7leUiLayer::onlingquBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	KaifuHuodongMgr::getInstance()->getReward(_data.m_iId, m_Index);
+}
+
+bool Tian7leUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	return true;
+}
+
+void Tian7leUiLayer::updateReceiveBtnState( int index,int sendBefore )
+{
+	CCNode* node = getChildByTag(0);
+
+	SPacket_Activity* pPacketInfo = KaifuHuodongMgr::getInstance()->getKaifuPacketActivity(_data.m_iId);
+	CCControlButton* btn = dynamic_cast<CCControlButton*>(node->getChildByTag(1));//领取
+	if (pPacketInfo && btn)
+	{
+		if (sendBefore == 1)
+		{
+			if (pPacketInfo->byData[index].m_iValue == 1)
+			{
+				btn->setEnabled(true);
+			}
+			if (pPacketInfo->byData[index].m_iValue == 2)
+			{
+				btn->setEnabled(false);
+				btn->setVisible(false);
+
+			}
+			if (pPacketInfo->byData[index].m_iValue == 0)
+			{
+				btn->setEnabled(false);
+			}
+		}
+		else if (sendBefore == 2)
+		{
+			if (pPacketInfo->byData[index].m_iValue == 2)
+			{
+				btn->setEnabled(false);
+				World::getInstance()->SetHighLight(btn, WT_CCCONTROLBUTTON, WCT_KaifuActivity, 0, false,0,0);
+
+			}
+			else if (pPacketInfo->byData[index].m_iValue == 1)
+			{
+				World::getInstance()->SetHighLight(btn, WT_CCCONTROLBUTTON, WCT_KaifuActivity, 0, true,0,0);
+				btn->setEnabled(true);
+			}
+			else if (pPacketInfo->byData[index].m_iValue == 0)
+			{
+				World::getInstance()->SetHighLight(btn, WT_CCCONTROLBUTTON, WCT_KaifuActivity, 0, false,0,0);
+				btn->setEnabled(false);
+			}
+		}
+	}
+}
+
+KaifuhuodongListItemChild::KaifuhuodongListItemChild()
+{
+
+}
+
+KaifuhuodongListItemChild::~KaifuhuodongListItemChild()
+{
+
+}
+
+cocos2d::CCSize KaifuhuodongListItemChild::getContentSize()
+{
+	if (ccNode)
+	{
+		return ccNode->getChildByTag(0)->getContentSize();
+	}
+	return CCSize(0.f, 0.f);
+}
+
+float KaifuhuodongListItemChild::getItemHeight()
+{
+	return 81.0f/*ListItem::getItemHeight()*/;
+}

@@ -1,0 +1,1748 @@
+#include "PlayerState.h"
+#include "tools.h"
+#include "Telegram.h"
+#include "GameEntity.h"
+#include "JoyStick.h"
+#include "RoleManager.h"
+#include "ActionProto.h"
+#include "TCPClient.h"
+#include "LocalPlayer.h"
+#include "MapManager.h"
+#include "SkillManager.h"
+#include "SkillAnimManager.h"
+#include "Phyx.h"
+#include "AssaultSkillEffect.h"
+#include "SocialMgr.h"
+#include "StringMgr.h"
+#include "ToolTip.h"
+#include "AttackAction.h"
+#include "Monster.h"
+const static float MAX_SEND_TIMES = 0.5f;
+const static float MIN_SEND_TIMES = 0.4f;
+
+LocalPlayerStateRun * LocalPlayerStateRun::getInstance()
+{
+	static LocalPlayerStateRun state;
+	return &state;
+}
+
+void LocalPlayerStateRun::Enter( Role* role,bool revert)
+{
+	_dt = 0.f;
+	role->runRunAni();
+	MapManager::getInstance()->resetCrossMapping();
+
+	((LocalPlayer*)role)->setAutoRunState(false);
+
+	float speed = role->getAttribute(RA_SPEED);
+	float esp = MIN_SEND_TIMES;
+	CCPoint newPos = getNewPosition(role->getPosition(), role->getDirection(), speed, esp);
+	static_cast<LocalPlayer*>(role)->sendRunMsg(role->getPosition(), newPos);
+	static_cast<LocalPlayer*>(role)->m_bIsJock = true;
+	static_cast<LocalPlayer*>(role)->m_bAttBtnClick = false;
+}
+
+void LocalPlayerStateRun::Execute( Role*role, float dt)
+{
+	_dt += dt;
+
+	static float g_trigger_interval =0;
+
+	g_trigger_interval += dt;
+
+	CCPoint curPos = role->getPosition();
+	CCPoint curDir = role->getDirection();
+	int speed = role->getAttribute(RA_SPEED);
+	CCPoint newPos = getNewPosition(curPos, curDir, speed, dt);
+
+	MapManager* map_mgr = MapManager::getInstance();
+	if(!map_mgr->isBlock(newPos) &&!Phyx::getInstance()->queryCollision(curPos.x , curPos.y , curDir))
+	{
+		role->setPosition(newPos);
+		CCPoint pos = role->getPosition();
+		//CC_ASSERT(!MapManager::getInstance()->isBlock(pos));
+
+		getNewPosition(curPos, role->getDirection(), -speed, _dt);
+		//float dis = ccpDistance(oldPos, curPos);
+
+		LocalPlayer *lp = static_cast<LocalPlayer*>(role);
+	//	bool is = lp->getAttribute(RA_BattleMode) || lp->getAttribute(RA_Hang);
+		float esp = MIN_SEND_TIMES;
+		if(_dt > esp)
+		{
+			//CCPoint oldPos = getNewPosition(curPos, role->getDirection(), -speed, _dt);
+			CCPoint newPos = getNewPosition(role->getPosition(), role->getDirection(), speed, esp);
+			lp->sendRunMsg(curPos, newPos);
+			_dt = 0.f;
+		}
+
+		static_cast<LocalPlayer*>(role)->checkToRide(dt);
+	}
+
+	if (g_trigger_interval > 1.0f)
+	{
+		map_mgr->check_map_trigger(dt);
+
+		g_trigger_interval =0;
+	}
+
+}
+
+void LocalPlayerStateRun::Exit( Role* role)
+{
+	role->stopAni();
+	if (_dt > 0.0f)
+		static_cast<LocalPlayer*>(role)->sendStandMsg(role->getPosition());
+
+	MapManager* map_mgr = MapManager::getInstance();
+	map_mgr->check_map_trigger();
+}
+
+bool LocalPlayerStateRun::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_JOYSTICKPRESS) |
+		MSG_MASK(M_LpStand) |
+		MSG_MASK(M_ATTRACK) |
+		MSG_MASK(M_MANUALATTRACK) |
+		MSG_MASK(M_ASSAULT) |
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_PATHFIND) |
+		MSG_MASK(M_SIT) |
+		MSG_MASK(M_REPEL) |
+		MSG_MASK(M_AutoUse) |
+		MSG_MASK(M_Dizzy) |
+		MSG_MASK(M_Tie) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+LocalPlayerStateStand * LocalPlayerStateStand::getInstance()
+{
+	static LocalPlayerStateStand state;
+	return &state;
+}
+
+void LocalPlayerStateStand::Enter( Role* role,bool revert)
+{
+	//发送本地玩家的站立消息给服务器
+	if(role->getId() == RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		LocalPlayer *lp = static_cast<LocalPlayer*>(role);
+		if(lp->getAttackState())
+		{
+			SkillManager::getInstance()->NowIsAttack(false);
+			role->runPerAttackAni();
+			_attackState=true;
+		}
+		else
+		{
+			_attackState=false;
+			role->runStandAni();
+		}
+			
+
+		const CCPoint &pos = role->getPosition();
+		if(ccpDistance(pos, _lastPos) > 1.0f)
+		{
+			//lp->sendStandMsg(pos);
+		}
+		_lastPos = pos;
+	}
+}
+
+//[bing] 自动攻击在站立状态下判断
+void LocalPlayerStateStand::Execute( Role* role, float )
+{
+	LocalPlayer *lp = static_cast<LocalPlayer*>(role);
+	if(_attackState)
+	{	
+		eSkillQueryState state;
+		SkillManager::getInstance()->querySkill(state , false);
+		if(state == SQS_SUCCESS || state == SQS_BUFFER || state == SQS_EXIST)
+		{
+			role->stateMachine()->ChangeState(LocalPlayerStateAttack::getInstance());
+			return;
+		}
+		else if(state == SQS_OUTRANGE)
+		{
+			lp->attackTo(RoleManager::getInstance()->get_select_role_id());
+		}
+		else if(state == SQS_NOTARGET)
+		{
+			lp->setExitAttackState();
+			lp->stopAni();
+			lp->runStandAni();
+		}
+	}
+}
+
+void LocalPlayerStateStand::Exit( Role* role)
+{
+	role->stopAni();
+	_attackState=false;
+}
+
+bool LocalPlayerStateStand::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_JOYSTICKPRESS) |
+		MSG_MASK(M_ATTRACK) |
+		MSG_MASK(M_MANUALATTRACK) |
+		MSG_MASK(M_ASSAULT) |
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_PATHFIND) |
+		MSG_MASK(M_SIT) |
+		MSG_MASK(M_REPEL) |
+		MSG_MASK(M_AutoUse) |
+		MSG_MASK(M_Dizzy) |
+		MSG_MASK(M_Tie) |
+		MSG_MASK(M_ATTRACKED) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+void LocalPlayerStateStand::cancel_atk_state(Role* role)
+{
+	_attackState = false;
+	role->runStandAni();
+}
+
+//////////////////////////////////////////////////////////////////////////
+/*
+LocalPlayerPerAttack * LocalPlayerPerAttack::getInstance()
+{
+	static LocalPlayerPerAttack state;
+	return &state;
+};
+
+void LocalPlayerPerAttack::Enter(Role* pRole)
+{
+	pRole->runPerAttackAni();
+}
+
+void LocalPlayerPerAttack::Execute(Role* pRole, float fTick)
+{
+
+}
+
+void LocalPlayerPerAttack::Exit(Role* pRole)
+{
+	pRole->stopAni();
+}
+
+bool LocalPlayerPerAttack::OnMessage(Role* pRole, const Telegram& telegram)
+{
+	return pRole->changeState(
+		MSG_MASK(M_JOYSTICKPRESS) |
+		MSG_MASK(M_LpStand) |
+		MSG_MASK(M_ATTRACK) |
+		MSG_MASK(M_ATTRACKED) |
+		MSG_MASK(M_MANUALATTRACK) |
+		MSG_MASK(M_ASSAULT) |
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_PATHFIND) |
+		MSG_MASK(M_SIT) |
+		MSG_MASK(M_REPEL) |
+		MSG_MASK(M_AutoUse) |
+		MSG_MASK(M_Dizzy) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+*/
+
+//////////////////////////////////////////////////////////////////////////
+
+
+LocalPlayerStateRunPath * LocalPlayerStateRunPath::getInstance()
+{
+	static LocalPlayerStateRunPath state;
+	return &state;
+}
+
+void LocalPlayerStateRunPath::Enter( Role* role,bool revert)
+{
+	_dt = 0.f;
+
+	LocalPlayer* lp  =static_cast<LocalPlayer*>(role);
+	bool have_way_pt =lp->runPath();
+	if (!have_way_pt) return;
+	
+
+	lp->runRunAni();
+	//float speed = role->getAttribute(RA_SPEED);
+	//float esp = MAX_SEND_TIMES;
+	CCPoint newPos;
+
+	if (lp->getNextPathPoint(newPos,revert))
+	{
+		lp->sendRunMsg(role->getPosition(), newPos);
+	}
+}
+
+void LocalPlayerStateRunPath::Execute( Role* role, float dt)
+{
+	_dt += dt;
+
+	//role->updateRealPosition();
+	//if(role->getId() == RoleManager::getInstance()->getLocalPlayer()->getId())
+	float speed = role->getAttribute(RA_SPEED);
+	CCPoint curPos = role->getPosition();
+	if(Phyx::getInstance()->queryCollision(curPos.x , curPos.y))
+		role->stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+	else
+	{
+		getNewPosition(curPos, role->getDirection(), -speed, _dt);
+		//float dis = ccpDistance(oldPos, curPos);
+
+		LocalPlayer *lp = static_cast<LocalPlayer*>(role);
+		float esp = MAX_SEND_TIMES;
+		if(_dt > esp)
+		{
+			CCPoint newPos;
+			if (lp->getNextPathPoint(newPos))
+			{
+				lp->sendRunMsg(role->getPosition(), newPos);
+				_dt = 0.f;
+			}
+		}
+
+		static_cast<LocalPlayer*>(role)->checkToRide(dt);
+	}
+
+	static float g_trigger_interval_in_auto_path= 0;
+	g_trigger_interval_in_auto_path += dt;
+
+	if (g_trigger_interval_in_auto_path > MAX_SEND_TIMES)
+	{
+		g_trigger_interval_in_auto_path=0;
+
+		MapManager::getInstance()->check_map_trigger();
+	}
+}
+
+void LocalPlayerStateRunPath::Exit( Role* role)
+{
+	role->stopAni();
+	if (_dt > 0.0f)
+		static_cast<LocalPlayer*>(role)->sendStandMsg(role->getPosition());
+
+	static_cast<LocalPlayer*>(role)->_sigPathFinished.emit();
+
+	CC_ASSERT(role->getId() == RoleManager::getInstance()->getLocalPlayer()->getId());
+	if(MapManager::getInstance() && MapManager::getInstance()->isBlock(role->getPosition()))
+	{
+		role->setPosition(MapManager::getInstance()->findNoBlockPoint(role->getPosition()));
+	}
+
+}
+
+bool LocalPlayerStateRunPath::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_JOYSTICKPRESS) |
+		MSG_MASK(M_LpStand) |
+		MSG_MASK(M_ATTRACK) |
+		MSG_MASK(M_MANUALATTRACK) |
+		MSG_MASK(M_ASSAULT) |
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_PATHFIND) |
+		MSG_MASK(M_SIT) |
+		MSG_MASK(M_REPEL) |
+		MSG_MASK(M_AutoUse) |
+		MSG_MASK(M_Dizzy) |
+		MSG_MASK(M_Tie) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+LocalPlayerStatePreAttack * LocalPlayerStatePreAttack::getInstance()
+{
+	static LocalPlayerStatePreAttack state;
+	return &state;
+}
+
+void LocalPlayerStatePreAttack::Enter( Role* role,bool revert)
+{
+	LocalPlayer* lp = static_cast<LocalPlayer*>(role);
+	eSkillQueryState state;
+	SkillManager::getInstance()->querySkill(state , false);
+	if(state == SQS_SUCCESS || state == SQS_BUFFER ||state == SQS_EXIST)
+	{
+		role->stateMachine()->ChangeState(LocalPlayerStateAttack::getInstance());
+		return;
+	}
+	/*else if (state == SQS_INCD)
+	{
+		SkillManager::getInstance()->planUseManual(-1);
+		lp->setExitAttackState();
+		lp->stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+		return;
+	}*/
+	else if (state == SQS_EXIT)
+	{
+		lp->setExitAttackState();
+		lp->stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+		return;
+	}
+	else if(state != SQS_OUTRANGE)
+	{	
+		if(state == SQS_LESSMP)
+		{
+			unsigned int timeDif(0);
+			unsigned int curTime(0);
+			struct timeval tv;
+			gettimeofday(&tv , 0);
+			curTime = tv.tv_sec*1000;
+
+			timeDif = curTime - m_last_show_tip_time;
+			if (timeDif > 10000)//10秒后给提示
+			{
+				//魔力不足,无法发动技能.
+				ToolTip::getInstance()->push(GET_STR(2012));
+				m_last_show_tip_time = curTime;
+			}
+		}
+		role->stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+		return;
+	}
+	_dt = 0.f;
+	static_cast<LocalPlayer*>(role)->runPath();
+	role->runRunAni();
+
+	float speed = role->getAttribute(RA_SPEED);
+	float esp = MAX_SEND_TIMES;
+	CCPoint newPos = getNewPosition(role->getPosition(), role->getDirection(), speed, esp);
+	if (static_cast<LocalPlayer*>(role)->GetPathNodeCount() <= 1)
+	{
+		newPos = static_cast<LocalPlayer*>(role)->getEndMovePoint();
+	}
+	static_cast<LocalPlayer*>(role)->sendRunMsg(role->getPosition(), newPos);
+}
+
+void LocalPlayerStatePreAttack::Execute( Role* role, float dt)
+{
+	CC_ASSERT(role->getId() == RoleManager::getInstance()->getLocalPlayer()->getId());
+	_dt += dt;
+
+	//role->updateRealPosition();
+
+	float speed = role->getAttribute(RA_SPEED);
+	CCPoint curPos = role->getPosition();
+	if(Phyx::getInstance()->queryCollision(curPos.x , curPos.y))
+		role->stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+
+	getNewPosition(curPos, role->getDirection(), -speed, _dt);
+	//float dis = ccpDistance(oldPos, curPos);
+
+	LocalPlayer *lp = static_cast<LocalPlayer*>(role);
+	float esp = MAX_SEND_TIMES;
+	if(_dt > esp)
+	{
+		//CCPoint oldPos = getNewPosition(curPos, role->getDirection(), -speed, _dt);
+		CCPoint newPos = getNewPosition(role->getPosition(), role->getDirection(), speed, esp);
+		if (static_cast<LocalPlayer*>(role)->GetPathNodeCount() <= 1)
+		{
+			newPos = static_cast<LocalPlayer*>(role)->getEndMovePoint();
+		}
+		lp->sendRunMsg(curPos, newPos);
+		_dt = 0.f;
+	}
+
+	eSkillQueryState state;
+	SkillManager::getInstance()->querySkill(state , false);
+	if(state == SQS_SUCCESS || state == SQS_BUFFER)
+	{
+		role->stateMachine()->ChangeState(LocalPlayerStateAttack::getInstance());
+		return;
+	}
+	else if(state != SQS_OUTRANGE)
+	{
+		role->stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+	}
+
+	//static_cast<LocalPlayer*>(role)->checkToRide(dt);
+}
+
+void LocalPlayerStatePreAttack::Exit( Role* role)
+{
+	role->stopAni();
+	if (_dt > 0.0f)
+		static_cast<LocalPlayer*>(role)->sendStandMsg(role->getPosition());
+
+	CC_ASSERT(role->getId() == RoleManager::getInstance()->getLocalPlayer()->getId());
+	if(MapManager::getInstance()->isBlockByAStar(role->getPosition()))
+	{
+		CCPoint pt;
+		bool isFind = MapManager::getInstance()->findNoBlockPointByAStar(role->getPosition(),pt);
+		if (isFind)
+			role->setPosition(pt);
+	}
+}
+
+bool LocalPlayerStatePreAttack::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_JOYSTICKPRESS) |
+		MSG_MASK(M_LpStand) |
+		MSG_MASK(M_ATTRACK) |
+		MSG_MASK(M_MANUALATTRACK) |
+		MSG_MASK(M_ASSAULT) |
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_PATHFIND) |
+		MSG_MASK(M_SIT) |
+		MSG_MASK(M_REPEL) |
+		MSG_MASK(M_AutoUse) |
+		MSG_MASK(M_Dizzy) |
+		MSG_MASK(M_Tie) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+
+LocalPlayerStateAttack * LocalPlayerStateAttack::getInstance()
+{
+	static LocalPlayerStateAttack state;
+	return &state;
+}
+
+void LocalPlayerStateAttack::Enter( Role* role,bool revert)
+{
+	RoleManager* role_mgr = RoleManager::getInstance();
+	if(role->getAttribute(RA_RideState) != 0)
+	{
+		role_mgr->sendUnRideMsg();
+		return ;
+	}
+
+	_dt = 0.f;
+	eSkillQueryState state;
+	int manualId = SkillManager::getInstance()->getManualSkillId();
+	int skillId = SkillManager::getInstance()->querySkill(state , true);
+	
+	if(state == SQS_SUCCESS || state == SQS_BUFFER|| state == SQS_EXIST)
+	{
+		SkillData *data = SkillManager::getInstance()->getSkillData(skillId);
+		Role *target = role_mgr->GetTargetRole();
+		if (NULL != target && NULL != role && target->getId() != role->getId())
+		{	
+			if(data&&!data->proto->isUpAttack)
+			{
+				if (role->getLevel() < target->getLevel())
+					return ;
+			}
+		}
+
+
+		if(data != NULL)
+		{
+			NET_SIC_skill skill;
+			skill.dwMapID = MapManager::getInstance()->getCurMapId();
+			skill.dwSerial = 1010001;
+			skill.dwSkillID = skillId;
+			if(data->proto->targetType == SKT_SELF)
+			{
+				skill.dwTargetRoleID = RoleManager::getInstance()->getLocalPlayer()->getId();
+			}
+			else
+				skill.dwTargetRoleID = RoleManager::getInstance()->get_select_role_id();
+			const CCPoint &pos = RoleManager::getInstance()->getLocalPlayer()->getPosition();
+			skill.vSrcPos[0] = pos.x;
+			skill.vSrcPos[2] = pos.y;
+			TCP_CLIENT->send_net_cmd(&skill, NP_CRITICAL, false);
+			//[bing] debug		//[bing] 服务器那边还是有判断技能CD的 所以这样发是不能达到攻击多次的目的
+			//TCP_CLIENT->send_net_cmd(&skill, NP_CRITICAL, false);
+			//TCP_CLIENT->send_net_cmd(&skill, NP_CRITICAL, false);
+			//TCP_CLIENT->send_net_cmd(&skill, NP_CRITICAL, false);
+		}
+
+		if(!SkillManager::getInstance()->isManaualSkill(skillId))
+		{
+			std::string strbeginEffect = "";
+			RoleManager::getInstance()->getLocalPlayer()->GetBeginEffect(skillId,strbeginEffect);
+			if (strbeginEffect.empty())
+			{
+				SkillAnimManager::getInstance()->useAnims(skillId, role->getId(), role->getId(),CCPointZero);
+			}
+			//if (skillId / 100 == 10207 || skillId / 100 == 10307 || skillId / 100 == 10203 )//抗拒火环 气功波 魔法盾技能前摇和技能特效一起播放
+			//{
+			//	SkillAnimManager::getInstance()->useAnims(skillId, role->getId(), role->getId());
+			//}
+			Role *target = NULL;
+			if(data->proto->targetType == SKT_SELF && skillId == manualId)
+				target = RoleManager::getInstance()->findRole(RoleManager::getInstance()->getLocalPlayer()->getId());
+			else
+				target = RoleManager::getInstance()->findRole(RoleManager::getInstance()->get_select_role_id());
+
+			if(role->getAttribute(RA_RideState) == 0 && target != NULL)
+			{
+				CCPoint targetPosition = target->getPosition();
+				CCPoint rolePosition = role->getPosition();
+				if(target != role)
+				{
+					role->setDirection(ccpSub(target->getPosition(), role->getPosition()));
+				}
+				role->setCurrentSkillid(skillId);
+				role->setCurrentTargetid(target->getId());
+				role->runAttrackAni();
+			}
+
+			if (data->proto->targetType == SKT_SELF && skillId == manualId)
+			{
+				RoleManager::getInstance()->set_select_role_id(-1);
+				RoleManager::getInstance()->SetTargetRole(NULL);
+				RoleManager::getInstance()->getLocalPlayer()->setExitAttackState();
+			}
+
+			//SkillAnimManager::getInstance()->useAnims(skillId, RoleManager::getInstance()->getLocalPlayer()->getId(),
+			//	RoleManager::getInstance()->getSelectRole());
+		}
+		else
+		{
+			if(role->getRoleType() != RT_MWARRIOR &&
+				role->getRoleType() != RT_WWARRIOR)
+			{
+				role->runAttrackAni();
+
+				SkillAnimManager::getInstance()->useAnims(skillId, RoleManager::getInstance()->getLocalPlayer()->getId(),
+					RoleManager::getInstance()->get_select_role_id(),CCPointZero);
+			}
+			else
+			{
+				role->stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+			}
+		}
+	}
+	_End = false;
+	MapManager::getInstance()->resetCrossMapping();
+}
+
+void LocalPlayerStateAttack::Execute( Role* role, float dt)
+{
+	_dt += dt;//超时时长
+	if (_dt > 2.0f)
+	{
+		//static_cast<LocalPlayer*>(role)->sendStandMsg(role->getPosition());
+		role->stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+	}
+	if(role->isAnimationFinished() && (_End==false))
+	{
+		_dt = 1.7f;
+		role->runPerAttackAni();
+		_End = true;
+	}
+}
+
+void LocalPlayerStateAttack::Exit( Role* role)
+{
+	_dt = 0.f;
+	role->stopAni();
+
+	if(MapManager::getInstance()->isBlockByAStar(role->getPosition()))
+	{
+		CCPoint pt;
+		bool isFind = MapManager::getInstance()->findNoBlockPointByAStar(role->getPosition(),pt);
+		if (isFind)
+			role->setPosition(pt);
+	}
+}
+
+bool LocalPlayerStateAttack::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_REPEL) |
+		MSG_MASK(M_Dizzy) |
+		MSG_MASK(M_ASSAULT) |		//[bing] 攻击状态下增加可以改编为冲锋的状态
+		MSG_MASK(M_Tie) |
+		MSG_MASK(M_PATHFIND) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+LocalPlayerStateAttackUnRide * LocalPlayerStateAttackUnRide::getInstance()
+{
+	static LocalPlayerStateAttackUnRide instance;
+	return &instance;
+}
+
+void LocalPlayerStateAttackUnRide::Enter( Role*,bool revert )
+{
+	RoleManager::getInstance()->getLocalPlayer()->exitRideState();
+	RoleManager::getInstance()->sendUnRideMsg();
+}
+
+void LocalPlayerStateAttackUnRide::Execute( Role*, float )
+{
+
+}
+
+void LocalPlayerStateAttackUnRide::Exit( Role* )
+{
+
+}
+
+bool LocalPlayerStateAttackUnRide::OnMessage( Role* role, const Telegram& telegram)
+{
+	if(telegram.Msg == M_UnRide)
+	{
+		role->stateMachine()->ChangeState(LocalPlayerStateAttack::getInstance());
+		return true;
+	}
+
+	return role->changeState(
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_JOYSTICKPRESS) |
+		MSG_MASK(M_LpStand) |
+		MSG_MASK(M_PATHFIND) |
+		MSG_MASK(M_REPEL) |
+		MSG_MASK(M_AutoUse) |
+		MSG_MASK(M_Dizzy) |
+		MSG_MASK(M_Tie)/* |
+						 MSG_MASK(M_UpdateDis)*/, telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+LocalPlayerStateManualAttack * LocalPlayerStateManualAttack::getInstance()
+{
+	static LocalPlayerStateManualAttack state;
+	return &state; 
+}
+
+void LocalPlayerStateManualAttack::Enter( Role* role,bool revert)
+{
+	Role *target = RoleManager::getInstance()->findRole(RoleManager::getInstance()->get_select_role_id());
+	if(target != NULL)
+	{
+		role->setDirection(ccpSub(target->getPosition(), role->getPosition()));
+	}
+	MapManager::getInstance()->resetCrossMapping();
+	role->runAttrackAni();
+}
+
+void LocalPlayerStateManualAttack::Execute( Role* role, float dt)
+{
+}
+
+void LocalPlayerStateManualAttack::Exit( Role* role)
+{
+	role->stopAni();
+}
+
+bool LocalPlayerStateManualAttack::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_JOYSTICKPRESS) |
+		MSG_MASK(M_MANUALATTRACK) |
+		MSG_MASK(M_ASSAULT) |
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_PATHFIND) |
+		MSG_MASK(M_SIT) |
+		MSG_MASK(M_REPEL) |
+		MSG_MASK(M_Dizzy) |
+		MSG_MASK(M_Tie) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+
+
+LocalPlayerStateBeAttack * LocalPlayerStateBeAttack::getInstance()
+{
+	static LocalPlayerStateBeAttack state;
+	return &state;
+}
+
+void LocalPlayerStateBeAttack::Enter( Role* role,bool revert)
+{
+	role->runAttrackedAni();
+}
+
+void LocalPlayerStateBeAttack::Execute( Role* role, float dt)
+{
+	if(role->isAnimationFinished())
+	{
+		role->revertToPreviousState();
+	}
+}
+
+void LocalPlayerStateBeAttack::Exit( Role* role)
+{
+	role->stopAni();
+}
+
+bool LocalPlayerStateBeAttack::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_RUNTO) |
+		MSG_MASK(M_STAND) |
+		MSG_MASK(M_ASSAULT) |
+		MSG_MASK(M_REPEL) |
+		MSG_MASK(M_Dizzy) |
+		MSG_MASK(M_Tie) |
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_ATTRACK)|
+		MSG_MASK(M_UpdateDis)|
+		MSG_MASK(M_PATHFIND), telegram);
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+
+
+
+LocalPlayerStateDead * LocalPlayerStateDead::getInstance()
+{
+	static LocalPlayerStateDead state;
+	return &state;
+}
+
+void LocalPlayerStateDead::Enter( Role* role,bool revert)
+{
+	role->runDeadAni();
+	MapManager::getInstance()->resetCrossMapping();
+}
+
+void LocalPlayerStateDead::Execute( Role* role, float dt)
+{
+}
+
+void LocalPlayerStateDead::Exit( Role* role)
+{
+	role->stopAni();
+}
+
+bool LocalPlayerStateDead::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_LIVE) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+
+
+
+LocalPlayerStateRepel * LocalPlayerStateRepel::getInstance()
+{
+	static LocalPlayerStateRepel state;
+	return &state;
+}
+
+void LocalPlayerStateRepel::Enter( Role* role,bool revert)
+{
+	MapManager::getInstance()->resetCrossMapping();
+	role->setDirection(ccpSub(role->getPosition(), role->getDestMovePoint()));
+	role->runAttrackedAni();
+}
+
+void LocalPlayerStateRepel::Execute( Role* role, float dt)
+{
+	CCPoint opos = role->getPosition();
+	CCPoint vec = ccpSub(role->getDestMovePoint() , opos);
+	float dis = ccpDistance(opos, role->getDestMovePoint());
+	float needtime = dis / SPECIAL_MOVE_SPEED;
+	if(needtime < dt)
+	{
+		CCPoint pt = role->getDestMovePoint();
+		role->setPosition(pt);
+		role->stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+	}
+	else
+	{
+		vec = ccpNormalize(vec);
+		CCPoint pt = ccpAdd(opos, ccpMult(vec, needtime * SPECIAL_MOVE_SPEED));
+		role->runTo(pt);
+		role->setPosition(pt);
+		role->setDirection(ccpSub(role->getPosition(), role->getDestMovePoint()));
+	}
+
+}
+
+void LocalPlayerStateRepel::Exit( Role* role)
+{
+	role->stopAni();
+}
+
+bool LocalPlayerStateRepel::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_Dizzy) |
+		MSG_MASK(M_Tie) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+LocalPlayerStateAssault * LocalPlayerStateAssault::getInstance()
+{
+	static LocalPlayerStateAssault instance;
+	return &instance;
+}
+
+void LocalPlayerStateAssault::Enter( Role* role ,bool revert)
+{
+	MapManager::getInstance()->resetCrossMapping();
+	role->setDirection(ccpSub(role->getDestMovePoint() , role->getPosition()));
+	SkillAnimManager::getInstance()->useAnims(AssaultSkillId, role->getId(), role->getId(),CCPointZero);
+	role->runRunAni();
+}
+
+void LocalPlayerStateAssault::Execute( Role* role, float dt)
+{
+	CCPoint opos = role->getPosition();
+	CCPoint vec = ccpSub(role->getDestMovePoint() , opos);
+	float dis = ccpDistance(opos, role->getDestMovePoint());
+	float needtime = dis / SPECIAL_MOVE_SPEED;
+	if(needtime < dt)
+	{
+		role->setPosition(role->getDestMovePoint());
+		role->stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+	}
+	else
+	{
+		vec = ccpNormalize(vec);
+		role->setPosition(ccpAdd(opos, ccpMult(vec, dt * SPECIAL_MOVE_SPEED)));
+	}
+}
+
+void LocalPlayerStateAssault::Exit( Role* role)
+{
+	role->stopAni();
+	SkillAnimManager::getInstance()->stopAnims(role->getId(), AssaultSkillId);
+}
+
+bool LocalPlayerStateAssault::OnMessage( Role* rple, const Telegram& telegam)
+{
+	return false;
+}
+//////////////////////////////////////////////////////////////////////////
+
+LocalPlayerStateSit * LocalPlayerStateSit::getInstance()
+{
+	static LocalPlayerStateSit instance;
+	return &instance;
+}
+
+void LocalPlayerStateSit::Enter( Role* role,bool revert)
+{
+	role->runSitAni();
+}
+
+void LocalPlayerStateSit::Execute( Role*, float )
+{
+
+}
+
+void LocalPlayerStateSit::Exit( Role* role)
+{
+	role->stopAni();
+}
+
+bool LocalPlayerStateSit::OnMessage( Role* role, const Telegram& tel)
+{
+	if(role->changeState(
+		MSG_MASK(M_UNSIT) |
+		MSG_MASK(M_UpdateDis), tel))
+		return true;
+
+	switch(tel.Msg)
+	{
+	case M_JOYSTICKPRESS:
+		if(static_cast<LocalPlayer*>(role)->isInRoleStateAny(RA_ShuangXiu))
+		{
+			//todo:玩家试图结束双修
+			//SocialMgr::getInstance()->CancelCompractice();
+		}
+		break;
+	default:
+		break;
+	}
+
+	return false;
+}
+
+//////////////////////////////////////////////////////////////////////////
+LocalPlayerAutoUse * LocalPlayerAutoUse::getInstance()
+{
+	static LocalPlayerAutoUse state;
+	return &state;
+}
+
+void LocalPlayerAutoUse::Enter( Role*  role,bool revert)
+{
+	_dt = 0.f;
+	LocalPlayer *lp =dynamic_cast<LocalPlayer*>(role);
+	CC_ASSERT(lp);
+	if(lp->getRoleType() == RT_WMAGE || lp->getRoleType() == RT_MMAGE)
+	{//如果是法师，自动释放魔法盾
+		SkillData *skillData = SkillManager::getInstance()->getSkillData(SKILLMOFADUNTYPEID, true);
+		if(skillData != NULL)
+		{
+			if(SkillManager::getInstance()->queryAndUseSkill(skillData->proto->id,true))//此方法被动和自动释放填写第二参数false
+			{
+				Role *target = RoleManager::getInstance()->GetTargetRole();
+				if (NULL != skillData && NULL != target && NULL != lp && target->getId() != lp->getId())
+				{	
+					if(!skillData->proto->isUpAttack)
+					{
+						if (role->getLevel() < target->getLevel())
+							return ;
+					}
+				}
+				role->setCurrentSkillid(skillData->proto->id);
+				role->runAttrackAni();
+				//skillData->cdTime = skillData->cd;
+				NET_SIC_skill skill;
+				skill.dwMapID = MapManager::getInstance()->getCurMapId();
+				skill.dwSerial = 1010001;
+				skill.dwSkillID = skillData->proto->id;
+				skill.dwTargetRoleID = lp->getId();
+				const CCPoint &pos = lp->getPosition();
+				skill.vSrcPos[0] = pos.x;
+				skill.vSrcPos[2] = pos.y;
+				TCP_CLIENT->send_net_cmd(&skill, NP_CRITICAL, false);
+			}
+		}
+	}
+	else if(lp->getRoleType() == RT_WTAOIST || lp->getRoleType() == RT_MTAOIST)
+	{//如果是道士，自动召唤骷髅和圣兽
+		SkillData *skillData1 = SkillManager::getInstance()->getSkillData(SKILLSHENGSHOUTYPEID, true);
+		if(skillData1 != NULL && SkillManager::getInstance()->queryAndUseSkill(skillData1->proto->id,true))
+		{
+			Role *target = RoleManager::getInstance()->GetTargetRole();
+			if (NULL != target && NULL != lp && target->getId() != lp->getId())
+			{	
+				if(!skillData1->proto->isUpAttack)
+				{
+					if (role->getLevel() < target->getLevel())
+						return ;
+				}		
+			}
+
+			role->setCurrentSkillid(skillData1->proto->id);
+			role->runAttrackAni();
+			//skillData1->cdTime = skillData1->cd;
+			NET_SIC_skill skill;
+			skill.dwMapID = MapManager::getInstance()->getCurMapId();
+			skill.dwSerial = 1010001;
+			skill.dwSkillID = skillData1->proto->id;
+			skill.dwTargetRoleID = lp->getId();
+			const CCPoint &pos = lp->getPosition();
+			skill.vSrcPos[0] = pos.x;
+			skill.vSrcPos[2] = pos.y;
+			TCP_CLIENT->send_net_cmd(&skill, NP_CRITICAL, false);
+		}
+
+		SkillData *skillData2 = SkillManager::getInstance()->getSkillData(SKILLKULOUTYPEID, true);
+		if(skillData2 != NULL && SkillManager::getInstance()->queryAndUseSkill(skillData2->proto->id,true))
+		{
+			Role *target = RoleManager::getInstance()->GetTargetRole();
+			if (NULL != target && NULL != lp && target->getId() != lp->getId())
+			{	
+				if(!skillData2->proto->isUpAttack)
+				{
+					if (role->getLevel() < target->getLevel())
+						return ;
+				}
+			}
+
+			role->setCurrentSkillid(skillData2->proto->id);
+			role->runAttrackAni();
+			//skillData2->cdTime = skillData2->cd;
+			NET_SIC_skill skill;
+			skill.dwMapID = MapManager::getInstance()->getCurMapId();
+			skill.dwSerial = 1010001;
+			skill.dwSkillID = skillData2->proto->id;
+			skill.dwTargetRoleID = lp->getId();
+			const CCPoint &pos = lp->getPosition();
+			skill.vSrcPos[0] = pos.x;
+			skill.vSrcPos[2] = pos.y;
+			TCP_CLIENT->send_net_cmd(&skill, NP_CRITICAL, false);
+		}
+		else
+		{
+			SkillData *skillData3 = SkillManager::getInstance()->getSkillData(SKILLYOULINGHUJIA, true);
+			if(skillData3 != NULL && SkillManager::getInstance()->queryAndUseSkill(skillData3->proto->id,true))
+			{
+				Role *target = RoleManager::getInstance()->GetTargetRole();
+				if (NULL != target && NULL != lp && target->getId() != lp->getId())
+				{	
+					if(!skillData3->proto->isUpAttack)
+					{
+						if (role->getLevel() < target->getLevel())
+							return ;
+					}
+				}
+
+				role->setCurrentSkillid(skillData3->proto->id);
+				role->runAttrackAni();
+				//skillData3->cdTime = skillData3->cd;
+				NET_SIC_skill skill;
+				skill.dwMapID = MapManager::getInstance()->getCurMapId();
+				skill.dwSerial = 1010001;
+				skill.dwSkillID = skillData3->proto->id;
+				skill.dwTargetRoleID = lp->getId();
+				const CCPoint &pos = lp->getPosition();
+				skill.vSrcPos[0] = pos.x;
+				skill.vSrcPos[2] = pos.y;
+				TCP_CLIENT->send_net_cmd(&skill, NP_CRITICAL, false);
+			}
+		}
+	}
+	else
+	{
+		revertToPreviousState(role);
+	}
+}
+
+void LocalPlayerAutoUse::Execute( Role* role, float dt)
+{
+	_dt += dt;
+	if(role->isAnimationFinished() || _dt > 2.0f)
+	{
+		_dt = 0.f;
+		revertToPreviousState(role);
+	}
+}
+
+void LocalPlayerAutoUse::Exit( Role* role)
+{
+	_dt = 0.f;
+	role->stopAni();
+}
+
+bool LocalPlayerAutoUse::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_REPEL) |
+		MSG_MASK(M_Dizzy) |
+		MSG_MASK(M_Tie) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+void LocalPlayerAutoUse::revertToPreviousState( Role *role )
+{
+	if(role->stateMachine()->PreviousState() == RoleStateUpdateDisplay::getInstance())
+	{
+		role->stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+	}
+	else
+	{
+		role->revertToPreviousState();
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+LocalPlayerDizzyState * LocalPlayerDizzyState::getInstance()
+{
+	static LocalPlayerDizzyState instance;
+	return &instance;
+}
+
+void LocalPlayerDizzyState::Enter( Role* role,bool revert)
+{
+	role->runStandAni();
+	role->runDizzyAnim();
+}
+
+void LocalPlayerDizzyState::Execute( Role*, float )
+{
+
+}
+
+void LocalPlayerDizzyState::Exit( Role* role)
+{
+	role->stopAni();
+	role->stopDizzyAnim();
+}
+
+bool LocalPlayerDizzyState::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_UnDizzy) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+
+LocalPlayerTieState * LocalPlayerTieState::getInstance()
+{
+	static LocalPlayerTieState instance;
+	return &instance;
+}
+
+void LocalPlayerTieState::Enter( Role* role,bool revert)
+{
+	role->runStandAni();
+}
+
+void LocalPlayerTieState::Execute( Role*, float )
+{
+
+}
+
+void LocalPlayerTieState::Exit( Role* role)
+{
+	role->stopAni();
+}
+
+bool LocalPlayerTieState::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_UnTie) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+RoleStateRunTo * RoleStateRunTo::getInstance()
+{
+	static RoleStateRunTo state;
+	return &state;
+}
+
+void RoleStateRunTo::Enter( Role* role,bool revert)
+{
+	CCPoint pos;
+	bool hasWay = role->popFrontWayPoint(pos);
+	if (!hasWay)
+	{
+		role->stateMachine()->ChangeState(RoleStateStand::getInstance());
+		return;
+	}
+	role->runTo(pos, true);
+}
+
+void RoleStateRunTo::Execute( Role* role, float dt)
+{
+	if (dt > 100)
+	{
+		CCPoint pos;
+		bool hasWay = role->popFrontWayPoint(pos);
+		if (!hasWay)
+		{
+			role->stateMachine()->ChangeState(RoleStateStand::getInstance());
+			return;
+		}
+		role->runTo(pos, false);
+	}
+}
+
+void RoleStateRunTo::Exit( Role* role)
+{
+	role->stopAni();
+	if (role->getEndFace().x != 0.0f && role->getEndFace().y != 0.0f)
+	{
+		role->setDirection(role->getEndFace());
+		role->setEndFace(ccp(0.0f, 0.0f));
+	}
+}
+
+bool RoleStateRunTo::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_RUNTO) |
+		MSG_MASK(M_STAND) |
+		MSG_MASK(M_ATTRACK) |
+		MSG_MASK(M_ASSAULT) |
+		MSG_MASK(M_REPEL) |
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_Dizzy) |
+		MSG_MASK(M_Tie) |
+		MSG_MASK(M_SIT) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+RoleStateStandTo * RoleStateStandTo::getInstance()
+{
+	static RoleStateStandTo state;
+	return &state;
+}
+
+void RoleStateStandTo::Enter( Role* role,bool revert)
+{
+	/*role->runTo(role->getDestMovePoint(), true);
+	role->runRunAni();*/
+}
+
+void RoleStateStandTo::Execute( Role* role, float dt)
+{
+}
+
+void RoleStateStandTo::Exit( Role* role)
+{
+	//role->stopAni();
+}
+
+bool RoleStateStandTo::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_RUNTO) |
+		MSG_MASK(M_STAND) |
+		MSG_MASK(M_ATTRACK) |
+		MSG_MASK(M_ASSAULT) |
+		MSG_MASK(M_REPEL) |
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_Dizzy) |
+		MSG_MASK(M_Tie) |
+		MSG_MASK(M_SIT) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+RoleStateStand * RoleStateStand::getInstance()
+{
+	static RoleStateStand state;
+	return &state;
+}
+
+void RoleStateStand::Enter( Role* role,bool revert)
+{
+	if(IS_PLAYER(role->getId()))
+	{
+		if (role->getAttribute(RA_BattleMode) 
+			|| role->getAttribute(RA_Hang) )
+		{
+			if (role->getAttribute(RC_Client_AttackEnd))
+			{
+				role->runPerAttackAni();
+				return;
+			}
+		}
+	}
+
+	role->runStandAni();
+
+}
+
+void RoleStateStand::Execute( Role* role, float dt)
+{
+	if(!IS_PLAYER(role->getId()))
+		return;
+	_dt += dt;//超时时长
+	if(role->isAnimationFinished() || _dt > 2.0f)
+	{
+		_dt = 0.f;
+		role->stopAni();
+		role->runStandAni();
+	}
+}
+
+void RoleStateStand::Exit( Role* role)
+{
+	if (role->getAttribute(RC_Client_AttackEnd) && _dt > 1.0f)
+	{
+		_dt = 0.f;
+		role->setAttribute(RC_Client_AttackEnd,0);
+	}
+	role->stopAni();
+}
+
+bool RoleStateStand::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_RUNTO) |
+		MSG_MASK(M_STAND) |
+		MSG_MASK(M_ASSAULT) |
+		MSG_MASK(M_ATTRACK) |
+		MSG_MASK(M_REPEL) |
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_Dizzy) |
+		MSG_MASK(M_Tie) |
+		MSG_MASK(M_SIT) |
+		MSG_MASK(M_ATTRACKED) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+RoleStateAttack * RoleStateAttack::getInstance()
+{
+	static RoleStateAttack state;
+	return &state;
+}
+
+void RoleStateAttack::Enter( Role* role,bool revert)
+{
+	role->stopAni();
+	role->runAttrackAni();
+	if (IS_PLAYER(role->getId()))
+	{
+		if(role->getAttribute(RA_RideState) != 0)
+		{
+			((Player*)role)->exitRideState();
+		}
+	}
+}
+
+
+void RoleStateAttack::Execute( Role* role, float )
+{
+	if(role->isAnimationFinished())
+	{
+		if (IS_PLAYER(role->getId()))
+		{
+			((Player*)role)->setAttribute(RC_Client_AttackEnd,1);
+		}
+
+		if (role->hasWayPoint())
+		{
+			role->stateMachine()->ChangeState(RoleStateRunTo::getInstance());
+		}
+		else
+		{
+			role->stateMachine()->ChangeState(RoleStateStand::getInstance());
+		}
+	}
+}
+
+void RoleStateAttack::Exit( Role* role)
+{
+	role->stopAni();
+}
+
+bool RoleStateAttack::OnMessage( Role* role, const Telegram& telegram)
+{
+	//攻击状态可以移动，否则骷髅会攻击距离太远
+	return role->changeState(
+		MSG_MASK(M_RUNTO) |
+		/*MSG_MASK(M_STAND) |*/
+		MSG_MASK(M_ASSAULT) |
+		MSG_MASK(M_REPEL) |
+		MSG_MASK(M_Dizzy) |
+		MSG_MASK(M_Tie) |
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_UpdateDis) |
+		MSG_MASK(M_ATTRACK) , telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+RoleStateDead * RoleStateDead::getInstance()
+{
+	static RoleStateDead state;
+	return &state;
+}
+
+void RoleStateDead::Enter( Role* role,bool revert)
+{
+	role->runDeadAni();
+}
+
+void RoleStateDead::Execute( Role*, float )
+{
+
+}
+
+void RoleStateDead::Exit( Role* role)
+{
+	role->stopAni();
+}
+
+bool RoleStateDead::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_LIVE) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+RoleStateBeAttack * RoleStateBeAttack::getInstance()
+{
+	static RoleStateBeAttack state;
+	return &state;
+}
+
+void RoleStateBeAttack::Enter( Role* role,bool revert)
+{
+	role->runAttrackedAni();
+}
+
+void RoleStateBeAttack::Execute( Role* role, float dt)
+{
+	if(role->isAnimationFinished())
+		role->revertToPreviousState();
+}
+
+void RoleStateBeAttack::Exit( Role* role)
+{
+	role->stopAni();
+}
+
+bool RoleStateBeAttack::OnMessage( Role*role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_RUNTO) |
+		MSG_MASK(M_STAND) |
+		MSG_MASK(M_ASSAULT) |
+		MSG_MASK(M_REPEL) |
+		MSG_MASK(M_Dizzy) |
+		MSG_MASK(M_Tie) |
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_ATTRACK)|
+		MSG_MASK(M_UpdateDis)|
+		MSG_MASK(M_PATHFIND), telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+RoleStateRepel * RoleStateRepel::getInstance()
+{
+	static RoleStateRepel state;
+	return &state;
+}
+
+void RoleStateRepel::Enter( Role* role,bool revert)
+{
+	role->setDirection(ccpSub(role->getPosition(), role->getDestMovePoint()));
+	role->runAttrackedAni();
+}
+
+void RoleStateRepel::Execute( Role* role, float dt)
+{
+	CCPoint opos = role->getPosition();
+	CCPoint vec = ccpSub(role->getDestMovePoint() , opos);
+	float dis = ccpDistance(opos, role->getDestMovePoint());
+	float needtime = dis / SPECIAL_MOVE_SPEED;
+	if(needtime < dt)
+	{
+		CCPoint pt = role->getDestMovePoint();
+		role->setPosition(pt);
+		//Phyx::getInstance()->modifyPhyxObjectPos(role->getId() , pt.x , pt.y);
+		role->stateMachine()->ChangeState(RoleStateStand::getInstance());
+	}
+	else
+	{
+		vec = ccpNormalize(vec);
+		CCPoint pt = ccpAdd(opos, ccpMult(vec, needtime * SPECIAL_MOVE_SPEED));
+		//Phyx::getInstance()->modifyPhyxObjectPos(role->getId() , pt.x , pt.y);
+		
+		//role->setDestMovePoint(pt);
+		//role->setMovePositionState(true);
+		role->runTo(pt);
+		role->setPosition(pt);
+		
+	}
+}
+
+
+void RoleStateRepel::Exit( Role* role)
+{
+	role->stopAni();
+}
+
+bool RoleStateRepel::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		//MSG_MASK(M_RUNTO) | //因击退时 怪物会移动，所以造成击退时，怪物收到移动会取消击退状态，所以击退时不允许移动 add by XSea 2014.06.19
+		MSG_MASK(M_STAND) |
+		MSG_MASK(M_ASSAULT) |
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////
+RoleStateAssault * RoleStateAssault::getInstance()
+{
+	static RoleStateAssault instance;
+	return &instance;
+}
+
+void RoleStateAssault::Enter( Role* role,bool revert)
+{
+	role->setDirection(ccpSub(role->getDestMovePoint() , role->getPosition()));
+	SkillAnimManager::getInstance()->useAnims(AssaultSkillId, role->getId(), role->getId(),CCPointZero);
+	role->runRunAni();
+}
+
+void RoleStateAssault::Execute( Role* role, float dt)
+{
+	CCPoint opos = role->getPosition();
+	CCPoint vec = ccpSub(role->getDestMovePoint() , opos);
+	float dis = ccpDistance(opos, role->getDestMovePoint());
+	float needtime = dis / SPECIAL_MOVE_SPEED;
+	if(needtime < dt)
+	{
+		role->setPosition(role->getDestMovePoint());
+		role->stateMachine()->ChangeState(RoleStateStand::getInstance());
+	}
+	else
+	{
+		vec = ccpNormalize(vec);
+		role->setPosition(ccpAdd(opos, ccpMult(vec, dt * SPECIAL_MOVE_SPEED)));
+	}
+}
+
+void RoleStateAssault::Exit( Role* role)
+{
+	role->stopAni();
+	SkillAnimManager::getInstance()->stopAnims(role->getId(), AssaultSkillId);
+}
+
+bool RoleStateAssault::OnMessage( Role* role, const Telegram& tel)
+{
+	return role->changeState(
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_UpdateDis), tel);
+	return false;
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+RoleStateSit * RoleStateSit::getInstance()
+{
+	static RoleStateSit instance;
+	return &instance;
+}
+
+void RoleStateSit::Enter( Role* role,bool revert)
+{
+	role->runSitAni();
+}
+
+void RoleStateSit::Execute( Role*, float )
+{
+
+}
+
+void RoleStateSit::Exit( Role* role)
+{
+	role->stopAni();
+}
+
+bool RoleStateSit::OnMessage( Role* role, const Telegram& tel)
+{
+	return role->changeState(
+		MSG_MASK(M_UNSIT) |
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_UpdateDis), tel);
+
+	return false;
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+RoleStateDizzy * RoleStateDizzy::getInstance()
+{
+	static RoleStateDizzy instance;
+	return &instance;
+}
+
+void RoleStateDizzy::Enter( Role* role,bool revert)
+{
+	role->runStandAni();
+	role->runDizzyAnim();
+}
+
+void RoleStateDizzy::Execute( Role*, float )
+{
+
+}
+
+void RoleStateDizzy::Exit( Role* role)
+{
+	role->stopAni();
+	role->stopDizzyAnim();
+}
+
+bool RoleStateDizzy::OnMessage( Role*role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_UnDizzy) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+RoleStateUpdateDisplay * RoleStateUpdateDisplay::getInstance()
+{
+	static RoleStateUpdateDisplay instance;
+	return &instance;
+}
+
+void RoleStateUpdateDisplay::Enter( Role* role,bool revert)
+{
+	
+}
+
+void RoleStateUpdateDisplay::Execute( Role* role, float )
+{
+	if(role->stateMachine()->PreviousState() == LocalPlayerAutoUse::getInstance())
+	{
+		CC_ASSERT(role->getId() == RoleManager::getInstance()->getLocalPlayer()->getId());
+		role->stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+	}
+	else
+	{
+		role->revertToPreviousState();
+	}
+}
+
+void RoleStateUpdateDisplay::Exit( Role* role)
+{
+	//role->stopAni();
+}
+
+bool RoleStateUpdateDisplay::OnMessage( Role* role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_UnDizzy) |
+		MSG_MASK(M_Dizzy) |
+		MSG_MASK(M_UnTie) |
+		MSG_MASK(M_Tie) |
+		MSG_MASK(M_SIT) |
+		MSG_MASK(M_UNSIT)|
+		MSG_MASK(M_UnRide)|
+		MSG_MASK(M_PATHFIND), telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+RoleStateTie * RoleStateTie::getInstance()
+{
+	static RoleStateTie instance;
+	return &instance;
+}
+
+void RoleStateTie::Enter( Role* role,bool revert)
+{
+	role->runStandAni();
+}
+
+void RoleStateTie::Execute( Role*, float )
+{
+
+}
+
+void RoleStateTie::Exit( Role* role)
+{
+	role->stopAni();
+}
+
+bool RoleStateTie::OnMessage( Role*role, const Telegram& telegram)
+{
+	return role->changeState(
+		MSG_MASK(M_DEAD) |
+		MSG_MASK(M_UnTie) |
+		MSG_MASK(M_UpdateDis), telegram);
+}
+
+//////////////////////////////////////////////////////////////////////////

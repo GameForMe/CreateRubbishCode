@@ -1,0 +1,2163 @@
+#include "UiTools.h"
+#include "UiLoader.h"
+#include "tooltip.h"
+#include "Signals.h"  
+#include "TCPClient.h"
+#include "BuySetUi.h"
+#include "UiManager.h"
+#include "StringMgr.h"
+#include "TradingMgr.h"
+#include "RechargeUi.h"
+#include "TradingUI.h"
+#include "LocalPlayer.h"
+#include "CfgReader.h"
+#include "CommonClient.h"
+#include "TradingProto.h"
+#include "RoleManager.h"
+#include "NumericalIniMgr.h"
+#include "InviteListView.h"
+#include "boost/foreach.hpp"
+#include "PackageManager.h"
+#include "InputMessageBox.h"
+#include "TradingGetItemList.h"
+#include "TradingEquipItemTipUI.h"
+#include "TradingSellLeftItemList.h"
+#include "TradingBuyRightItemList.h"
+#include "TradingSellRightItemList.h"
+#include "TradingSellLeftItemNoList.h"
+#include "TradingBuyRightFinalItemList.h"
+#include "UIUtil.h"
+#include "PlacardManager.h"
+#define TRADING_MAX_ITEM_NUM 16
+
+TradingUI::TradingUI()
+{
+}
+
+TradingUI::~TradingUI()
+{
+
+}
+
+CCNode * TradingUI::openUi()
+{
+	CCNode *uiNode = TradingUILayer::createFromCCBI("TradingUI",NULL,this);
+	CC_ASSERT(uiNode != NULL);
+	return uiNode;
+
+	TradingMgr::getInstance()->ClearTradingState();
+}
+
+TradingUILayer * TradingUI::getUiLayer()
+{
+	return getUiNodeByTag<TradingUILayer>(WCT_TradingUI);
+}
+
+int TradingUILayer::m_ScrollViewIndex = 0;
+
+TradingUILayer::TradingUILayer()
+	:m_LastScrollViewIndex(0)
+	,m_pCommonYuanBao(NULL)
+	//,m_pTradingHelp(NULL)
+	,m_pSellPushNum(NULL)
+	,m_pPriceArrow(NULL)
+	,m_pDelaySp(NULL)
+	,m_pYuanBaoCCNode(NULL)
+	,m_ProfessBtnPt(CCPointZero)
+	,m_LevelBtnPt(CCPointZero)
+	,m_PriceBtnPt(CCPointZero)
+	,m_ProfessPagePt(CCPointZero)
+	,m_LevelPagePt(CCPointZero)
+	,m_pLevelButton(NULL)
+	,m_pPriceButton(NULL)
+	,m_pProfessButton(NULL)
+	,m_pSelfOneGetButton(NULL)
+	,m_pSelfAllGetButton(NULL)
+	,m_pSelfBuyButton(NULL)
+	,m_pBuyLeftList(NULL)
+	,m_pBuyLeftContainer(NULL)
+	,m_pBuyLeftScrollView(NULL)
+	,m_BuyLeftBeginPt(CCPointZero)
+	,m_eCurFrame(T_TradingBuy)
+	,m_pProfessPage(NULL)
+	,m_pLevelPage(NULL)
+	,m_pPageCCNode(NULL)
+	,m_pGetControl(NULL)
+	,m_pGetNum(NULL)
+	,m_pSelfBuyBtn(NULL)
+	,m_pSelfSellBtn(NULL)
+	,m_pSelfGetBtn(NULL)
+	,m_pBuyRightTalk(NULL)
+	,m_pBuyRightText(NULL)
+	,m_pBuyRightClassify(NULL)
+	,m_pBuyRightContainer(NULL)
+	,m_pBuyRightScrollView(NULL)
+	,m_pBuyRightGridAlignNode(NULL)
+	,m_pBuyRightContainerLayer(NULL)
+	,m_pBuyRightTouchMove(false)
+	,m_pSellRightTouchMove(false)
+	,m_pSellRightContainer(NULL)
+	,m_pSellRightScrollView(NULL)
+	,m_pSellRightGridAlignNode(NULL)
+	,m_pSellRightContainerLayer(NULL)
+	,m_SellLeftTouchMove(false)
+	,m_pSellLeftContainer(NULL)
+	,m_pSellLeftScrollView(NULL)
+	,m_pSellLeftGridAlignNode(NULL)
+	,m_pSellLeftContainerLayer(NULL)
+	,m_pSellRightItemBlank(NULL)
+	,m_pBuyRightFinalContainer(NULL)
+	,m_pBuyRightFinalScrollView(NULL)
+	,m_pBuyRightFinalGridAlignNode(NULL)
+	,m_pBuyRightFinalContainerLayer(NULL)
+	,m_pSelfGetRedPoint(NULL)
+	,m_pOneGetRedPoint(NULL)
+	,m_pAllGetRedPoint(NULL)
+	,m_pGoldText(NULL)
+	,m_pGoldCCNode(NULL)
+	,m_pProfessText(NULL)
+	,m_pLevelText(NULL)
+	,m_pNewCommonYuanBao(NULL)
+	,m_pNewGoldText(NULL)
+	,m_pGetNewNum(NULL)
+	,m_pSellNewPushNum(NULL)
+	,m_pBuyNewRightText(NULL)
+	,m_pNewProfessText(NULL)
+	,m_pNewLevelText(NULL)
+	,m_pPriceText(NULL)
+	,m_pSellRightText(NULL)
+	,m_pChoseText(NULL)
+	,m_pSearchText(NULL)
+	,m_pSearchTextField(NULL)
+	,m_nMaxInputNum(3 * 7)//UTF8汉子3个字节
+	,m_nCurInputNum(0)
+{
+	m_vTradingButton.assign(T_TradingTabNum,NULL);
+	for(int i = 0 ; i < T_TradingTabNum; i++)
+	{
+		 m_pFrame[i] = NULL;
+	}
+}
+
+TradingUILayer::~TradingUILayer()
+{
+	CC_SAFE_DELETE(m_pBuyLeftList);
+	//CC_SAFE_RELEASE(m_pTradingHelp);
+}
+
+TradingUILayer* TradingUILayer::createFromCCBI( const char* szFile,CCObject* pOwner/*=NULL*/,UiInterface* holder/*=NULL*/ )
+{
+	CCNodeLoaderLibrary* lib = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string uiFile =CFGReader::instance()->get_ui_ccbi_filepath(szFile);
+	CCNode * node = reader->readNodeGraphFromFile(uiFile.c_str(),pOwner);
+
+	TradingUILayer* panel  = dynamic_cast<TradingUILayer*>(node);
+	holder->mergeSheet(reader->getLoadedSpriteSheet());
+
+	return panel;
+}
+
+bool TradingUILayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CoverButton*,m_pProfessButton);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CoverButton*,m_pLevelButton);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CoverButton*,m_pPriceButton);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(ListControl*,m_pGetControl);
+	//SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(FrameSprite*,m_pTradingHelp);
+
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"selfBuyBtn",CCControlButton*,m_vTradingButton[0]);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"selfSellBtn",CCControlButton*,m_vTradingButton[1]);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"selfGetBtn",CCControlButton*,m_vTradingButton[2]);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mSelfOneGetButton",CCControlButton*,m_pSelfOneGetButton);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mSelfAllGetButton",CCControlButton*,m_pSelfAllGetButton);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mSelfBuyButton",CCControlButton*,m_pSelfBuyButton);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"CommonYuanBao",CCLabelTTF*,m_pCommonYuanBao);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mGoldText",CCLabelTTF*,m_pGoldText);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mGetNum",CCLabelTTF*,m_pGetNum);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mPriceArrow",CCSprite*,m_pPriceArrow);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mSellPushNum",CCLabelTTF*,m_pSellPushNum);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mYuanBaoCCNode",CCNode*,m_pYuanBaoCCNode);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mGoldCCNode",CCNode*,m_pGoldCCNode);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"BuyLeftContent",CCNode*,m_pBuyLeftContainer);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"BuyRightContent",CCNode*,m_pBuyRightContainer); 
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"BuyRightClassify",CCNode*,m_pBuyRightClassify); 
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"BuyRightFinalContent",CCNode*,m_pBuyRightFinalContainer);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"BuyRightTalk",CCNode*,m_pBuyRightTalk);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mBuyText",CCLabelTTF*,m_pBuyRightText);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"zhiye1",CCNode*,m_pProfessPage);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"lv2",CCNode*,m_pLevelPage);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mPageCCNode",CCNode*,m_pPageCCNode);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"SellRightContent",CCNode*,m_pSellRightContainer);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"SellLeftContent",CCNode*,m_pSellLeftContainer);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"SelfGetRedPoint",CCSprite*,m_pSelfGetRedPoint);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"OneGetRedPoint",CCSprite*,m_pOneGetRedPoint);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"AllGetRedPoint",CCSprite*,m_pAllGetRedPoint);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mProfessText",CCLabelTTF*,m_pProfessText);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mLevelText",CCLabelTTF*,m_pLevelText);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mTradingBlank",CCSprite*,m_pSellRightItemBlank);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_pPriceText",CCLabelTTF*,m_pPriceText);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_pChoseText",CCLabelTTF*,m_pChoseText);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_pSellRightText",CCLabelTTF*,m_pSellRightText);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_pSearchText",CCNode*,m_pSearchText);
+
+	return false;
+}
+
+cocos2d::SEL_MenuHandler TradingUILayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler TradingUILayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onlvBtnPressed);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onlv21BtnPressed);	
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onlv22BtnPressed);	
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onlv23BtnPressed);	
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onlv24BtnPressed);	
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onlv25BtnPressed);	
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onlv26BtnPressed);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onjiageBtnPressed);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onCloseBtnPressed);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onzhiyeBtnPressed);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onsousuoBtnPressed);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,ongoumaiBtnPressed);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onlingquBtnPressed);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onzhiyefashiBtnPressed);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onzhiyedaoshiBtnPressed);	
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onlv2quanbuBtnPressed);	
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onwoyaogoumaiBtnPressed);	
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onwoyaochushouBtnPressed);	
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onwoyaolingquBtnPressed);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onzhiyequanbuBtnPressed);	
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onzhiyezhanshiBtnPressed);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onquanbulingquBtnPressed);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onzhiyetongyongBtnPressed);	
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onHelpBtnPressed);
+	//SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingUILayer,onOkHelpBtnPressed);
+
+	return NULL;
+}
+
+// void TradingUILayer::onOkHelpBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+// {
+// // 	CC_ASSERT(m_pTradingHelp != NULL);
+// // 	m_pTradingHelp->setTouchEnable(false);
+// // 	m_pTradingHelp->removeFromParent();
+// }
+
+void TradingUILayer::onHelpBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+// 	CC_ASSERT(m_pTradingHelp != NULL);
+// 	if(m_pTradingHelp->getParent() == NULL)
+// 	{
+// 		m_pTradingHelp->setVisible(true);
+// 		m_pTradingHelp->setTouchPriority(-1);
+// 		setAllChildernButtonPriority(m_pTradingHelp,-1);
+// 		m_pTradingHelp->setTouchEnable(true);
+// 		World::getInstance()->getScene()->addChild(m_pTradingHelp,WZ_POPUI);
+// 	} 
+	PlacardManager::getInstance()->open_placard_node(14);
+}
+
+void TradingUILayer::onquanbulingquBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(TradingMgr::getInstance()->m_bTradingGetAllIsReceive)
+		TradingMgr::getInstance()->GetLoadTradingAllDataByMsg();
+}
+
+void TradingUILayer::onlingquBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(TradingMgr::getInstance()->m_bTradingGetOneIsReceive)
+		TradingMgr::getInstance()->GetLoadTradingOneDataByMsg();
+}
+
+void TradingUILayer::onjiageBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	TradingMgr::getInstance()->m_bPriceState = !TradingMgr::getInstance()->m_bPriceState;
+	if(TradingMgr::getInstance()->m_bTradingLoadDataIsReceive)
+	{
+		m_ScrollViewIndex = 0;
+		m_LastScrollViewIndex = 0;
+		if(!TradingMgr::getInstance()->m_bTradingSearch)
+		{
+			const std::string strMsg = TradingMgr::getInstance()->GetTradingMsgString();	
+			TradingMgr::getInstance()->GetLoadTradingBuyDataByMsg(strMsg);
+		}
+		else
+			TradingMgr::getInstance()->GetLoadSearchTradingBuyDataByMsg();
+	}
+
+	setPriceButttonImage();
+}
+
+void TradingUILayer::onlv2quanbuBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(!TradingMgr::getInstance()->m_bLevelClick || TradingMgr::getInstance()->m_nLevel != ET_LEVEL_Begin)
+	{
+		if(TradingMgr::getInstance()->m_nLevel == ET_LEVEL_Begin)
+			TradingMgr::getInstance()->m_bLevelClick = true;
+		else
+			TradingMgr::getInstance()->m_bLevelClick = false;
+
+		m_ScrollViewIndex = 0;
+		m_LastScrollViewIndex = 0;
+		TradingMgr::getInstance()->m_bOneClassClick = false;
+		TradingMgr::getInstance()->m_bProfessionClick = false;
+		TradingMgr::getInstance()->m_bTowClassClick = false;
+
+		TradingMgr::getInstance()->m_nLevel = ET_LEVEL_Begin;
+
+		if(TradingMgr::getInstance()->m_bTradingLoadDataIsReceive)
+		{
+			if(!TradingMgr::getInstance()->m_bTradingSearch)
+			{
+				const std::string strMsg = TradingMgr::getInstance()->GetTradingMsgString();	
+				TradingMgr::getInstance()->GetLoadTradingBuyDataByMsg(strMsg);
+			}
+			else
+				TradingMgr::getInstance()->GetLoadSearchTradingBuyDataByMsg();
+		}
+		if(m_pLevelPage->isVisible())
+			m_pLevelPage->setVisible(false);
+
+		m_pNewLevelText->setString(GET_STR(9397).c_str());
+	}
+}
+
+void TradingUILayer::onlv21BtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(!TradingMgr::getInstance()->m_bLevelClick || TradingMgr::getInstance()->m_nLevel != ET_LEVEL1)
+	{
+		if(TradingMgr::getInstance()->m_nLevel == ET_LEVEL1)
+			TradingMgr::getInstance()->m_bLevelClick = true;
+		else
+			TradingMgr::getInstance()->m_bLevelClick = false;
+
+		m_ScrollViewIndex = 0;
+		m_LastScrollViewIndex = 0;
+		TradingMgr::getInstance()->m_bOneClassClick = false;
+		TradingMgr::getInstance()->m_bProfessionClick = false;
+		TradingMgr::getInstance()->m_bTowClassClick = false;
+
+		TradingMgr::getInstance()->m_nLevel = ET_LEVEL1;
+
+		if(TradingMgr::getInstance()->m_bTradingLoadDataIsReceive)
+		{
+			if(!TradingMgr::getInstance()->m_bTradingSearch)
+			{
+				const std::string strMsg = TradingMgr::getInstance()->GetTradingMsgString();	
+				TradingMgr::getInstance()->GetLoadTradingBuyDataByMsg(strMsg);
+			}
+			else
+				TradingMgr::getInstance()->GetLoadSearchTradingBuyDataByMsg();
+		}
+		if(m_pLevelPage->isVisible())
+			m_pLevelPage->setVisible(false);
+
+		m_pNewLevelText->setString(GET_STR(9402).c_str());
+
+		TradingMgr::getInstance()->m_bTradingSearch = false;
+	}
+}
+
+void TradingUILayer::onlv22BtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(!TradingMgr::getInstance()->m_bLevelClick || TradingMgr::getInstance()->m_nLevel != ET_LEVEL2)
+	{
+		if(TradingMgr::getInstance()->m_nLevel == ET_LEVEL2)
+			TradingMgr::getInstance()->m_bLevelClick = true;
+		else
+			TradingMgr::getInstance()->m_bLevelClick = false;
+
+		m_ScrollViewIndex = 0;
+		m_LastScrollViewIndex = 0;
+		TradingMgr::getInstance()->m_bOneClassClick = false;
+		TradingMgr::getInstance()->m_bProfessionClick = false;
+		TradingMgr::getInstance()->m_bTowClassClick = false;
+
+		TradingMgr::getInstance()->m_nLevel = ET_LEVEL2;
+
+		if(TradingMgr::getInstance()->m_bTradingLoadDataIsReceive)
+		{
+			if(!TradingMgr::getInstance()->m_bTradingSearch)
+			{
+				const std::string strMsg = TradingMgr::getInstance()->GetTradingMsgString();	
+				TradingMgr::getInstance()->GetLoadTradingBuyDataByMsg(strMsg);
+			}
+			else
+				TradingMgr::getInstance()->GetLoadSearchTradingBuyDataByMsg();
+		}
+
+		if(m_pLevelPage->isVisible())
+			m_pLevelPage->setVisible(false);
+
+		m_pNewLevelText->setString(GET_STR(9403).c_str());
+
+		TradingMgr::getInstance()->m_bTradingSearch = false;
+	}
+}
+
+void TradingUILayer::onlv23BtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(!TradingMgr::getInstance()->m_bLevelClick || TradingMgr::getInstance()->m_nLevel != ET_LEVEL3)
+	{
+		if(TradingMgr::getInstance()->m_nLevel == ET_LEVEL3)
+			TradingMgr::getInstance()->m_bLevelClick = true;
+		else
+			TradingMgr::getInstance()->m_bLevelClick = false;
+
+		m_ScrollViewIndex = 0;
+		m_LastScrollViewIndex = 0;
+		TradingMgr::getInstance()->m_bOneClassClick = false;
+		TradingMgr::getInstance()->m_bProfessionClick = false;
+		TradingMgr::getInstance()->m_bTowClassClick = false;
+
+		TradingMgr::getInstance()->m_nLevel = ET_LEVEL3;
+
+		if(TradingMgr::getInstance()->m_bTradingLoadDataIsReceive)
+		{
+			if(!TradingMgr::getInstance()->m_bTradingSearch)
+			{
+				const std::string strMsg = TradingMgr::getInstance()->GetTradingMsgString();	
+				TradingMgr::getInstance()->GetLoadTradingBuyDataByMsg(strMsg);
+			}
+			else
+				TradingMgr::getInstance()->GetLoadSearchTradingBuyDataByMsg();
+		}
+
+		if(m_pLevelPage->isVisible())
+			m_pLevelPage->setVisible(false);
+
+		m_pNewLevelText->setString(GET_STR(9404).c_str());
+
+		TradingMgr::getInstance()->m_bTradingSearch = false;
+	}
+}
+
+void TradingUILayer::onlv24BtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(!TradingMgr::getInstance()->m_bLevelClick || TradingMgr::getInstance()->m_nLevel != ET_LEVEL4)
+	{
+		if(TradingMgr::getInstance()->m_nLevel == ET_LEVEL4)
+			TradingMgr::getInstance()->m_bLevelClick = true;
+		else
+			TradingMgr::getInstance()->m_bLevelClick = false;
+
+		m_ScrollViewIndex = 0;
+		m_LastScrollViewIndex = 0;
+		TradingMgr::getInstance()->m_bOneClassClick = false;
+		TradingMgr::getInstance()->m_bProfessionClick = false;
+		TradingMgr::getInstance()->m_bTowClassClick = false;
+
+		TradingMgr::getInstance()->m_nLevel = ET_LEVEL4;
+
+		if(TradingMgr::getInstance()->m_bTradingLoadDataIsReceive)
+		{
+			if(!TradingMgr::getInstance()->m_bTradingSearch)
+			{
+				const std::string strMsg = TradingMgr::getInstance()->GetTradingMsgString();	
+				TradingMgr::getInstance()->GetLoadTradingBuyDataByMsg(strMsg);
+			}
+			else
+				TradingMgr::getInstance()->GetLoadSearchTradingBuyDataByMsg();
+		}
+
+		if(m_pLevelPage->isVisible())
+			m_pLevelPage->setVisible(false);
+
+		m_pNewLevelText->setString(GET_STR(9405).c_str());
+
+		TradingMgr::getInstance()->m_bTradingSearch = false;
+	}
+}
+
+void TradingUILayer::onlv25BtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(!TradingMgr::getInstance()->m_bLevelClick || TradingMgr::getInstance()->m_nLevel != ET_LEVEL5)
+	{
+		if(TradingMgr::getInstance()->m_nLevel == ET_LEVEL5)
+			TradingMgr::getInstance()->m_bLevelClick = true;
+		else
+			TradingMgr::getInstance()->m_bLevelClick = false;
+
+		m_ScrollViewIndex = 0;
+		m_LastScrollViewIndex = 0;
+		TradingMgr::getInstance()->m_bOneClassClick = false;
+		TradingMgr::getInstance()->m_bProfessionClick = false;
+		TradingMgr::getInstance()->m_bTowClassClick = false;
+
+		TradingMgr::getInstance()->m_nLevel = ET_LEVEL5;
+
+		if(TradingMgr::getInstance()->m_bTradingLoadDataIsReceive)
+		{
+			if(!TradingMgr::getInstance()->m_bTradingSearch)
+			{
+				const std::string strMsg = TradingMgr::getInstance()->GetTradingMsgString();	
+				TradingMgr::getInstance()->GetLoadTradingBuyDataByMsg(strMsg);
+			}
+			else
+				TradingMgr::getInstance()->GetLoadSearchTradingBuyDataByMsg();
+		}
+
+		if(m_pLevelPage->isVisible())
+			m_pLevelPage->setVisible(false);
+
+		m_pNewLevelText->setString(GET_STR(9406).c_str());
+
+		TradingMgr::getInstance()->m_bTradingSearch = false;
+	}
+}
+
+void TradingUILayer::onlv26BtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(!TradingMgr::getInstance()->m_bLevelClick || TradingMgr::getInstance()->m_nLevel != ET_LEVEL6)
+	{
+		if(TradingMgr::getInstance()->m_nLevel == ET_LEVEL6)
+			TradingMgr::getInstance()->m_bLevelClick = true;
+		else
+			TradingMgr::getInstance()->m_bLevelClick = false;
+
+		m_ScrollViewIndex = 0;
+		m_LastScrollViewIndex = 0;
+		TradingMgr::getInstance()->m_bOneClassClick = false;
+		TradingMgr::getInstance()->m_bProfessionClick = false;
+		TradingMgr::getInstance()->m_bTowClassClick = false;
+
+		TradingMgr::getInstance()->m_nLevel = ET_LEVEL6;
+
+		if(!TradingMgr::getInstance()->m_bTradingSearch)
+		{
+			const std::string strMsg = TradingMgr::getInstance()->GetTradingMsgString();	
+			TradingMgr::getInstance()->GetLoadTradingBuyDataByMsg(strMsg);
+		}
+		else
+			TradingMgr::getInstance()->GetLoadSearchTradingBuyDataByMsg();
+
+		if(m_pLevelPage->isVisible())
+			m_pLevelPage->setVisible(false);
+
+		m_pNewLevelText->setString(GET_STR(9407).c_str());
+
+		TradingMgr::getInstance()->m_bTradingSearch = false;
+	}
+}
+
+void TradingUILayer::onzhiyequanbuBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(	!TradingMgr::getInstance()->m_bProfessionClick || TradingMgr::getInstance()->m_nProfession != EV_Trading_Class_Begin)
+	{
+		if(TradingMgr::getInstance()->m_nProfession == EV_Trading_Class_Begin)
+			TradingMgr::getInstance()->m_bProfessionClick = true;
+		else
+			TradingMgr::getInstance()->m_bProfessionClick = false;
+
+		m_ScrollViewIndex = 0;
+		m_LastScrollViewIndex = 0;
+		TradingMgr::getInstance()->m_bOneClassClick = false;
+		TradingMgr::getInstance()->m_bLevelClick = false;
+		TradingMgr::getInstance()->m_bTowClassClick = false;
+
+		TradingMgr::getInstance()->m_nProfession = EV_Trading_Class_Begin;
+
+		if(TradingMgr::getInstance()->m_bTradingLoadDataIsReceive)
+		{
+			if(!TradingMgr::getInstance()->m_bTradingSearch)
+			{
+				const std::string strMsg = TradingMgr::getInstance()->GetTradingMsgString();	
+				TradingMgr::getInstance()->GetLoadTradingBuyDataByMsg(strMsg);
+			}
+			else
+				TradingMgr::getInstance()->GetLoadSearchTradingBuyDataByMsg();
+		}
+
+		if(m_pProfessPage->isVisible())
+			m_pProfessPage->setVisible(false);
+
+		m_pNewProfessText->setString(GET_STR(9397).c_str());
+
+		TradingMgr::getInstance()->m_bTradingSearch = false;
+	}
+}
+
+void TradingUILayer::onzhiyezhanshiBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(	!TradingMgr::getInstance()->m_bProfessionClick || TradingMgr::getInstance()->m_nProfession != EV_Trading_Class_Warrior)
+	{
+		if(TradingMgr::getInstance()->m_nProfession == EV_Trading_Class_Warrior)
+			TradingMgr::getInstance()->m_bProfessionClick = true;
+		else
+			TradingMgr::getInstance()->m_bProfessionClick = false;
+
+		m_ScrollViewIndex = 0;
+		m_LastScrollViewIndex = 0;
+		TradingMgr::getInstance()->m_bOneClassClick = false;
+		TradingMgr::getInstance()->m_bLevelClick = false;
+		TradingMgr::getInstance()->m_bTowClassClick = false;
+
+
+		TradingMgr::getInstance()->m_nProfession = EV_Trading_Class_Warrior;
+
+		if(TradingMgr::getInstance()->m_bTradingLoadDataIsReceive)
+		{
+			if(!TradingMgr::getInstance()->m_bTradingSearch)
+			{
+				const std::string strMsg = TradingMgr::getInstance()->GetTradingMsgString();	
+				TradingMgr::getInstance()->GetLoadTradingBuyDataByMsg(strMsg);
+			}
+			else
+				TradingMgr::getInstance()->GetLoadSearchTradingBuyDataByMsg();
+		}
+
+		if(m_pProfessPage->isVisible())
+			m_pProfessPage->setVisible(false);
+
+		m_pNewProfessText->setString(GET_STR(9398).c_str());
+
+		TradingMgr::getInstance()->m_bTradingSearch = false;
+	}
+}
+
+void TradingUILayer::onzhiyefashiBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(	!TradingMgr::getInstance()->m_bProfessionClick || TradingMgr::getInstance()->m_nProfession != EV_Trading_Class_Mage)
+	{
+		if(TradingMgr::getInstance()->m_nProfession == EV_Trading_Class_Mage)
+			TradingMgr::getInstance()->m_bProfessionClick = true;
+		else
+			TradingMgr::getInstance()->m_bProfessionClick = false;
+
+		m_ScrollViewIndex = 0;
+		m_LastScrollViewIndex = 0;
+		TradingMgr::getInstance()->m_bOneClassClick = false;
+		TradingMgr::getInstance()->m_bLevelClick = false;
+		TradingMgr::getInstance()->m_bTowClassClick = false;
+
+		TradingMgr::getInstance()->m_nProfession = EV_Trading_Class_Mage;
+
+		if(TradingMgr::getInstance()->m_bTradingLoadDataIsReceive)
+		{
+			if(!TradingMgr::getInstance()->m_bTradingSearch)
+			{
+				const std::string strMsg = TradingMgr::getInstance()->GetTradingMsgString();	
+				TradingMgr::getInstance()->GetLoadTradingBuyDataByMsg(strMsg);
+			}
+			else
+				TradingMgr::getInstance()->GetLoadSearchTradingBuyDataByMsg();
+		}
+
+		if(m_pProfessPage->isVisible())
+			m_pProfessPage->setVisible(false);
+
+		m_pNewProfessText->setString(GET_STR(9399).c_str());
+
+		TradingMgr::getInstance()->m_bTradingSearch = false;
+	}
+}
+
+void TradingUILayer::onzhiyedaoshiBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(	!TradingMgr::getInstance()->m_bProfessionClick || TradingMgr::getInstance()->m_nProfession != EV_Trading_Class_Taoist)
+	{
+		if(TradingMgr::getInstance()->m_nProfession == EV_Trading_Class_Taoist)
+			TradingMgr::getInstance()->m_bProfessionClick = true;
+		else
+			TradingMgr::getInstance()->m_bProfessionClick = false;
+
+		m_ScrollViewIndex = 0;
+		m_LastScrollViewIndex = 0;
+		TradingMgr::getInstance()->m_bOneClassClick = false;
+		TradingMgr::getInstance()->m_bLevelClick = false;
+		TradingMgr::getInstance()->m_bTowClassClick = false;
+
+		TradingMgr::getInstance()->m_nProfession = EV_Trading_Class_Taoist;
+
+		if(TradingMgr::getInstance()->m_bTradingLoadDataIsReceive)
+		{
+			if(!TradingMgr::getInstance()->m_bTradingSearch)
+			{
+				const std::string strMsg = TradingMgr::getInstance()->GetTradingMsgString();	
+				TradingMgr::getInstance()->GetLoadTradingBuyDataByMsg(strMsg);
+			}
+			else
+				TradingMgr::getInstance()->GetLoadSearchTradingBuyDataByMsg();
+		}
+
+		if(m_pProfessPage->isVisible())
+			m_pProfessPage->setVisible(false);
+
+		m_pNewProfessText->setString(GET_STR(9400).c_str());
+
+		TradingMgr::getInstance()->m_bTradingSearch = false;
+	}
+}
+
+void TradingUILayer::onzhiyetongyongBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(	!TradingMgr::getInstance()->m_bProfessionClick || TradingMgr::getInstance()->m_nProfession != EV_Trading_Class_End)
+	{
+		if(TradingMgr::getInstance()->m_nProfession == EV_Trading_Class_End)
+			TradingMgr::getInstance()->m_bProfessionClick = true;
+		else
+			TradingMgr::getInstance()->m_bProfessionClick = false;
+
+		m_ScrollViewIndex = 0;
+		m_LastScrollViewIndex = 0;
+		TradingMgr::getInstance()->m_bOneClassClick = false;
+		TradingMgr::getInstance()->m_bLevelClick = false;
+		TradingMgr::getInstance()->m_bTowClassClick = false;
+
+		TradingMgr::getInstance()->m_nProfession = EV_Trading_Class_End;
+
+		if(TradingMgr::getInstance()->m_bTradingLoadDataIsReceive)
+		{
+			if(!TradingMgr::getInstance()->m_bTradingSearch)
+			{
+				const std::string strMsg = TradingMgr::getInstance()->GetTradingMsgString();	
+				TradingMgr::getInstance()->GetLoadTradingBuyDataByMsg(strMsg);
+			}
+			else
+				TradingMgr::getInstance()->GetLoadSearchTradingBuyDataByMsg();
+		}
+
+		if(m_pProfessPage->isVisible())
+			m_pProfessPage->setVisible(false);
+
+		m_pNewProfessText->setString(GET_STR(9401).c_str());
+
+		TradingMgr::getInstance()->m_bTradingSearch = false;
+	}
+}
+
+void TradingUILayer::onzhiyeBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	m_pProfessPage->setVisible(!m_pProfessPage->isVisible());
+	if(m_pLevelPage->isVisible())
+		m_pLevelPage->setVisible(false);
+}
+
+void TradingUILayer::onlvBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	m_pLevelPage->setVisible(!m_pLevelPage->isVisible());
+	if(m_pProfessPage->isVisible())
+		m_pProfessPage->setVisible(false);
+}
+
+void TradingUILayer::onwoyaogoumaiBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	showFrame(T_TradingBuy);
+}
+
+void TradingUILayer::ongoumaiBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if(0 == TradingBuyRightFinalItemList::m_n64_serial)
+	{
+	   ToolTip::getInstance()->push(GET_STR( 9396 ));
+		return ;
+	}
+
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if(NULL == player)
+		return ;
+
+	tagTradingItemDataMsg item;
+	item.m_ItemInfo.n64_serial = TradingBuyRightFinalItemList::m_n64_serial;
+	tagTradingItemDataMsg *data = TradingMgr::getInstance()->FindTradingBuyItem(item);
+	if(NULL != data)
+	{
+		if(data->dwUpRoleID == player->getId())
+		{
+			ToolTip::getInstance()->push(GET_STR( 9304 ));
+			return ;
+		}
+
+		BuySetUi::getInstance()->open();
+		BuySetUi::getInstance()->setDataId(TradingBuyRightFinalItemList::m_itemTypeId);
+		BuySetUi::getInstance()->setPrice(TradingBuyRightFinalItemList::m_itemPriceNum);
+		BuySetUi::getInstance()->setNumKeyIsOpen(false);
+
+		if(!MIsEquipment(TradingBuyRightFinalItemList::m_itemTypeId))
+			BuySetUi::getInstance()->setNum(TradingBuyRightFinalItemList::m_itemNumber);
+		else
+			BuySetUi::getInstance()->setNum(1);
+
+		BuySetUi::getInstance()->_signalBtnPressed->connect(this, &TradingUILayer::onOkBtnPressed);
+	}
+}
+
+void TradingUILayer::onOkBtnPressed( bool isOk, int count)
+{
+	if(isOk)
+	{
+		if(NumericalIniMgr::getInstance()->get_m_trading_get_container_count() <= TradingMgr::getInstance()->getRoleTradingGetSize())
+		{		 
+			ToolTip::getInstance()->push(GET_STR(9414));	
+			return ;
+		}
+
+		if(TradingBuyRightFinalItemList::m_itemPriceNum * TradingBuyRightFinalItemList::m_itemNumber > PackageManager::getInstance()->getYuanBao())
+		{
+			RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+			return ;
+		}
+
+		const std::string strMsg =  TradingMgr::getInstance()->GetTradingMsgString();	
+		if(std::string("") == strMsg)
+			return ;
+
+		TradingMgr::getInstance()->GetBuyItemByMsg(strMsg);	
+	}
+}
+
+void TradingUILayer::onwoyaochushouBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	showFrame(T_TradingSell);
+}
+
+void TradingUILayer::onwoyaolingquBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	showFrame(T_TradingGet);
+}
+
+void TradingUILayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_TradingTipUI);	
+	CLOSE_UI(WCT_TradingUI);
+	NumKeypad::getInstance()->close();
+	BuySetUi::getInstance()->close();
+}
+
+void TradingUILayer::onsousuoBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	onSearchChanged();
+	//ToolTip::getInstance()->push(GET_STR(9353));
+}
+
+void TradingUILayer::CloseButton()
+{
+	if(m_pProfessPage->isVisible())
+		m_pProfessPage->setVisible(false);
+
+	if(m_pLevelPage->isVisible())
+		m_pLevelPage->setVisible(false);
+}
+
+bool TradingUILayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CloseButton();
+	if(isTouchOnNodeContent(m_pFrame[T_TradingBuy], pTouch))
+	{
+		if(isTouchOnNodeContent(m_pBuyLeftContainer, pTouch))
+			m_BuyLeftBeginPt = m_pBuyLeftContainer->convertTouchToNodeSpace(pTouch);
+
+		if(isTouchOnNodeContent(m_pSearchText, pTouch))
+			m_pSearchTextField->attachWithIME();
+
+		return true;
+	}
+
+	return false;
+}
+
+void TradingUILayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(NULL != m_pBuyLeftContainer && isTouchOnNodeContent(m_pBuyLeftContainer,pTouch))
+	{
+		CCPoint pt = m_pBuyLeftContainer->convertTouchToNodeSpace(pTouch);
+		if(ccpDistance(m_BuyLeftBeginPt, pt) < TOUCH_MOVE_DIS)
+		{
+			if(NULL != m_pBuyLeftList)
+				m_pBuyLeftList->onTouch(pTouch);
+		}
+	}
+}
+
+bool TradingUILayer::onTextFieldAttachWithIME( CCTextFieldTTF *pSender )
+{
+	return false;
+	//return true; 不启动
+}
+
+//当用户进行输入是的回调函数
+bool TradingUILayer::onTextFieldInsertText( CCTextFieldTTF *pSender, const char* text, int nLen )
+{
+	if (m_nCurInputNum < m_nMaxInputNum)
+	{
+		m_nCurInputNum += nLen;
+		return false;
+	}else
+	{
+		ToolTip::getInstance()->push(GET_STR( 9438 ));
+		return true;
+	}
+	//return true; 不输入文字
+}
+
+//当用户关闭虚拟键盘时的回调
+bool TradingUILayer::onTextFieldDetachWithIME( CCTextFieldTTF * sender )
+{
+	return false;
+	//return true; 不关闭虚拟键盘
+}
+
+//当用户删除文字时的回调
+bool TradingUILayer::onTextFieldDeleteBackward( CCTextFieldTTF *pSender, const char* text, int nLen )
+{
+	if (m_nCurInputNum >= nLen)
+	{
+		m_nCurInputNum -= nLen;
+	}else
+	{
+		m_nCurInputNum = 0;
+	}
+	return false;
+	//return true; 不删除
+}
+
+void TradingUILayer::onSearchChanged()
+{
+	if(NULL == m_pSearchTextField)
+		return ;
+
+	std::string SearchStr = m_pSearchTextField->getString();
+	std::vector<DWORD> v_itemId;
+	v_itemId.clear();
+	std::string baseStr = "SELECT * FROM PackageData WHERE Name like \"%" + SearchStr +"%\"";
+	wchar_t * wstr = convertWName(baseStr);
+	c_db_manager::getSingleton()->begin_operation(convertName(wstr));
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();//数据表
+	while(table->retrieve_row())
+	{
+		unsigned int  idx = table->get_index("TypeId");
+
+		int typeId = table->get_integer32(idx);
+
+		idx = table->get_index("putawayBool");
+		if(!table->get_boolean(idx))
+			continue;
+
+		v_itemId.push_back(typeId);
+	}
+
+	m_ScrollViewIndex = 0;
+	m_LastScrollViewIndex = 0;
+	TradingMgr::getInstance()->GetLoadTradingSearchItemInfo(SearchStr,v_itemId);
+	TradingMgr::getInstance()->m_bTradingSearch = true;
+	TradingMgr::getInstance()->m_bLevelClick = false;
+	TradingMgr::getInstance()->m_bOneClassClick = false;
+	TradingMgr::getInstance()->m_bProfessionClick = false;
+	TradingMgr::getInstance()->m_bTowClassClick = false;
+}
+
+void TradingUILayer::SetDelayShow(bool value)
+{
+   if(NULL != m_pDelaySp)
+	   m_pDelaySp->setVisible(value);
+}
+
+void TradingUILayer::SetLoadingImage()
+{
+	if(NULL == m_pBuyRightContainer)
+		return ;
+
+	CCSize size = m_pBuyRightContainer->getContentSize();
+	if(NULL == m_pDelaySp)
+	{
+		m_pDelaySp = CCSprite::create("Art/ICON/SingleUI/loading.png");
+		m_pDelaySp->setPosition(ccp(size.width/2,size.height/2));
+		m_pDelaySp->setAnchorPoint(ccp(0.5,0.5));
+
+		CCRotateBy* rotate = CCRotateBy::create(2,360);
+		m_pDelaySp->runAction(CCRepeatForever::create(rotate));
+		m_pDelaySp->setVisible(false);
+		m_pBuyRightContainer->addChild(m_pDelaySp);
+	}
+}
+
+void TradingUILayer::setPriceButttonImage()
+{
+	std::string btnstr = "jiaoyi_goumai_jiantou";
+	btnstr += (true == TradingMgr::getInstance()->m_bPriceState ? "0" : "1");
+	m_pPriceArrow->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(btnstr.c_str()));
+};
+
+void TradingUILayer::showFrame( eTradingFrameTag ft )
+{
+	if(ft == m_eCurFrame || ft < T_TradingBuy || ft >= T_TradingTabNum)
+		return;
+
+	m_pFrame[ft]->setVisible(true);
+	m_pFrame[m_eCurFrame]->setVisible(false);
+
+	m_eCurFrame = ft;
+
+	ClearClickScrollView();
+	HideSelfButton();
+	ClearBuyLeftBtnState();
+	SetGetUIRedPoint();
+	CLOSE_UI(WCT_TradingTipUI);
+	for(int i = 1; i < T_TradingTabNum; i++)
+	{
+		std::string btnstr = "jiaoyihang_btn";
+		std::stringstream oss;
+		oss << i - 1;
+		btnstr += oss.str().c_str();
+		btnstr += (i == ft ? "h" : "n");
+		setButtonSpriteFrame(m_vTradingButton[i - 1],btnstr,btnstr,btnstr);
+	}
+
+	if(T_TradingGet == ft)
+	{
+		m_pSelfOneGetButton->setVisible(true);
+		m_pSelfAllGetButton->setVisible(true);
+		m_pYuanBaoCCNode->setVisible(true);
+		m_pBuyRightTalk->setVisible(false);
+		m_pGoldCCNode->setVisible(false);
+		updateGetItemList();
+		SetSellRightItemClickEnable(false);
+	}	
+
+	if(T_TradingBuy == ft)
+	{
+		m_pBuyRightTalk->setVisible(true);
+		m_pSelfBuyButton->setVisible(true);
+		m_pYuanBaoCCNode->setVisible(true);
+		m_pGoldCCNode->setVisible(false);
+		SetSellRightItemClickEnable(false);
+		SetGetUIRedPoint();
+	}
+
+	if(T_TradingSell == ft)
+	{
+		m_pYuanBaoCCNode->setVisible(false);
+		m_pBuyRightTalk->setVisible(false);
+		m_pGoldCCNode->setVisible(true);
+		updateSellRightItemList();
+		updateSellLeftItemList();
+		UpdatePushSellNum();
+		SetSellRightItemClickEnable(true);
+		SetGetUIRedPoint();
+	}
+
+	NumKeypad::getInstance()->close();
+	BuySetUi::getInstance()->close();
+	m_pPageCCNode->setVisible(false);
+	TradingMgr::getInstance()->ClearTradingState();
+	TradingMgr::getInstance()->m_bTradingSearch = false;
+}
+
+void TradingUILayer::onNodeLoaded( cocos2d::CCNode* pNode, cocos2d::extension::CCNodeLoader* pNodeLoader )
+{
+	CC_ASSERT(NULL != getChildByTag(T_TradingCommon));
+	m_pFrame[T_TradingCommon] = getChildByTag(T_TradingCommon);
+	CC_ASSERT(NULL != m_pFrame[T_TradingCommon]);
+	m_pFrame[T_TradingCommon]->setVisible(true);
+
+	CC_ASSERT(NULL != getChildByTag(T_TradingBuy));
+	m_pFrame[T_TradingBuy] = getChildByTag(T_TradingBuy);
+	CC_ASSERT(NULL != m_pFrame[T_TradingBuy]);
+	m_pFrame[T_TradingBuy]->setVisible(true);
+
+	CC_ASSERT(NULL != getChildByTag(T_TradingSell));
+	m_pFrame[T_TradingSell] = getChildByTag(T_TradingSell);
+	CC_ASSERT(NULL != m_pFrame[T_TradingSell]);
+	m_pFrame[T_TradingSell]->setVisible(false);
+
+	CC_ASSERT(NULL != getChildByTag(T_TradingGet));
+	m_pFrame[T_TradingGet] = getChildByTag(T_TradingGet);
+	CC_ASSERT(NULL != m_pFrame[T_TradingGet]);
+	m_pFrame[T_TradingGet]->setVisible(false);
+
+	TradingMgr::getInstance()->m_bTradingSearch = false;
+
+	m_pNewCommonYuanBao = Helper::replaceLabelTTFWithLabelFTAndRemove(m_pCommonYuanBao);
+	CC_ASSERT(NULL != m_pNewCommonYuanBao);
+
+	m_pNewGoldText = Helper::replaceLabelTTFWithLabelFTAndRemove(m_pGoldText);
+	CC_ASSERT(NULL != m_pNewGoldText);
+
+	m_pGetNewNum = Helper::replaceLabelTTFWithLabelFTAndRemove(m_pGetNum);
+	CC_ASSERT(NULL != m_pGetNewNum);
+
+	m_pSellNewPushNum = Helper::replaceLabelTTFWithLabelFTAndRemove(m_pSellPushNum);
+	CC_ASSERT(NULL != m_pSellNewPushNum);
+
+	m_pBuyNewRightText = Helper::replaceLabelTTFWithLabelFTAndRemove(m_pBuyRightText);
+	CC_ASSERT(NULL != m_pBuyNewRightText);
+
+	m_pNewProfessText = Helper::replaceLabelTTFWithLabelFTAndRemove(m_pProfessText);
+	CC_ASSERT(NULL != m_pNewProfessText);
+
+	m_pNewLevelText = Helper::replaceLabelTTFWithLabelFTAndRemove(m_pLevelText);
+	CC_ASSERT(NULL != m_pNewLevelText);
+
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_pPriceText);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_pChoseText);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_pSellRightText);
+	//CC_ASSERT(NULL != Helper::replaceLabelTTFWithLabelFTAndRemove(m_pPriceText));
+	//CC_ASSERT(NULL != Helper::replaceLabelTTFWithLabelFTAndRemove(m_pChoseText));
+
+	//CC_ASSERT(NULL != Helper::replaceLabelTTFWithLabelFTAndRemove(m_pSellRightText));
+
+	CC_ASSERT(NULL != m_pProfessPage);
+	CC_ASSERT(NULL != m_pLevelPage);
+	m_pProfessPage->setVisible(false);
+	m_pLevelPage->setVisible(false);
+
+// 	m_pTradingHelp->retain();
+// 	m_pTradingHelp->setVisible(false);
+// 	m_pTradingHelp->removeFromParent();
+// 	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+// 	m_pTradingHelp->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+
+	CC_ASSERT(NULL != m_pBuyLeftContainer);
+	m_pBuyLeftScrollView = createScrollViewWithContent(m_pBuyLeftContainer);
+	m_pBuyLeftContainer->addChild(m_pBuyLeftScrollView);
+	if (NULL != m_pBuyLeftList)
+		m_pBuyLeftList->clear();
+	CC_SAFE_DELETE(m_pBuyLeftList);
+	m_pBuyLeftList = new VerticalList<BuyLeftBtnList>;
+	CC_ASSERT(NULL != m_pBuyLeftList);
+	m_pBuyLeftList->addToScrollView(m_pBuyLeftScrollView);
+	m_pBuyLeftList->setMinSize(m_pBuyLeftContainer->getContentSize());
+	m_pBuyLeftList->setLineSpace(0);
+	m_pBuyLeftList->setEnableSelect(true);
+
+	m_ProfessBtnPt	=	m_pProfessButton->getPosition();
+	m_LevelBtnPt	=	m_pLevelButton->getPosition();
+	m_ProfessPagePt =	m_pProfessPage->getPosition();
+	m_LevelPagePt	=	m_pLevelPage->getPosition();
+	m_PriceBtnPt	=	m_pPriceButton->getPosition();
+	m_pPageCCNode->setVisible(false);
+
+	m_pSearchTextField = createInputWithContent(m_pSearchText, 15);
+	if(NULL != m_pSearchTextField)
+	{
+		m_pFrame[T_TradingBuy]->addChild(m_pSearchTextField);
+		m_pSearchTextField->setDelegate(this);
+	}
+
+	setAllChildernButtonPriority(m_pProfessPage,-1);
+	setAllChildernButtonPriority(m_pLevelPage,-1);
+	setAllChildernButtonPriority(m_pPageCCNode,-1);
+	setAllChildernButtonPriority(getChildByTag(T_TradingCommon),-1);
+
+	CCSize BuyRightSize = m_pBuyRightContainer->getContentSize();
+	m_pBuyRightScrollView = CCScrollView::create(BuyRightSize);
+	m_pBuyRightContainer->addChild(m_pBuyRightScrollView);
+	m_pBuyRightContainerLayer = CCNode::create();
+	m_pBuyRightContainerLayer->set_enable_rect(false);
+	m_pBuyRightScrollView->setContainer(m_pBuyRightContainerLayer);
+	m_pBuyRightScrollView->setTouchEnabled(true);
+	m_pBuyRightScrollView->setBounceable(true);
+	m_pBuyRightScrollView->setContentSize(m_pBuyRightScrollView->getViewSize());
+	m_pBuyRightScrollView->setDirection(kCCScrollViewDirectionVertical);
+	m_pBuyRightScrollView->setContentOffset(ccp(0,0));
+	m_pBuyRightGridAlignNode = GridAlignNode::create_and_setup(GridAlignNode::ES_Vertical,2,BuyRightSize,BuyRightSize);
+	m_pBuyRightGridAlignNode->setAnchorPoint(ccp(0.0,0.0));
+	m_pBuyRightGridAlignNode->setPosition(ccp(0,m_pBuyRightContainer->getContentSize().height));
+	m_pBuyRightContainerLayer->addChild(m_pBuyRightGridAlignNode);
+	m_pBuyRightClassify->setVisible(false);
+	m_pBuyRightTalk->setVisible(true);	 
+	m_pBuyRightScrollView->setDelegate(this);
+
+	CCSize BuyRightFinalSize = m_pBuyRightFinalContainer->getContentSize();
+	m_pBuyRightFinalScrollView = CCScrollView::create(BuyRightFinalSize);
+	m_pBuyRightFinalContainer->addChild(m_pBuyRightFinalScrollView);
+	m_pBuyRightFinalContainerLayer = CCNode::create();
+	m_pBuyRightFinalScrollView->setContainer(m_pBuyRightFinalContainerLayer);
+	m_pBuyRightFinalContainerLayer->set_enable_rect(false);
+	m_pBuyRightFinalScrollView->setTouchEnabled(true);
+	m_pBuyRightFinalScrollView->setBounceable(true);
+	m_pBuyRightFinalScrollView->setContentSize(m_pBuyRightFinalScrollView->getViewSize());
+	m_pBuyRightFinalScrollView->setDirection(kCCScrollViewDirectionVertical);
+	m_pBuyRightFinalScrollView->setContentOffset(ccp(0,0));
+	m_pBuyRightFinalGridAlignNode = GridAlignNode::create_and_setup(GridAlignNode::ES_Vertical,2,BuyRightFinalSize,BuyRightFinalSize);
+	m_pBuyRightFinalGridAlignNode->setAnchorPoint(ccp(0.0,0.0));
+	m_pBuyRightFinalGridAlignNode->setPosition(ccp(0,m_pBuyRightFinalContainer->getContentSize().height));
+	m_pBuyRightFinalContainerLayer->addChild(m_pBuyRightFinalGridAlignNode);
+	m_pBuyRightFinalScrollView->setDelegate(this);
+
+	CCSize SellRightSize = m_pSellRightContainer->getContentSize();
+	m_pSellRightScrollView = CCScrollView::create(SellRightSize);
+	m_pSellRightContainer->addChild(m_pSellRightScrollView);
+	m_pSellRightContainerLayer = CCNode::create();
+	m_pSellRightScrollView->setContainer(m_pSellRightContainerLayer);
+	m_pSellRightContainerLayer->set_enable_rect(false);
+	m_pSellRightScrollView->setTouchEnabled(true);
+	m_pSellRightScrollView->setBounceable(true);
+	m_pSellRightScrollView->setContentSize(m_pSellRightScrollView->getViewSize());
+	m_pSellRightScrollView->setDirection(kCCScrollViewDirectionVertical);
+	m_pSellRightScrollView->setContentOffset(ccp(0,6.5));
+	m_pSellRightGridAlignNode = GridAlignNode::create_and_setup(GridAlignNode::ES_Vertical,4,SellRightSize,SellRightSize);
+	m_pSellRightGridAlignNode->setAnchorPoint(ccp(0.0,0.0));
+	m_pSellRightGridAlignNode->fixed_scale_row(-6);
+	m_pSellRightGridAlignNode->setPosition(ccp(0,m_pSellRightContainer->getContentSize().height));
+	m_pSellRightContainerLayer->addChild(m_pSellRightGridAlignNode);
+	m_pSellRightScrollView->setDelegate(this);
+
+	CCSize SellLeftSize = m_pSellLeftContainer->getContentSize();
+	m_pSellLeftScrollView = CCScrollView::create(SellLeftSize);
+	m_pSellLeftContainer->addChild(m_pSellLeftScrollView);
+	m_pSellLeftContainerLayer = CCNode::create();
+	m_pSellLeftScrollView->setContainer(m_pSellLeftContainerLayer);
+	m_pSellLeftContainerLayer->set_enable_rect(false);
+	m_pSellLeftScrollView->setTouchEnabled(true);
+	m_pSellLeftScrollView->setBounceable(true);
+	m_pSellLeftScrollView->setContentSize(m_pSellLeftScrollView->getViewSize());
+	m_pSellLeftScrollView->setDirection(kCCScrollViewDirectionVertical);
+	m_pSellLeftScrollView->setContentOffset(ccp(0,0));
+	m_pSellLeftGridAlignNode = GridAlignNode::create_and_setup(GridAlignNode::ES_Vertical,2,SellLeftSize,SellLeftSize);
+	m_pSellLeftGridAlignNode->setAnchorPoint(ccp(0.0,0.0));
+	m_pSellLeftGridAlignNode->setPosition(ccp(0,m_pSellLeftContainer->getContentSize().height));
+	m_pSellLeftContainerLayer->addChild(m_pSellLeftGridAlignNode);
+	m_pSellLeftScrollView->setDelegate(this);
+
+	if(IS_VALID_PTR(m_pSellRightItemBlank))
+	{
+		m_pSellRightItemBlank->setPositionY(m_pSellRightItemBlank->getPositionY() + 1);
+	}
+
+	SetLoadingImage();
+	InitBuyRightText();
+	UpdateCommonYuanBao();
+	updateBuyLeftBtnList();
+	updateSellRightItemList();
+	SetGetUIRedPoint();
+	HideGetButton();
+	SetSellRightItemClickEnable(false);
+}
+
+void TradingUILayer::HideGetButton()
+{
+	m_pSelfOneGetButton->setVisible(false);
+	m_pSelfAllGetButton->setVisible(false);
+}
+
+void TradingUILayer::ClearAllGetUIRedPoint()
+{
+	if(	NULL == m_pOneGetRedPoint || NULL == m_pSelfGetRedPoint || NULL == m_pAllGetRedPoint)
+		return ;
+
+	m_pOneGetRedPoint->setVisible(false);
+	m_pSelfGetRedPoint->setVisible(false);
+	m_pAllGetRedPoint->setVisible(false);
+}
+
+void TradingUILayer::SetGetUIRedPoint()
+{
+	if(	NULL == m_pOneGetRedPoint || NULL == m_pSelfGetRedPoint || NULL == m_pAllGetRedPoint)
+		return ;
+
+	m_pOneGetRedPoint->setVisible(false);
+	m_pSelfGetRedPoint->setVisible(false);
+	m_pAllGetRedPoint->setVisible(false);
+
+	if(!TradingMgr::getInstance()->m_vGetTradingInfo.empty())
+		m_pSelfGetRedPoint->setVisible(true);
+
+	if(T_TradingGet == m_eCurFrame)
+	{
+		if(1 == TradingMgr::getInstance()->m_vGetTradingInfo.size())
+			m_pOneGetRedPoint->setVisible(true);
+		else if(1 < TradingMgr::getInstance()->m_vGetTradingInfo.size())
+			m_pAllGetRedPoint->setVisible(true);
+	}
+}
+
+void TradingUILayer::ClearBuyLeftBtnState()
+{
+	if(NULL != m_pBuyLeftList)
+	{
+		int count = m_pBuyLeftList->getItemCount();
+		for(int i = 0; i < count; i ++)
+		{
+			BuyLeftBtnList *listItem = m_pBuyLeftList->getItem(i);
+			if(NULL != m_pBuyLeftList)
+				listItem->setSelectEnable(false);		
+		}
+	}
+}
+
+void TradingUILayer::HideSelfButton()
+{
+	m_pSelfOneGetButton->setVisible(false);
+	m_pSelfAllGetButton->setVisible(false);
+	m_pSelfBuyButton->setVisible(false);
+}
+
+void TradingUILayer::InitBuyRightText()
+{
+	m_pBuyRightTalk->setVisible(true);;
+	m_pBuyNewRightText->setString(GET_STR(9354).c_str());
+};
+
+void TradingUILayer::SetAllButtonPriority()
+{
+	for(int i = 1; i < T_TradingTabNum; i++)
+	{
+		m_vTradingButton[i - 1]->setTouchPriority(-1);
+	}
+}
+
+void TradingUILayer::onExit()
+{
+	m_ScrollViewIndex = 0;
+	m_LastScrollViewIndex = 0;
+	if(NULL != m_pDelaySp)
+		m_pDelaySp->stopAllActions();
+
+	TradingMgr::getInstance()->ClearTradingState();
+	if(NULL != m_pBuyRightGridAlignNode)
+		m_pBuyRightGridAlignNode->remove_all_items();
+	 if(NULL != m_pSellRightGridAlignNode)
+		m_pSellRightGridAlignNode->remove_all_items();
+	if(NULL != m_pSellLeftGridAlignNode)
+		m_pSellLeftGridAlignNode->remove_all_items();
+	if(NULL != m_pBuyRightFinalGridAlignNode)
+		m_pBuyRightFinalGridAlignNode->remove_all_items();
+	if(NULL != m_pGetControl)
+		m_pGetControl->clear_list();
+
+	extern MessageBoxUi *g_msgUi;
+	if (NULL != g_msgUi && MessageBoxUi::MessageBox_Trading == g_msgUi->getTag())
+	{
+		g_msgUi->removeFromParentAndCleanup(true);
+		g_msgUi = NULL;
+	}
+
+// 	if(NULL != m_pTradingHelp)
+// 	{
+// 		m_pTradingHelp->setTouchEnable(false);
+// 		m_pTradingHelp->removeFromParent();
+// 	}
+
+	CCLayer::onExit();
+}
+
+void TradingUILayer::ClearClickScrollView()
+{
+	if(NULL != m_pBuyRightGridAlignNode)
+		m_pBuyRightGridAlignNode->remove_all_items();
+	if(NULL != m_pSellLeftGridAlignNode)
+		m_pSellLeftGridAlignNode->remove_all_items();
+	if(NULL != m_pBuyRightFinalGridAlignNode)
+		m_pBuyRightFinalGridAlignNode->remove_all_items();
+	
+	TradingMgr::getInstance()->m_bLevelClick = false;
+	TradingMgr::getInstance()->m_bProfessionClick = false;
+	TradingMgr::getInstance()->m_bOneClassClick = false;
+	TradingMgr::getInstance()->m_bTowClassClick = false;
+}
+
+void TradingUILayer::UpdateCommonYuanBao()
+{
+	if(NULL != m_pNewCommonYuanBao)
+	{  
+		INT64 yuanbao = PackageManager::getInstance()->getYuanBao();
+		std::ostringstream ostr;
+// 		if(yuanbao >= 100000)
+// 		{
+// 			ostr << yuanbao / 10000 << GET_STR(9033).c_str();
+// 		}
+// 		else
+// 		{
+			ostr << yuanbao;
+//		}
+		m_pNewCommonYuanBao->setString(ostr.str().c_str());
+	}
+}
+
+void TradingUILayer::UpdateGoldText()
+{
+	if(NULL != m_pNewGoldText)
+	{
+		int money = PackageManager::getInstance()->getJinBi();
+
+		CCString *str = NULL;
+		if (money / 10000 != 0)
+		{
+			str = CCString::createWithFormat("%d%s", money / 10000, GET_STR(9033).c_str());
+		}else
+		{
+			str = CCString::createWithFormat("%d", money);
+		}
+
+		if(NULL !=str)
+			m_pNewGoldText->setString(str->getCString());
+	}
+}
+
+void TradingUILayer::UpdatePushSellNum()
+{
+	std::stringstream oss;
+	oss << TradingMgr::getInstance()->m_vRoleTradingInfo.size() << "/" << NumericalIniMgr::getInstance()->Get_trading_push_max();
+
+	m_pSellNewPushNum->setString(oss.str().c_str());
+}
+
+void TradingUILayer::updateBuyLeftBtnList()
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	CC_ASSERT(NULL != ploc);
+	CC_ASSERT(NULL != m_pBuyLeftList);
+
+	if (m_eCurFrame != T_TradingBuy)
+		return ;
+
+	m_pBuyLeftList->clear();
+	const std::map<unsigned int,TradingData>& TradingMap = TradingMgr::getInstance()->GetTradingMap();
+	for(std::map<unsigned int, TradingData>::const_iterator iter = TradingMap.begin(); iter != TradingMap.end(); ++ iter)
+	{
+		BuyLeftBtnList *LeftBtn = new BuyLeftBtnList();
+		CC_ASSERT(NULL != LeftBtn);
+		
+		LeftBtn->setShowInfo(iter->second);
+		m_pBuyLeftList->addItem(LeftBtn,false);
+	}
+
+	m_pBuyLeftList->updateDisplay();
+}
+
+void TradingUILayer::updateBuyItemRightList(int btnIndex)
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	CC_ASSERT(NULL != ploc);
+
+	if (m_eCurFrame != T_TradingBuy)
+		return ;
+
+	TradingBuyRightItemList::m_pItemOldSelect = NULL;
+	CCSize size = m_pBuyRightContainer->getContentSize();
+	m_pBuyRightGridAlignNode->setContentSize(size);
+	m_pBuyRightGridAlignNode->remove_all_items();
+	m_pBuyRightFinalGridAlignNode->remove_all_items();
+
+	const std::map<unsigned int, TradingData>& TradingMap = TradingMgr::getInstance()->GetTradingMap();
+	for(std::map<unsigned int, TradingData>::const_iterator iter = TradingMap.begin(); iter != TradingMap.end(); ++ iter)
+	{
+		if(0 == btnIndex)
+		{
+			if(btnIndex == iter->first)
+				continue;
+		}
+		else
+		{
+			if (btnIndex != iter->first)
+				continue;
+		}
+
+		const TradingData Info = iter->second;
+
+		for(size_t i = 0 ; i < Info.vTowclassInfo.size(); ++i)
+		{
+			if(std::string("0") == Info.vTowclassInfo[i].towclassName)
+				continue;
+
+			TradingBuyRightItemList* item = TradingBuyRightItemList::createItem("TradingBuyRightItemList",NULL);
+			item->refreshData(Info.vTowclassInfo[i]);
+			m_pBuyRightGridAlignNode->add_item(item);
+		}	
+	}
+
+	m_pPageCCNode->setVisible(false);
+	if(0 < m_pBuyRightGridAlignNode->get_items().size())
+	{
+		m_pBuyRightTalk->setVisible(false);
+		m_pBuyRightClassify->setVisible(true);	
+	}
+	else
+	{
+		m_pBuyRightTalk->setVisible(true);
+		m_pBuyRightClassify->setVisible(false);
+		m_pBuyNewRightText->setString(GET_STR(9341).c_str());
+	}
+
+	m_pBuyRightFinalScrollView->setTouchEnabled(false);
+	m_pBuyRightScrollView->setTouchEnabled(true);
+	m_pBuyRightScrollView->setContentSize(m_pBuyRightGridAlignNode->getContentSize());
+	m_pBuyRightScrollView->setContentOffset(ccp(0,m_pBuyRightScrollView->getViewSize().height - m_pBuyRightScrollView->getContentSize().height));
+	m_pBuyRightGridAlignNode->setPositionY(m_pBuyRightGridAlignNode->getContentSize().height);
+}
+
+void TradingUILayer::updateBuyFinalItemRightList(bool isHave)
+{
+	if (m_eCurFrame != T_TradingBuy)
+		return ;
+
+	if(!isHave)
+		m_pPageCCNode->setVisible(false);
+	else
+	{
+		if(TradingMgr::getInstance()->m_bTradingSearch)
+			SetSearchButtonState();
+		else
+			setClickButtonState();
+	}
+
+	TradingBuyRightFinalItemList::m_pItemOldSelect = NULL;
+	TradingBuyRightFinalItemList::m_n64_serial = 0;
+	TradingBuyRightFinalItemList::m_itemTypeId = 0;
+	TradingBuyRightFinalItemList::m_itemPriceNum  = 0;
+	TradingBuyRightFinalItemList::m_itemNumber = 0;
+	CCSize size = m_pBuyRightFinalContainer->getContentSize();
+	m_pBuyRightFinalGridAlignNode->setContentSize(size);
+	m_pBuyRightFinalGridAlignNode->remove_all_items();
+	m_pBuyRightGridAlignNode->remove_all_items();
+	m_pBuyRightClassify->setVisible(false);
+
+	TradingMgr::tagTrading_item_vector::iterator iter = TradingMgr::getInstance()->m_vBuyTradingInfo.begin();
+	TradingMgr::tagTrading_item_vector::iterator iterEnd = TradingMgr::getInstance()->m_vBuyTradingInfo.end();
+	for ( ;iter != iterEnd; ++iter)
+	{
+		const ItemTypeData &itemData = PackageManager::getInstance()->getItemTypeData(iter->m_ItemInfo.dw_data_id);
+		if(!itemData.putawayBool)
+			continue;
+
+		TradingBuyRightFinalItemList* item = TradingBuyRightFinalItemList::createItem("TradingBuyRightFinalItemList",NULL);
+		item->refreshData(*iter);
+		item->hideCompose(false);
+		m_pBuyRightFinalGridAlignNode->add_item(item);
+	}
+
+	if(0 < m_pBuyRightFinalGridAlignNode->get_items().size())
+		m_pBuyRightTalk->setVisible(false);
+	else
+	{
+		m_pBuyRightTalk->setVisible(true);
+		m_pBuyNewRightText->setString(GET_STR(9341).c_str());
+	}
+
+	m_pBuyRightScrollView->setTouchEnabled(false);
+	m_pBuyRightFinalScrollView->setTouchEnabled(true);
+	m_pBuyRightFinalScrollView->setContentSize(m_pBuyRightFinalGridAlignNode->getContentSize());
+	m_pBuyRightFinalScrollView->setContentOffset(ccp(0,m_pBuyRightFinalScrollView->getViewSize().height - m_pBuyRightFinalScrollView->getContentSize().height));
+	m_pBuyRightFinalGridAlignNode->setPositionY(m_pBuyRightFinalGridAlignNode->getContentSize().height);
+}
+
+void TradingUILayer::updateSellLeftItemList()
+{
+	if (m_eCurFrame != T_TradingSell)
+		return ;
+
+	CCSize size = m_pSellLeftContainer->getContentSize();
+	m_pSellLeftGridAlignNode->setContentSize(size);
+	m_pSellLeftGridAlignNode->remove_all_items();
+
+	TradingSellLeftItemList::m_pItemOldSelect = NULL;
+	TradingMgr::tagTrading_item_vector::iterator iter = TradingMgr::getInstance()->m_vRoleTradingInfo.begin();
+	TradingMgr::tagTrading_item_vector::iterator iterEnd = TradingMgr::getInstance()->m_vRoleTradingInfo.end();
+	for (int i = 0;iter != iterEnd && i < TradingMgr::getInstance()->preSellLeftItemNolist(); ++iter,i++)
+	{
+		const ItemTypeData &itemData = PackageManager::getInstance()->getItemTypeData(iter->m_ItemInfo.dw_data_id);
+		if(!itemData.putawayBool)
+			continue;
+
+		TradingSellLeftItemList* item = TradingSellLeftItemList::createItem("TradingSellLeftItemList",NULL);
+		if(NULL != item)
+		{
+			item->refreshData(*iter);
+			item->hideCompose(false);
+			m_pSellLeftGridAlignNode->add_item(item);
+		}	
+	}
+
+	for(int i = m_pSellLeftGridAlignNode->get_items().size(); i < TradingMgr::getInstance()->preSellLeftItemNolist(); i++)
+	{
+		TradingSellLeftItemNoList* item = TradingSellLeftItemNoList::createItem("TradingSellLeftItemNoList",NULL);
+		if(NULL != item)
+		{
+			item->refreshData(GET_STR(9314));
+			m_pSellLeftGridAlignNode->add_item(item);
+		}
+	}
+
+	for (int i = m_pSellLeftGridAlignNode->get_items().size(); i < NumericalIniMgr::getInstance()->Get_trading_push_max(); i++)
+	{
+		TradingSellLeftItemNoList* item = TradingSellLeftItemNoList::createItem("TradingSellLeftItemNoList",NULL);
+		if(NULL != item)
+		{
+			item->refreshData(TradingMgr::getInstance()->preSellLeftItemNolistString(i));
+			m_pSellLeftGridAlignNode->add_item(item);
+		}
+	}
+
+	m_pSellLeftScrollView->setContentSize(m_pSellLeftGridAlignNode->getContentSize());
+	m_pSellLeftScrollView->setContentOffset(ccp(0,m_pSellLeftScrollView->getViewSize().height - m_pSellLeftScrollView->getContentSize().height));
+	m_pSellLeftGridAlignNode->setPositionY(m_pSellLeftGridAlignNode->getContentSize().height);
+
+	UpdateGoldText();
+}
+
+void TradingUILayer::DeleteSellRightItemById(INT64 n64_old_serial)
+{
+	  if(0 >= n64_old_serial)
+		  return ;
+
+	   TradingSellRightItemList* item = dynamic_cast<TradingSellRightItemList*>(m_pSellRightGridAlignNode->find_item(n64_old_serial));
+	   if(NULL != item)
+	   {
+		   m_pSellRightGridAlignNode->remove_item(item);
+		   setSellRightTouchEnabled();
+	   }
+}
+
+void TradingUILayer::SetSellRightItemClickEnable(bool value)
+{
+	  if(m_pSellRightGridAlignNode->get_items().empty())
+		  return ;
+
+	  GridAlignNode::NodeList::const_iterator iterBegin = m_pSellRightGridAlignNode->get_items().begin();
+	  GridAlignNode::NodeList::const_iterator iterEnd = m_pSellRightGridAlignNode->get_items().end();
+	  for(;iterBegin != iterEnd;iterBegin++)
+	  {
+		 TradingSellRightItemList* item =  dynamic_cast<TradingSellRightItemList*>(*iterBegin);
+		 if(NULL != item)
+			 item->setClickEnable(value);
+	  }
+}
+
+void TradingUILayer::setSellRightTouchEnabled()
+{
+	if(NULL == m_pSellRightScrollView)
+		return ;
+
+	if(T_TradingSell != m_eCurFrame)
+		return ;
+
+	PackageManager::ItemMap *itemMap = PackageManager::getInstance()->getItemMap(EICT_Bag);
+	if(NULL == itemMap)
+	{
+		m_pSellRightScrollView->setTouchEnabled(false);
+		return;
+	}
+
+	int count = 0;
+	PackageManager::ItemMap::iterator iter0 = itemMap->begin();
+	PackageManager::ItemMap::iterator iterEnd0 = itemMap->end();
+	for ( ;iter0 != iterEnd0; ++iter0)
+	{
+		const ItemTypeData &itemData = PackageManager::getInstance()->getItemTypeData(iter0->second->get_item_type_id());
+		if(!itemData.putawayBool)
+			continue;
+
+		if(iter0->second->is_item_binded())
+			continue;
+
+		count++;
+	}
+
+	if(TRADING_MAX_ITEM_NUM < count)
+	{	
+		if(!m_pSellRightScrollView->isTouchEnabled())
+			m_pSellRightScrollView->setTouchEnabled(true);
+	}
+	else
+	{
+		updateSellRightItemList();
+		m_pSellRightScrollView->setTouchEnabled(false);
+	}
+}
+
+void TradingUILayer::updateSellRightItemList(bool setOffset)
+{
+	PackageManager::ItemMap *itemMap = PackageManager::getInstance()->getItemMap(EICT_Bag);
+	if(NULL == itemMap)
+	{
+		m_pSellRightScrollView->setTouchEnabled(false);
+		return;
+	}
+
+	CCSize size = m_pSellRightContainer->getContentSize();
+	m_pSellRightGridAlignNode->setContentSize(size);
+
+	int count = 0;
+	PackageManager::ItemMap::iterator iter0 = itemMap->begin();
+	PackageManager::ItemMap::iterator iterEnd0 = itemMap->end();
+	for ( ;iter0 != iterEnd0; ++iter0)
+	{
+		const ItemTypeData &itemData = PackageManager::getInstance()->getItemTypeData(iter0->second->get_item_type_id());
+		if(!itemData.putawayBool)
+			continue;
+		
+		if(iter0->second->is_item_binded())
+			continue;
+
+		if(iter0->second->is_locked())
+			continue;
+
+		count++;
+	}
+	 
+	bool IsEnabled = false;
+	if(TRADING_MAX_ITEM_NUM < count)
+		IsEnabled = true;
+
+	PackageManager::ItemMap::iterator iter = itemMap->begin();
+	PackageManager::ItemMap::iterator iterEnd = itemMap->end();
+	for ( ;iter != iterEnd; ++iter)
+	{
+		const ItemTypeData &itemData = PackageManager::getInstance()->getItemTypeData(iter->second->get_item_type_id());
+		if(!itemData.putawayBool)
+			continue;
+
+		if(iter->second->is_item_binded())
+			continue;
+
+		if(iter->second->is_locked())
+			continue;
+
+		TradingSellRightItemList* item = dynamic_cast<TradingSellRightItemList*>(m_pSellRightGridAlignNode->find_item(iter->second->get_item_id()));
+
+		if (NULL == item )
+		{
+			item = TradingSellRightItemList::createItem("TradingSellRightItemList",NULL);
+			if(NULL != item)
+				m_pSellRightGridAlignNode->add_item(item, false);	
+		}
+
+		if(NULL != item)
+		{
+			item->setTag(iter->second->get_item_id());	
+			item->initWithItem(iter->second);
+			item->hideCompose(false);
+		}
+	}
+
+	m_pSellRightGridAlignNode->arrange_items();
+	m_pSellRightItemBlank->setVisible(!IsEnabled);
+	m_pSellRightScrollView->setTouchEnabled(IsEnabled);
+	m_pSellRightScrollView->setContentSize(m_pSellRightGridAlignNode->getContentSize());
+	if(setOffset)
+		m_pSellRightScrollView->setContentOffset(ccp(0,m_pSellRightScrollView->getViewSize().height - m_pSellRightScrollView->getContentSize().height));
+
+	m_pSellRightGridAlignNode->setPositionY(m_pSellRightGridAlignNode->getContentSize().height);
+
+	m_pSellRightScrollView->setBounceable(IsEnabled);
+	if(!IsEnabled)
+	{
+		m_pSellRightScrollView->setContentSize(CCSizeMake(m_pSellRightGridAlignNode->getContentSize().width, m_pSellRightGridAlignNode->getContentSize().height - 1));
+	}
+}
+
+void TradingUILayer::DeleteAllGetItemList()
+{
+	if(0 >= m_pGetControl->count())
+		return;
+
+	TradingGetItemList::m_pItemOldSelect = NULL;
+	m_pGetControl->clear_list();
+	SetGetUIRedPoint();
+	SetGetNum();
+}
+
+void TradingUILayer::DeleteGetItemListById(INT64 n64_serial)
+{
+	if(0 >= n64_serial)
+		return ;
+
+	TradingGetItemList* item = dynamic_cast<TradingGetItemList*>(m_pGetControl->find_item(n64_serial));
+	if(NULL != item)
+	{
+		TradingGetItemList::m_pItemOldSelect = NULL;
+		m_pGetControl->remove_item(item);
+		SetGetUIRedPoint();
+		SetGetNum();
+	}
+}
+
+void TradingUILayer::PushGetItemListByItem(tagTradingGetItemDataMsg *item)
+{
+	if(NULL == item)
+		return ;
+
+	if(0 >= item->n64Serial)
+		return ;
+
+	TradingGetItemList* itemNode = dynamic_cast<TradingGetItemList*>(m_pGetControl->find_item(item->n64Serial));
+	if(NULL == itemNode)
+	{
+		itemNode = TradingGetItemList::createItem("TradingGetItemList",NULL);
+		if(NULL != itemNode)
+		{
+			itemNode->setTag(item->n64Serial);
+			itemNode->refreshData(item);
+			m_pGetControl->add_item(itemNode);
+			SetGetUIRedPoint();
+			SetGetNum();
+		}
+	}
+}
+
+void TradingUILayer::updateGetItemState(DWORD dwUpRoleID,INT64 n64_serial,tradingState nState)
+{
+	if(ETT_TradingBegin >= nState || ETT_TradingEnd <= nState)
+		return ;
+
+	TradingGetItemList* item = dynamic_cast<TradingGetItemList*>(m_pGetControl->find_item(n64_serial));
+	if(NULL != item)
+	{
+		item->UpdateState(dwUpRoleID,nState);
+		item->SetTimeText();
+	}
+}
+
+void TradingUILayer::updateGetItemList()
+{
+	if (m_eCurFrame != T_TradingGet)
+		return ;
+
+	TradingGetItemList::m_n64_serial = 0;
+	TradingGetItemList::m_dwItemId = 0;
+	TradingGetItemList::m_nNum = 0;
+	int i = 0;
+	TradingMgr::tagTrading_get_item_vector::iterator iter = TradingMgr::getInstance()->m_vGetTradingInfo.begin();
+	TradingMgr::tagTrading_get_item_vector::iterator iterEnd = TradingMgr::getInstance()->m_vGetTradingInfo.end();
+	for ( ;iter != iterEnd; ++iter)
+	{
+		const ItemTypeData &itemData = PackageManager::getInstance()->getItemTypeData(iter->dwItemId);
+		if(!itemData.putawayBool)
+			continue;
+
+		TradingGetItemList * item = dynamic_cast<TradingGetItemList*>(m_pGetControl->find_item(iter->n64Serial));
+		if(NULL == item)
+		{
+			item = TradingGetItemList::createItem("TradingGetItemList",NULL);
+			if(NULL != item)
+				m_pGetControl->add_item(item);
+		}
+		if(NULL != item)
+		{
+			item->SetItemSelect(false);
+			if(0 == i)
+			{
+				if(NULL != item->m_pItemSelect)
+				{
+					TradingGetItemList::m_pItemOldSelect = item->m_pItemSelect;
+					TradingGetItemList::m_n64_serial = iter->n64Serial;
+					TradingGetItemList::m_dwItemId = iter->dwItemId;
+					TradingGetItemList::m_nNum = iter->nNumber;
+					item->SetItemSelect(true);
+				}
+			}
+
+			item->setTag(iter->n64Serial);
+			item->refreshData(&(*iter));
+		}
+
+		i++;
+	}
+
+	m_pGetControl->scroll_to_top();
+
+	SetGetNum();
+}
+
+void TradingUILayer::SetGetNum()
+{
+	std::stringstream oss;
+	oss<< m_pGetControl->count();
+	m_pGetNewNum->setString(oss.str().c_str());
+	SetGetUIRedPoint();
+}
+
+/////////////////////////////////我要购买左边按钮 begin/////////////////////////////////////////
+TradingUILayer::BuyLeftBtnList::BuyLeftBtnList() :_BlankSprite(NULL),_SelectSprite(NULL)
+{
+
+}
+
+TradingUILayer::BuyLeftBtnList::~BuyLeftBtnList()
+{
+
+}
+cocos2d::CCSize TradingUILayer::BuyLeftBtnList::getContentSize()
+{
+	CCSprite *sprite = dynamic_cast<CCSprite*>(_node->getChildByTag(NT_Icon));
+	CC_ASSERT(NULL != sprite);
+	return sprite->getContentSize();
+}
+
+void TradingUILayer::BuyLeftBtnList::onTouch( CCTouch *touck )
+{
+	TradingUILayer * p_ui = getUiNodeByTag<TradingUILayer>(WCT_TradingUI);
+	if(NULL == p_ui)
+		return ;
+
+	if(!TradingMgr::getInstance()->m_bOneClassClick || TradingMgr::getInstance()->m_nOneClassId != m_noneclassId)
+	{
+		if(TradingMgr::getInstance()->m_nOneClassId == m_noneclassId)
+			TradingMgr::getInstance()->m_bOneClassClick = true;
+		else
+		{
+			m_ScrollViewIndex = 0;
+			p_ui->m_LastScrollViewIndex = 0;
+			TradingMgr::getInstance()->m_bOneClassClick = false;
+		}
+
+		if(1 == m_towclassSize )
+			TradingMgr::getInstance()->m_bOneClassClick = true;
+		else
+			TradingMgr::getInstance()->m_bOneClassClick = false;
+
+		TradingMgr::getInstance()->m_bTradingSearch = false;
+
+		TradingMgr::getInstance()->m_bLevelClick = false;
+		TradingMgr::getInstance()->m_bProfessionClick = false;
+		TradingMgr::getInstance()->m_bTowClassClick = false;
+		TradingMgr::getInstance()->m_nProfession = EV_Trading_Class_Begin;
+		TradingMgr::getInstance()->m_nLevel	= ET_LEVEL_Begin;
+
+		TradingMgr::getInstance()->m_nOneClassId = m_noneclassId;
+		
+		if(1 == m_towclassSize )
+		{
+			if(TradingMgr::getInstance()->m_bTradingLoadDataIsReceive)
+			{
+				if(!TradingMgr::getInstance()->m_bTradingSearch)
+				{
+					const std::string strMsg = TradingMgr::getInstance()->GetTradingMsgString();	
+					TradingMgr::getInstance()->GetLoadTradingBuyDataByMsg(strMsg);
+				}
+				else
+					TradingMgr::getInstance()->GetLoadSearchTradingBuyDataByMsg();
+			}
+		}
+		else
+			p_ui->updateBuyItemRightList(m_noneclassId);
+	}
+
+	TradingMgr::getInstance()->m_bProfessionClass = m_professionClass;
+	TradingMgr::getInstance()->m_bLvClass = m_lvClass;
+
+	TradingMgr::getInstance()->m_nTowClassId = 0;
+	TradingMgr::getInstance()->m_bTowClassClick = false;
+
+	if(NULL != p_ui->getProfessText())
+		p_ui->getProfessText()->setString(GET_STR(9408).c_str());
+
+	if(NULL != p_ui->getLevelText())
+		p_ui->getLevelText()->setString(GET_STR(9409).c_str());
+
+	p_ui->SetBuyRightTouchMove(false);
+}
+
+
+void TradingUILayer::BuyLeftBtnList::onSelectChanged( bool select )
+{
+	  if(NULL != _SelectSprite)
+		  _SelectSprite->setVisible(select);
+}
+
+void TradingUILayer::BuyLeftBtnList::setSelectEnable( bool select )
+{
+	if(NULL != _SelectSprite)
+		_SelectSprite->setVisible(select);
+}
+
+float TradingUILayer::BuyLeftBtnList::getItemHeight()
+{
+	return getContentSize().height;
+}
+
+void TradingUILayer::BuyLeftBtnList::setShowInfo(const TradingData data)
+{
+	if(NULL == _BlankSprite)
+		_BlankSprite = CCSprite::create();
+
+	CC_ASSERT(NULL != _BlankSprite);
+	CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName((data.labelIcon + std::string("n")).c_str());
+	CC_ASSERT(frame != NULL);
+	_BlankSprite->setDisplayFrame(frame);
+	_BlankSprite->setAnchorPoint(ccp(0,1));
+
+	/*	_BlankSprite->setAnchorPoint(ccp(0,1));*/
+	_BlankSprite->setTag(NT_Icon);
+	_BlankSprite->setZOrder(-1);
+	/*	_node->addChild(_BlankSprite,-1);*/
+	//_node->setAnchorPoint(ccp(.5f,0.5f));
+	_node->setContentSize(_BlankSprite->getContentSize());
+	UIUtil::childNodeAlign(_node,_BlankSprite,eha_center,eva_center,CCPointZero);
+
+	if(NULL == _SelectSprite)
+		_SelectSprite = CCSprite::create();
+
+	CC_ASSERT(NULL != _SelectSprite);
+	CCSpriteFrame* selectframe = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName((data.labelIcon + std::string("h")).c_str());
+	CC_ASSERT(selectframe != NULL);
+	_SelectSprite->setDisplayFrame(selectframe);
+	_SelectSprite->setAnchorPoint(ccp(.5f,.5f));
+	_SelectSprite->setTag(NT_Select);
+	_SelectSprite->setVisible(false);
+	/*	_node->addChild(_SelectSprite,-1);*/
+	UIUtil::childNodeAlign(_node,_SelectSprite,eha_center,eva_center,CCPointZero);
+
+	m_noneclassId = data.oneclassId;
+	m_towclassSize = data.vTowclassInfo.size();
+	m_professionClass = data.professionClass;
+	m_lvClass = data.lvClass;
+}
+/////////////////////////////////我要购买左边容器End//////////////////////////////////////////
+
+
+void TradingUILayer::scrollViewDidScroll( CCScrollView* view )
+{
+	/*CCPoint po =  getSellRightScrollView()->getContentOffset();
+	CCSize size = m_pSellRightGridAlignNode->getContentSize();
+	CCLOG("m_LastScrollViewIndex1 %f m_ScrollViewIndex2 %f ",po.x,po.y);
+
+	CCLOG("m_LastScrollViewIndex3%f m_ScrollViewIndex4 %f ",size.width,size.height);*/
+	if(m_pBuyRightScrollView == view)
+	{
+		SetBuyRightTouchMove(true);
+		this->unschedule(schedule_selector(TradingUILayer::SetBuyRightTouchMove));
+		this->scheduleOnce(schedule_selector(TradingUILayer::SetBuyRightTouchMove),0.5f);
+	}
+
+	if(m_pBuyRightFinalScrollView == view)
+	{
+		CCPoint Offpoint = view->getContentOffset();
+		float GridAlignheight = m_pBuyRightFinalGridAlignNode->getContentSize().height;
+		float Containerheight =  m_pBuyRightFinalContainer->getContentSize().height;
+		if(0 == Offpoint.y)
+		{
+		    if(!TradingMgr::getInstance()->m_bTradingLoadDataIsReceive || NumericalIniMgr::getInstance()->get_trading_plane_num() > TradingMgr::getInstance()->GetBuyTradingInfoSize())
+				return ;
+
+		   if(NumericalIniMgr::getInstance()->get_trading_plane_num() == TradingMgr::getInstance()->GetBuyTradingInfoSize())
+				m_ScrollViewIndex++;
+		}
+
+		else if( -15 >= (Offpoint.y + (GridAlignheight - Containerheight)))
+		{
+		   if(0 > (m_ScrollViewIndex - 1))
+		   {
+			   m_ScrollViewIndex = 0;
+		   }
+		   else
+		   {
+			   if(TradingMgr::getInstance()->m_bTradingLoadDataIsReceive)
+					m_ScrollViewIndex--;
+		   }
+		}
+
+		if(m_ScrollViewIndex != m_LastScrollViewIndex)
+		{
+			if(TradingMgr::getInstance()->m_bTradingLoadDataIsReceive)
+			{
+				if(!TradingMgr::getInstance()->m_bTradingSearch)
+				{
+					const std::string strMsg =  TradingMgr::getInstance()->GetTradingMsgString();	
+					TradingMgr::getInstance()->GetLoadTradingBuyDataByMsg(strMsg);
+				}
+				else
+					TradingMgr::getInstance()->GetLoadSearchTradingBuyDataByMsg();
+			}
+
+			m_LastScrollViewIndex = m_ScrollViewIndex;
+		}
+	}
+
+	if(m_pSellRightScrollView == view)
+	{
+		SetSellRightTouchMove(true);
+		this->unschedule(schedule_selector(TradingUILayer::SetSellRightTouchMove));
+		this->scheduleOnce(schedule_selector(TradingUILayer::SetSellRightTouchMove),0.5f);
+	}
+
+	if(m_pSellLeftScrollView == view)
+	{
+		SetSellLeftTouchMove(true);
+		this->unschedule(schedule_selector(TradingUILayer::SetSellLeftTouchMove));
+		this->scheduleOnce(schedule_selector(TradingUILayer::SetSellLeftTouchMove),0.5f);
+	}
+}
+
+void TradingUILayer::scrollViewDidZoom( CCScrollView* view )
+{
+
+}
+
+void TradingUILayer::SetBuyRightTouchMove(float dt)
+{
+	SetBuyRightTouchMove(false);
+}
+
+void TradingUILayer::SetSellRightTouchMove(float dt)
+{
+	SetSellRightTouchMove(false);
+}
+
+void TradingUILayer::SetSellLeftTouchMove( float dt )
+{
+	SetSellLeftTouchMove(false);
+}
+
+void TradingUILayer::SetSearchButtonState()
+{
+	if(!m_pPageCCNode->isVisible())
+		m_pPageCCNode->setVisible(true);
+
+	if(m_pLevelButton->isVisible())
+		m_pLevelButton->setVisible(false);
+
+	if(m_pProfessButton->isVisible())
+		m_pProfessButton->setVisible(false);
+
+	if(!m_pPriceButton->isVisible())
+		m_pLevelButton->setVisible(true);
+}
+
+//设置按钮显示情况
+void TradingUILayer::setClickButtonState()
+{
+	m_pPageCCNode->setVisible(true);
+	if(!m_pPriceButton->isVisible())
+	{
+		if(m_pLevelButton->isVisible())
+			m_pLevelButton->setPosition(m_PriceBtnPt);
+
+		if(m_pProfessButton->isVisible())
+			m_pProfessButton->setPosition(m_LevelBtnPt);
+	}
+	else
+	{
+		if(m_pProfessPage && m_pLevelPage)
+		{
+			m_pProfessPage->setVisible(false);
+			m_pLevelPage->setVisible(false);
+		}
+
+		if(m_pProfessButton)
+		{
+			m_pProfessButton->setPositionX(m_ProfessBtnPt.x);
+			m_pProfessButton->setVisible(TradingMgr::getInstance()->m_bProfessionClass);
+		}
+
+		if(m_pLevelButton)
+		{
+			m_pLevelButton->setPositionX(m_LevelBtnPt.x);
+			m_pLevelButton->setVisible(TradingMgr::getInstance()->m_bLvClass);
+		}
+
+		if(m_pProfessPage &&  m_pLevelPage)
+		{
+			m_pProfessPage->setPositionX(m_ProfessPagePt.x);
+			m_pLevelPage->setPositionX(m_LevelPagePt.x);
+		}
+
+		if(m_pProfessButton->isVisible() && m_pLevelButton)
+		{
+			if(!m_pLevelButton->isVisible())
+			{
+				m_pProfessButton->setPositionX(m_LevelBtnPt.x);
+				if(m_pProfessPage && m_pLevelPage)
+					m_pProfessPage->setPositionX(m_LevelPagePt.x);
+			}
+		}
+	}
+}
+
+

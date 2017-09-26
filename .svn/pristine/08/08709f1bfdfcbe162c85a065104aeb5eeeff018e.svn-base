@@ -1,0 +1,3292 @@
+#include "MapManager.h"
+#include "CmdAdapter.h"
+#include "World.h"
+#include "BaseDefine.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "SparseGraph.h"
+#include "Phyx.h"
+#include "ChatMgr.h"
+#include "MessageDispatcher.h"
+#include "QuestMgr.h"
+#include "MarryMgr.h"
+#include "TCPClient.h"
+#include "CrossSceneUI.h"
+#include "UpMgr.h"
+#include "CombatProto.h"
+#include "StoreMgr.h"
+#include "CfgReader.h"
+#include "ExchangeMgr.h"
+#include "AnimationCache.h"
+#include "ShopMgr.h"
+#include "TransmitMgr.h"
+#include "Auto_ActionMgr.h"
+#include "StallUi.h"
+#include "PlayerStallMgr.h"
+#include "DBMgr.h"
+#include "SocialMgr.h"
+#include "UiManager.h"
+#include "ToolTip.h"
+#include <fstream>
+#include "ExchangeBusinessMgr.h"
+#include "AudioPlayer.h"
+#include "StringMgr.h"
+#include "WorldMapUi.h"
+#include "WorldPacket.h"
+#include "SkillUi.h"
+#include "MapPath.h"
+#include "Movie.h"
+#include "SkillAnimManager.h"
+#include "UiResourceMgr.h"
+#include "PlayerState.h"
+#include "NewPlayerGuide.h"
+#include "GuildMgr.h"
+#include "NPCTalkUi.h"
+#include "DaRongLu.h"
+#include "UiManagerEffect.h"
+#include "Movie.h"
+#include "NPC.h"
+#include "SelectRoleHeadUi.h"
+#include "ActivityMgr.h"
+#include "RewardQuestMgr.h"
+#include "InstanceProto.h"
+#include "UiTools.h"
+#include "LineSelectUi.h"
+#include "CommonView.h"
+#include "GameEventDefine.h"
+#include "ActivityMgr.h"
+#include "Helper.h"
+#include "f_string_util.h"
+#include "NPCChatMgr.h"
+#include "CommonClient.h"
+#include "f_zhuzai_mgr.h"
+#include "f_game_tiled_map.h"
+
+#include "AppDelegate.h"
+//extern std::ofstream testOf;
+
+#define WORLD_MAP_CONTENT_W 440.0
+#define WORLD_MAP_CONTENT_H 275.0
+#define SBK_TRIGGERID 3
+
+const int WORLD_MAP_TILE_SIZE = 256;	//[bing] 地块贴图大小
+
+enum
+{
+	SBK_NotAttTime = 6,   // 沙巴克非攻城时间
+	SBK_NotToTime  = 7,   // 沙巴克城堡将于21:10分开始
+	SBK_OverTime   = 8,   // 沙城堡已关闭
+};
+
+unsigned int crc32(const wchar_t* sz_buffer_)
+{
+	unsigned char* p_data = (unsigned char*)sz_buffer_;
+	if( !(*p_data || *(p_data+1)) ) 
+		return (unsigned int)-1;
+
+	unsigned int n_result = *p_data++ << 24;
+	n_result |= *p_data++ << 16;
+	if( *p_data || *(p_data+1) )
+	{
+		n_result |= *p_data++ << 8;
+		n_result |= *p_data++;
+	}
+	n_result = ~ n_result;
+	int n_count = 0;
+	while( (n_count&1) ? true : (*p_data || *(p_data+1)) )
+	{
+		n_result = (n_result << 8 | *p_data) ^ crc32_table[n_result >> 24];
+		++p_data;
+		++n_count;
+	}
+	return ~n_result;
+}
+
+
+void MapTouchHandle::init()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 3,true);
+}
+
+void MapTouchHandle::destroy()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool MapTouchHandle::ccTouchBegan( CCTouch *touch, CCEvent *event )
+{
+	CLOSE_ALL_UI();
+	CCCamera *mapCam = MapManager::getInstance()->getMap()->getCamera();
+	float eyeX, eyeY, eyeZ;
+	mapCam->getEyeXYZ(&eyeX, &eyeY, &eyeZ);
+	CCDirector:: sharedDirector()->convertToGL(touch->getLocationInView());
+	CCPoint endPos = MapManager::getInstance()->getMap()->convertTouchToNodeSpace(touch);
+	endPos.x += eyeX;
+	endPos.y += eyeY;
+
+	const CCSize &size = MapManager::getInstance()->getMap()->getContentSize();
+	if(	endPos.x < 0 || endPos.x >= size.width ||
+		endPos.y < 0 || endPos.y >= size.height)
+		return true;
+
+	Role* pPickRole = NULL;
+	long long selectRole = RoleManager::getInstance()->pickRole(endPos, &pPickRole);
+	if (pPickRole && pPickRole->getCreatureType() == CT_MONSTER &&
+		pPickRole->getTypeID() == 2910191)
+	{
+		selectRole = -1;
+	}
+	MapManager::getInstance()->resetCrossMapping();
+
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(lp))
+		return false;
+	if (selectRole == lp->getId())
+	{
+		if (lp->isInRoleStateAny(RA_Stall))
+		{
+			PlayerStallMgr::getInstance()->openStall();
+		}
+		return false;
+	}
+
+	if (AutoActionMgr::getInstance()->Get_Auto_Action())
+	{
+		AutoActionMgr::getInstance()->Set_Auto_Action(false);
+	}
+	else
+	{
+		AutoActionMgr::getInstance()->setCurrentQuestID(INVALID,AutoActionMgr::TraceTarget());
+	}
+
+	//取消NPC对话框
+	World::getInstance()->getNPCDialog()->show(false);
+	if (lp->isInRoleStateAny(RA_ShuangXiu) || lp->isInRoleStateAny(RA_Stall) || lp->isInRoleStateAny(RA_Exchange))
+	{
+		if (lp->isInRoleStateAny(RA_Exchange))
+		{
+			ExchangeBusinessMgr::getInstance()->CancleExchange();
+		}
+		else if (lp->isInRoleStateAny(RA_ShuangXiu))
+		{
+			SocialMgr::getInstance()->CancelCompractice(); //点击地面取消双修 //add by XSea 2014.11.17
+			//ToolTip::getInstance()->push(GET_STR(2147));
+		}
+		else if(lp->isInRoleStateAny(RA_Stall))
+		{
+			PlayerStallMgr::getInstance()->openStall();
+		}
+		else
+		{
+			ToolTip::getInstance()->push(GET_STR(2146));
+		}
+		return false;
+	}
+
+	if(selectRole < 0)//没有选中
+	{
+		//CCLog("-----------------pickRole::meiYouXuanZhong:NPC 1");
+		lp->setExitAttackState();
+		if (lp->getAutoRunState())
+		{
+			if(lp->GetRunNode()->GetActionState())
+				lp->GetRunNode()->StopAction(false, true);
+
+			lp->setAutoRunState(false);
+		}
+
+		lp->SetisMouseClick(true);
+		lp->runPathTo(endPos);
+		
+		AudioPlayer::getSigletonPtr()->playerSoundSceneEffect(SCENE_TOUCH);
+		MapManager::getInstance()->runClickAnims(endPos);
+		RoleManager::getInstance()->set_select_role_id(INVALID);
+		RoleManager::getInstance()->SetTargetRole(NULL);
+		return false;
+	}
+	
+	if(pPickRole == NULL)
+		return false;
+	
+	RoleManager::getInstance()->set_select_role_id(selectRole);
+	RoleManager::getInstance()->SetTargetRole(pPickRole);
+
+	if(selectRole == RoleManager::getInstance()->get_select_role_id() && RoleManager::getInstance()->canAttack(selectRole))
+	{//双击，进行攻击
+		lp->attackTo(selectRole);
+		return true;
+	}
+
+	//lp->setExitAttackState();
+	MessageDispatcher::Instance()->DispatchMsg(-1.0, NULL, lp, M_LpStand, NULL);
+
+	//AutoActionMgr::getInstance()->cancel_auto_action(true);
+	lp->setExitAttackState();
+	//!是否是npc 
+	if(pPickRole->getCreatureType() == CT_NPC)
+	{
+		NPCChatMgr::getInstance()->openNPCChatUi(pPickRole->getTypeID(),pPickRole->getId());
+
+		return false;
+	}
+	
+	if(pPickRole->getCreatureType() == CT_PLAYER )
+	{//如果是玩家
+		if(pPickRole->getAttribute(RA_Stall) != 0)
+		{
+			PlayerStallMgr::getInstance()->\
+				send_NET_C2G_REQUEST_NEW_STALL_LOOK_OTHER(pPickRole->getId());
+		}
+	}
+
+	return false;
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+MapManager * MapManager::getInstance()
+{
+	static MapManager mapManager;
+	return &mapManager;
+}
+
+MapManager::MapManager()
+	: _curMapId(0)
+	//, _triggerTimer(0.f)
+	, _alpahData(NULL)
+	, _worldMapScale(0.f)
+	, _roleSelectAcNode(NULL)
+	, _remindTimer(0.f)
+	,_isRandPos(false)
+	,m_bIsBigMap(false)
+	, _isOldCrossMap(false)
+	,_curLine(NULL)
+	,m_isEnabled(false)
+	,path_to_trigger_map_id(INVALID)
+	,m_app_delegate(NULL)
+	,_cache_map_idx(0)
+	//,_blockSpriteArray(NULL)
+	//,_blockCount(0)
+{
+	_crossMapping = false;
+	_isEnterArea = false;
+	//m_bUseBlockMap = true;
+	m_bPutSEFrame = false;
+	_clickNode = NULL;
+
+	m_grassLayer=NULL;
+	m_sandLayer=NULL;
+	m_hardgroundLayer=NULL;
+	m_riverLayer=NULL;
+	m_woodLayer=NULL;
+	m_snowLayer=NULL;
+	AutoFightMapId.clear();
+	m_auto_fight_map_level.clear();
+}
+
+MapManager::~MapManager()
+{
+	//CC_SAFE_RELEASE(_roleSelectAcNode);
+	m_auto_fight_map_level.clear();
+	CC_SAFE_DELETE_ARRAY(_alpahData);
+
+	CC_SAFE_RELEASE(_clickNode);
+
+	CC_SAFE_RELEASE(_roleSelectAcNode);
+	//UiResourceMgr::getInstance()->releasePlistFile(_plist);
+	//CC_SAFE_RELEASE(_blockSpriteArray);
+}
+
+void MapManager::init(AppDelegate* delegate)
+{
+	m_app_delegate = delegate;
+	//fan
+	//_blockSpriteArray = CCArray::create();
+	//_blockSpriteArray->retain();
+
+	/*
+	std::string mapDir = CFGReader::instance()->get_profile_string("Art", "Scene", "");
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM TiledMapData");
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		int index = table->get_index("MapFileName");
+		std::string mapFileName = table->get_text(index);
+		index = table->get_index("MapName");
+		std::string mapName = table->get_text(index);
+		index = table->get_index("BGM");
+		std::string mapBgm = table->get_text(index);
+		index = table->get_index("raid");
+		bool canRide = (table->get_integer32(index) == 1);
+		index = table->get_index("showother");
+		bool forceShow = (table->get_integer32(index) == 1);
+		index = table->get_index("CopyFileName");
+		std::string mapCpyFileName = table->get_text(index);
+		index = table->get_index("SceneType");
+		int mapSceneType = table->get_integer32(index);
+		index = table->get_index("IsDangerous");
+		int mapIsDangerous = table->get_integer32(index);
+		wchar_t vStr[300];
+		memset(vStr, 0, sizeof(vStr));
+		Utf8ToUtf16(mapFileName.c_str(), vStr,300,0);
+		unsigned int id = crc32(vStr);
+
+		//_terrainMapping[id] = mapDir + mapFileName + ".tmx";
+		_terrainMapping[id] = mapDir + mapFileName + ".tmx";	//[bing] 为了节省图 直接用cpyfilename
+		_mapNameMap[id] = mapName;
+		_mapSceneType[id] = mapSceneType;
+		_mapBgm[id] = mapBgm;
+		_canRideData[id] = canRide;
+		_forceShowOther[id] = forceShow;
+		_CpyFileNameMap[id] = mapDir + mapCpyFileName + ".tmx";
+		_mapIsDangerous[id] = mapIsDangerous;
+	}
+
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	*/
+
+	//...初始化自动打怪地图
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM guajiMapData");
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	if(cmd && table)
+	{
+		CCLOG("MapManager() read db OK!");
+		while(table->retrieve_row())
+		{
+			unsigned int idx = table->get_index("mapId");
+			int MapId = table->get_integer32(idx);
+			idx = table->get_index("minLv");
+			int minLv = table->get_integer32(idx);
+
+			AddAutoFightMapId(MapId);
+
+			m_auto_fight_map_level.insert(std::make_pair(MapId, minLv));
+		}
+	}
+	else
+	{
+		CCLOG("cmd=%x || table=%x", cmd, table);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	initMapData();
+	CCLog("map data inited");
+
+	LinkMapPath& LinkPath = LinkMapPath::GetInstance();
+	LinkPath.Init();
+
+	//fillLineData();	//[bing] 不用这个了
+	pCameraNode = NULL;
+	m_pLastUpdateLineTime = ServerTime::getInstance()->cal_current_server_dword_time();
+
+	initBigMapName();
+}
+
+void MapManager::destroy()
+{
+	//注销网络事件
+	//
+	//if (_clickpos != NULL)
+	//{
+	// 	delete(_clickpos);
+	//	_clickpos = NULL;
+	//}
+	resetCrossMapping();
+
+	set_path_to_trigger_map_id(INVALID);
+	//closeMap(false);
+	_isOldCrossMap = false;
+
+	//mapDataCache.clear();
+	//_terrainMapping.clear();
+	//_mapNameMap.clear();
+	//_mapSceneType.clear();
+	//_mapBgm.clear();
+	//_canRideData.clear();
+	//_forceShowOther.clear();
+	//_CpyFileNameMap.clear();
+
+	//_triggerMap.clear();
+	//_mapAreaVector.clear();
+	//_mapLine.clear();
+	//mapCross.clear();
+	//_usedAnims.clear();
+}
+
+void MapManager::registerCmd()
+{
+	TCP_CLIENT->register_net_cmd("NET_SIS_Synchronize_Line", this, &MapManager::onServerSynchronizeLine);
+	TCP_CLIENT->register_net_cmd("NET_SIS_Line_state", this, &MapManager::onServerLinestate);
+	TCP_CLIENT->register_net_cmd("NET_SIS_select_line", this, &MapManager::onServerSelectLine);
+	TCP_CLIENT->register_net_cmd("NET_SIS_role_map_trigger", this, &MapManager::onServerRoleMapTrigger);
+}
+
+void MapManager::unregisterCmd()
+{
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Synchronize_Line", this, &MapManager::onServerSynchronizeLine);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Line_state", this, &MapManager::onServerLinestate);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_select_line", this, &MapManager::onServerSelectLine);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_role_map_trigger", this, &MapManager::onServerRoleMapTrigger);
+}
+
+MapBackFunc * MapBackFunc::getInstance()
+{
+	static MapBackFunc mapBackFunc;
+	return &mapBackFunc;
+}
+
+void MapBackFunc::jieshoutexiao(s_net_cmd* cmd)
+{
+
+	WorldPacket Msg((const void*)cmd);
+	int effectId;
+	int x,y;//特效释放的坐标
+	Msg >> effectId;
+	Msg >> x;
+	Msg >> y;
+	c_sql_command* cmd_2 = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EffectData WHERE ID = ?1");
+	cmd_2->set_integer32(1 , effectId);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("EFFECT_FILE");
+		std::string effectFileName = table->get_text(idx);
+		idx = table->get_index("EFFECT_TYPE");
+		unsigned int effectType = table->get_integer32(idx);
+	//特效
+		AnimationCache::AnimateList anims;
+		if (effectType == 1)//一方向特效
+		{
+			AnimationCache::createDefList(1, anims);
+			AnimationCache::getInstance()->getSinEffect(0, effectFileName, anims);
+		}
+		else if(effectType == 8)//八方向特效
+		{
+			AnimationCache::createDefList(5, anims);
+			AnimationCache::getInstance()->getOctEffect(0, effectFileName, anims);
+		}
+		BSAnimate *animate = anims[0];
+		CCSprite *sprite = CCSprite::create();
+		//sprite->setAnchorPoint(ccp(0.0f, 1.0f));
+		sprite->setPosition(ccp(x,y));
+		MapManager::getInstance()->_map->addChild(sprite, RZN_EFFECT);
+		CCSequence *action = CCSequence::create(animate,/*CCCallFuncN::create(this,callfuncN_selector(MapBackFunc::stopotcEffect))*/CCRemoveSelf::create(),NULL);
+		sprite->runAction(action);
+		
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd_2);
+}
+
+void MapBackFunc::stopotcEffect(CCNode* node)
+{
+	node->removeFromParentAndCleanup(true);
+}
+
+void MapManager::update( float dt )
+{
+	if(_map != NULL && _map->isRunning() )
+	{
+		//判断本地玩家是否死亡;
+		LocalPlayer* localPlayer = RoleManager::getInstance()->getLocalPlayer();
+		if(localPlayer->isDead())
+		{
+			getMap()->setGray();
+		}
+
+		CCCamera *c = _map->getCamera();
+		LocalPlayer *p = RoleManager::getInstance()->getLocalPlayer();
+		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+
+		float fWinHalfWidth = winSize.width / 2.0;
+		float fWinHalfHeigh = winSize.height / 2.0;
+
+		float camx = p->getPosition().x - fWinHalfWidth;
+		float camy = p->getPosition().y + 32.0f - fWinHalfHeigh;
+
+		//[bing] 在这里判断一下Movie是不是正在播放 若播放中摄像机不锁定在LP身上
+		if((CMovie::GetInstance().IsInPlaying() || CMovie::GetInstance().isWaittingChangeMap()) && pCameraNode)
+		{
+			camx = pCameraNode->getPositionX() - fWinHalfWidth;
+			camy = pCameraNode->getPositionY() - fWinHalfHeigh;
+		}
+		if(camx  < 0)
+		{
+			camx = 0;
+		}
+		if(camy < 0)
+		{
+			camy = 0;
+		}
+		if(camx > _map->getContentSize().width - winSize.width)
+		{
+			camx = _map->getContentSize().width - winSize.width;
+		}
+		if(camy > _map->getContentSize().height - winSize.height)
+		{
+			camy = _map->getContentSize().height - winSize.height;
+		}
+
+		
+		//float z = CCCamera::getZEye();
+		c->setCenterXYZ(camx, camy, -CCCamera::getZEye());
+		c->setEyeXYZ(camx, camy, .0f);
+
+		//[bing] 加层判断如果使用地块贴图才处理
+		if( /*m_bUseBlockMap == true*/localPlayer->is_landed()&& curMapIsBlockMap()&& (m_fSaveX != camx || m_fSaveY != camy) )
+		{
+			m_fSaveX = camx;
+			m_fSaveY = camy;
+
+			//[bing] 重置所有block的显示状态
+			SetAllBGBlockInvisible();
+
+			//[bing] todo: 看来屏幕分辨率大小不固定 所以不能写死了 坐标根据分辨率大小来计算它 这里先用长，宽/288 来取一个可能出现的矩阵块大小
+			float nWidthPX = (float)m_nBlockWidth / (float)m_nVisBlockX;
+			float nHeightPX = (float)m_nBlockHeight / (float)m_nVisBlockY;
+			CCPoint WinPoint;
+
+			//[bing] 算个地块与实际屏幕大小的偏移值
+			float fOffSetX = (m_nBlockWidth - winSize.width) / 2;
+			float fOffSetY = (m_nBlockHeight - winSize.height) / 2;
+
+			for(int i = 0; i < m_nVisBlockY + 1; ++i)		//+1 是为了取最右边的点
+			{
+				for(int j = 0; j < m_nVisBlockX + 1; j++)
+				{
+					WinPoint.setPoint(j * nWidthPX + camx - fOffSetX, i * nHeightPX + camy - fOffSetY);
+					FillDataBGBlock(WinPoint, !m_bOpenMap);
+				}
+			}
+
+			//[bing] 将已经不在显示列表内的block清除
+			this->hideInvisibleMapBlock();
+
+			m_bOpenMap = false;
+		}
+
+		if(CMovie::GetInstance().IsInPlaying())
+			return;
+
+		//更新选择角色
+		Role *selectRole = RoleManager::getInstance()->findRole(RoleManager::getInstance()->get_select_role_id());
+		if(selectRole != NULL)
+		{
+			if (!_roleSelectAcNode->isVisible())
+			{
+				SelectRoleHeadUi *RoleHeadUi = World::getInstance()->getSelectRoleHeadUi();
+				if(RoleHeadUi != NULL)
+					RoleHeadUi->setBtnVisible(true);
+
+
+				_roleSelectAcNode->setVisible(true);
+				_roleSelectAcNode->BeginAction(0.08f, true);
+			}
+
+			if(_roleSelectAcNode->isVisible() && (2910191 == selectRole->getTypeID() || 2910159 == selectRole->getTypeID()))
+			{ 
+				_roleSelectAcNode->StopAction();
+				_roleSelectAcNode->setVisible(false);
+			}
+
+			_roleSelectAcNode->setPosition(selectRole->getPosition());
+		}
+		else
+		{
+			if (_roleSelectAcNode->isVisible())													   
+			{
+				_roleSelectAcNode->StopAction();
+				_roleSelectAcNode->setVisible(false);
+			}
+		}
+
+// 		_triggerTimer += dt;
+// 		if(_triggerTimer > 1.5f)
+// 		{
+// 			//update_trigger(dt);
+// 		}
+
+
+		if (_curMapId == MENGZHONG_MAP_ID || _curMapId == SBK_MAP_CRC_ID || _curMapId == CANGYUEDAO_MAP || _curMapId == HOLY_FOREST_MAP)
+		{
+			_remindTimer += dt;
+			if (_remindTimer > 2.0f)
+			{
+				_remindTimer = 0.f;
+				LocalPlayer *role = RoleManager::getInstance()->getLocalPlayer();
+				if (role != NULL)
+				{
+					enterAreaRemind(role);
+				}
+			}
+		}
+	}
+}
+
+//!mapid不等于-1时，是跨地图寻路
+void MapManager::findPath(const pathNode& st_, pathNode& et_  ,std::vector<pathNode>& out, int mapid/* = -1*/)
+{
+	if (_map == NULL || getSparseGraph() == NULL)
+	{
+		return /*std::vector<pathNode>()*/;
+	}
+	if(mapid != _mapIndex && mapid != -1)
+	{
+		if(_mapIndex == 108 || _mapIndex == 109 || _mapIndex == 110 || _mapIndex == 118 || _mapIndex == 140|| _mapIndex == 142|| _mapIndex == 143||_mapIndex == 144|| (_mapIndex >= 120 && _mapIndex <= 137) ||_mapIndex == 158
+			|| 146 == _mapIndex || 147 == _mapIndex || 148 == _mapIndex || 149 == _mapIndex || 150 == _mapIndex || 151 == _mapIndex || 152 == _mapIndex || 153 == _mapIndex 
+			|| 154 == _mapIndex || 155 == _mapIndex || 156 == _mapIndex || 157 == _mapIndex)//gx modify 屏蔽玉洞 146-157
+		{
+			//gx moidfy 修改提示方式
+			//无法自动寻路
+			ToolTip::getInstance()->push(STRING_TABLE["can_not_find_path"]);
+			//请寻找传送NPC前往目标地点
+			ToolTip::getInstance()->push(STRING_TABLE["trans_by_npc_plz"]);
+			return ;
+		}
+		if(mapid == 108 ||  _mapIndex == 109  || mapid == 110 || mapid == 118 ||  mapid == 140||_mapIndex == 142|| _mapIndex == 143||_mapIndex == 144|| (mapid >= 120 && mapid <= 137)
+			|| 146 == _mapIndex || 147 == _mapIndex || 148 == _mapIndex || 149 == _mapIndex || 150 == _mapIndex || 151 == _mapIndex || 152 == _mapIndex || 153 == _mapIndex 
+			|| 154 == _mapIndex || 155 == _mapIndex || 156 == _mapIndex || 157 == _mapIndex)//gx modify 屏蔽玉洞 146-157
+		{
+			//无法自动寻路
+			ToolTip::getInstance()->push(STRING_TABLE["can_not_find_path"]);
+			//请寻找传送NPC前往目标地点
+			ToolTip::getInstance()->push(STRING_TABLE["trans_by_npc_plz"]);
+			return ;
+		}
+	}
+	if(mapid == _mapIndex || mapid == -1)
+	{
+		resetCrossMapping();
+		//std::vector<pathNode> path;
+		if(et_.x() > _map->getContentSize().width)
+			return ;
+		if(et_.y() > _map->getContentSize().height)
+			return ;
+		et_ = rand_pos(et_);
+		_isOldCrossMap = false;
+		if (getSparseGraph())
+			/*path = */getSparseGraph()->go(st_, et_,out);
+		if(out.size() > 1)
+			out.erase(out.begin());
+		return;
+	}
+	else//!跨地图寻路开始
+	{
+		_isOldCrossMap = true;
+		CCLOG("OtherMap Begin! mapid = %d, mapIdx = %d", mapid, _mapIndex);
+
+		resetCrossMapping();
+		_targetPos = et_;
+
+		CCLOG("_targetPos x = %f y = %f", _targetPos._x, _targetPos._y);
+
+		std::list<unsigned int> pathlist;
+		LinkMapPath::GetInstance().FindAToBPath(_mapIndex, mapid, pathlist);
+
+		CCLOG("pathlist size = %d", pathlist.size());
+
+		for(size_t i = 0; i < pathlist.size(); ++i)
+		{
+			mapCross.push_back(pathlist.front());
+			pathlist.pop_front();
+		}
+
+		//CC_ASSERT(mapCross.size());	//[bing] 如果不能跨场景寻路就不让走好了 by 祥祥
+
+		if(mapCross.size() == 0)
+		{
+			//std::vector<pathNode> path;
+			return;
+		}
+
+		//!先跑到第一个中转点
+		CCPoint pos;
+		bool ret;
+		ret = getMapEntry(mapCross.front() , pos);
+
+		CCLOG("getMapEntry ret = %d", ret ? 1 : 0);
+
+		mapCross.erase(mapCross.begin());
+		//std::vector<pathNode> path;
+		if(ret)
+		{
+			_crossMapping = true;
+			pathNode et(pos.x , pos.y);
+			if(_map && et.x() > _map->getContentSize().width)
+				return ;
+			if(_map && et.y() > _map->getContentSize().height)
+				return ;
+			if (getSparseGraph())
+				getSparseGraph()->go(st_, et,out);
+			if(out.size() > 1)
+				out.erase(out.begin());
+			return;
+		}
+	}
+}
+
+void MapManager::updataSelectAllRoleMap(int mapIndex)//更新所有mini地图上role
+{
+	//_triggerMap.clear();
+/*
+	//读取触发器;
+	_triggerMap.clear();
+	CCTMXTiledMap *_map = CCTMXTiledMap::create(CCString::createWithFormat("%s%d%s","Art/Scene/m",mapIndex,".tmx")->getCString());
+	//_map = CCTMXTiledMap::create(_mapName.c_str());
+	CCTMXObjectGroup *trigger = _map->objectGroupNamed("trigger");
+	if(trigger)
+	{
+
+		int objectName = 1;
+		CCString *str = CCString::createWithFormat("%d", objectName);
+		CCDictionary *director = trigger->objectNamed(str->getCString());
+		while(director != NULL)
+		{
+			int x = director->valueForKey("x")->intValue();
+			int y = director->valueForKey("y")->intValue();
+			int w = director->valueForKey("width")->intValue();
+			int h = director->valueForKey("height")->intValue();
+			//std::string mapFileName = director->valueForKey("MapName")->getCString();
+
+/ *
+			std::string mapFileName = director->valueForKey("MapName")->getCString();
+			std::string mapName = getMapName(mapFileName);
+			mapFileName = mapFileName.substr(1);* /
+
+			std::string mapName = getMapName(CCString::createWithFormat("%s%d","m",mapIndex)->getCString());
+			 
+			Trigger triggerRect;
+			triggerRect.rect = CCRect(x, y, w, h);
+			//triggerRect.mapName = atoi(mapFileName.c_str());
+			triggerRect.mapName = mapIndex;
+			triggerRect.nameStr = mapName;
+			_triggerMap[objectName] = triggerRect;
+
+			//在触发器上添加传送阵;
+			addTransfer(ccp(x + w / 2, y + h / 2), mapName);
+
+			objectName ++;
+			str = CCString::createWithFormat("%d", objectName);
+			director = trigger->objectNamed(str->getCString());
+		}
+	}*/
+	if (_cache_map_idx == mapIndex) return;
+
+	_cache_map_idx = mapIndex;
+	//npc
+	_npcAreaInfo.clear();
+	_monsterAreaInfo.clear();
+	int _mapFileName = mapIndex;
+	
+	std::for_each(m_vecAllmapCreatureInfo.begin(),m_vecAllmapCreatureInfo.end(),[&](const CreatureInfo& data)
+	{
+		if (data.creatureType == 1 && data.mapIndex == _mapFileName)
+		{
+			_npcAreaInfo.push_back(data);
+		}
+		else if (data.creatureType == 2 && data.mapIndex == _mapFileName)
+		{
+			_monsterAreaInfo.push_back(data);
+		}
+	});
+
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM mapCreatureData WHERE creatureType = 1 and mapIndex = ?1");
+// 	cmd->set_integer32(1 , _mapFileName);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("creatureName");
+// 		creatureName = table->get_text(idx);
+// 		idx = table->get_index("posX");
+// 		posX = (EEquipPos)table->get_integer32(idx);
+// 		idx = table->get_index("posY");
+// 		posY = (EEquipPos)table->get_integer32(idx);
+// 		idx = table->get_index("colour");
+// 		colour = table->get_text(idx);
+// 		CreatureInfo info(creatureName.c_str(),posX,posY,colour);
+// 		_npcAreaInfo.push_back(info);
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+// 	//怪物
+// 	_monsterAreaInfo.clear();
+// 	c_sql_command* cmd_2 = c_db_manager::getSingleton()->begin_operation("SELECT * FROM mapCreatureData WHERE creatureType = 2 and mapIndex = ?1");
+// 	cmd_2->set_integer32(1 , _mapFileName);
+// 	c_sql_table* table_2 = c_db_manager::getSingleton()->create_table();
+// 
+// 	while(table_2->retrieve_row())
+// 	{
+// 		unsigned int idx = table_2->get_index("creatureName");
+// 		creatureName = table_2->get_text(idx);
+// 		idx = table_2->get_index("posX");
+// 		posX = (EEquipPos)table_2->get_integer32(idx);
+// 		idx = table_2->get_index("posY");
+// 		posY = (EEquipPos)table_2->get_integer32(idx);
+// 		idx = table_2->get_index("colour");
+// 		colour = table_2->get_text(idx);
+// 		CreatureInfo info(creatureName.c_str(),posX,posY,colour);
+// 		_monsterAreaInfo.push_back(info);
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table_2);
+// 	c_db_manager::getSingleton()->end_operation(cmd_2);
+}
+
+
+void MapManager::initMapCreatureDataWithXML()
+{
+	f_data_set dataset;
+	std::list<std::string> fields;
+
+	bool ret = dataset.load("Config/db/mapCreatureData.xml","id",&fields);
+	CC_ASSERT(ret);
+	m_vecAllmapCreatureInfo.clear();
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		CreatureInfo data;
+		data.mapIndex = dataset.get_int("mapIndex",one.c_str(),0);
+		data.creatureName = dataset.get_string("creatureName",one.c_str(),"");
+		data.creatureType = dataset.get_int("creatureType",one.c_str(),0);
+		data.pos.x = dataset.get_int("posX",one.c_str(),0);
+		data.pos.y = dataset.get_int("posY",one.c_str(),0);
+		data.colour = dataset.get_string("colour",one.c_str(),"");
+
+		m_vecAllmapCreatureInfo.push_back(data);
+	});
+}
+
+bool MapManager::checkIsInView(const CCPoint& pt) const
+{
+	CCCamera *c = MapManager::getInstance()->getMap()->getCamera();
+	//LocalPlayer *p = RoleManager::getInstance()->getLocalPlayer();
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	float camx;
+	float camy;
+	float z;
+	c->getEyeXYZ(&camx,&camy,&z);
+	/////////////////////////
+	camx = camx - 100;
+	camy = camy - 100;
+	camx = camx < 0?0:camx;
+	camy = camx < 0?0:camy;
+	CCRect frameRect(camx, camy, winSize.width +150, winSize.height +150);
+
+	if (frameRect.containsPoint(pt))
+	{
+		return true;
+	}
+	return false;
+}
+
+//是否需要旋转
+bool MapManager::CheakIsRotation(const CCPoint& pt)
+{
+	if(NULL == MapManager::getInstance()->getMap())
+		return false;
+
+	CCCamera *c = MapManager::getInstance()->getMap()->getCamera();
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	float camx;
+	float camy;
+	float z;
+	c->getEyeXYZ(&camx,&camy,&z);
+	/////////////////////////
+	camx = camx - 100;
+	camy = camy - 100;
+	camx = camx < 0?0:camx;
+	camy = camx < 0?0:camy;
+	CCRect frameRect(camx, camy, winSize.width - 650, winSize.height);
+
+	if (frameRect.containsPoint(pt))
+	{
+		return true;
+	}
+	return false;
+}
+
+void MapManager::setRandPos(bool is)
+{
+	_isRandPos = is;
+}
+
+const static int MAX_CHECK = 8;
+const static CCPoint randPos[MAX_CHECK] = 
+{
+	CCPointMake(RAND_POS,RAND_POS),CCPointMake(RAND_POS,-RAND_POS),
+	CCPointMake(-RAND_POS,RAND_POS),CCPointMake(-RAND_POS,-RAND_POS),
+	CCPointMake(0,RAND_POS),CCPointMake(RAND_POS,0),
+	CCPointMake(0,-RAND_POS),CCPointMake(-RAND_POS,0),
+};
+
+pathNode MapManager::rand_pos(const pathNode& node)
+{
+	pathNode retNode = node;
+	if (_isRandPos == false)
+		return retNode;
+	_isRandPos = false;
+	const CCPoint& curp = RoleManager::getInstance()->getLocalPlayer()->getPosition();
+	if ((curp.x - node.x() < 100.0f 
+		&& curp.x - node.x() >-100.0f
+		&& curp.y - node.y() < 100.0f
+		&& curp.y - node.y() >-100.0f) && !_isOldCrossMap )
+	{
+		retNode._x = curp.x;
+		retNode._y = curp.y;
+		return retNode;
+	}
+	CCPoint pt =  ccp(node.x(), node.y());
+	for (int i = 0; i < MAX_CHECK; ++i)
+	{
+		int s = rand()%MAX_CHECK;
+		CCPoint ch = CCPointMake(pt.x + randPos[s].x, pt.y + randPos[s].y);
+		if (!getSparseGraph()->isBlockByAStar(ch))
+		{
+			retNode._x = ch.x;
+			retNode._y = ch.y;
+			break;
+		}
+	}
+	return retNode;
+}
+
+/*
+void MapManager::openMap()
+{
+	//[bing] 现在精英本与普通本用2张图 但是资源也用2个一样的会比较浪费 所以加一个判断吧
+	if (!m_bPutSEFrame)				//第一次的时候加载特效资源		【Ji：】
+	{
+		std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+		std::string sSESelect = sSEDir + "E1_38.plist";
+		std::string sSETouch = sSEDir + "E1_62.plist";
+		_plist.insert(sSESelect);
+		_plist.insert(sSETouch);
+		UiResourceMgr::getInstance()->retainPlistFile(_plist);
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSESelect.c_str());
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSETouch.c_str());
+		m_bPutSEFrame = true;
+	}
+	
+
+	_map = GameMapNode::create(_mapName.c_str());
+
+	CCSize mapSize = _map->getContentSize();
+
+	int mapNameRightSide = _copyName.find(".");
+	curMapFilePath = _copyName.substr(0,mapNameRightSide);
+	std::string JPGFilePath = curMapFilePath.substr(curMapFilePath.find_last_of("/") + 1,curMapFilePath.size() - curMapFilePath.find_last_of("/"));
+	curMapFilePath += "/";
+	curMapFilePath += JPGFilePath;
+
+	float worldMapScaleW = WORLD_MAP_CONTENT_W / mapSize.width;
+	float worldMapScaleH = WORLD_MAP_CONTENT_H / mapSize.height;
+	float scale = worldMapScaleH > worldMapScaleW ? worldMapScaleH : worldMapScaleW;
+	_worldMapScale = scale > WORLD_MAP_SCALE ? scale : WORLD_MAP_SCALE;
+
+	_map->layerNamed("block")->setVisible(false);
+	_map->layerNamed("alpha")->setVisible(false);
+
+	CCTMXLayer* grassMaterialLayer = _map->layerNamed("grassMaterial");
+	if (grassMaterialLayer)
+	{
+		grassMaterialLayer->setVisible(false);
+	}
+
+	CCTMXLayer* sandMaterialLayer = _map->layerNamed("sandMaterial");
+	if (sandMaterialLayer)
+	{
+		sandMaterialLayer->setVisible(false);
+	}
+
+	CCTMXLayer* riverMaterialLayer = _map->layerNamed("riverMaterial");
+	if (riverMaterialLayer)
+	{
+		riverMaterialLayer->setVisible(false);
+	}
+
+	CCTMXLayer* woodMaterialLayer = _map->layerNamed("woodMaterial");
+	if (woodMaterialLayer)
+	{
+		woodMaterialLayer->setVisible(false);
+	}
+
+	CCTMXLayer* snowMaterialLayer = _map->layerNamed("snowMaterial");
+	if (snowMaterialLayer)
+	{
+		snowMaterialLayer->setVisible(false);
+	}
+	//[bing] 判断一下地图贴图层 有地图贴图层的场景不用block模式
+// 	if(_map->layerNamed("maptexture") != NULL)
+// 		m_bUseBlockMap = false;
+// 	else
+// 		m_bUseBlockMap = true;
+
+	//ZHJL: 防止场景发生滚动是地图抖动
+	if (!curMapIsBlockMap())
+	{
+		CCArray *pChildrenArray = _map->getChildren();
+		CCSpriteBatchNode *child = NULL;
+		CCObject *pObj = NULL;
+		CCARRAY_FOREACH(pChildrenArray,pObj){
+			child = (CCSpriteBatchNode*)pObj;
+			if(!child)
+				break;
+
+			child->getTexture()->setAntiAliasTexParameters();
+		}
+	}
+
+	initAlpahData();
+	InitMaterialLayer();
+
+	World::getInstance()->getScene(true)->addChild(_map, (int)WZ_MAP);    
+	World::getInstance()->setAttached(true);
+
+	//选择框
+	if (_roleSelectAcNode == NULL)
+	{
+		_roleSelectAcNode = GameActionNode::create();
+		_roleSelectAcNode->retain();
+// 		for (int i = 1; i < 99; ++i)
+// 		{
+// 			CCString* selectSEStr = CCString::createWithFormat("%s%02d", "E1_38", i);
+// 			if(!_roleSelectAcNode->AddTexture(selectSEStr->getCString(), "Effect", "png"))
+// 				break;
+// 		}
+		_roleSelectAcNode->InitTextureWithSpriteFrame("E1_38");
+	}
+	_map->addChild(_roleSelectAcNode, MZ_SELECT);
+	if (!_roleSelectAcNode->isVisible())
+	{
+		_roleSelectAcNode->StopAction();
+//		_roleSelectAcNode->setVisible(false);
+	}
+
+	//hp特效label
+	initLabelCache();
+	for(std::list<CCLabelBMFont*>::iterator iter = _hpEffectLabelCache.begin(); iter != _hpEffectLabelCache.end(); ++ iter)
+	{
+		CCLabelBMFont *label = *iter;
+		label->setVisible(false);
+		//if(label->getParent() == NULL)
+		_map->addChild(label,MZ_ROLE_HP_EFFECT);
+	}
+	//!初始化A*算法
+	_graph = new c_sparse_graph(_map->getContentSize().width,_map->getContentSize().height,_map->getMapSize().width , _map->getMapSize().height);
+	CCTMXLayer *blockLayer = _map->layerNamed("block");
+	//CC_ASSERT(blockLayer != NULL);
+	for(int i = 0; i < _map->getMapSize().width; i ++)
+	{
+		for(int j = 0; j < _map->getMapSize().height; j ++)
+		{
+			if(blockLayer->tileGIDAt(ccp(i, j)) != 0)
+			{
+				_graph->brush(i, _map->getMapSize().height - j -1 , BT_OBSTACLE);
+			}
+			else
+				_graph->brush(i, _map->getMapSize().height - j -1 , BT_NORMAL);
+		}
+	}
+
+	_touchHandle.init();
+	//读取触发器;
+	_triggerMap.clear();
+	
+	CCTMXObjectGroup *trigger = _map->objectGroupNamed("trigger");
+	if(trigger)
+	{
+		int objectName = 1;
+		CCString *str = CCString::createWithFormat("%d", objectName);
+		CCDictionary *director = trigger->objectNamed(str->getCString());
+		while(director != NULL)
+		{
+			int x = director->valueForKey("x")->intValue();
+			int y = director->valueForKey("y")->intValue();
+			int w = director->valueForKey("width")->intValue();
+			int h = director->valueForKey("height")->intValue();
+			int type = director->valueForKey("type")->intValue();
+			int targetId = director->valueForKey("QuestTag")->intValue();
+			int questID = director->valueForKey("QuestID")->intValue();
+			std::string mapFileName = director->valueForKey("MapName")->getCString();
+			std::string mapName = getMapName(mapFileName);
+			unsigned int mapId = getMapIdFromName(mapFileName);
+			mapFileName = mapFileName.substr(1);
+
+			//在触发器上添加传送阵;
+			Trigger triggerRect;
+			triggerRect.rect = CCRect(x, y, w, h);
+			triggerRect.mapName = atoi(mapFileName.c_str());
+			triggerRect.nameStr = mapName;
+			triggerRect.type = type;
+			triggerRect.targetID = targetId;
+			triggerRect.questID = questID;
+			triggerRect.mapID = mapId;
+
+			if(type != 0){
+				_triggerMap[objectName] = triggerRect;
+
+				addTransfer(ccp(x + w / 2, y + h / 2), mapName);
+			}
+			
+
+			objectName ++;
+			str = CCString::createWithFormat("%d", objectName);
+			director = trigger->objectNamed(str->getCString());
+		}
+	}
+	//npc
+	_npcAreaInfo.clear();
+	int _mapFileName = getCurMapIndex();//获取当前mapid
+	std::string creatureName = "";
+	std::string colour = "";
+	int posX = 0;
+	int posY = 0;
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM mapCreatureData WHERE creatureType = 1 and mapIndex = ?1");
+	cmd->set_integer32(1 , _mapFileName);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("creatureName");
+		creatureName = table->get_text(idx);
+		idx = table->get_index("posX");
+		posX = (EEquipPos)table->get_integer32(idx);
+		idx = table->get_index("posY");
+		posY = (EEquipPos)table->get_integer32(idx);
+		idx = table->get_index("colour");
+		colour = table->get_text(idx);
+		CreatureInfo info(creatureName.c_str(),posX,posY,colour);
+		_npcAreaInfo.push_back(info);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	//怪物
+	_monsterAreaInfo.clear();
+	c_sql_command* cmd_2 = c_db_manager::getSingleton()->begin_operation("SELECT * FROM mapCreatureData WHERE creatureType = 2 and mapIndex = ?1");
+	cmd_2->set_integer32(1 , _mapFileName);
+	c_sql_table* table_2 = c_db_manager::getSingleton()->create_table();
+
+	while(table_2->retrieve_row())
+	{
+		unsigned int idx = table_2->get_index("creatureName");
+		creatureName = table_2->get_text(idx);
+		idx = table_2->get_index("posX");
+		posX = (EEquipPos)table_2->get_integer32(idx);
+		idx = table_2->get_index("posY");
+		posY = (EEquipPos)table_2->get_integer32(idx);
+		idx = table_2->get_index("colour");
+		colour = table_2->get_text(idx);
+		CreatureInfo info(creatureName.c_str(),posX,posY,colour);
+		_monsterAreaInfo.push_back(info);
+	}
+	c_db_manager::getSingleton()->destroy_table(table_2);
+	c_db_manager::getSingleton()->end_operation(cmd_2);
+
+
+	//地图特殊区域;
+	initMapArea();
+	createNpc();
+	_isEnterArea = false;
+	//if ((_curMapId == MENGZHONG_MAP_ID) || (_curMapId == SBK_MAP_CRC_ID))
+	//{
+	//	_isEnterArea = true;
+	//}
+	//竞技场要取消寻路
+	if (2887771852==_curMapId)
+	{
+		resetCrossMapping();
+	}
+	//!跨地图寻路开始;
+	if(_crossMapping)
+	{
+		if(!mapCross.empty())
+		{
+			mapCross.erase(mapCross.begin());
+		}
+
+		LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+		if( lp != NULL )
+		{
+			//unsigned int temp = lp->getTargetMapId();
+			lp->runPathTo(ccp(_targetPos.x(), _targetPos.y()), lp->getTargetMapId());
+		}
+		_crossMapping = true;	//特例， 设置为true，因为寻路算法在最后一张图的时候会自动设置为false，这样是不对的
+	}
+
+	//播放背景乐
+	AudioPlayer::getSigletonPtr()->playerMusic(getCurBgm());
+	//是否可以骑乘
+	RoleManager::getInstance()->getLocalPlayer()->setCanRide(canCurMapRide());
+	//强制显示
+	RoleManager::getInstance()->setForceShowOther(forceShowOther());
+
+	//[bing] 初始化区域地块信息
+	int nIdx = 0;
+	nBlockNum_X = (int)mapSize.width % WORLD_MAP_TILE_SIZE == 0 ? mapSize.width / WORLD_MAP_TILE_SIZE : mapSize.width / WORLD_MAP_TILE_SIZE + 1;
+	nBlockNum_Y = (int)mapSize.height % WORLD_MAP_TILE_SIZE == 0 ? mapSize.height / WORLD_MAP_TILE_SIZE : mapSize.height / WORLD_MAP_TILE_SIZE + 1;
+	m_pBlockArray = new BGBlockInfo[ nBlockNum_X * nBlockNum_Y ];
+	for(int i = nBlockNum_Y - 1; i >= 0; i--)
+	{
+		for(int j = 0; j < nBlockNum_X; ++j)
+		{
+			m_pBlockArray[i * nBlockNum_X + j].m_byIdx = ++nIdx;
+		}
+	}
+
+	//[bing] 在这里计算一下实际屏幕需要几个地块
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	m_nBlockWidth = (int)winSize.width + WORLD_MAP_TILE_SIZE;
+	m_nBlockHeight = (int)winSize.height + WORLD_MAP_TILE_SIZE;
+
+	m_nVisBlockX = m_nBlockWidth % WORLD_MAP_TILE_SIZE == 0 ? m_nBlockWidth / WORLD_MAP_TILE_SIZE : m_nBlockWidth / WORLD_MAP_TILE_SIZE + 1;
+	m_nVisBlockY = m_nBlockHeight % WORLD_MAP_TILE_SIZE == 0 ? m_nBlockHeight / WORLD_MAP_TILE_SIZE : m_nBlockHeight / WORLD_MAP_TILE_SIZE + 1;
+
+	m_fSaveX = -1;
+	m_fSaveY = -1;
+
+	m_bOpenMap = true;
+
+	_clickNode = GameActionNode::create();
+// 	for (int j = 1; j < 99; ++j)
+// 	{
+// 		CCString* touchSEStr = CCString::createWithFormat("%s%02d", "E1_62", j);
+// 		if (!_clickNode->AddTexture(touchSEStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+	_clickNode->InitTextureWithSpriteFrame("E1_62");
+	_map->addChild(_clickNode, RZN_EFFECT);
+}
+*/
+//static long curTime =0;
+
+bool MapManager::open_map(/*int nStep, int& outCurStep*/)
+{
+	init_map_node();
+
+	InitMaterialLayer();
+
+	//对不用jpg的地图，需要设置图块的抗锯齿
+	if (!curMapIsBlockMap())
+	{
+		CCArray *pChildrenArray = _map->getChildren();
+		CCSpriteBatchNode *child = NULL;
+		CCObject *pObj = NULL;
+		CCARRAY_FOREACH(pChildrenArray,pObj){
+			child = (CCSpriteBatchNode*)pObj;
+			if(!child)
+				break;
+
+			child->getTexture()->setAntiAliasTexParameters();
+		}
+	}
+
+	initAlpahData();
+
+	//hp特效label
+	initLabelCache();
+
+	update_map_graph_brush();
+
+	setup_trigger();
+
+	//地图特殊区域;
+	initMapArea();
+	loadRendui();
+	createNpc();
+	_isEnterArea = false;
+
+	//是否可以骑乘
+	RoleManager* role_mgr = RoleManager::getInstance();
+	role_mgr->getLocalPlayer()->setCanRide(canCurMapRide());
+	//强制显示
+	role_mgr->setForceShowOther(forceShowOther());
+	//快递图寻路的更新
+	update_pathfinder_state();
+
+	update_tile_info();
+
+	//加入一些场景特效
+	addMapEffect();
+	//播放背景乐
+	AudioPlayer::getSigletonPtr()->playerMusic(getCurBgm());
+	m_bOpenMap = true;
+
+	return m_bOpenMap;
+}
+
+void MapManager::addMapEffect()
+{
+	if (!m_bPutSEFrame)
+	{
+		m_bPutSEFrame = true;
+		std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+		std::string sSESelect = sSEDir + "E1_38.plist";
+		std::string sSETouch = sSEDir + "E1_62.plist";
+		_plist.insert(sSESelect);
+		_plist.insert(sSETouch);
+		UiResourceMgr::getInstance()->retainPlistFile(_plist);
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSESelect.c_str());
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSETouch.c_str());
+		//点击特效
+		_clickNode = GameActionNode::create();
+		CC_SAFE_RETAIN(_clickNode);
+		_clickNode->InitTextureWithSpriteFrame("E1_62");
+
+		//选择框
+		_roleSelectAcNode = GameActionNode::create();
+		CC_SAFE_RETAIN(_roleSelectAcNode);
+		_roleSelectAcNode->InitTextureWithSpriteFrame("E1_38");
+		if (!_roleSelectAcNode->isVisible()) _roleSelectAcNode->StopAction();
+	}
+
+	_map->addChild(_clickNode, RZN_EFFECT);
+	_map->addChild(_roleSelectAcNode, MZ_SELECT);
+
+}
+
+
+void MapManager::removeMapEffect()
+{
+	if(_clickNode) _clickNode->removeFromParent();
+
+	if(_roleSelectAcNode) _roleSelectAcNode->removeFromParent();
+}
+
+void MapManager::addTransfer( const CCPoint &pos, const std::string &name )
+{
+	unsigned int len = name.length();
+	if (len == 0)	//by zhang 找不到地图名字，不加 
+		return;
+	AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_26", anims);					//【Ji：】  更改传送阵特效名称(原名chuansongzhen)
+	//_usedAnims.clear();
+	_usedAnims.push_back(AnimsUsed(AT_Sin, "E1_26"));
+	BSAnimate *animate = anims[0];
+	CCSprite *sprite = CCSprite::create();
+	sprite->runAction(CCRepeatForever::create(animate));
+	sprite->setPosition(pos);
+	//sprite->setAnchorPoint(ccp(0.0f, 1.0f));
+	TTFConfig config;
+	config.fontFilePath=  FT_FONTFACE;
+	config.fontSize = 18;
+	config.outlineSize = 1;
+
+	LabelFT *label = LabelFT::createWithTTF(config,"");
+	label->setString(name.c_str());
+	label->setTextColor(Helper::converColor3B_2_4B(ccc3(200 , 0 , 100)));
+	label->setPosition(ccp(pos.x + 15.0f, pos.y + 25.0f));
+
+	_map->addChild(sprite, MZ_ROLE);
+	_map->addChild(label, MZ_ROLE);
+}
+
+void MapManager::closeMap(bool bNeedClearMapBlock /*= true*/)
+{
+	m_fSaveX = -1;
+	m_fSaveY = -1;
+
+	DeleteAllBGBlock(bNeedClearMapBlock);
+	//m_BGBlockCacheMap.clear();
+	
+	CC_SAFE_DELETE_ARRAY(m_pBlockArray);
+
+
+// 	if(_map != NULL)
+// 		_map->removeFromParent();
+		//_map->stopAllActions();
+
+	CC_SAFE_DELETE_ARRAY(_alpahData);
+
+	_touchHandle.destroy();
+// 	if(_graph != NULL)
+// 	{
+// 		delete _graph;
+// 		_graph = NULL;
+// 	}
+
+	if(World::getInstance()->isAttached())
+	{
+		//CC_ASSERT(_map->realRefCount() == 2);//!removeChild后cocos2d删除之
+		if (World::getInstance()->getScene())
+		{
+			World::getInstance()->getScene()->removeChild(_map);
+		}
+	}
+
+	World::getInstance()->setAttached(false);
+
+	//_clickNode = NULL;
+	_map = NULL;
+	pCameraNode = NULL;
+
+	AnimationCache::getInstance()->releaseAnims(_usedAnims);
+	_usedAnims.clear();
+
+	//移除新手副本风沙效果
+	CCScene* pScene = World::getInstance()->getScene();
+	if(pScene&&pScene->getChildByTag(WCT_SAND_EFFECT) != NULL)
+		pScene->removeChildByTag(WCT_SAND_EFFECT);
+
+	UiManagerEffect::getInstance()->destory();
+	//UiManagerEffect::getInstance()->runCurrentEffect();
+
+	m_grassLayer=NULL;
+	m_sandLayer=NULL;
+	m_hardgroundLayer=NULL;
+	m_riverLayer=NULL;
+	m_woodLayer=NULL;
+	m_snowLayer=NULL;
+
+	remove_label();
+
+	removeMapEffect();
+
+	CloseMap evt;
+	SEND_EVENT(&evt);
+}
+
+CCTMXLayer * MapManager::getAlphaLayer()
+{
+	return _map->layerNamed("alpha");
+}
+
+CCTMXLayer * MapManager::getBlockLayer()
+{
+	return _map->layerNamed("block");
+}
+
+inline float pixel_aligned(float pixel_)
+{
+	return pixel_;
+	//[bing] A* 不用pixel_
+	//return ((float)(int)((pixel_) + ((pixel_)>0.0f?0.5f:-0.5f)));
+}
+
+bool is_fire_massacre_map( unsigned int map_crc_id )
+{
+	return map_crc_id == FIRE_MASSACRE_MAP_1
+		||map_crc_id == FIRE_MASSACRE_MAP_2
+		||FIRE_MASSACRE_MAP_3 == map_crc_id;
+}
+
+bool MapManager::isBlock( int tiledX, int tiledY )
+{
+	const CCSize &mapSize = _map->getMapSize();
+
+	if(tiledX < 0 || tiledX >= mapSize.width || tiledY < 0 || tiledY >= mapSize.height)
+		return true;
+
+	CCTMXLayer *blockLayer = getBlockLayer();
+	return blockLayer->tileGIDAt(ccp(tiledX, tiledY)) != 0;
+}
+
+bool MapManager::isBlockByAStar(const CCPoint &pos)
+{
+	return getSparseGraph()->isBlockByAStar(pos);
+}
+
+bool MapManager::isBlock( const CCPoint &coord )
+{
+	CCSize tileSize = _map->getTileSize();
+	CCSize mapSize = _map->getMapSize();
+	int h = pixel_aligned(coord.x) / tileSize.width;
+	int v = mapSize.height - pixel_aligned(coord.y) / tileSize.height;
+	return isBlock(h, v);
+}
+
+bool MapManager::isAlpha( const CCPoint &coord )const
+{
+	if(_alpahData == NULL)
+		return false;
+
+	CCSize tileSize = _map->getTileSize();
+	CCSize mapSize = _map->getMapSize();
+	int h = coord.x / tileSize.width;
+	int v = coord.y / tileSize.height;
+
+	if(h < 0 || h >= mapSize.width || v < 0 || v >= mapSize.height)
+		return true;
+
+	return _alpahData[(int)mapSize.width * v + h] != 0;
+	//CCTMXLayer *alphaBlock = getAlphaLayer();
+	//return alphaBlock->tileGIDAt(ccp(h, v)) != 0;
+}
+const static int MAX_X = 5;
+const static int MAX_Y = 5;
+bool MapManager::findNoBlockPointByAStar(const CCPoint &pos, CCPoint& outPos)
+{
+	for (int y = 0; y < MAX_Y; ++y)
+	{
+		CCPoint ch = CCPointMake(pos.x - 24, pos.y - y*48);
+		if (!getSparseGraph()->isBlockByAStar(ch))
+		{
+			outPos = ch;
+			return true;
+		}
+	}
+	for (int y = 0; y < MAX_Y; ++y)
+	{
+		for (int x = 1; x <= MAX_X; ++x)
+		{
+			CCPoint ch = CCPointMake(pos.x + x*48, pos.y + y*48);
+			if (!getSparseGraph()->isBlockByAStar(ch))
+			{
+				outPos = ch;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+CCPoint MapManager::findNoBlockPoint( const CCPoint &pos )
+{
+	CC_ASSERT(isBlock(pos));
+
+	CCSize tileSize = _map->getTileSize();
+	CCSize mapSize = _map->getMapSize();
+	int h = pos.x / tileSize.width;
+	int v = mapSize.height - pos.y / tileSize.height;
+
+	if(!isBlock(h, v + 1))
+	{
+		return ccp(h * tileSize.width, (mapSize.height - v - 1) * tileSize.height);
+	}
+
+	if(!isBlock(h, v - 1))
+	{
+		return ccp(h * tileSize.width, (mapSize.height - v + 1) * tileSize.height);
+	}
+
+	if(!isBlock(h + 1, v))
+	{
+		return ccp((h + 1) * tileSize.width, (mapSize.height - v) * tileSize.height);
+	}
+
+	if(!isBlock(h - 1, v))
+	{
+		return ccp((h - 1) * tileSize.width, (mapSize.height - v) * tileSize.height);
+	}
+
+	//CC_ASSERT(0);
+	return pos;
+}
+
+float MapManager::getZOrderAtPoint( const CCPoint &pos ) const
+{
+	if(_map != NULL)
+		return _map->getContentSize().height - pos.y;
+
+	return 0.0f;
+}
+
+void MapManager::changeMap( unsigned int mid )
+{
+	CMovie::GetInstance().cleanWaitChangeMapFlag();
+
+	stMapTileData const* pData = getMapData(mid);
+
+	//std::map<unsigned int , std::string>::iterator iter = _terrainMapping.find(mid);
+	if(pData)
+	{
+		_mapName =/* iter->second*/pData->terrain;
+		_curMapId = mid;
+		size_t s = _mapName.find_last_of('/');
+		size_t e = _mapName.find_last_of('.');
+		std::string tmp = _mapName.substr(s+2 , e -s -2);
+		_mapIndex = atoi(tmp.c_str());		
+// 		std::map<unsigned int , std::string>::iterator copyiter = _CpyFileNameMap.find(mid);
+// 		if(copyiter!=_CpyFileNameMap.end())
+// 		{
+// 			_copyName = copyiter->second;
+// 		}
+// 		else
+// 			_copyName = _mapName;
+
+		_copyName = pData->copyName;
+		
+		Phyx::getInstance()->simulate(false);
+
+		//s = _mapName.find_last_of('/');
+		//e = _mapName.find_last_of('.');
+		tmp = _mapName.substr(s+1 , e -s -1);
+
+		checkIsBigMap(tmp);
+
+		change_map evt;
+		evt.map_crc_id = _curMapId;
+		SEND_EVENT(&evt);
+		/*	//[bing] 取消所有地图玩家阻挡
+		switch(_mapIndex)
+		{
+		//[bing] 固定这2张地图有阻挡 写代码的标记一下 mark!
+		//case 9:	//[bing] 取消沙巴克阻挡
+		case 104:
+			Phyx::getInstance()->simulate(true);
+			break;
+		default:
+			Phyx::getInstance()->simulate(false);
+			break;
+		}
+		*/
+		//{
+			//const std::string& mapname = MapManager::getInstance()->getCurMapName();
+// 			int s = _mapName.find_last_of('/');
+// 			int e = _mapName.find_last_of('.');
+// 			const std::string tmp = _mapName.substr(s+1 , e -s -1);
+// 
+// 			checkIsBigMap(tmp);
+// 			std::list<std::string> names;
+// 			names.push_back("m2");
+// 			names.push_back("m9");
+// 			names.push_back("m23");
+// 			names.push_back("m24");
+// 			names.push_back("m25");
+// 			names.push_back("m41");
+// 			names.push_back("d101");
+// 			names.push_back("f1251");
+// 			names.push_back("f1252");
+// 			names.push_back("f1301");
+// 			names.push_back("f1302");
+// 			names.push_back("g601");
+// 			names.push_back("g602");
+// 			names.push_back("g603");
+// 			names.push_back("g604");
+// 
+// 			m_bIsBigMap = false;
+// 			std::list<std::string>::iterator iter = names.begin();
+// 			for ( ; iter!=names.end(); ++iter)
+// 			{
+// 				const std::string& name =  *iter;
+// 				if (tmp==name)
+// 				{
+// 					m_bIsBigMap = true;
+// 					break;
+// 				}
+// 			}
+//		}
+
+	}
+	else
+	{
+		//_mapName = "fuck you";
+		CC_ASSERT("a missing map ,can not reach here!");
+	}
+}
+
+bool MapManager::getTriggerPosition( int triggerId , CCPoint &pos)
+{
+	TriggerMap::iterator iter = _triggerMap.find(triggerId);
+	if(iter != _triggerMap.end())
+	{
+		const Trigger &trigger = iter->second;
+		pos = ccp(trigger.rect.getMidX(), trigger.rect.getMidY());
+		return true;
+	}
+
+	return false;
+}
+
+bool MapManager::getMapEntry( int mapName, CCPoint &pos )
+{
+	for(TriggerMap::iterator iter = _triggerMap.begin(); iter != _triggerMap.end(); ++ iter)
+	{
+		const Trigger &trigger = iter->second;
+		if(mapName == trigger.mapName)
+		{
+			return getTriggerPosition(iter->first, pos);
+		}
+	}
+
+	return false;
+}
+
+std::list<int> MapManager::getMapPath( int map1, int map2 )
+{
+	return std::list<int>();
+}
+
+CCLabelBMFont * MapManager::getLabelFromCache()
+{
+	if(!_hpEffectLabelCache.empty())
+	{
+		CCLabelBMFont *label = *_hpEffectLabelCache.begin();
+		_hpEffectLabelCache.pop_front();
+		_usedLabel.push_back(label);
+		return label;
+	}
+
+	return NULL;
+}
+
+void MapManager::pushBackToLabelCache( CCLabelBMFont *label )
+{
+	bool bFind = false;
+	for(std::list<CCLabelBMFont*>::iterator iter = _usedLabel.begin(); iter != _usedLabel.end(); ++ iter)
+	{
+		if(label == *iter)
+		{
+			bFind = true;
+			break;
+		}
+	}
+	if(bFind)
+		_hpEffectLabelCache.push_back(label);
+
+	for(std::list<CCLabelBMFont*>::iterator iter = _usedLabel.begin(); iter != _usedLabel.end(); ++ iter)
+	{
+		if(label == *iter)
+		{
+			_usedLabel.erase(iter);
+			return;
+		}
+	}
+}
+
+void MapManager::initLabelCache()
+{
+	static bool labelCacheInit = false;
+	if(!labelCacheInit || _hpEffectLabelCache.size() == 0)
+	{
+		//初始化hp减少label
+		//_hpEffectLabelCache.clear();
+		clearLabelCache();
+
+		for(int i = 0; i < 20; i ++)
+		{
+			CCLabelBMFont *label = CCLabelBMFont::create();
+			label->setFntFile("Art/Scene/font.fnt");
+			label->setVisible(false);
+			label->retain();
+			_hpEffectLabelCache.push_back(label);
+		}
+		labelCacheInit = true;
+	}
+
+	CC_ASSERT(_usedLabel.size() + _hpEffectLabelCache.size() == 20);
+
+	for(std::list<CCLabelBMFont*>::iterator iter = _usedLabel.begin(); iter != _usedLabel.end(); ++ iter)
+	{
+		_hpEffectLabelCache.push_back(*iter);
+	}
+	_usedLabel.clear();
+
+
+	for(std::list<CCLabelBMFont*>::iterator iter = _hpEffectLabelCache.begin(); iter != _hpEffectLabelCache.end(); ++ iter)
+	{
+		CCLabelBMFont *label = *iter;
+		label->setVisible(false);
+		//if(label->getParent() == NULL)
+		_map->addChild(label,MZ_ROLE_HP_EFFECT);
+	}
+}
+
+void MapManager::resetCrossMapping()
+{
+	_crossMapping = false;
+	//set_path_to_trigger_map_id(INVALID);
+	mapCross.clear();
+}
+
+std::string MapManager::getMapName( unsigned int mapId ) const
+{
+	if (mapId == MANOR_MAP_ID)
+	{
+		std::string name =  f_zhuzai_mgr::get_singleton().get_manor_owner_name();
+		std::string title;
+		safe_sprintf(title,STRING_TABLE["manor_title"],name);
+		return title;
+	}
+	else
+	{
+		stMapTileData const* pData = getMapData(mapId);
+		if (pData)
+		{
+			return pData->mapName;
+		}
+	}
+
+	return "";
+// 	std::map<unsigned int, std::string>::iterator iter = _mapNameMap.find(mapId);
+// 	if(iter != _mapNameMap.end())
+// 	{
+// 		return iter->second;
+// 	}
+// 
+// 	return "";
+}
+
+int MapManager::getCurSceneType(unsigned int curMapId)
+{
+	stMapTileData const* pData =getMapData(curMapId);
+	if (pData)
+	{
+		return pData->sceneType;
+	}
+	return 0;
+// 	if (_mapSceneType.empty())
+// 	{
+// 		return 0;
+// 	}
+// 	std::map<unsigned int, int>::iterator iter = _mapSceneType.find(curMapId);
+// 	if(iter != _mapSceneType.end())
+// 	{
+// 		return iter->second;
+// 	}
+// 	return 0;
+}
+
+std::string MapManager::getMapName( const std::string &mapFileName ) const
+{
+	wchar_t vStr[300];
+	memset(vStr, 0, sizeof(vStr));
+	Utf8ToUtf16(mapFileName.c_str(), vStr,300,0);
+
+	unsigned int id = crc32(vStr);
+	return getMapName(id);
+}
+
+
+unsigned int MapManager::getMapIdFromName( const std::string &mapFileName )
+{
+	wchar_t vStr[300];
+	memset(vStr, 0, sizeof(vStr));
+	Utf8ToUtf16(mapFileName.c_str(), vStr,300,0);
+	unsigned int mapId = crc32(vStr);
+	return mapId;
+}
+                                                                                                                                                                                                                                                                                                                                                                                                                
+const MapManager::CreatureVector & MapManager::getNpcInfo()
+{
+	return _npcAreaInfo;
+}
+
+const MapManager::CreatureVector & MapManager::getMonsterInfo()
+{
+	return _monsterAreaInfo;
+}
+
+const MapManager::TriggerMap & MapManager::getTriggerMap()
+{
+	return _triggerMap;
+}
+
+void MapManager::runClickAnims( const CCPoint &pos )
+{
+	/*
+	GameActionNode* tmpAcNode = GameActionNode::create();
+	for (int j = 1; j < 99; ++j)
+	{
+		CCString* touchSEStr = CCString::createWithFormat("%s%02d", "E1_62", j);
+		if (!tmpAcNode->AddTexture(touchSEStr->getCString(), "Effect", "png"))
+			break;
+	}
+	_map->addChild(tmpAcNode, RZN_EFFECT);
+	*/
+	_clickNode->StopAction();
+	_clickNode->setPosition(pos);
+	_clickNode->playAnimOnce(0.09f, false);
+}
+
+std::string MapManager::getCurBgm()
+{
+	stMapTileData const* pData = getMapData(_curMapId);
+	if (pData)
+	{
+		return pData->mapBGM;
+	}
+
+	return "";
+
+// 	std::map<unsigned int, std::string>::iterator iter = _mapBgm.find(_curMapId);
+// 	if(iter != _mapBgm.end())
+// 	{
+// 		return iter->second;
+// 	}
+// 	return "";
+}
+
+MAP_MATERIAL MapManager::getMaterial( const CCPoint &coord )
+{
+	if (_map==NULL)
+		return hardGround;
+
+	CCSize tileSize = _map->getTileSize();
+	CCSize mapSize = _map->getMapSize();
+	int h = pixel_aligned(coord.x) / tileSize.width;
+	int v = mapSize.height - pixel_aligned(coord.y) / tileSize.height;
+
+	if(h < 0 || h >= mapSize.width || v < 0 || v >= mapSize.height)
+		return hardGround;
+
+	if (m_grassLayer && m_grassLayer->tileGIDAt(ccp(h,v))!=0)
+		return grassGround;
+
+	if (m_sandLayer && m_sandLayer->tileGIDAt(ccp(h,v))!=0)
+		return sandGround;
+
+	if (m_hardgroundLayer && m_hardgroundLayer->tileGIDAt(ccp(h,v))!=0)
+		return hardGround;
+
+	if (m_riverLayer && m_riverLayer->tileGIDAt(ccp(h,v))!=0)
+		return riverSide;
+
+	if (m_woodLayer && m_woodLayer->tileGIDAt(ccp(h,v))!=0)
+		return woodGround;
+
+	if (m_snowLayer && m_snowLayer->tileGIDAt(ccp(h,v))!=0)
+		return snowGround;
+
+	return hardGround;
+}
+
+void MapManager::InitMaterialLayer()
+{
+	//先置空
+	m_grassLayer=NULL;
+	m_sandLayer=NULL;
+	m_hardgroundLayer=NULL;
+	m_riverLayer=NULL;
+	m_woodLayer=NULL;
+	m_snowLayer=NULL;
+
+	m_grassLayer=_map->layerNamed("grassMaterial");
+	m_sandLayer=_map->layerNamed("sandMaterial");
+	m_hardgroundLayer=_map->layerNamed("hardgroundMaterial");
+	m_riverLayer=_map->layerNamed("riverMaterial");
+	m_woodLayer=_map->layerNamed("woodMaterial");
+	m_snowLayer=_map->layerNamed("snowMaterial");
+	if (m_grassLayer)
+		m_grassLayer->setVisible(false);
+	if (m_sandLayer)
+		m_sandLayer->setVisible(false);
+	if (m_hardgroundLayer)
+		m_hardgroundLayer->setVisible(false);
+	if (m_riverLayer)
+		m_riverLayer->setVisible(false);
+	if (m_woodLayer)
+		m_woodLayer->setVisible(false);
+	if (m_snowLayer)
+		m_snowLayer->setVisible(false);
+}
+
+void MapManager::initAlpahData()
+{
+	CC_SAFE_DELETE_ARRAY(_alpahData);
+
+	CCTMXLayer *alphaLayer = getAlphaLayer();
+	CC_ASSERT(alphaLayer != NULL);
+	alphaLayer->setVisible(false);
+
+	CCSize tileSize = _map->getTileSize();
+	CCSize mapSize = _map->getMapSize();
+
+	_alpahData = new char[(int)(mapSize.width * mapSize.height)];
+
+	//按照行排序
+	for(int i = 0; i < (int)mapSize.height; i ++)
+	{
+		for(int j = 0; j < (int)mapSize.width; j ++)
+		{
+			_alpahData[i * (int)mapSize.width + j] = alphaLayer->tileGIDAt(ccp(j, mapSize.height - i - 1));
+		}
+	}
+}
+
+void MapManager::initMapArea()
+{
+	_mapAreaVector.clear();
+	_enterAreaMap.clear();
+	CCTMXObjectGroup *area = _map->objectGroupNamed("area");
+	if(area != NULL)
+	{
+		CCArray *objArray = area->getObjects();
+		if(objArray != NULL && objArray->count() > 0)
+		{
+			CCObject* pObj = NULL;
+			CCARRAY_FOREACH(objArray, pObj)
+			{
+				CCDictionary* pDict = (CCDictionary*)pObj;
+				int type = pDict->valueForKey("type")->intValue();
+				if(type > MapArea::AT_Normal && type < MapArea::AT_End)
+				{
+					int x = pDict->valueForKey("x")->intValue();
+					int y = pDict->valueForKey("y")->intValue();
+					int w = pDict->valueForKey("width")->intValue();
+					int h = pDict->valueForKey("height")->intValue();
+					_mapAreaVector.push_back(MapArea((MapArea::eAreaType)type, CCRect(x, y, w, h)));
+					_enterAreaMap[x + w] = false;
+				}
+			}
+		}
+	}
+}
+
+MapManager::MapArea::eAreaType MapManager::checkRoleArea( int roleId )
+{
+	Role *role = RoleManager::getInstance()->findRole(roleId);
+	return checkRoleArea(role);
+}
+
+MapManager::MapArea::eAreaType MapManager::checkRoleArea( Role *role )
+{
+	if(role != NULL)
+	{
+		const CCPoint &rolePos = role->getPosition();
+		for(MapAreaVector::iterator iter = _mapAreaVector.begin(); iter != _mapAreaVector.end(); ++ iter)
+		{
+			const MapArea &mapArea = *iter;
+			if(mapArea.rect.containsPoint(rolePos))
+				return mapArea.areaType;
+		}
+	}
+	return MapArea::AT_Normal;
+}
+
+bool MapManager::isStallArea( Role *role )
+{
+	if (role != NULL)
+	{
+		const CCPoint &rolePos = role->getPosition();
+		for(MapAreaVector::iterator iter = _mapAreaVector.begin(); iter != _mapAreaVector.end(); ++ iter)
+		{
+			const MapArea &mapArea = *iter;
+			if(MapArea::AT_Stall == mapArea.areaType && mapArea.rect.containsPoint(rolePos))
+				return true;
+		}
+	}
+	return false;
+}
+
+bool MapManager::canCurMapRide()
+{
+	stMapTileData const* pData = getMapData(_curMapId);
+	if (pData)
+	{
+		return pData->canRide;
+	}
+	return false;
+}
+
+bool MapManager::getCurMapCanRideWithMaPai()
+{
+	stMapTileData const* pData = getMapData(_curMapId);
+	if (pData)
+	{
+		return pData->mapCanRide;
+	}
+
+	return false;
+}
+
+bool MapManager::forceShowOther()
+{
+	return forceShowOther(_curMapId);
+}
+
+bool MapManager::forceShowOther( unsigned int mapId )
+{
+	stMapTileData const* pdata =getMapData(mapId);
+	if (pdata)
+	{
+		return pdata->forceShowOther;
+	}
+
+	return false;
+}
+int MapManager::mapDangerousValue(unsigned int mapId)
+{
+	stMapTileData const* pdata =getMapData(mapId);
+	if(pdata)
+	{
+		return pdata->mapIsDangerous;
+	}
+	return NULL;
+}
+void MapManager::DeleteAllBGBlock(bool bNeedClearMapBlock)
+{
+	//_blockSpriteArray->removeAllObjects();
+	//_blockCount = 0;
+
+	//if(!_map)
+	//	return;
+	if(_map == NULL)
+	{
+		return;
+	}
+
+	if(bNeedClearMapBlock)
+	{
+		std::for_each(m_BGVisibleBlockMap.begin(),m_BGVisibleBlockMap.end(),[](std::pair< unsigned short, BGBlockInfo* > const& kv){
+		
+			CCNode* spriteNode = kv.second->m_pSprite;
+			if (spriteNode)
+			{
+				spriteNode->removeFromParent();
+			}
+		});
+// 		BGVisibleBlockMap::iterator It = m_BGVisibleBlockMap.begin();
+// 		while(It != m_BGVisibleBlockMap.end())
+// 		{
+// 			CCNode* spriteNode = It->second->m_pSprite;
+// 			if (spriteNode)
+// 			{
+// 				spriteNode->removeFromParent();
+// 				// It->second->m_pSprite = NULL;
+// 			}
+// 			//_map->removeChild( It->second->m_pSprite, true );
+// 			//It->second->m_pSprite = NULL;
+// 			++It;
+// 		}
+	}
+	m_BGVisibleBlockMap.clear();
+	
+}
+
+void MapManager::FillDataBGBlock( CCPoint& NowPoint, bool bUseAsyncLoad )
+{
+	if(!_map)
+		return;
+
+	int i = NowPoint.x / WORLD_MAP_TILE_SIZE;
+	int j = NowPoint.y / WORLD_MAP_TILE_SIZE;
+
+	if(i >= nBlockNum_X
+		|| j >= nBlockNum_Y)
+		return;
+
+	BGBlockInfo* pBGBlockInfo = &m_pBlockArray[j * nBlockNum_X + i];
+
+	std::string strTmp;
+	//重新填充地块
+	BGVisibleBlockMap::iterator It = m_BGVisibleBlockMap.find( pBGBlockInfo->m_byIdx );
+	if(It == m_BGVisibleBlockMap.end())
+	{
+		safe_sprintf(strTmp,"%s_%02d.jpg",curMapFilePath.c_str(),pBGBlockInfo->m_byIdx);
+		//创建精灵显示该地块
+		//CCString* str = CCString::createWithFormat("%s_%02d.jpg",curMapFilePath.c_str(),pBGBlockInfo->m_byIdx);
+		CCSprite* pBGBlockSprite = CCSprite::create();
+		CC_ASSERT(pBGBlockSprite);
+		pBGBlockSprite->setPosition( ccp(i * WORLD_MAP_TILE_SIZE, j * WORLD_MAP_TILE_SIZE) );
+		_map->addChild(pBGBlockSprite);
+		pBGBlockInfo->m_pSprite = pBGBlockSprite;
+		m_BGVisibleBlockMap.insert( std::make_pair(pBGBlockInfo->m_byIdx, pBGBlockInfo) );
+		//只用同步加载的方式，对效率没有影响
+		if(!bUseAsyncLoad)
+		{
+			CCTexture2DPixelFormat defaultTextrureFormat = CCTexture2D::defaultAlphaPixelFormat();
+			CCTexture2D::setDefaultAlphaPixelFormat(kCCTexture2DPixelFormat_RGB565);
+			pBGBlockSprite->initWithFile(strTmp.c_str());
+			CCTexture2D::setDefaultAlphaPixelFormat(defaultTextrureFormat);
+			//pBGBlockSprite->initWithFile(strTmp.c_str());	//改用异步加载方式
+			CCTextureCache::sharedTextureCache()->removeTexture(pBGBlockSprite->getTexture());
+			pBGBlockSprite->setAnchorPoint(ccp(0, 0));
+		}
+		else
+		{
+			bind_cccall_helper* helper=  bind_cccall_helper::bind_fn_o(boost::bind(&MapManager::bgBlockLoaded,this,_1,_curMapId,pBGBlockInfo->m_byIdx));
+			CCTextureCache::sharedTextureCache()->addImageAsync(strTmp.c_str(),helper,callfuncO_selector(bind_cccall_helper::on_call_o),kCCTexture2DPixelFormat_RGB565);
+			//AnimationCache::getInstance()->createImgFromFile(pBGBlockInfo->m_byIdx, _curMapId,str->getCString());
+		}
+
+		// get blockSprite from cache array
+		//CCSprite * pBGBlockSprite = (CCSprite*)_blockSpriteArray->objectAtIndex(pBGBlockInfo->m_byIdx -1);
+		//CCTextureCache::sharedTextureCache()->removeTexture(pBGBlockSprite->getTexture());
+
+
+		//加入当前可见地块列表
+		//m_BGVisibleBlockMap.insert( std::make_pair(pBGBlockInfo->m_byIdx, pBGBlockInfo) );
+
+		//CCLog("load map block textrue %d",pBGBlockInfo->m_byIdx);
+// 		if(bUseAsyncLoad)
+// 		{
+// 			AnimationCache::getInstance()->createImgFromFile(pBGBlockInfo->m_byIdx, _curMapId,str->getCString());
+// 		}
+	} 
+
+	pBGBlockInfo->bInVisibleMap = true;
+}
+
+void MapManager::SetAllBGBlockInvisible()
+{
+	if(!_map)
+		return;
+
+	std::for_each(m_BGVisibleBlockMap.begin(),m_BGVisibleBlockMap.end(),[](std::pair<unsigned short, BGBlockInfo *> const& kv){kv.second->bInVisibleMap =false;});
+
+// 	BGVisibleBlockMap::iterator It = m_BGVisibleBlockMap.begin();
+// 	while(It != m_BGVisibleBlockMap.end())
+// 	{
+// 		It->second->bInVisibleMap = false;
+// 		++It;
+// 	}
+}
+
+void MapManager::hideInvisibleMapBlock()
+{
+	if(!_map)
+		return;
+
+	std::for_each(m_BGVisibleBlockMap.begin(),m_BGVisibleBlockMap.end(),[](std::pair<unsigned short, BGBlockInfo * > const& kv){
+		CCNode* spriteNode = kv.second->m_pSprite;
+		if (spriteNode)
+		{
+			spriteNode->setVisible(kv.second->bInVisibleMap);
+		}
+	});
+		
+
+// 	BGVisibleBlockMap::iterator It = m_BGVisibleBlockMap.begin();
+// 	//BGVisibleBlockMap tempMap;
+// 	
+// 	while(It != m_BGVisibleBlockMap.end())
+// 	{
+// 		CCNode* spriteNode = It->second
+// 		if(!It->second->bInVisibleMap)
+// 		{
+// 			_map->removeChild( It->second->m_pSprite, true );
+// 			//tempMap[It->first] = It->second;
+// 			//tmpIt->second->m_pSprite = NULL;
+// 			//It = m_BGVisibleBlockMap.erase(tmpIt);
+// 		}
+// 
+// 		++It;
+// 	}
+
+// 	if (!tempMap.empty())
+// 	{
+// 		BGVisibleBlockMap::iterator It = tempMap.begin();
+// 		while(It != tempMap.end())
+// 		{
+// 			BGVisibleBlockMap::iterator findIt = m_BGVisibleBlockMap.find(It->first);
+// 			if (findIt!=m_BGVisibleBlockMap.end())
+// 			{
+// 				 m_BGVisibleBlockMap.erase(findIt);
+// 			}
+// 			++It;
+// 		}
+// 	}
+// 	tempMap.clear();
+}
+
+// void MapManager::FillImgFromCache( CCTexture2D* pTexture, BGCacheObject* pObj )
+// {
+// 	if(pObj->_mapid != _mapIndex)
+// 		return;
+// 
+// 	//[bing] 从TextureCatch内 Init Sprite
+// 	//先检查可是地块内是否存在 若存在才init
+// 	BGVisibleBlockMap::iterator It = m_BGVisibleBlockMap.find(pObj->_bgIdx);
+// 	if(It != m_BGVisibleBlockMap.end())
+// 	{
+// 		It->second->m_pSprite->initWithTexture(pTexture);
+// 		It->second->m_pSprite->setAnchorPoint(ccp(0, 0));
+// 	}
+// 
+// 	BGBlockCacheMap::iterator CacheIT = m_BGBlockCacheMap.find(pObj->_bgIdx);
+// 	if(CacheIT != m_BGBlockCacheMap.end())
+// 		m_BGBlockCacheMap.erase(CacheIT);
+// }
+
+void MapManager::FillImgFromImage( CCImage* pImg, unsigned short nIdx, unsigned int mapID, const char* FileName )
+{	
+	CC_ASSERT(0 && "FillImgFromImage! NO!can not reach here!!!");
+
+	if (_curMapId != mapID)
+	{
+		CC_ASSERT("map sprite texture async loaded in delay");
+		return;
+	}
+
+	BGVisibleBlockMap::iterator It = m_BGVisibleBlockMap.find(nIdx);
+	if(It != m_BGVisibleBlockMap.end())
+	{
+		CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addUIImage(pImg, FileName);
+       /* CCTexture2D *texture = new CCTexture2D();
+        texture->initWithImage(pImg);*/
+        //texture->autorelease();
+
+		CCSpriteFrame *frame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+		It->second->m_pSprite->setDisplayFrame(frame);
+		It->second->m_pSprite->setAnchorPoint(ccp(0, 0));
+
+		//CCTextureCache::sharedTextureCache()->removeTexture(texture);
+	}
+}
+
+void MapManager::SetCameraPos( float fX, float fY, float fSpeed )
+{
+	if(!_map)
+		return;
+
+	//[bing] 把摄像机node加进去
+	if(!pCameraNode)
+	{
+		pCameraNode = CCNode::create();
+		_map->addChild(pCameraNode);
+	}
+
+	if(fSpeed == 0.0f)
+		pCameraNode->setPosition(ccp(fX, fY));
+	else
+	{
+		pCameraNode->stopAllActions();
+		CCActionInterval* moveto = CCMoveTo::create(fSpeed, ccp(fX, fY));
+		pCameraNode->runAction(moveto);
+	}
+}
+
+//当前场景是否为副本
+bool MapManager::IsInstance()
+{
+	bool flag = false;
+	//读副本表
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM fubendata WHERE mapid = ?1");
+	cmd->set_integer64(1 , _curMapId);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		//如果是副本
+		flag = true;
+		break;;
+	}
+
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	return flag;
+}
+
+//播放风沙粒子效果
+void MapManager::playSandParticleEffect()
+{
+		//[bing] 如果在d101地图不要显示
+	/*if(getCurMapId() == 2904548812)
+	{*/
+		CCScene *_scene = World::getInstance()->getScene();
+		CCParticleRain* particleSand = CCParticleRain::create(); //创建沙子
+		//particleSand->retain();
+
+		CCTexture2D *pTexture2d = CCTextureCache::sharedTextureCache()->addImage("Art/Effect/big_shazi1.pvr.ccz");
+		if(!pTexture2d) 
+		{
+			pTexture2d = CCTextureCache::sharedTextureCache()->addImage("Art/Effect/big_shazi1.png");
+		}
+		if(!pTexture2d) 
+		{
+			return ;
+		}
+		particleSand->setTexture(pTexture2d);
+		particleSand->setPosition(ccp(_scene->getContentSize().width / 2 - 150 ,_scene->getContentSize().height));
+		particleSand->setStartSize(3); //起始大小
+		particleSand->setStartSizeVar(4); //大小变化率
+		particleSand->setEndSize(4); //结束大小
+		particleSand->setEndSizeVar(5); //大小变化率
+		particleSand->setAngle(310); //角度
+		particleSand->setRadialAccel(20); //径向加速度
+		particleSand->setRadialAccelVar(50); //径向加速度变化率
+		particleSand->setTangentialAccel(80); //切向加速度
+		particleSand->setTangentialAccel(50); //切向加速度变化率
+		particleSand->setSpeed(300); //速度
+		particleSand->setEmissionRate(particleSand->getTotalParticles() / particleSand->getLife()); //每秒产生粒子数
+		particleSand->setAutoRemoveOnFinish(true); //自动回收
+
+		CCParticleBatchNode* batch = CCParticleBatchNode::createWithTexture(particleSand->getTexture());
+		batch->addChild(particleSand);
+		
+		_scene->addChild(batch, RZN_State, WCT_SAND_EFFECT);
+		//particleSand->release();
+	/*}*/
+}
+
+void MapManager::enterAreaRemind(Role *role)
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if (player == NULL)
+		return;
+	if (role == NULL)
+		return;
+
+	if (role->getId() == player->getId())
+	{
+		const CCPoint &rolePos = role->getPosition();
+		if(!_mapAreaVector.empty())
+		{
+			int nType = 0;
+			int index = 0;
+			for(MapAreaVector::iterator iter = _mapAreaVector.begin(); iter != _mapAreaVector.end(); ++ iter)
+			{
+				const MapArea &mapArea = *iter;
+				int xAndWidth = mapArea.rect.origin.x + mapArea.rect.size.width;
+				if(mapArea.rect.containsPoint(rolePos))
+				{			
+					for (std::map<int, bool>::iterator enter_iter = _enterAreaMap.begin(); enter_iter != _enterAreaMap.end(); ++enter_iter)
+					{
+						if (enter_iter->first == xAndWidth)
+						{
+							_enterAreaMap[enter_iter->first] = true;
+						}
+						else
+						{
+							_enterAreaMap[enter_iter->first] = false;
+						}
+					}
+					nType = mapArea.areaType;
+					index = xAndWidth;
+					break;
+				}
+			}
+			//上面记状态，下面做处理
+			int nFlag = getEnterAreaFlag();
+			if (nFlag == 0)
+			{
+				if (_isEnterArea == true)
+				{
+					if (_curMapId == MENGZHONG_MAP_ID || _curMapId == HOLY_FOREST_MAP)
+					{
+						ToolTip::getInstance()->push(GET_STR(7161)); // 提示：您进入了危险区
+						_isEnterArea = false;
+					}
+					else if(_curMapId == SBK_MAP_CRC_ID || _curMapId == CANGYUEDAO_MAP)
+					{
+						ToolTip::getInstance()->push(GET_STR(7162)); // 提示：您进入了PK区
+						_isEnterArea = false;
+					}
+				}
+			}
+			else
+			{
+				CC_ASSERT(nFlag == index);
+				if (_isEnterArea == false)
+				{
+					if (nType == MapArea::AT_Safe)
+					{
+						ToolTip::getInstance()->push(GET_STR(7160)); // 提示：您进入了安全区
+						if((player->getAttribute(RA_RideState) != 0/* && player->getUseRideLv() < 60*/) && (0==RoleManager::getInstance()->getLocalPlayer()->getMaPaiLevel()))
+						{
+							RoleManager::getInstance()->sendUnRideMsg();
+						}
+						_isEnterArea = true;
+					}
+					else if(nType == MapArea::AT_Risk)
+					{
+						ToolTip::getInstance()->push(GET_STR(7161)); // 提示：您进入了危险区
+						_isEnterArea = true;
+					}
+					else if(nType == MapArea::AT_NoPunish)
+					{
+						ToolTip::getInstance()->push(GET_STR(7162)); // 提示：您进入了PK区
+						if((player->getAttribute(RA_RideState) != 0/* && player->getUseRideLv() < 60*/) && (0==RoleManager::getInstance()->getLocalPlayer()->getMaPaiLevel()))
+						{
+							RoleManager::getInstance()->sendUnRideMsg();
+						}
+						_isEnterArea = true;
+					}
+				}
+				_enterAreaMap[index] = false;
+			}
+		}
+	}
+}
+
+void MapManager::enterMapRemind( unsigned int mapid )
+{
+	if (mapid == 0 || mapid == -1)
+	{
+		return;
+	}
+	std::string mapName("");
+	getMapNameFrom_mapId(mapid,mapName);
+	if (mapName.empty())
+	{
+		return;
+	}
+	ChangeMapRemindUI::remindUI_init(mapName);
+	//std::string mapName = getMapName(mapid);
+}
+
+int MapManager::getEnterAreaFlag()
+{
+	for (std::map<int, bool>::iterator enter_iter = _enterAreaMap.begin(); enter_iter != _enterAreaMap.end(); ++enter_iter)
+	{
+		if (enter_iter->second == true)
+		{
+			return enter_iter->first;
+		}
+	}
+	return 0;
+}
+
+void MapManager::getMapNameFrom_mapId( unsigned int dwMapID,std::string &mapName )
+{
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Mapinfo");
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		int index = table->get_index("id");
+		int mapID = table->get_integer32(index);
+		if (dwMapID == mapID)
+		{
+			index = table->get_index("mapname");
+			mapName = table->get_text(index);
+			break;
+		}
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+}
+
+void MapManager::getWorldMapScale( unsigned int mapId, const CCRect& rc, float& w, float& h )
+{
+	CCSize mapSize = getMapSizeFrom_mapId(mapId, mapSize);
+	w = rc.size.width / mapSize.width;
+	h = rc.size.height / mapSize.height;
+}
+
+CCSize& MapManager::getMapSizeFrom_mapId( unsigned int dwMapID, CCSize& size )
+{
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Mapinfo");
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		int index = table->get_index("id");
+		int mapID = table->get_integer32(index);
+		if (dwMapID == mapID)
+		{
+			index = table->get_index("SceneWidth");
+			size.width = table->get_integer32(index) * 48;
+			index = table->get_index("SceneHeight");
+			size.height = table->get_integer32(index) * 48;
+			break;
+		}
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	return size;
+}
+
+void MapManager::createNpc()
+{
+	if (!_map)
+		return;
+
+	CCTMXObjectGroup *area = _map->objectGroupNamed("unit");
+	if(area != NULL)
+	{
+		CCArray *objArray = area->getObjects();
+		if(objArray != NULL && objArray->count() > 0)
+		{
+			CCObject* pObj = NULL;
+			CCARRAY_FOREACH(objArray, pObj)
+			{
+				CCDictionary* pDict = (CCDictionary*)pObj;
+				int objId = 0;
+				int num = 0;
+				std::string name = pDict->valueForKey("name")->getCString();
+				sscanf(name.c_str(), "%d&#%d", &objId, &num);
+				if(objId > 0 && objId != 1840101)
+				{
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	if (objId == 1116004)
+		continue;
+#endif
+					//RoleManager::CreatureInfo creatureInfo = RoleManager::getInstance()->getCreatureInfo(objId);
+					stCreateProto const* proto = RoleManager::getInstance()->getCreatureProto(objId);
+					if (proto && proto->strName.c_str() > 0 && proto->nType == 3)
+					{
+						int x = pDict->valueForKey("x")->intValue();
+						int y = pDict->valueForKey("y")->intValue();
+						//int w = pDict->valueForKey("width")->intValue();
+						//int h = pDict->valueForKey("height")->intValue();
+
+						//int nRepeat  =20;
+						Role* role = new NPC();
+						//!在此加入typeid
+						role->setTypeID(objId);
+						role->setVisiable(true);
+						role->initFsm();
+						role->addToMap();
+						role->initBloodUi();
+						role->setId(RoleManager::getInstance()->getNpcId());
+						role->setAttribute(RA_HP, 250);
+						role->setAttribute(RA_MaxHP, 250);
+						role->setAttribute(RA_MP, 250);
+						role->setAttribute(RA_MaxMP, 250);
+						role->setLevel(100);
+						role->loadAnimate(objId);
+						role->setAsNewMapRole(true);
+						role->setPosition(ccp(x , y + 48 / 2));
+						//role->setDirection(ccp(roleState->CreatureData.fFaceTo[0], roleState->CreatureData.fFaceTo[2]));
+						RoleManager::getInstance()->AddNpc(role);
+
+					}
+				}
+			}
+		}
+	}
+}
+
+void MapManager::showSbkTransmitFailMessage(float dt)
+{
+	if (m_lastTime == 0.0 || m_lastTime > 2.0f)
+	{
+		std::string messege;
+		switch(m_sbkTransLimitMsgId)
+		{
+		case SBK_NotAttTime:
+			messege = GET_STR(2409); //非攻城时间，不可进入沙巴克城堡
+			break;
+		case SBK_NotToTime:
+			messege = GET_STR(2410); //沙巴克城堡将于21点10分开启
+			break;
+		case SBK_OverTime:
+			messege = GET_STR(2411); //沙巴克城堡已关闭
+			break;
+		default:
+			break;
+		}
+		if (!messege.empty())
+		{
+			ToolTip::getInstance()->push(messege.c_str());
+		}else
+		{
+			MessageBoxUi::createWithOneBtn("title","messege is null","close");
+		}
+		m_lastTime = 0;
+	}
+	m_lastTime += dt;
+}
+
+bool MapManager::isSbkTransmitLimited()
+{
+	LocalPlayer* localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if (localPlayer == NULL)
+		return false;
+	tagDWORDTime nowTime = ServerTime::getInstance()->cal_current_server_dword_time();
+	int curWeek = WhichWeekday(nowTime);//得到今天是星期几，周日是0，周六是六
+	int nowDay = 1<<curWeek;
+	//INT beforeAttTime = 21 * 60 + 10;
+	//INT afterAttTime = 21 * 60 + 40;
+	DayActivityData* actSBK = ActivityMgr::getInstance()->getDataById(ACT_FIGHTCITY_INDEX);
+	if (actSBK == NULL)
+		return false;
+	int tempDay = nowDay & actSBK->weekday;
+	bool isDay = false;
+	if (tempDay != 0)
+		isDay = true;
+	//int nowTimeInWeek = WhichWeekday(nowTime);
+	if (!ActivityMgr::getInstance()->isRemoveFirstAttackCityLimit() || (isDay == false))
+	{
+		m_sbkTransLimitMsgId = SBK_NotAttTime;
+		return true;
+	}
+	else if (isDay)
+	{
+		//皇宫关闭
+		if (ActivityMgr::getInstance()->isSbkOverTime())
+		{
+			m_sbkTransLimitMsgId = SBK_OverTime;
+			return true;
+		}
+		//21:00-21:10
+		else if (ActivityMgr::getInstance()->is_between_two_Index(ESTT_5,ESTT_9))
+		{
+			m_sbkTransLimitMsgId = SBK_NotToTime;
+			return true;
+		}
+		else if(!ActivityMgr::getInstance()->isSbkStartTime())
+		{
+			if (localPlayer->getGuildID() != GuildMgr::getInstance()->getSBKGuildId())
+			{
+				m_sbkTransLimitMsgId = SBK_NotToTime;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+unsigned int MapManager::onServerSynchronizeLine( s_net_cmd *cmd )
+{
+	NET_SIS_Synchronize_Line* msg = (NET_SIS_Synchronize_Line*)cmd;
+	if (msg == NULL)
+		return 0;
+	if (msg->num <= 0)
+		return 0;
+	m_pLastUpdateLineTime = ServerTime::getInstance()->cal_current_server_dword_time();
+	_maxRoleNum = msg->maxRoleNUm;
+	m_pLineMap.clear();
+	for(int i=0; i<msg->num; ++i)
+	{
+		m_pLineMap.insert(make_pair(msg->data[i].index,msg->data[i].roleNum));
+	}
+	LineSelectUiLayer* layer = (LineSelectUiLayer*)getUiNodeByTag<LineSelectUiLayer>(WCT_LineSelectUi);
+	if (layer)
+	{
+		layer->updateUi();
+	}
+	return 0;
+}
+
+unsigned int MapManager::onServerLinestate( s_net_cmd *cmd )
+{
+	NET_SIS_Line_state* msg = (NET_SIS_Line_state*)cmd;
+	if (msg)
+	{
+		_goodState = msg->goodState;
+		_busyState = msg->busyState;
+	}
+	return 0;
+}
+
+LineStateMap& MapManager::getLineStateMap()
+{
+	return m_pLineMap;
+}
+
+unsigned int MapManager::onServerSelectLine( s_net_cmd *cmd )
+{
+	NET_SIS_select_line* msg = (NET_SIS_select_line*)cmd;
+	if(msg)
+	{
+		switch (msg->dwError)
+		{
+		case E_Instance_select_line_already:
+			ToolTip::getInstance()->push(GET_STR(9040));
+			break;
+		case E_Instance_select_line_role_full:
+			ToolTip::getInstance()->push(GET_STR(9041));
+			break;
+		case E_Instance_select_line_close:
+			ToolTip::getInstance()->push(GET_STR(9042));
+			break;
+		case E_Instance_select_line_map_type_error:
+			ToolTip::getInstance()->push(GET_STR(9043));
+			break;
+		case E_Instance_select_line_dead:
+			ToolTip::getInstance()->push(GET_STR(9044));
+			break;
+		case E_Instance_select_line_shuangxiu:
+			ToolTip::getInstance()->push(GET_STR(9045));
+			break;
+		case E_Instance_select_line_stall:
+			ToolTip::getInstance()->push(GET_STR(9046));
+			break;
+		case E_Instance_select_line_exchange:
+			ToolTip::getInstance()->push(GET_STR(9047));
+			break;
+		case E_Instance_select_line_other_map:
+			ToolTip::getInstance()->push(GET_STR(9048));
+			break;
+		}
+	}
+	return 0;
+}
+
+void MapManager::sendSynchronizeLine()
+{
+	DWORD nowTime = ServerTime::getInstance()->cal_current_server_dword_time();
+	if (CalcTimeDiff(nowTime,m_pLastUpdateLineTime) < 120)
+	{
+		return;
+	}
+	NET_SIC_Synchronize_Line cmd;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+}
+
+void MapManager::resetData()
+{
+	//_roleSelectAcNode = NULL;
+	//CC_SAFE_RELEASE_NULL(_roleSelectAcNode);
+	//_hpEffectLabelCache.clear();
+	clearLabelCache();
+
+	_usedLabel.clear();
+}
+
+void MapManager::loadRendui()
+{
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	std::string mainuiList = uiDir + std::string("ccbResources/rendui.plist");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(mainuiList.c_str());
+}
+
+void MapManager::initBigMapName()
+{
+	mvecBigMapNames.clear();
+
+	mvecBigMapNames.push_back("m2");
+	mvecBigMapNames.push_back("m9");
+	mvecBigMapNames.push_back("m23");
+	mvecBigMapNames.push_back("m24");
+	mvecBigMapNames.push_back("m25");
+	mvecBigMapNames.push_back("m41");
+	mvecBigMapNames.push_back("d101");
+	mvecBigMapNames.push_back("f1251");
+	mvecBigMapNames.push_back("f1252");
+	mvecBigMapNames.push_back("f1301");
+	mvecBigMapNames.push_back("f1302");
+	mvecBigMapNames.push_back("g601");
+	mvecBigMapNames.push_back("g602");
+	mvecBigMapNames.push_back("g603");
+	mvecBigMapNames.push_back("g604");
+}
+
+void MapManager::checkIsBigMap( std::string const& map_name )
+{
+	m_bIsBigMap = std::find(mvecBigMapNames.begin(),mvecBigMapNames.end(),map_name) != mvecBigMapNames.end();
+}
+
+void MapManager::bgBlockLoaded( CCObject* tex,unsigned int mapID,unsigned short block_index )
+{
+	CCTexture2D* pTex =  dynamic_cast<CCTexture2D*>(tex);
+	CC_ASSERT(pTex);
+	
+	if (_curMapId == mapID)
+	{
+		auto iter = m_BGVisibleBlockMap.find(block_index);
+		if (iter != m_BGVisibleBlockMap.end())
+		{
+			CCSprite* sp = iter->second->m_pSprite;
+			sp->initWithTexture(pTex);
+			sp->setAnchorPoint(ccp(0,0));
+		}
+	}
+	else
+		CCLog("bg block sprite texture async loaded in delay");
+
+	CCTextureCache::sharedTextureCache()->removeTexture(pTex);
+}
+
+void MapManager::initMapData()
+{
+	std::string mapDir = CFGReader::instance()->get_profile_string("Art", "Scene", "");
+	std::string tmpCopy;
+	wchar_t vStr[256]={0};
+
+	SQL_START_WITH_DATA(TiledMapData,stMapTileData,data);
+	SQL_EXTRA_STRING(data.mapName ,MapName);
+	SQL_EXTRA_BOOL(data.canRide ,raid);
+	SQL_EXTRA_BOOL(data.forceShowOther ,showother);
+	SQL_EXTRA_STRING(data.mapBGM ,BGM);
+	SQL_EXTRA_INT(data.sceneType ,SceneType);
+	SQL_EXTRA_BOOL(data.blockJPG ,blockmap);
+
+	SQL_EXTRA_STRING(tmpCopy ,CopyFileName);
+	data.copyName = mapDir + tmpCopy + ".tmx";
+	SQL_EXTRA_STRING(tmpCopy ,MapFileName);
+	data.terrain = mapDir + tmpCopy + ".tmx";
+	
+	memset(vStr, 0, sizeof(vStr));
+	Utf8ToUtf16(tmpCopy.c_str(), vStr,256,0);
+	unsigned int id = crc32(vStr);
+
+	SQL_EXTRA_INT(data.mapIsDangerous,IsDangerous);
+	SQL_EXTRA_BOOL(data.mapCanRide,isMapRaid);
+	mapDataCache.insert(std::make_pair(id,data));
+	SQL_END;
+}
+
+MapManager::stMapTileData const* MapManager::getMapData( unsigned int mapID ) const
+{
+	auto iter = mapDataCache.find(mapID);
+	if (iter != mapDataCache.end())
+	{
+		return &iter->second;
+	}
+
+	return nullptr;
+}
+
+bool MapManager::curMapIsBlockMap() const
+{
+	stMapTileData const* pData = getMapData(_curMapId);
+	CC_ASSERT(pData);
+
+	return pData->blockJPG;
+}
+
+unsigned int MapManager::onServerRoleMapTrigger( s_net_cmd *cmd )
+{
+	NET_SIS_role_map_trigger* msg = (NET_SIS_role_map_trigger*)cmd;
+	if (msg)
+	{
+		World::getInstance()->setTransmitTypeIsTrigger(false);
+		SetISetEnabled(true);
+		switch (msg->dwError)
+		{
+		case E_Instance_Not_Sbk_Guild:
+			ToolTip::getInstance()->push(GET_STR(2410));
+			break;
+		case E_Instance_Sbk_Door_Not_Open:
+			ToolTip::getInstance()->push(GET_STR(2410));
+			break;
+		case E_Instance_Sbk_Door_Is_Close:
+			ToolTip::getInstance()->push(GET_STR(2411));
+			break;
+		}
+	}
+	return 0;
+}
+
+void MapManager::sameMapRunPath()
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if (player == NULL)
+		return;
+
+	if (player->getTargetMapId() == INVALID)
+		return;
+
+	if(player->getIsPath() && getisEnabled())
+	{
+		unsigned int roleId = INVALID;
+		AutoActionMgr::getInstance()->getCurrentMonsterID(roleId);
+		if (roleId == INVALID)
+			return;
+		stCreateProto const* proto = RoleManager::getInstance()->getCreatureProto(roleId);
+		CC_ASSERT(proto);
+		if (proto == NULL)
+			return;
+		
+		player->runPathTo(ccp(proto->nPosX,proto->nPosY), _curMapId);
+	}
+}
+
+c_sparse_graph* MapManager::getSparseGraph() const
+{
+	return /*_graph*/m_app_delegate->m_sparse_graph;
+}
+
+void MapManager::update_pathfinder_state()
+{
+	//竞技场要取消寻路
+	if (2887771852==_curMapId)
+	{
+		resetCrossMapping();
+	}
+
+	if (path_to_trigger_map_id ==  _curMapId)
+	{
+		resetCrossMapping();
+		set_path_to_trigger_map_id(INVALID);
+	}
+	//!跨地图寻路开始;
+	if(_crossMapping)
+	{
+		if(!mapCross.empty())
+		{
+			mapCross.erase(mapCross.begin());
+		}
+
+		LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+		if( lp != NULL )
+		{
+			if(lp->getIsPath() && getisEnabled())
+			{
+				//unsigned int temp = lp->getTargetMapId();
+				lp->runPathTo(ccp(_targetPos.x(), _targetPos.y()), lp->getTargetMapId());
+			}
+		}
+
+		_crossMapping = true;	//特例， 设置为true，因为寻路算法在最后一张图的时候会自动设置为false，这样是不对的
+	}
+}
+
+void MapManager::setup_trigger()
+{
+	_touchHandle.init();
+	//读取触发器;
+	_triggerMap.clear();
+
+	CCTMXObjectGroup *trigger = _map->objectGroupNamed("trigger");
+	if(trigger)
+	{
+		int objectName = 1;
+		CCString *str = CCString::createWithFormat("%d", objectName);
+		CCDictionary *director = trigger->objectNamed(str->getCString());
+		while(director != NULL)
+		{
+			int x = director->valueForKey("x")->intValue();
+			int y = director->valueForKey("y")->intValue();
+			int w = director->valueForKey("width")->intValue();
+			int h = director->valueForKey("height")->intValue();
+			int type = director->valueForKey("type")->intValue();
+			int targetId = director->valueForKey("QuestTag")->intValue();
+			int questID = director->valueForKey("QuestID")->intValue();
+			std::string mapFileName = director->valueForKey("MapName")->getCString();
+			std::string mapName = getMapName(mapFileName);
+			unsigned int mapId = getMapIdFromName(mapFileName);
+			mapFileName = mapFileName.substr(1);
+
+			Trigger triggerRect;
+			triggerRect.rect = CCRect(x, y, w, h);
+			triggerRect.mapName = atoi(mapFileName.c_str());
+			triggerRect.nameStr = mapName;
+			triggerRect.type = type;
+			triggerRect.targetID = targetId;
+			triggerRect.questID = questID;
+			triggerRect.mapID = mapId;
+			_triggerMap[objectName] = triggerRect;
+
+			//在触发器上添加传送阵;
+			if(type != 0){
+				addTransfer(ccp(x + w / 2, y + h / 2), mapName);
+			}
+			UiManagerEffect::getInstance()->runCurrentEffect();
+
+			objectName ++;
+			str = CCString::createWithFormat("%d", objectName);
+			director = trigger->objectNamed(str->getCString());
+		}
+	}
+}
+
+void MapManager::update_map_graph_brush()
+{
+	CCTMXLayer *alphaLayer = _map->layerNamed("alpha");
+	CCTMXLayer *blockLayer = _map->layerNamed("block");
+
+	for (int i = 0; i < _map->getMapSize().width; ++i) {
+		for (int j = 0; j < _map->getMapSize().height; ++j) {
+			_alpahData[j * (int)_map->getMapSize().width + i] = alphaLayer->tileGIDAt(ccp(i, _map->getMapSize().height - j - 1));
+			int r = blockLayer->tileGIDAt(ccp(i, j));
+			e_brush_type brushType = r != 0 ? BT_OBSTACLE : BT_NORMAL;
+			unsigned int nodeIdx = (_map->getMapSize().height - j - 1) * MAX_MAP_TILE_X + i;
+			getSparseGraph()->brushWithNodeInfo(nodeIdx,brushType);
+			//_graph->brush(i, _map->getMapSize().height - j -1 , brushType);
+		}
+	}
+}
+
+void MapManager::update_tile_info()
+{
+	//[bing] 初始化区域地块信息
+	int nIdx = 0;
+	/*if (_blockCount == 0)*/ {
+		CCSize mapSize = _map->getContentSize();
+		nBlockNum_X = (int)mapSize.width % WORLD_MAP_TILE_SIZE == 0 ? mapSize.width / WORLD_MAP_TILE_SIZE : mapSize.width / WORLD_MAP_TILE_SIZE + 1;
+		nBlockNum_Y = (int)mapSize.height % WORLD_MAP_TILE_SIZE == 0 ? mapSize.height / WORLD_MAP_TILE_SIZE : mapSize.height / WORLD_MAP_TILE_SIZE + 1;
+		m_pBlockArray = new BGBlockInfo[ nBlockNum_X * nBlockNum_Y ];
+		for(int i = nBlockNum_Y - 1; i >= 0; i--)
+		{
+			for(int j = 0; j < nBlockNum_X; ++j)
+			{
+				m_pBlockArray[i * nBlockNum_X + j].m_byIdx = ++nIdx;
+				//++_blockCount;
+			}
+		}
+	}
+	/*
+	// Add one blockSprite every frame util all blockSprites of the map has been created
+	int curLoadedCount = _blockSpriteArray->count();
+	int unLoadedCount = _blockCount - curLoadedCount;
+	int const nStep = 32;
+	int eachFrameLoadedCount = unLoadedCount > nStep ? nStep : unLoadedCount;
+
+	if (curLoadedCount != _blockCount) {
+	for (int i = curLoadedCount; i < curLoadedCount + eachFrameLoadedCount; ++i) {
+
+	std::string strTmp;
+	safe_sprintf(strTmp,"%s_%02d.jpg", curMapFilePath.c_str(), i+1);
+	CCSprite* pBGBlockSprite = CCSprite::create();
+
+	CCTexture2DPixelFormat defaultTextrureFormat = CCTexture2D::defaultAlphaPixelFormat();
+	CCTexture2D::setDefaultAlphaPixelFormat(kCCTexture2DPixelFormat_RGB565);
+	pBGBlockSprite->initWithFile(strTmp.c_str());
+	CCTexture2D::setDefaultAlphaPixelFormat(defaultTextrureFormat);
+
+	_blockSpriteArray->addObject(pBGBlockSprite);
+
+	CCTextureCache::sharedTextureCache()->removeTexture(pBGBlockSprite->getTexture());
+	}
+
+	outCurStep = 15;
+	curSetp = 15;
+	return false;
+	}
+	*/
+
+	//[bing] 在这里计算一下实际屏幕需要几个地块
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	m_nBlockWidth = (int)winSize.width + WORLD_MAP_TILE_SIZE;
+	m_nBlockHeight = (int)winSize.height + WORLD_MAP_TILE_SIZE;
+
+	m_nVisBlockX = m_nBlockWidth % WORLD_MAP_TILE_SIZE == 0 ? m_nBlockWidth / WORLD_MAP_TILE_SIZE : m_nBlockWidth / WORLD_MAP_TILE_SIZE + 1;
+	m_nVisBlockY = m_nBlockHeight % WORLD_MAP_TILE_SIZE == 0 ? m_nBlockHeight / WORLD_MAP_TILE_SIZE : m_nBlockHeight / WORLD_MAP_TILE_SIZE + 1;
+
+	m_fSaveX = -1;
+	m_fSaveY = -1;
+}
+
+void MapManager::init_map_node()
+{
+	_map = f_game_tile_map::create(_mapName.c_str());
+	World::getInstance()->getScene(true)->addChild(_map, (int)WZ_MAP);
+	World::getInstance()->setAttached(true);
+	//_map->retain();
+
+	CCSize mapSize = _map->getContentSize();
+
+	int mapNameRightSide = _copyName.find(".");
+	curMapFilePath = _copyName.substr(0,mapNameRightSide);
+	std::string JPGFilePath = curMapFilePath.substr(curMapFilePath.find_last_of("/") + 1,curMapFilePath.size() - curMapFilePath.find_last_of("/"));
+	curMapFilePath += "/";
+	curMapFilePath += JPGFilePath;
+
+	float worldMapScaleW = WORLD_MAP_CONTENT_W / mapSize.width;
+	float worldMapScaleH = WORLD_MAP_CONTENT_H / mapSize.height;
+	float scale = worldMapScaleH > worldMapScaleW ? worldMapScaleH : worldMapScaleW;
+	_worldMapScale = scale > WORLD_MAP_SCALE ? scale : WORLD_MAP_SCALE;
+
+	_map->layerNamed("block")->setVisible(false);
+	_map->layerNamed("alpha")->setVisible(false);
+
+	GroundItemManager::getInstance()->notify_new_map_created(true);
+
+}
+
+void MapManager::enter_cur_map_remind()
+{
+	enterMapRemind(getCurMapId());
+}
+
+bool MapManager::test_pathfind( CCPoint const& sp,CCPoint const& tp ) const
+{
+	pathNode src(sp);
+	pathNode target(tp);
+
+	std::vector<pathNode> out;
+	if (getSparseGraph())
+		getSparseGraph()->go(src, target,out);
+
+	return !out.empty();
+}
+
+void MapManager::escape_from_world()
+{
+	destroy(); 
+	closeMap();
+}
+
+void MapManager::check_map_trigger( float dt)
+{
+	if (CrossSceneUI::getInstance()->isInCross())
+	{
+		CCDirector* dir= CCDirector::sharedDirector();
+		dir->getScheduler()->scheduleSelector(SEL_SCHEDULE(&MapManager::check_map_trigger_impl), this, 0.5f, false);
+		return;
+	}
+
+	check_map_trigger_impl(dt);
+}
+
+void MapManager::on_pathfind_end()
+{
+	check_map_trigger();
+}
+
+void MapManager::check_map_trigger_impl( float dt )
+{
+	CCDirector* dir= CCDirector::sharedDirector();
+	dir->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&MapManager::check_map_trigger_impl), this);
+	// 检测触发器
+	CCPoint lpPos = RoleManager::getInstance()->getLocalPlayer()->getPosition();
+	Role *localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if (localPlayer->isDead() == false && getisEnabled())
+	{
+		for(TriggerMap::iterator iter = _triggerMap.begin(); iter != _triggerMap.end(); ++ iter)
+		{
+			Trigger &trigger = iter->second;
+			if(trigger.rect.containsPoint(lpPos))
+			{
+				if (SBK_TRIGGERID == iter->first && _curMapId == SBK_MAP_CRC_ID)
+				{
+					if (isSbkTransmitLimited())
+					{
+						showSbkTransmitFailMessage(0);
+						//CCLog("\xE8\xBF\x9B\xE5\x85\xA5\xE6\xB2\x99\xE5\xB7\xB4\xE5\x85\x8B\xE5\x9F\x8E");
+						break;
+					}
+				}
+				if (SBK_MAP_CRC_ID == trigger.mapID)
+				{
+					if (ActivityMgr::getInstance()->can_enter_sbk_result() == false)
+					{
+						break;
+					}
+				}
+				//3为沙城皇宫传送阵
+				if( 1 == trigger.type || 3 == trigger.type)
+				{
+					RoleHeadUi* roleui = World::getInstance()->getRoleHeadUi();
+					if(NULL != roleui)
+						roleui->setShoeEnabled(false);
+
+					SetISetEnabled(false);
+				}
+				//ZHJL:先屏蔽非传送点的触发器，乱加，不用了也不屏蔽
+				//else
+				//{
+				//	RoleHeadUi* roleui = World::getInstance()->getRoleHeadUi();
+				//	if(NULL != roleui)
+				//		roleui->setShoeEnabled(true);
+				//}
+
+				//_triggerTimer = 0.f;
+
+
+				//localPlayer->stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+				RoleManager::getInstance()->getLocalPlayer()->sendRunMsg(localPlayer->getPosition(), localPlayer->getPosition());
+
+
+				NET_SIC_role_map_trigger msg;
+				msg.dwMapID = _curMapId;
+				msg.dwTriggerID = iter->first;
+				TCP_CLIENT->send_net_cmd(&msg, NP_CRITICAL, false);
+				World::getInstance()->setTransmitTypeIsTrigger(true);
+
+				CCLOG("[[[[[[[[[[[[[[[send on map trigger[[[[[[[[[[[[[[[");
+
+				break;
+			}
+		}
+	}
+}
+
+
+// unsigned int MapManager::get_map_tigger_exit_data( int map_idx,std::string const& exit_key_name )
+// {
+// 	CCTMXTiledMap *map = CCTMXTiledMap::create(CCString::createWithFormat("Art/Scene/m%d.tmx",map_idx)->getCString());
+// 	CCTMXObjectGroup *trigger = map->objectGroupNamed("waypoint");
+// 	if(trigger)
+// 	{
+// 		CCDictionary *director = trigger->objectNamed(exit_key_name.c_str());
+// 		if (director)
+// 		{
+// 			int x = director->valueForKey("x")->intValue();
+// 			int y = director->valueForKey("y")->intValue();
+// 			int w = director->valueForKey("width")->intValue();
+// 			int h = director->valueForKey("height")->intValue();
+// 
+// 			return true;
+// 		}
+// 	}
+// 
+// 	return INVALID;
+// }
+
+/*void BGCacheObject::BGTextureCallBack( CCObject* pTexture )
+{
+	//[bing] 如果正在跨图 不要处理直接release吧
+	if(!CrossSceneUI::getInstance()->isInCross() && _MapMgr)
+		_MapMgr->FillImgFromCache((CCTexture2D*)pTexture, this);
+
+	CCTextureCache::sharedTextureCache()->removeTexture((CCTexture2D*)pTexture);
+	autorelease();
+}*/

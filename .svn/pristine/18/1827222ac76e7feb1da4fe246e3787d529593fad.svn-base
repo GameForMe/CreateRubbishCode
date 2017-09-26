@@ -1,0 +1,813 @@
+#include "MailRewardUi.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "CfgReader.h"
+#include "UiManager.h"
+#include "MailRewardMgr.h"
+#include "WorldPacket.h"
+#include "CommonMsgDefine.h"
+#include "ReceiveRewardUi.h"
+#include "TCPClient.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "ItemNode.h"
+#include "UiResourceMgr.h"
+#include "PackageManager.h"
+#include "StringMgr.h"
+#include "ToolTip.h"
+#include "Helper.h"
+//////////////////////////////////////////////////////////////////////////
+
+MailRewardUi::MailRewardUi()
+{
+
+}
+
+MailRewardUi::~MailRewardUi()
+{
+
+}
+
+CCNode* MailRewardUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["MailRewardUiLayer"] = UiLayerLoader<MailRewardUiLayer>::loader();
+	CCNode* pNode = readUiFromCCBI("mailui", nodeLoaders, _loadSpriteSheet);
+
+	return pNode;
+}
+void MailRewardUi::closeUI()
+{
+}
+void MailRewardUi::updateMailData()
+{
+	MailRewardUiLayer *ui = getUiNodeByTag<MailRewardUiLayer>(WCT_MAILREWARDUI);
+	if(ui != NULL)
+	{
+		ui->updateMailItem();
+	}
+}
+
+void MailRewardUi::updateMailListData()
+{
+	MailRewardUiLayer *ui = getUiNodeByTag<MailRewardUiLayer>(WCT_MAILREWARDUI);
+	if(ui != NULL)
+	{
+		ui->updateMailListItem();
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler MailRewardUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler MailRewardUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", MailRewardUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed1", MailRewardUiLayer::onCloseBtnPressed1);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onReceiveBtnPressed", MailRewardUiLayer::onReceiveBtnPressed);
+	return NULL;
+}
+
+void MailRewardUiLayer::onCloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_MAILREWARDUI);
+}
+
+void MailRewardUiLayer::onReceiveBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	int Index =	MailRewardMgr::getInstance()->getCheckedMailIndex();
+	//MailRewardMgr::getInstance()->setCurrentReceiveIndex(Index);
+	tagMailReward const& checkedMailReward = MailRewardMgr::getInstance()->getMailDataListByIndex(Index - 1);
+	if (checkedMailReward.n64MailID <= 0)
+	{
+		return;
+	}
+	int nItemCount = 0;
+	for ( int i = 0 ; i < 5 ; ++i )
+	{
+		if ( checkedMailReward.RewardItem[i].dwItemID != 0 )
+		{
+			nItemCount++;
+		}
+	}
+
+	if (nItemCount > 0)
+	{
+		int bagCount = PackageManager::getInstance()->getBlankCount();//获取玩家背包空格数
+		if (bagCount < nItemCount)
+		{
+			ToolTip::getInstance()->push(GET_STR(161));
+			return;
+		}
+	}
+
+	for (int i = 0;i < 5;i++)
+	{
+		int totalnumber = 1;//每种奖励的总数
+		for(int j = 0; j < 5;++j)
+		{
+			if(i != j)
+			{
+				if(checkedMailReward.RewardItem[i].dwItemID == checkedMailReward.RewardItem[j].dwItemID)
+				{
+					++totalnumber;
+				}
+			}
+		}
+		if(totalnumber == 1)
+		{
+			ReceiveRewardUiMgr::GetInstance()->setItemData(checkedMailReward.RewardItem[i].dwItemID,checkedMailReward.RewardItem[i].n16Count);
+		}
+		else
+		{
+			ReceiveRewardUiMgr::GetInstance()->setItemData(checkedMailReward.RewardItem[i].dwItemID,totalnumber);
+		}
+	}
+	WorldPacket SIC_Msg(NET_C2G_REQUEST_GET_MAIL_REWARD);		//组装消息头
+	SIC_Msg << checkedMailReward.n64MailID;//发送信息内容
+	mailDefinite->setVisible(false);
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)SIC_Msg.contents(), NP_INSIGNIFICANT, false);		//发送
+}
+
+float const g_gaps = 10.0f;
+void MailRewardUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	mailMain = dynamic_cast<CCSprite*>(getChildByTag(MAILMAIN));//邮件总界面
+	mailDefinite = dynamic_cast<CCSprite*>(getChildByTag(MAILDEFINITE));//具体邮件界面
+	mailDown = mailDefinite->getChildByTag(1);
+	mailDefinite->setVisible(false);
+	mailTitle = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(mailDefinite->getChildByTag(MAILTITLE)));//邮件标题
+	mailTitle_2 =Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(mailDefinite->getChildByTag(MAILTITLE_2)));
+	mailFront =Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(mailDefinite->getChildByTag(MAILFRONT)));//邮件开头人名
+	mailBody = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(mailDefinite->getChildByTag(MAILBODY)));//邮件正文
+    mailBody->setDimensions(300.0f,0.0f);
+	mailInscribe =Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(mailDefinite->getChildByTag(MAILINSCRIBE)));//邮件落款
+
+	mailitemPic_1 = dynamic_cast<CCSprite*>(mailDown->getChildByTag(ITEMPIC_1));//第一个位置图片
+	mailItemFont_1 =Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(mailDown->getChildByTag(ITEMFONT_1)));//第一个位置文字
+	mailItemFont_1->setTag(ITEMFONT_1);
+	mailitemPic_2 = dynamic_cast<CCSprite*>(mailDown->getChildByTag(ITEMPIC_2));//第二个位置图片
+	mailItemFont_2 =Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(mailDown->getChildByTag(ITEMFONT_2)));//第二个位置文字
+	mailItemFont_2->setTag(ITEMFONT_2);
+	mailitemPic_3 = dynamic_cast<CCSprite*>(mailDown->getChildByTag(ITEMPIC_3));//第三个位置图片
+	mailItemFont_3 =Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(mailDown->getChildByTag(ITEMFONT_3)));//第三个位置文字
+	mailItemFont_3->setTag(ITEMFONT_3);
+	mailitemPic_4 = dynamic_cast<CCSprite*>(mailDown->getChildByTag(ITEMPIC_4));//第四个位置图片
+	mailItemFont_4 =Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(mailDown->getChildByTag(ITEMFONT_4)));//第四个位置文字
+	mailItemFont_4->setTag(ITEMFONT_4);
+
+	mailitemPic_5 = dynamic_cast<CCSprite*>(mailDown->getChildByTag(ITEMPIC_5));//第五个位置图片
+	mailItemFont_5 =Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(mailDown->getChildByTag(ITEMFONT_5)));//第四个位置文字
+
+	mailRewardItem_1 = dynamic_cast<CCNode*>(mailDown->getChildByTag(MAILREWARD_1));//奖励物品1
+	mailRewardItem_2 = dynamic_cast<CCNode*>(mailDown->getChildByTag(MAILREWARD_2));//奖励物品2
+	mailRewardItem_3 = dynamic_cast<CCNode*>(mailDown->getChildByTag(MAILREWARD_3));//奖励物品3
+	mailRewardItem_4 = dynamic_cast<CCNode*>(mailDown->getChildByTag(MAILREWARD_4));//奖励物品4
+	mailRewardItem_5 = dynamic_cast<CCNode*>(mailDown->getChildByTag(MAILREWARD_5));//奖励物品5
+
+	mailReward_1 = ItemNode::create();//奖励物品1
+	mailReward_1->hideItemOpBtn();
+	mailReward_1->setClickable(true);
+	mailDown->addChild(mailReward_1,5);
+	mailRewardItem_1->setPosition(mailRewardItem_1->getPosition());
+	mailReward_2 = ItemNode::create();//奖励物品2
+	mailReward_2->hideItemOpBtn();
+	mailReward_2->setClickable(true);
+	mailDown->addChild(mailReward_2,5);
+	mailRewardItem_2->setPosition(mailRewardItem_2->getPosition());
+	mailReward_3 = ItemNode::create();//奖励物品3
+	mailReward_3->hideItemOpBtn();
+	mailReward_3->setClickable(true);
+	mailDown->addChild(mailReward_3,5);
+	mailRewardItem_3->setPosition(mailRewardItem_3->getPosition());
+	mailReward_4 = ItemNode::create();//奖励物品4
+	mailReward_4->hideItemOpBtn();
+	mailReward_4->setClickable(true);
+	mailDown->addChild(mailReward_4,5);
+	mailRewardItem_4->setPosition(mailRewardItem_4->getPosition());
+	mailReward_5 = ItemNode::create();//奖励物品5
+	mailReward_5->hideItemOpBtn();
+	mailReward_5->setClickable(true);
+	mailDown->addChild(mailReward_5,5);
+	mailRewardItem_5->setPosition(mailRewardItem_5->getPosition());
+	//LabelFT* mailExpFont =Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(mailDown->getChildByTag(11)));//文字
+	//mailExpFont->setTag(11);
+	MailRewardMgr::MailList const& tempList = MailRewardMgr::getInstance()->getMailDataList();
+	//邮件滚动条
+	_contentLayer = dynamic_cast<CCLayer*>(mailMain->getChildByTag(0));
+	_scrollView = CCScrollView::create(_contentLayer->getContentSize());
+	_contentLayer->addChild(_scrollView);
+	_container = CCNode::create();
+	//_container->retain();
+	if (tempList.size() % 3 == 0)
+	{
+		_container->setContentSize(CCSize(_contentLayer->getContentSize().width,_contentLayer->getContentSize().height * (tempList.size() / 3)));
+	} 
+	else
+	{
+		_container->setContentSize(CCSize(_contentLayer->getContentSize().width,_contentLayer->getContentSize().height * (tempList.size() / 3 + 1)));
+	}
+	
+	int tmpPostion = _contentLayer->getContentSize().height / 3 + g_gaps;
+	_scrollView->setContainer(_container);
+	_scrollView->setTouchEnabled(true);
+	_scrollView->setBounceable(true);
+	_scrollView->setContentSize(_container->getContentSize());
+	_scrollView->setDirection(kCCScrollViewDirectionVertical);
+	_scrollView->setContentOffset(_scrollView->minContainerOffset());
+	
+	if (tempList.size() > 0)
+	{
+		auto iter = tempList.begin();
+		int index = 0;
+		
+		clearMailRewardUiItems();
+
+		while(iter != tempList.end())
+		{
+			MailRewardUiItem* temp = new MailRewardUiItem;
+			_listMailRewardUiItems.push_back(temp);
+			_container->addChild(temp->getUiFrame()); 
+			if (tempList.size() % 3 == 0)
+			{
+				temp->getUiFrame()->setPositionY(-57 - (tmpPostion * index) + (_contentLayer->getContentSize().height) * (tempList.size() / 3));
+			} 
+ 			else
+			{
+				temp->getUiFrame()->setPositionY(-57 - (tmpPostion * index) + (_contentLayer->getContentSize().height) * (tempList.size() / 3 + 1));
+			}
+         			temp->getUiFrame()->setPositionX(temp->getUiFrame()->getContentSize().width / 2-3.0f);
+			temp->getUiFrame()->setData(MailRewardMgr::getInstance()->getMailDataListByIndex(index));
+ 			temp->getUiFrame()->setTag(index + 1);
+			++iter;
+			++index;
+		}
+	}
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void MailRewardUiLayer::clearData()
+{
+	mailTitle_2->setString(" ");//邮件标题
+	mailBody->setString(" ");//邮件正文
+	mailInscribe->setString(" ");//邮件落款
+	mailItemFont_1->setString(" ");
+	mailItemFont_2->setString(" ");
+	mailItemFont_3->setString(" ");
+	mailItemFont_4->setString(" ");
+	mailItemFont_5->setString(" ");
+	mailitemPic_1->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("mailui_kong"));
+	mailitemPic_2->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("mailui_kong"));
+	mailitemPic_3->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("mailui_kong"));
+	mailitemPic_4->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("mailui_kong"));
+	mailitemPic_5->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("mailui_kong"));
+
+	mailReward_1->setVisible(false);//奖励物品1
+	mailReward_2->setVisible(false);//奖励物品2
+	mailReward_3->setVisible(false);//奖励物品3
+	mailReward_4->setVisible(false);//奖励物品4
+	mailReward_5->setVisible(false);//奖励物品5
+	//std::string fileName = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "icon_block.png";
+	//mailReward_1->initWithFile(fileName.c_str());//奖励物品1
+	//mailReward_2->initWithFile(fileName.c_str());//奖励物品2
+	//mailReward_3->initWithFile(fileName.c_str());//奖励物品3
+	//mailReward_4->initWithFile(fileName.c_str());//奖励物品4
+	//mailReward_5->initWithFile(fileName.c_str());//奖励物品5
+}
+
+bool MailRewardUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	CCPoint framePoint = _contentLayer->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _contentLayer->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if (isTouchOnNodeContent(mailMain,pTouch) || isTouchOnNodeContent(mailDefinite,pTouch))
+	{
+ 		if(frameRect.containsPoint(framePoint))
+ 		{
+ 			MailItemList::iterator i ,iend = _listMailRewardUiItems.end();
+ 			for (i = _listMailRewardUiItems.begin(); i != iend; ++i)
+ 			{
+ 				(*i)->ccTouchBegan(pTouch,pEvent);
+ 			}
+ 		}
+		return true;
+	}
+	else
+	{
+		CLOSE_UI(WCT_MAILREWARDUI);
+		return false;
+	}
+	return true;
+}
+
+void MailRewardUiLayer::onEnter() 
+{
+	CCLayer::onEnter();
+}
+
+void MailRewardUiLayer::onExit()
+{
+	if (_container)
+		_container->removeAllChildrenWithCleanup(true);
+	clearMailRewardUiItems();
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+
+void MailRewardUiLayer::clearMailRewardUiItems()
+{
+	std::list<MailRewardUiItem*>::iterator iter = _listMailRewardUiItems.begin();
+	while (iter!=_listMailRewardUiItems.end())
+	{
+		MailRewardUiItem* p = *iter;
+		delete p;
+		++iter;
+	}
+	_listMailRewardUiItems.clear();
+}
+void MailRewardUiLayer::updateMailItem()
+{
+	clearData();//每次更新数据前要先清空数据
+	mailDefinite->setVisible(true);
+	mailDown->setVisible(true);
+	MailRewardMgr* mail_mgr = MailRewardMgr::getInstance();
+	bool empty = mail_mgr->is_mailbox_empty();
+	if (empty)
+	{
+		return;
+	}
+	
+	int index = MailRewardMgr::getInstance()->getCheckedMailIndex();
+	--index;
+	tagMailReward const& checkedMailReward =  MailRewardMgr::getInstance()->getMailDataListByIndex(index);//获取一个邮件
+	std::string tmp = Helper::convert_wstr_to_string<128>(checkedMailReward.Title);
+	mailTitle_2->setString(/*CCString::createWithFormat("%s",MailRewardMgr::getChangeWenziType(checkedMailReward.Title).c_str())->getCString()*/tmp.c_str());//邮件标题
+	//mailItemFont_1->setString(CCString::createWithFormat("%d",checkedMailReward.nExp)->getCString());//邮件开头人名
+	tmp = Helper::convert_wstr_to_string<256>(checkedMailReward.Content);
+	mailBody->setString(tmp.c_str()/*CCString::createWithFormat("%s",MailRewardMgr::getChangeWenziType(checkedMailReward.Content).c_str())->getCString()*/);//邮件正文
+	//mailInscribe = (CCLabelTTF*)(mailDefinite->getChildByTag(MAILINSCRIBE));;//邮件落款
+	int tmpIndex = 10;//第一个tag为10
+	bool isHasFujian = false;
+	//设置经验,金币等属性
+	for ( int i = 0 ; i < 5 ; ++i )
+	{
+		switch(i)
+		{
+		case 0:
+			{
+				if (checkedMailReward.nExp != 0)//经验
+				{
+					CCSprite* mailitemPic_1 = dynamic_cast<CCSprite*>(mailDown->getChildByTag(tmpIndex));//图片
+					LabelFT* mailExpFont_1 =dynamic_cast<LabelFT*>(mailDown->getChildByTag(tmpIndex + 1));//文字
+					tmpIndex += 2;//下一组图片和文字tag值
+					mailitemPic_1->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("mailui_exp"));
+					mailExpFont_1->setString(CCString::createWithFormat("%d",checkedMailReward.nExp)->getCString());
+					isHasFujian = true;
+				}
+			}
+			break;
+		case 1:
+			{
+				if (checkedMailReward.nDiamond != 0)//钻石
+				{
+					CCSprite* mailitemPic_2 = dynamic_cast<CCSprite*>(mailDown->getChildByTag(tmpIndex));//图片
+					LabelFT* mailExpFont_2 =dynamic_cast<LabelFT*>(mailDown->getChildByTag(tmpIndex + 1));//文字
+					tmpIndex += 2;//下一组图片和文字tag值
+					mailitemPic_2->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("mailui_zhuanshi"));
+					mailExpFont_2->setString(CCString::createWithFormat("%d",checkedMailReward.nDiamond)->getCString());
+					isHasFujian = true;
+				}
+			}
+			break;
+		case 2:
+			{
+				if (checkedMailReward.nYuanbao != 0)//元宝
+				{
+					CCSprite* mailitemPic_5 = dynamic_cast<CCSprite*>(mailDown->getChildByTag(tmpIndex));//图片
+					LabelFT* mailExpFont_5 =dynamic_cast<LabelFT*>(mailDown->getChildByTag(tmpIndex + 1));//文字
+					tmpIndex += 2;//下一组图片和文字tag值
+					mailitemPic_5->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("mailui_yuabnbao"));
+					mailExpFont_5->setString(CCString::createWithFormat("%d",checkedMailReward.nYuanbao)->getCString());
+					isHasFujian = true;
+				}
+			}
+			break;
+		case 3:
+			{
+				if (checkedMailReward.n64Silver != 0)//金币
+				{
+					CCSprite* mailitemPic_3 = dynamic_cast<CCSprite*>(mailDown->getChildByTag(tmpIndex));//图片
+					LabelFT* mailExpFont_3 =dynamic_cast<LabelFT*>(mailDown->getChildByTag(tmpIndex + 1));//文字
+					tmpIndex += 2;//下一组图片和文字tag值
+					mailitemPic_3->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("mailui_jinbi"));
+					mailExpFont_3->setString(CCString::createWithFormat("%lld",checkedMailReward.n64Silver)->getCString());
+					isHasFujian = true;
+				}
+			}
+			break;
+		case 4:
+			{
+				if (checkedMailReward.nTili != 0)//体力
+				{
+					CCSprite* mailitemPic_4 = dynamic_cast<CCSprite*>(mailDown->getChildByTag(tmpIndex));//图片
+					LabelFT* mailExpFont_4 = dynamic_cast<LabelFT*>(mailDown->getChildByTag(tmpIndex + 1));//文字
+					tmpIndex += 2;//下一组图片和文字tag值
+					mailitemPic_4->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("mailui_chicken"));
+					mailExpFont_4->setString(CCString::createWithFormat("%d",checkedMailReward.nTili)->getCString());
+					isHasFujian = true;
+				}
+			}
+			break;
+		}
+	}
+
+	for ( int i = 0 ; i < 5 ; ++i )
+	{
+		if ( checkedMailReward.RewardItem[i].dwItemID == 0 )
+		{
+			continue;
+		}
+		isHasFujian = true;
+		switch(i)
+		{
+		case 0:
+			{
+				mailReward_1->setVisible(true);
+				mailReward_1->setDataId(checkedMailReward.RewardItem[i].dwItemID);
+				mailReward_1->setNum(checkedMailReward.RewardItem[i].n16Count); //add by XSea 2014.11.15 邮件奖励物品数量显示
+				mailReward_1->setBind(checkedMailReward.isBind != 0);
+			}
+			break;
+		case 1:
+			{
+				mailReward_2->setVisible(true);
+				mailReward_2->setDataId(checkedMailReward.RewardItem[i].dwItemID);
+				mailReward_2->setNum(checkedMailReward.RewardItem[i].n16Count);
+				mailReward_2->setBind(checkedMailReward.isBind != 0);
+			}
+			break;
+		case 2:
+			{
+				mailReward_3->setVisible(true);
+				mailReward_3->setDataId(checkedMailReward.RewardItem[i].dwItemID);
+				mailReward_3->setNum(checkedMailReward.RewardItem[i].n16Count);
+				mailReward_3->setBind(checkedMailReward.isBind != 0);
+			}
+			break;
+		case 3:
+			{
+				mailReward_4->setVisible(true);
+				mailReward_4->setDataId(checkedMailReward.RewardItem[i].dwItemID);
+				mailReward_4->setNum(checkedMailReward.RewardItem[i].n16Count);
+				mailReward_4->setBind(checkedMailReward.isBind != 0);
+			}
+			break;
+		case 4:
+			{
+				mailReward_5->setVisible(true);
+				mailReward_5->setDataId(checkedMailReward.RewardItem[i].dwItemID);
+				mailReward_5->setNum(checkedMailReward.RewardItem[i].n16Count);
+				mailReward_5->setBind(checkedMailReward.isBind != 0);
+			}
+			break;
+		}
+	}
+
+	switch(tmpIndex)//有一个属性12，有二个14，有三个16，有四个18,有五个20
+	{
+	case 12:
+	case 14:
+		{
+			mailReward_1->setPosition(ccp(mailRewardItem_1->getPositionX(),mailItemFont_1->getPositionY() - ( mailItemFont_1->getContentSize().height ) * 3 + 10));//奖励物品1
+			mailReward_2->setPosition(ccp(mailRewardItem_2->getPositionX(),mailItemFont_1->getPositionY() - ( mailItemFont_1->getContentSize().height ) * 3 + 10));//奖励物品2
+			mailReward_3->setPosition(ccp(mailRewardItem_3->getPositionX(),mailItemFont_1->getPositionY() - ( mailItemFont_1->getContentSize().height ) * 3 + 10));//奖励物品3
+			mailReward_4->setPosition(ccp(mailRewardItem_4->getPositionX(),mailItemFont_1->getPositionY() - ( mailItemFont_1->getContentSize().height ) * 3 + 10));//奖励物品4
+			mailReward_5->setPosition(ccp(mailRewardItem_5->getPositionX(),mailItemFont_1->getPositionY() - ( mailItemFont_1->getContentSize().height ) * 3 + 10));//奖励物品5
+		}
+		break;
+	case 16:
+	case 18:
+		{
+			mailReward_1->setPosition(ccp(mailRewardItem_1->getPositionX(),mailItemFont_3->getPositionY() - ( mailItemFont_1->getContentSize().height ) * 3 + 10));//奖励物品1
+			mailReward_2->setPosition(ccp(mailRewardItem_2->getPositionX(),mailItemFont_3->getPositionY() - ( mailItemFont_1->getContentSize().height ) * 3 + 10));//奖励物品2
+			mailReward_3->setPosition(ccp(mailRewardItem_3->getPositionX(),mailItemFont_3->getPositionY() - ( mailItemFont_1->getContentSize().height ) * 3 + 10));//奖励物品3
+			mailReward_4->setPosition(ccp(mailRewardItem_4->getPositionX(),mailItemFont_3->getPositionY() - ( mailItemFont_1->getContentSize().height ) * 3 + 10));//奖励物品4
+			mailReward_5->setPosition(ccp(mailRewardItem_5->getPositionX(),mailItemFont_3->getPositionY() - ( mailItemFont_1->getContentSize().height ) * 3 + 10));//奖励物品5
+		}
+		break;
+	case 20:
+		{
+			mailReward_1->setPosition(ccp(mailRewardItem_1->getPositionX(),mailItemFont_5->getPositionY() - ( mailItemFont_1->getContentSize().height ) * 3 + 10));//奖励物品1
+			mailReward_2->setPosition(ccp(mailRewardItem_2->getPositionX(),mailItemFont_5->getPositionY() - ( mailItemFont_1->getContentSize().height ) * 3 + 10));//奖励物品2
+			mailReward_3->setPosition(ccp(mailRewardItem_3->getPositionX(),mailItemFont_5->getPositionY() - ( mailItemFont_1->getContentSize().height ) * 3 + 10));//奖励物品3
+			mailReward_4->setPosition(ccp(mailRewardItem_4->getPositionX(),mailItemFont_5->getPositionY() - ( mailItemFont_1->getContentSize().height ) * 3 + 10));//奖励物品4
+			mailReward_5->setPosition(ccp(mailRewardItem_5->getPositionX(),mailItemFont_5->getPositionY() - ( mailItemFont_1->getContentSize().height ) * 3 + 10));//奖励物品5
+		}
+		break;
+	default://10的话等于没有属性
+		{
+			mailReward_1->setPosition(ccp(mailRewardItem_1->getPositionX(),mailItemFont_1->getPositionY() - mailItemFont_1->getContentSize().height / 2 - 20));//奖励物品1
+			mailReward_2->setPosition(ccp(mailRewardItem_2->getPositionX(),mailItemFont_1->getPositionY() - mailItemFont_1->getContentSize().height / 2 - 20));//奖励物品2
+			mailReward_3->setPosition(ccp(mailRewardItem_3->getPositionX(),mailItemFont_1->getPositionY() - mailItemFont_1->getContentSize().height / 2 - 20));//奖励物品3
+			mailReward_4->setPosition(ccp(mailRewardItem_4->getPositionX(),mailItemFont_1->getPositionY() - mailItemFont_1->getContentSize().height / 2 - 20));//奖励物品4
+			mailReward_5->setPosition(ccp(mailRewardItem_5->getPositionX(),mailItemFont_1->getPositionY() - mailItemFont_1->getContentSize().height / 2 - 20));//奖励物品5
+		}
+		break;
+	}
+	CCControlButton *confirmButton = dynamic_cast<CCControlButton*>(mailDefinite->getChildByTag(2));
+	if (!isHasFujian)
+	{
+		mailDown->setVisible(false);
+		if (confirmButton)
+		{
+			confirmButton->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("mailui_okbtnn"), CCControlStateNormal);
+			confirmButton->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("mailui_okbtnh"), CCControlStateHighlighted);
+		}
+	}
+	else
+	{
+		if (confirmButton)
+		{
+			confirmButton->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("mailui_lingqubtnn"), CCControlStateNormal);
+			confirmButton->setBackgroundSpriteFrameForState(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("mailui_lingqubtnh"),CCControlStateHighlighted);
+		}
+	}
+	mailDefinite->setVisible(true);
+}
+
+void MailRewardUiLayer::updateMailListItem()
+{
+	_container->removeAllChildrenWithCleanup(true);
+
+	clearMailRewardUiItems();
+
+	if (MailRewardMgr::getInstance()->is_mailbox_empty())
+	{
+		CLOSE_UI(WCT_MAILREWARDUI);
+		return;
+	}
+
+	MailRewardMgr::MailList const& tempList = MailRewardMgr::getInstance()->getMailDataList();
+	if (tempList.size() % 3 == 0)
+	{
+		_container->setContentSize(CCSize(_contentLayer->getContentSize().width,_contentLayer->getContentSize().height * (tempList.size() / 3)));
+		_container->setPositionY(0.0f);
+	} 
+	else
+	{
+		_container->setContentSize(CCSize(_contentLayer->getContentSize().width,_contentLayer->getContentSize().height * (tempList.size() / 3 + 1)));
+	}
+
+	int tmpPostion = _contentLayer->getContentSize().height / 3+g_gaps;
+
+	if (tempList.size() > 0)
+	{
+		auto iter = tempList.begin();
+		int index = 0;
+
+		while(iter != tempList.end())
+		{
+			MailRewardUiItem* temp = new MailRewardUiItem;
+			_listMailRewardUiItems.push_back(temp);
+			_container->addChild(temp->getUiFrame(),5); 
+			if (tempList.size() % 3 == 0)
+			{
+				temp->getUiFrame()->setPositionY(-50 - (tmpPostion * index) + _contentLayer->getContentSize().height * (tempList.size() / 3));
+			} 
+			else
+			{
+				temp->getUiFrame()->setPositionY(-50 - (tmpPostion * index) + _contentLayer->getContentSize().height * (tempList.size() / 3 + 1));
+			}
+			temp->getUiFrame()->setPositionX(temp->getUiFrame()->getContentSize().width / 2-3.0f);
+			temp->getUiFrame()->setData(MailRewardMgr::getInstance()->getMailDataListByIndex(index));
+			temp->getUiFrame()->setTag(index + 1);
+			++index;
+			++iter;
+		}
+	}
+}
+
+// std::string MailRewardUiLayer::getChangeWenziType(wchar_t const* roleName)
+// {
+// 	char vStr[128];
+// 	memset(vStr, 0, sizeof(char) * 128);
+// 	Utf16ToUtf8(roleName, vStr, 128, 0);
+// 	return vStr;
+// }
+
+void MailRewardUiLayer::onCloseBtnPressed1( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	mailDefinite->setVisible(false);
+}
+
+void MailRewardUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint framePoint = _contentLayer->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _contentLayer->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if (isTouchOnNodeContent(mailMain,pTouch) || isTouchOnNodeContent(mailDefinite,pTouch))
+	{
+		if(frameRect.containsPoint(framePoint))
+		{
+			MailItemList::iterator i ,iend = _listMailRewardUiItems.end();
+			for (i = _listMailRewardUiItems.begin(); i != iend; ++i)
+			{
+				(*i)->ccTouchEnded(pTouch,pEvent);
+			}
+		}
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+MailRewardUiItem::MailRewardUiItem()
+	: _uiFrame(NULL)
+{
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("MailRewardUiItemFrame", MailRewardUiItemLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	_uiFrame = dynamic_cast<MailRewardUiItemFrame*>(ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "maillistitemui.ccbi").c_str()));
+	//_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+	//UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+	ccbReader->release();
+
+	if(_uiFrame != NULL)
+	{
+		//_uiFrame->retain();
+		_uiFrame->_item = this;
+		//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(_uiFrame, 2, true);
+	}
+}
+MailRewardUiItem::~MailRewardUiItem()
+{	
+}
+
+void MailRewardUiItem::setSelect(bool flag)
+{
+	_uiFrame->setSelect(flag);
+}
+
+bool MailRewardUiItem::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	return _uiFrame->ccTouchBegan(pTouch,pEvent);
+}
+
+void MailRewardUiItem::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	return _uiFrame->ccTouchEnded(pTouch,pEvent);
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+cocos2d::SEL_MenuHandler MailRewardUiItemFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler MailRewardUiItemFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+void MailRewardUiItemFrame::setSelect(bool flag)
+{
+	std::string name = flag == true?"mailui_xuanzhong":"mailui_smallBottom";
+	CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(name.c_str());
+	if (frame)
+	{
+		this->setDisplayFrame(frame);
+	}
+}
+
+bool MailRewardUiItemFrame::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	CCPoint framePoint = this->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = this->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+// 		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+// 		int index = this->getTag();
+// 		if (index == MailRewardMgr::getInstance()->getCheckedMailIndex())
+// 		{
+// 			MailRewardMgr::getInstance()->setIsClose(false);//关闭邮件附件
+// 		}else{
+// 			MailRewardMgr::getInstance()->setIsClose(true);//关闭邮件附件
+// 		}
+// 		MailRewardMgr::getInstance()->setCheckedMailIndex(index);
+// 		GET_UI(MailRewardUi,WCT_MAILREWARDUI)->updateMailData();
+// 		setSelect(true);
+		return true;
+	}
+	setSelect(false);
+	return false;
+}
+
+void MailRewardUiItemFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	//setAllChildernButtonPriority(this,2);
+	MailTitle =Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(getChildByTag(3)));//邮件标题
+	MailSend =Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(getChildByTag(2)));//邮件发件人
+	MailTime =Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(getChildByTag(4)));//发邮件时间
+	MailSendName=Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(getChildByTag(5)));
+//	MailIcon = dynamic_cast<CCSprite*>(getChildByTag(1));//图标
+	_mailIcon = ItemNode::create();
+	_mailIcon->setPosition(this->getChildByTag(1)->getPosition());
+	this->addChild(_mailIcon, this->getChildByTag(1)->getZOrder());
+	this->getChildByTag(1)->setVisible(false);
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void MailRewardUiItemFrame::setData(tagMailReward const& mailRewardData)
+{
+	std::string mailTitle = Helper::convert_wstr_to_string<128>(mailRewardData.Title);
+		/*CCString::createWithFormat("%s",MailRewardMgr::getChangeWenziType(mailRewardData.Title).c_str())->getCString()*/;
+	MailTitle->setString(mailTitle.c_str());//邮件标题
+	std::string mailRole = "";
+	switch( mailRewardData.nSenderType )
+	{
+	case 0:
+		mailRole = CCString::createWithFormat("%s","\xE7\xB3\xBB\xE7\xBB\x9F")->getCString(); //系统
+		break;
+	case 1:
+		//mailRole = CCString::createWithFormat("%s","\xE7\x83\xAD\xE8\xA1\x80\x4D\x4D")->getCString(); //热血MM
+		mailRole = CCString::createWithFormat("%s","\xE7\x8E\x9B\xE6\xB3\x95\xE4\xBF\xA1\xE4\xBD\xBF")->getCString(); //玛法信使
+		break;
+	case 2:
+		mailRole = STRING_TABLE["xiaomi_email_sender"];
+	}
+	MailSend->setString(mailRole.c_str());//邮件发件人
+	tagDWORDTime sendTime = mailRewardData.dwCreateTime; //时间转换
+	std::string mailTime = CCString::createWithFormat("20%02d-%02d-%02d",sendTime.year,sendTime.month,sendTime.day)->getCString();
+	MailTime->setString(mailTime.c_str());//发邮件时间
+// 	std::string fileName = CFGReader::instance()->get_profile_string("Art", "ICON", "") + CCString::createWithFormat("%d",mailRewardData.RewardItem[0].dwItemID)->getCString() + std::string(".png");
+// 	MailIcon->initWithFile(fileName.c_str());
+	
+	
+
+	if (mailRewardData.RewardItem[0].dwItemID == 0)
+	{
+	  _mailIcon->setDataId(mailRewardData.RewardItem[0].dwItemID);
+      _mailIcon->setVisible(false);
+	}
+	else
+	{
+		_mailIcon->setDataId(mailRewardData.RewardItem[0].dwItemID);
+		_mailIcon->setVisible(true);
+	}
+
+}
+
+// std::string MailRewardUiItemFrame::getChangeWenziType(wchar_t* roleName)
+// {
+// 	char vStr[128];
+// 	memset(vStr, 0, sizeof(char) * 128);
+// 	Utf16ToUtf8(roleName, vStr, 128, 0);
+// 	return vStr;
+// }
+
+void MailRewardUiItemFrame::onExit()
+{
+	//CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCSprite::onExit();
+}
+
+void MailRewardUiItemFrame::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (pTouch->cancel_in_scrollview())
+	{
+		return;
+	}
+	CCPoint framePoint = this->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = this->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+		int index = this->getTag();
+		if (index == MailRewardMgr::getInstance()->getCheckedMailIndex())
+		{
+			MailRewardMgr::getInstance()->setIsClose(false);//关闭邮件附件
+		}else{
+			MailRewardMgr::getInstance()->setIsClose(true);//关闭邮件附件
+		}
+		MailRewardMgr::getInstance()->setCheckedMailIndex(index);
+		GET_UI(MailRewardUi,WCT_MAILREWARDUI)->updateMailData();
+		setSelect(true);
+		//return true;
+	}
+// 	else
+// 		setSelect(false);
+	//return false;
+}
+
+/*
+void MailRewardUiItemFrame::setData(tagJJCRecord attr)
+{
+	DateMsg->setString(setMsgFormat(attr).c_str());
+}*/

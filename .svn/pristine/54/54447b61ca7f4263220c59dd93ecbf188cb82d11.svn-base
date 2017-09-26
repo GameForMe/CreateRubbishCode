@@ -1,0 +1,100 @@
+#include "SQLTable.h"
+
+c_sql_table::c_sql_table( sqlite3* db_, c_sql_command* pCmd )
+	:m_db(db_),
+	m_Cmd(pCmd) , 
+	m_finished(false)
+{
+
+}
+
+//--------------------------------------------------------
+c_sql_table::~c_sql_table(){}
+//--------------------------------------------------------
+int c_sql_table::get_column_count() const
+{
+	return sqlite3_column_count(m_Cmd->m_vm);
+}
+//--------------------------------------------------------
+std::string c_sql_table::get_column_name(int index_) const
+{
+	return sqlite3_column_name(m_Cmd->m_vm, index_);
+}
+//--------------------------------------------------------
+int c_sql_table::get_index(const std::string& name_) const
+{
+	int count = sqlite3_column_count(m_Cmd->m_vm);
+	for(int index = 0; index < count; index++)
+	{
+		const char* colname = (const char*)sqlite3_column_name(m_Cmd->m_vm, index);
+		if(colname != NULL && name_ == colname)
+			return index;
+	}
+	return -1;
+}
+//--------------------------------------------------------
+std::string c_sql_table::get_text(int index_) const
+{
+	const char* str = (const char*) sqlite3_column_text(m_Cmd->m_vm, index_);
+	if (str != NULL)
+		return str;
+	else
+		return std::string();
+}
+//--------------------------------------------------------
+bool c_sql_table::get_boolean(int index_) const
+{
+	return sqlite3_column_int(m_Cmd->m_vm, index_) != 0;
+}
+//--------------------------------------------------------
+int c_sql_table::get_integer32(int index_) const
+{
+	return sqlite3_column_int(m_Cmd->m_vm, index_);
+}
+//--------------------------------------------------------
+INT64 c_sql_table::get_integer64(int index_) const
+{
+	return sqlite3_column_int64(m_Cmd->m_vm, index_);
+}
+//--------------------------------------------------------
+double c_sql_table::get_double(int index_) const
+{
+	return sqlite3_column_double(m_Cmd->m_vm, index_);
+}
+//--------------------------------------------------------
+bool c_sql_table::retrieve_row()
+{
+	if(!m_finished)
+	{
+		for(int i=0; i<1000; i++)
+		{
+			int result = sqlite3_step(m_Cmd->m_vm);
+			switch(result)
+			{
+			case SQLITE_BUSY:
+				return false;
+			case SQLITE_ROW:
+				return true;
+			case SQLITE_DONE:
+				m_finished = true;
+				return false;
+			case SQLITE_ERROR:
+				{
+					m_finished = true;
+					sqlite3_reset(m_Cmd->m_vm);
+					std::string error = (char*)sqlite3_errmsg(m_db);
+					return false;
+				}
+			case SQLITE_MISUSE:
+				m_finished = true;
+				return false;
+			default:
+				m_finished = true;
+				return false;
+			}
+		}
+		return false;
+	}
+	else
+		return false;
+}

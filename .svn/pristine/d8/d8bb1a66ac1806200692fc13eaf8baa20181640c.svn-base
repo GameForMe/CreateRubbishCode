@@ -1,0 +1,264 @@
+#ifndef AUTO_ACTIONMGR_H
+#define AUTO_ACTIONMGR_H
+/**
+ *	@file		Auto_ActionMgr.h
+ *	@author		gx
+ *	@date		2013/6/19
+ *	@version	
+ *	@brief		自动打怪管理类
+ */
+#include "cocos2d.h"
+#include "CmdAdapter.h"
+#include "AutoActionProto.h"
+#include "GroundItemManager.h"
+#include "BaseDefine.h"
+
+#include <bitset>
+#include <memory>
+using namespace cocos2d;
+
+class LocalPlayer;
+class Role;
+struct SkillData;
+struct select_enemy_immediately;
+class AutoActionMgr
+{
+public:
+	enum AA_STATE
+	{
+		AA_NONE = 0,
+		AA_TASK = 1,
+		AA_MANUAL_FIGHT = 2,
+		AA_AUTO_FIGHT = 3,
+	};
+
+	enum e_target_police
+	{
+		ETP_BAD_PLAYER=0,
+		ETP_BOSS,
+		ETP_MONSTER,
+	};
+
+	struct short_strut
+	{
+		unsigned int id;
+		CCPoint pt;
+
+		void reset(){this->id  = INVALID;}
+
+		bool is_valid()const{return id != INVALID && id !=0;}
+	};
+
+	struct TraceTarget
+	{
+		TraceTarget():target_id(INVALID),npc(false){}
+
+		TraceTarget(unsigned int id,bool b_npc):target_id(id),npc(b_npc)
+		{
+
+		}
+
+		bool is_npc()const{return npc;}
+		bool is_valid_target()const{return target_id != INVALID;}
+		bool is_valid_atk_target()const{return is_valid_target() && !is_npc();}
+
+		unsigned int	target_id;
+		bool			npc;
+
+	};
+
+	struct st_valid_target 
+	{
+		Role* target;
+		float distance;
+
+		st_valid_target():target(NULL),distance(0)
+		{
+
+		}
+
+		st_valid_target(Role* t,float d):target(t),distance(d)
+		{
+
+		}
+	};
+
+	typedef std::vector<st_valid_target>	valid_target_list;
+
+	typedef std::map<INT64,CCPoint> PosMap;
+	typedef std::map<unsigned int,INT64> Ignore_Item_Map;//保存所有无法捡取的地物的信息，1分钟后从容器中剔除
+	typedef std::map<unsigned int,unsigned char> Item_AutoPickup_Map;//保存已查询过的packagedata信息，键值是typeid，数据是该物品的类型
+	typedef std::map<float,short_strut> PosShortMap;
+
+	struct st_pickup_point 
+	{
+		CCPoint pt;
+		int		priority;
+		INT64   id;
+		unsigned int type_id;
+
+		st_pickup_point():priority(0),id(0){}
+
+		st_pickup_point(CCPoint const& pt,int pri,INT64 id,unsigned int type_id)
+			:pt(pt)
+			,priority(pri)
+			,id(id)
+			,type_id(type_id)
+		{
+
+		}
+
+		~st_pickup_point()
+		{
+
+		}
+
+	};
+	typedef std::shared_ptr<st_pickup_point>	pickup_point_ptr;
+
+// 	struct Pick_Table   //拾取物品表
+// 	{
+// 		INT typeID;
+// 		INT Species;
+// 		INT nItemType;
+// 		INT StackNumber;
+// 	};
+
+private:
+	bool b_auto_action;			//是否自动打怪
+	bool IsShowTip;
+	CCPoint m_PlayerPos;		//打怪开始时玩家位置,也是自动打怪范围的中心点
+	short_strut m_PickItem;			//当前将要拾取的地物的坐标信息
+	unsigned int m_atk_target_id;//记录正在打击的怪物ID
+	//unsigned int m_LastHitMonsterTime;//记录上次打怪的时间,单位毫秒
+	/*以下字段满足自动拾取功能*/
+	//short m_AutoPickupMark[EAPI_End];//记录玩家拾取物品种类的选择
+	std::bitset<EAPI_End>	m_pickup_opt;
+// 	PosMap m_PriorityList;//优先拾取队列
+// 	PosMap m_PriorityListSkill;
+// 	PosMap m_PriorityListEquipment;
+// 	PosMap m_PriorityListTreasure;
+// 	PosMap m_PriorityListMedicine;
+// 	PosMap m_PriorityListConsume;
+// 	PosMap m_PriorityListMaterial;
+// 	PosMap m_PriorityListOthers;
+// 	PosMap m_PriorityListGold;
+
+	//拾取按优先级排序即可，不需要如此多的关联容器把
+	enum ePickUpPriority
+	{
+		PUP_SKILL = 0,
+		PUP_EQUIP,
+		PUP_TREASURE,
+		PUP_CONSUME,
+		PUP_MATERAIL,
+		PUP_MEDICINE,
+		PUP_GOLD,
+		PUP_OTHER,
+	};
+
+
+	typedef std::map<int ,pickup_point_ptr>		pickup_point_map;
+	typedef std::vector<pickup_point_ptr>		pickup_point_array;
+	pickup_point_array							m_points;
+
+	bool			is_valid_pickup_type(int type) const;
+	bool			is_in_pickup_option(int item_type_id,int type) const;
+	ePickUpPriority convert_to_priority(int specail_type);
+	pickup_point_ptr	peek_next_point(CCPoint const& lp_pos);
+
+	//pickup_point_ptr cur_point;
+	//Item_AutoPickup_Map m_Item_AutoPickup_Map;//记录已查询过数据库的信息
+	//float _pickTime;
+	float _fightTime;
+	bool  IsTaskFinish;
+	unsigned short m_usQuestId;
+	unsigned int  m_iCompleteTaskId;
+	UINT _questID;
+	
+	//UINT _questMonst;
+
+
+
+	TraceTarget	_cache_target;
+
+	bool common_check_auto_atk_target(Role* role,float& out_distance)const;
+	bool check_target_by_role_type(Role* role)const;
+
+	//bool can_auto_atk_by_disance_and_block(unsigned int target_id)const;
+	//void get_valid_target_list(valid_target_list& target_list);
+	Role* peek_target_from_list(valid_target_list& target_list,int policy);
+	
+	bool check_distance(Role* target,float& distance)const;
+	//bool common_select_atkable_target(Role** out_role,e_target_police policy);
+
+	void set_auto_target(Role* target);
+
+	void on_event_sel_enemy_immediately(select_enemy_immediately* evt);
+
+	float _interval_time;
+	INT64  m_last_target;
+
+	bool UpdateTodo(LocalPlayer* lp);
+public:
+	AutoActionMgr();
+	~AutoActionMgr();
+	static AutoActionMgr* getInstance();
+
+	void setCurrentQuestID(UINT id, TraceTarget const& mid);
+	UINT getCurrentQuestID();
+	bool getCurrentMonsterID(unsigned int& out);
+
+	inline void SetIsLastTaskFinish(bool IsLast){IsTaskFinish = IsLast;}
+	inline void SetTaskQuestId(unsigned short usQuestId){m_usQuestId = usQuestId;}
+	inline void SetCompleteTaskId(unsigned int iCompleteTaskId){m_iCompleteTaskId = iCompleteTaskId;}
+
+ 	void remove_if_send_pickup(INT64 id);
+
+	void Destroy();
+	void Init();
+	void Update(float dt);//自动打怪主函数
+	void BeginOrEnd();//响应挂机按钮，设置挂机开始，结束
+	void JustBeginAutoFight();//响应挂机按钮，设置挂机开始，结束
+	void Set_Auto_Action(bool bflag);
+	inline bool Get_Auto_Action()const{return b_auto_action;}
+	void send_begin_kill_monster();
+	void send_end_kill_monster();
+	unsigned int onServerBegin_Kill_Monster(s_net_cmd *cmd);
+	unsigned int onServerEnd_Kill_Monster(s_net_cmd *cmd);
+	unsigned int onServerMonsterKilled(s_net_cmd *cmd);
+	//bool IsMonsterInDistance(const CCPoint &monsterPos,float &outDis);//判断待选定的怪物是否在合理自动打怪范围内
+	bool is_special_ground_role(unsigned int typeID)const;
+	/*自动拾取相关函数的声明*/
+	//void SetAutoPickMark(char index,short value);
+	//void SelectPickItem(INT64 id);
+	//INT GetTableByTypeId(INT id, Pick_Table& data);
+
+	unsigned int OnServerItemPickUp(s_net_cmd *cmd);
+	unsigned int OnServerItemDisapper(s_net_cmd *cmd);
+	/*modify*/
+	bool CanStartAutoKill();//根据玩家当前所处的状态，判断玩家是否可以挂机
+	//void SetAutoKillScope(short nPercent = 100);//设置自动打怪范围大小
+	bool CanPickUpCurItem(unsigned int ownerID,unsigned int teamID)const;
+	bool CanItemUse(unsigned int typeID);
+	//float GetAutoKillScope();//获取自动打怪范围
+	void SetAutoPickOption();//根据自动设置的数据设置自动打怪过程中拾取物品的选项
+	/*根据状态机修改重新UPdate*/
+	//void UpdatePicking(/*float dt*/);
+	//void UpdateKilling(float dt);
+	//void SelectJusticeEnemy();
+	//bool SelectBadPlayer();
+	//bool SelectBossEnemy();
+	//bool SelectMonsterEnemy();
+	//void SelectOtherModeEnemy();
+	void update_select_enemy();
+
+	/*自动拾取全局有效*/
+	bool IsAutoPickUpItem(unsigned int typeID);//判断该物品是否主动拾取
+	/*end*/
+
+	void			generate_pickup_points();
+
+	void cancel_auto_action();
+};
+#endif

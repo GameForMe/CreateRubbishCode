@@ -1,0 +1,460 @@
+#include "TcpSocket.h"
+#include "assert.h"
+
+#if (CC_TARGET_PLATFORM==CC_PLATFORM_WIN32)
+#include <ws2def.h>
+#include <WS2tcpip.h>
+#endif
+
+#include "cocos2d.h"
+using namespace cocos2d;
+
+c_tcp_socket::c_tcp_socket(c_mem_pool* pool_):c_socket(ST_TCP) ,_pool(pool_),m_adapter(pool_), m_suspend(false){}
+//--------------------------------------------------------
+c_tcp_socket::~c_tcp_socket(){}
+//--------------------------------------------------------
+bool c_tcp_socket::open()
+{
+	if(m_socket == static_cast<unsigned int>(-1))
+	{
+		m_suspend = false;
+		m_socket = socket(PF_INET, SOCK_STREAM , 0);
+		//set_block(false);
+		set_nagle(false);
+		set_reuse(true);
+		linger lin;
+		lin.l_linger = 0;
+		lin.l_onoff = 1;
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+		setsockopt(m_socket, SOL_SOCKET, SO_NOSIGPIPE, (char*)&lin, sizeof(lin));
+
+#else
+		setsockopt(m_socket, SOL_SOCKET, SO_LINGER, (char*)&lin, sizeof(lin));
+#endif
+		return true;
+	}
+	else
+	{
+		return false;
+	}
+}
+//--------------------------------------------------------
+void c_tcp_socket::close()
+{
+	m_suspend = true;
+#if defined OVD_PLATFORM_WINDOWS
+	::shutdown(m_socket, SD_SEND);
+#else
+	::shutdown(m_socket, SHUT_WR);
+#endif
+	unsigned int retry = 0;
+	while(retry++ < 20)
+	{
+		if(1 == _wait(150*1000 , true))
+		{
+			char tmp;
+			int ret = ::recv(m_socket, &tmp, 1, 0);
+			if(0 == ret || SOCKET_ERROR == ret)
+				break;
+		}
+	}
+#ifdef OVD_PLATFORM_WINDOWS
+	::closesocket(m_socket);
+	m_socket = -1;
+#else
+	::close(m_socket);
+	m_socket = -1;
+#endif
+}
+//--------------------------------------------------------
+e_socket_status c_tcp_socket::connect(const char* address_, unsigned short port_, unsigned int timeout_ /*= 150*/)
+{
+	//连接ip
+	char ip[128];
+	memset(ip, 0, sizeof(ip));
+	
+	std::string strTmpIp = domainToIP(address_);
+	if(strTmpIp.empty())
+	{
+		strcpy(ip, address_);
+	}
+	else
+	{
+		strcpy(ip, strTmpIp.c_str());
+	}
+	CCLOG("IP=%s", ip);
+
+	void* svraddr = nullptr;
+	int error=-1, svraddr_len;
+	bool ret = true;
+	struct sockaddr_in svraddr_4;
+	struct sockaddr_in6 svraddr_6;
+
+	//获取网络协议
+	struct addrinfo *result = NULL;
+	error = getaddrinfo(ip, NULL, NULL, &result);
+	if(!result)
+	{
+		CCLOG("getaddrinfo get Fail");
+		return SS_ERROR;
+	}
+	const struct sockaddr *sa = result->ai_addr;
+	socklen_t maxlen = 128;
+	switch(sa->sa_family) {
+	case AF_INET://ipv4
+		if ((m_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+			CCLOG("socket create failed IPv4");
+			ret = false;
+			break;
+		}
+		if(inet_ntop(AF_INET, &(((struct sockaddr_in *)sa)->sin_addr),
+			ip, maxlen) < 0){
+				CCLOG("socket create failed IPv4");
+				ret = false;
+				break;
+		}
+		svraddr_4.sin_family = AF_INET;
+		svraddr_4.sin_addr.s_addr = inet_addr(ip);
+		svraddr_4.sin_port = htons(port_);
+		svraddr_len = sizeof(svraddr_4);
+		svraddr = &svraddr_4;
+		break;
+	case AF_INET6://ipv6
+		if ((m_socket = socket(AF_INET6, SOCK_STREAM, 0)) < 0) {
+			CCLOG("socket create failed IPv6");
+			ret = false;
+			break;
+		}
+		inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)sa)->sin6_addr),
+			ip, maxlen);
+
+		CCLOG("socket created ipv6/n");
+
+		memset(&svraddr_6, 0, sizeof(svraddr_6));
+		svraddr_6.sin6_family = AF_INET6;
+		svraddr_6.sin6_port = htons(port_);
+		if ( inet_pton(AF_INET6, ip, &svraddr_6.sin6_addr) < 0 ) {
+			CCLOG("socket create failed IPv6");
+			ret = false;
+			break;
+		}
+		svraddr_len = sizeof(svraddr_6);
+		svraddr = &svraddr_6;
+		break;
+
+	default:
+		CCLOG("Unknown AF\ns");
+		ret = false;
+		break;
+	}
+	freeaddrinfo(result);
+	if(!ret)
+	{
+		CCLOG("Cannot Connect the server!n");
+		return SS_ERROR;
+	}
+	int nret = ::connect(m_socket, (struct sockaddr*)svraddr, svraddr_len);
+
+	if(nret==SOCKET_ERROR)
+	{
+        if(SS_NOT_READY == _get_error_status())
+        {
+            for(int n=0; n<64; ++n)
+            {
+                if(1 == _wait(timeout_*1000 , false))
+                {
+                    return SS_DONE;
+                }
+            }
+        }
+        return SS_DISCONNECTED;
+    }
+    return SS_DONE;
+}
+//--------------------------------------------------------
+e_socket_status c_tcp_socket::send(s_net_cmd* msg_, bool compressed_)
+{
+	int nreturn = 0;
+	unsigned int headsz = sizeof(unsigned int);
+	char* header = (char*)&msg_->size;
+	while(headsz > 0)
+	{
+		nreturn = ::send(m_socket, header, headsz, 0);
+		if(SOCKET_ERROR == nreturn)
+		{
+			if(_get_error_status() == SS_NOT_READY)
+				_wait(150*1000 , false);
+			else
+			{
+				return SS_ERROR;
+			}
+		}
+		else
+		{
+			header += nreturn;
+			headsz -= nreturn;
+		}
+	}
+	unsigned int sz = msg_->size;
+	unsigned char* data(NULL);
+	if(compressed_)
+		m_adapter.pack(msg_ , sz , &data);
+	else
+		data = (unsigned char*)msg_;
+	while(sz > 0)
+	{
+		if(!data)
+			break;
+#ifdef USE_KEY
+		Sara_EnCode((unsigned char*)data, sz, sendKey);
+#endif
+		nreturn = ::send(m_socket, (char*)data, sz, 0);
+		if(SOCKET_ERROR == nreturn)
+		{
+			if(_get_error_status() == SS_NOT_READY)
+				_wait(150*1000 , false);
+			else
+			{
+				return SS_ERROR;
+			}
+		}
+		else
+		{
+			data += nreturn;
+			sz -= nreturn;
+		}
+	}
+	return SS_DONE;
+}
+//--------------------------------------------------------
+e_socket_status c_tcp_socket::receive(std::list<s_net_cmd*>& msgs_, bool compressed_)
+{
+	unsigned int tempsz = 0;
+	unsigned int msgsz = 0;
+	int nresult = 0;
+	char* tempptr = NULL;
+	tempsz = sizeof(unsigned int);
+	tempptr = (char*)&msgsz;
+	while(tempsz > 0)
+	{
+		if(1 == _wait(150*1000 , true))
+		{
+			nresult = ::recv(m_socket, tempptr, tempsz, 0);
+			if(0 == nresult)
+			{
+				return SS_DISCONNECTED;
+			}
+			if(SOCKET_ERROR == nresult)
+			{
+				return SS_ERROR;
+			}
+			else
+			{
+				tempsz -= nresult;
+
+				//ZHJL:如果变成负数了，后面不能加了，再加地址出错了，内存被写坏了。
+				if (tempsz<0)
+					break;
+
+				tempptr += nresult;
+			}
+		}
+		if(m_suspend)
+			return SS_DONE;
+	}
+	if(SOCKET_ERROR != nresult)
+	{
+		char* bufin = (char*)_pool->alloc(msgsz+msgsz/64+64);
+		tempsz = sizeof(unsigned int) + msgsz;
+		tempptr = bufin;
+		while(tempsz > 0)
+		{
+			timeval blocktime;
+			blocktime.tv_sec = 0;
+			blocktime.tv_usec = 150*1000;
+			fd_set fdread;
+			FD_ZERO(&fdread);
+			FD_SET(m_socket, &fdread);
+			int n = ::select(m_socket+1, &fdread, NULL, NULL, &blocktime);
+			if(n == 1)
+			{
+				nresult = ::recv(m_socket, tempptr, tempsz, 0);
+				if(0 == nresult)
+				{
+					return SS_DISCONNECTED;
+				}
+				if(nresult == SOCKET_ERROR)
+				{
+					return SS_ERROR;
+				}
+				else
+				{
+					tempsz -= nresult;
+					//ZHJL:如果变成负数了，后面不能加了，再加地址出错了，内存被写坏了。
+					if (tempsz<0)
+						break;
+					tempptr += nresult;
+				}
+			}
+			if(m_suspend)
+				return SS_DONE;
+		}
+		if(compressed_)
+		{
+			unsigned int osz = *(unsigned int*)bufin;
+			m_adapter.unpack(bufin + sizeof(unsigned int), msgsz, osz, msgs_);
+			_pool->dealloc(bufin);
+		}
+		else
+		{
+			char* rp = bufin;
+			unsigned int packsz = 0;
+			while(rp < bufin + msgsz)
+			{
+				s_net_cmd* rc = (s_net_cmd*)rp;
+				packsz = rc->size;
+				s_net_cmd* ele = (s_net_cmd*)_pool->alloc(packsz);
+				memcpy(ele , rc , packsz);
+				msgs_.push_back(ele);
+				rp += packsz;
+			}
+			_pool->dealloc(bufin);
+		}
+	}
+	return SS_DONE;
+}
+//--------------------------------------------------------
+int c_tcp_socket::_wait(int ms_, bool read_)
+{
+	if (m_socket == -1)
+	{
+		return 0;
+	}
+	fd_set selector;
+	FD_ZERO(&selector);
+	FD_SET(m_socket, &selector);
+	timeval time;
+	time.tv_sec  = 0;
+	time.tv_usec = ms_;
+	if(read_)
+		return ::select(m_socket+1, &selector, 0, 0, &time);
+	else
+		return ::select(m_socket+1, 0, &selector, 0, &time);
+}
+//--------------------------------------------------------
+e_socket_status c_tcp_socket::_get_error_status() const
+{
+#ifdef OVD_PLATFORM_WINDOWS
+	switch (WSAGetLastError())
+	{
+	case WSAEWOULDBLOCK:
+	case WSAENOBUFS:return SS_NOT_READY;
+	case WSAECONNABORTED:
+	case WSAECONNRESET:  
+	case WSAETIMEDOUT: 
+	case WSAENETRESET: 
+	case WSAENOTCONN:return SS_DISCONNECTED;
+	default:return SS_ERROR;
+	}
+#else 
+	if ((errno == EAGAIN) || (errno == EINPROGRESS))
+		return SS_NOT_READY;
+	switch (errno)
+	{
+	case EINPROGRESS:
+	case EWOULDBLOCK:return SS_NOT_READY;
+	case ECONNABORTED:
+	case ECONNRESET: 
+	case ETIMEDOUT: 
+	case ENETRESET: 
+	case ENOTCONN:return SS_DISCONNECTED;
+	default:return SS_ERROR;
+	}
+#endif
+}
+
+//hurui 判断是否IPv6网络
+bool c_tcp_socket::isIPV6Net(const std::string domainStr/* = "www.baidu.com"*/)
+{
+	bool isIPV6Net = false;
+
+	struct addrinfo *result = nullptr,*curr;
+
+	struct sockaddr_in6 dest;
+	memset(&dest, 0, sizeof(dest));
+
+	dest.sin6_family  = AF_INET6;
+
+	int ret = getaddrinfo(domainStr.c_str(),nullptr,nullptr,&result);
+	if (ret == 0)
+	{
+		for (curr = result; curr != nullptr; curr = curr->ai_next)
+		{
+			switch (curr->ai_family)
+			{
+			case AF_INET6:
+				{
+					isIPV6Net = true;
+					break;
+				}
+			case AF_INET:
+
+				break;
+
+			default:
+				break;
+			}
+		}
+	}
+
+	freeaddrinfo(result);
+
+	return isIPV6Net;
+}
+
+
+//hurui dns parse
+std::string c_tcp_socket::domainToIP(const char* pDomain)
+{
+	//hurui ipv6
+	if (isIPV6Net())
+	{
+		struct addrinfo hint;
+		memset(&hint, 0x0, sizeof(hint));
+		hint.ai_family = AF_INET6;
+		hint.ai_flags = AI_V4MAPPED;
+
+		addrinfo* answer = nullptr;
+		getaddrinfo(pDomain, nullptr, &hint, &answer);
+
+		if (answer != nullptr)
+		{
+			char hostname[1025] = "";
+
+			getnameinfo(answer->ai_addr,answer->ai_addrlen,hostname,1025,nullptr,0,0);
+
+			char ipv6[128] = "";
+			memcpy(ipv6,hostname,128);
+
+			CCLOG("domainToIP addrStr:%s", ipv6);
+
+			return ipv6;
+		}
+
+		freeaddrinfo(answer);
+	}
+	else{
+		struct hostent* h = gethostbyname(pDomain);
+		if( h != NULL )
+		{
+			unsigned char* p = (unsigned char *)(h->h_addr_list)[0];
+			if( p != NULL )
+			{
+				char ip[16] = {0};
+				sprintf(ip, "%u.%u.%u.%u", p[0], p[1], p[2], p[3]);
+				return ip;
+			}
+		}
+	}
+	return "";
+}

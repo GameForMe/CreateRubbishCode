@@ -1,0 +1,377 @@
+#include "ToolTip.h"
+#include "CfgReader.h"
+#include "UiManager.h"
+#include "cocos-ext.h"
+#include "World.h"
+#include "ClientUpdate.h"
+#include "UiResourceMgr.h"
+using namespace cocos2d::extension;
+
+#define TOOL_TIP_WIDTH 202
+#define TOOL_TIP_HEIGHT 33
+#define TOOL_TIP_HSIDE 20
+#define TOOL_TIP_VSIDE 10
+
+ToolTip * ToolTip::getInstance()
+{
+	static ToolTip instance;
+	return &instance;
+}
+
+ToolTip::ToolTip()
+{
+	_node = CCNode::create();
+	_node->retain();
+	
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art","UI","");
+	std::string sSEFightFire = sSEDir + "ccbResources/ToolTipui.plist";
+	_plist.insert(sSEFightFire);
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	CCScale9Sprite *sprite = CCScale9Sprite::create((uiDir + "ui_tip_back.png").c_str(), 
+		CCRect(0, 0, TOOL_TIP_WIDTH, TOOL_TIP_HEIGHT), 
+		CCRect(TOOL_TIP_HSIDE, TOOL_TIP_VSIDE, TOOL_TIP_WIDTH - TOOL_TIP_HSIDE * 2, TOOL_TIP_HEIGHT - TOOL_TIP_VSIDE * 2));
+	sprite->setPreferredSize(CCSize(TOOL_TIP_WIDTH, TOOL_TIP_HEIGHT));
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEFightFire.c_str());
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	//sprite->setScaleX(0.8);
+	sprite->setTag(NT_BackSprite);
+	//sprite->setAnchorPoint(ccp(0,0.5));
+	_node->addChild(sprite);
+
+	TTFConfig fc;
+	fc.fontFilePath = FT_FONTFACE;
+	fc.fontSize = 16;
+	fc.outlineSize = 1;
+
+	LabelFT* label = LabelFT::createWithTTF(fc, "");
+	label->setTag(NT_Label);
+	label->setTextColor(ccc4(0xff,0xff,0xff, 255));//vv 2014.10.8 底图
+	_node->addChild(label);
+	CCSprite *icon=CCSprite::create();
+	icon->setTag(NT_Icon);
+	_node->addChild(icon);
+	LabelFT* label1 = LabelFT::createWithTTF(fc, "");
+	label1->setTextColor(ccc4(0xff,0xff,0xff, 255));
+	label1->setTag(NT_text);
+	_node->addChild(label1);
+	CCSprite* rotate = CCSprite::create("Art/ICON/SingleUI/loading.png");
+	rotate->setTag(NT_rotate);
+	_node->addChild(rotate);
+	hide();
+}
+
+ToolTip::~ToolTip()
+{
+	_node->release();
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+}
+
+void ToolTip::show( const std::string &text, int time, CCScene *m_pScene )//开始界面切换时调用
+{
+	CCLog("----------------------ToolTip::show 1111111111111");
+	LabelFT *label = static_cast<LabelFT*>(_node->getChildByTag(NT_Label));
+	label->setString(text.c_str());
+	label->setTextColor(ccc4(255,255,255, 255));
+	label->setAnchorPoint(ccp(0.5,0.5));
+	label->setPositionX(0);
+	LabelFT* labelText=static_cast<LabelFT*>(_node->getChildByTag(NT_text));
+	LabelFT* labelIcon=static_cast<LabelFT*>(_node->getChildByTag(NT_Icon));
+	labelIcon->setVisible(false);
+	labelText->setVisible(false);
+	CCSize textSize = label->getContentSize();
+	int preW = textSize.width + TOOL_TIP_HSIDE * 2;
+	if(preW < TOOL_TIP_WIDTH)
+		preW = TOOL_TIP_WIDTH;
+	CCSpriteFrame* backSprite=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("ToolTipui_frame");
+	static_cast<CCScale9Sprite*>(_node->getChildByTag(NT_BackSprite))->initWithSpriteFrame(backSprite);
+	static_cast<CCScale9Sprite*>(_node->getChildByTag(NT_BackSprite))->setCapInsets(CCRect(16, 16,16,16));
+	static_cast<CCScale9Sprite*>(_node->getChildByTag(NT_BackSprite))->setPreferredSize(CCSize(preW + 32, 36));
+	CCLog("----------------------ToolTip::show 2222222222222222");
+	CCSprite* rotate = static_cast<CCSprite*>(_node->getChildByTag(NT_rotate));
+	rotate->setScale(0.65);
+	rotate->setColor(ccc3(0xff,0xff,0xff));
+	rotate->setAnchorPoint(ccp(0.5,0.5));
+	rotate->setPositionX(0 - textSize.width / 2 - 19);//从字体中心偏移+旋转图的半径
+	CCRotateBy* rotateInSprite = CCRotateBy::create(2,360);
+	rotate->runAction(CCRepeatForever::create(rotateInSprite));
+	rotate->setVisible(true);
+	_node->setVisible(true);
+	if(_node->getParent() == NULL)
+	{
+		CCLog("----------------------ToolTip::show 3333333333333333333333333");
+		CCScene *scene = UiMgr::getInstance()->getCurScene();
+		if(scene != NULL)
+		{
+			CCLog("----------------------ToolTip::show 44444444444444444444444");
+			scene->addChild(_node, WZ_POPUI);
+		}
+		else
+		{
+			CCLog("----------------------ToolTip::show 5555555555555555555");
+			if (m_pScene != NULL)
+				m_pScene->addChild(_node, WZ_POPUI);
+		}
+	}
+	else
+	{
+		_node->getParent()->removeChild(_node,false);
+		CCScene *scene = UiMgr::getInstance()->getCurScene();
+		if(scene != NULL)
+		{
+			CCLog("----------------------ToolTip::show 666666666666666666666");
+			scene->addChild(_node, WZ_POPUI);
+		}
+		else
+		{
+			CCLog("----------------------ToolTip::show 7777777777777777777");
+			if (m_pScene != NULL)
+				m_pScene->addChild(_node, WZ_POPUI);
+		}
+	}
+}
+
+void ToolTip::hide()
+{
+	CCScene *scene = UiMgr::getInstance()->getCurScene();
+	if(scene != NULL)
+		scene->removeChild(_node);
+	_node->setVisible(false);
+}
+
+void ToolTip::setPosition( const CCPoint &pos )
+{
+	CC_ASSERT(_node != NULL);
+	_node->setPosition(pos);
+}
+//push函数有信息提示   不是金币的提示
+void ToolTip::push(const std::string &text, int time /* = 2 */,int count)//gx modify 2S
+{
+	if (_text.size() < (size_t)count)
+	{
+		_text.push_back(TipText(text,"", time));
+	}
+	if(_text.size() == 1 && _textIcon.empty())
+	{
+		runText();
+	}
+
+}
+
+void ToolTip::timeCallback(float dt)
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&ToolTip::timeCallback), this);
+	if (!_text.empty())
+	{
+		_text.pop_front();
+	}
+	hide();
+	if(!_text.empty())
+	{
+		runText();
+		return;
+	}
+	else if (!_textIcon.empty())
+	{
+		runText();
+		return;
+	}
+}
+void ToolTip::iconCallBack(float dt)
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&ToolTip::iconCallBack),this);
+	if (!_textIcon.empty())
+	{
+		_textIcon.pop_front();
+	}
+	hide();
+	if(!_text.empty())
+	{
+		runText();
+		return;
+	}
+	else if (!_textIcon.empty())
+	{
+		runText();
+		return;
+	}
+}
+void ToolTip::runText()//物品上一上移提示信息
+{
+	eSceneType ptype = ClientUpdate::getInstance()->_currentScene;
+	if (ST_LOGINSCENE != ptype && ST_WORLDSCENE != ptype)
+	{
+		return;
+	}
+	if (_textIcon.size()>=1)
+	{
+		//const TipTextIcon& textIcon=_textIcon.front();
+		//CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&ToolTip::iconCallBack), this, textIcon.time, false);
+		showIcon();
+// 		if (!_textIcon.empty())
+// 		{
+// 			_textIcon.pop_front();
+// 		}
+	}
+	else
+	{
+		showText();
+// 		if (!_text.empty())
+// 		{
+// 			_text.pop_front();
+// 		}
+	}
+}
+
+void ToolTip::showText()
+{
+	CCScene* t_scene = UiMgr::getInstance()->getCurScene();
+
+	const TipText &tipText = _text.front();
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&ToolTip::timeCallback), this, tipText.time, false);
+	//show(tipText.text, tipText.time);
+	CCSpriteFrame* backSprite=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("ToolTipui_frame");
+	static_cast<CCScale9Sprite*>(_node->getChildByTag(NT_BackSprite))->initWithSpriteFrame(backSprite);
+	LabelFT* titleLabel = static_cast<LabelFT*>(_node->getChildByTag(NT_Label));
+	LabelFT* labelText=static_cast<LabelFT*>(_node->getChildByTag(NT_text));
+	LabelFT* labelIcon=static_cast<LabelFT*>(_node->getChildByTag(NT_Icon));
+	CCSprite* rotate = static_cast<CCSprite*>(_node->getChildByTag(NT_rotate));
+	labelIcon->setVisible(false);
+	labelText->setVisible(false);
+	rotate->setVisible(false);
+	titleLabel->setAnchorPoint(ccp(0.5,0.5));
+	titleLabel->setString("");
+	titleLabel->setString(tipText.text.c_str());
+	titleLabel->setTextColor(ccc4(255,255,255, 255));
+	titleLabel->setVisible(true);
+	//int x=titleLabel->getPositionX();
+	int preW =titleLabel->getContentSize().width+50;
+	static_cast<CCScale9Sprite*>(_node->getChildByTag(NT_BackSprite))->setCapInsets(CCRect(16, 16,16,16));
+	static_cast<CCScale9Sprite*>(_node->getChildByTag(NT_BackSprite))->setContentSize(CCSize(preW, 36));
+	titleLabel->setPositionX(0);
+	static_cast<CCScale9Sprite*>(_node->getChildByTag(NT_BackSprite))->setPositionX(0);
+	static_cast<CCScale9Sprite*>(_node->getChildByTag(NT_BackSprite))->setAnchorPoint(ccp(0.5,0.5));
+	static_cast<CCScale9Sprite*>(_node->getChildByTag(NT_BackSprite))->setVisible(true);
+	_node->setVisible(true);
+	_node->removeFromParent();
+	t_scene->addChild(_node,100,1000);
+	_node->setPosition(ccp(t_scene->getContentSize().width / 2 , t_scene->getContentSize().height / 2 + 120));
+	float moveTime = tipText.time;
+	if (moveTime < 2.0)
+		moveTime = 2.0f;
+	_node->runAction(CCSequence::create(CCMoveTo::create(moveTime,ccp(t_scene->getContentSize().width / 2,t_scene->getContentSize().height)),CCFadeOut::create(0.5f),NULL));
+	//CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	//setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+}
+
+void ToolTip::showIcon()
+{
+	eSceneType ptype = ClientUpdate::getInstance()->_currentScene;
+	if (ST_LOGINSCENE != ptype && ST_WORLDSCENE != ptype)
+	{
+		return;
+	}
+	CCScene* t_scene = UiMgr::getInstance()->getCurScene();
+	const TipTextIcon &tipText = _textIcon.front();
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&ToolTip::showIconCallback), this, tipText.time, false);
+	CCSpriteFrame* backSprite=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("ToolTipui_frame");
+	static_cast<CCScale9Sprite*>(_node->getChildByTag(NT_BackSprite))->initWithSpriteFrame(backSprite);
+	static_cast<CCScale9Sprite*>(_node->getChildByTag(NT_BackSprite))->setAnchorPoint(ccp(0.5,0.5));
+	CCSprite* rotate = static_cast<CCSprite*>(_node->getChildByTag(NT_rotate));
+	rotate->setVisible(false);
+	LabelFT *label = static_cast<LabelFT*>(_node->getChildByTag(NT_Label));
+	label->setAnchorPoint(ccp(0.5,0.5));
+	label->setTextColor(ccc4(0,255,0, 255));
+	LabelFT *label1=static_cast<LabelFT*>(_node->getChildByTag(NT_text));
+	label1->setAnchorPoint(ccp(0.5,0.5));
+	label1->setString(tipText.text1.c_str());
+	label1->setVisible(true);
+	label->setString(tipText.text.c_str());
+	label->setVisible(true);
+	CCSize textSize = label->getContentSize();
+	CCSprite *iconSprite=static_cast<CCSprite*>(_node->getChildByTag(NT_Icon));
+	iconSprite->setVisible(true);
+	iconSprite->setAnchorPoint(ccp(0.5,0.5));
+	/*if(preW < TOOL_TIP_WIDTH)
+		preW = TOOL_TIP_WIDTH;*/
+	CCSpriteFrame* frame =NULL;
+	if (_typeId==Gold)
+	{
+		frame=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("ToolTipui_icongold");
+		iconSprite->setScale(0.8);
+	}
+	else if (_typeId==Jewel)
+	{
+		frame=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("ToolTipui_iconjewel");
+		iconSprite->setScale(0.8);
+	}
+	else if (_typeId==Yuanbao)
+	{
+		frame=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("ToolTipui_iconyuanbao");
+		iconSprite->setScale(0.8);
+	}
+	else if(_typeId==Exp)
+	{
+		frame=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("ToolTipui_iconexp");
+		iconSprite->setScale(0.8);
+	}
+
+	CC_ASSERT(frame);
+	iconSprite->setDisplayFrame(frame);
+
+	int preW = textSize.width +label1->getContentSize().width+iconSprite->getContentSize().width+30;
+	label1->setPositionX(-preW*2/10);
+	//int label1X=label1->getPositionX()+label1->getContentSize().width;
+	//int xx=label1->getPositionX();
+	label->setPositionX(label1->getContentSize().width/2+label1->getPositionX()+label->getContentSize().width/2);
+	iconSprite->setPositionX(label->getContentSize().width/2+label->getPositionX()+iconSprite->getContentSize().width/2+2);
+	//static_cast<CCScale9Sprite*>(_node->getChildByTag(NT_BackSprite))->setPreferredSize(CCSize(preW, 36));
+	static_cast<CCScale9Sprite*>(_node->getChildByTag(NT_BackSprite))->setCapInsets(CCRect(16, 16,16,16));
+	static_cast<CCScale9Sprite*>(_node->getChildByTag(NT_BackSprite))->setContentSize(CCSize(preW, 36));
+	_node->setVisible(true);
+	_node->removeFromParent();
+	t_scene->addChild(_node,100,1000);
+	//_node->setPosition(ccp(World::getInstance()->getScene()->getContentSize().width / 2-(preW-50-textSize.width) , World::getInstance()->getScene()->getContentSize().height / 2 + 120));
+	_node->setPosition(ccp(t_scene->getContentSize().width / 2 , t_scene->getContentSize().height / 2 + 120));
+	_node->runAction(CCSequence::create(CCMoveBy::create(2.0f,ccp(0,100)),CCFadeOut::create(0.5f),NULL));
+}
+
+void ToolTip::showIconCallback( float dt )
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&ToolTip::showIconCallback), this);
+	if (!_textIcon.empty())
+	{
+		_textIcon.pop_front();
+	}
+	hide();
+	if(!_textIcon.empty())
+	{
+		runText();
+		return;
+	}
+	else if(!_text.empty())
+	{
+		runText();
+		return;
+	}
+}
+
+void ToolTip::pushMessage( const std::string &text, const std::string &_text1,int time,int typeId )
+{
+	time = 2.0f;
+	_typeId=typeId;
+	_textIcon.clear();
+	//hide();
+	if (_textIcon.size() < 5)
+	{
+		_textIcon.push_back(TipTextIcon(text,_text1, time));
+	}
+	if(_textIcon.size() == 1 && _text.empty())
+	{
+		runText();
+	}
+}
+void ToolTip::clear()
+{
+	_textIcon.clear();
+	hide();
+}

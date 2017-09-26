@@ -1,0 +1,341 @@
+#include "Attres.h"
+#include "DBMgr.h"
+#include "f_string_util.h"
+#include "cocos2d.h"
+using namespace cocos2d;
+Attres* Attres::getInstance()
+{
+	static Attres mgr;
+	return &mgr;
+}
+
+void Attres::load()
+{
+	loadTItleProtoFromXML();
+	loadActiveProto();
+	loadHuoYueReward();
+	loadActFramsProto();
+}
+
+void Attres::loadTItleProtoFromXML()
+{
+	_mapTitleProto.clear();
+	f_data_set dataset;
+	std::list<std::string> fields;
+
+	bool ret = dataset.load("Config/db/TitleData.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		tagTitleProto proto;
+		proto.dwID =  dataset.get_int("id",one.c_str());
+		proto.stName = dataset.get_string("name",one.c_str());
+		proto.stDesc = dataset.get_string("desc",one.c_str());
+		proto.stDesc2 = dataset.get_string("desc2",one.c_str());
+		/*proto.stAtt = dataset.get_string("att",one.c_str());*/
+		proto.colorStr = dataset.get_string("color",one.c_str());
+		proto.b_eft = dataset.get_int("isEffect",one.c_str()) == 1;
+		std::string tempStr = dataset.get_string("bodyEffect",one.c_str());
+		proto.bodyEft = (tempStr == "0") ? "":tempStr;   //周身特效文件名，如果为"0"，则存为""，用empty判断是否资源名有效，如果用"0"的话不判断会造成资源一直等待加载（找不到资源名）,内存泄露，而且用string == "0" 判断开销远大于 empty
+		proto.b_normal_eft = dataset.get_int("bodyEffectZoder",one.c_str()) == 1;
+		proto.nShwoForce = dataset.get_int("force",one.c_str());
+		proto.nTimeLimit = dataset.get_int("time_limit",one.c_str());
+		proto.classType = dataset.get_int("show",one.c_str());
+		proto.stGetMode = dataset.get_string("get_mode",one.c_str());
+		proto.nLinkGetUi = dataset.get_int("link",one.c_str());
+		_mapTitleProto.insert(std::make_pair(proto.dwID, proto));
+	});
+}
+
+// void Attres::loadTItleProto()
+// {
+// 	_mapTitleProto.clear();
+// 
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM TitleData");
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 
+// 	while(table->retrieve_row())
+// 	{
+// 		tagTitleProto proto;
+// 		unsigned int idx= table->get_index("id");
+// 		proto.dwID = table->get_integer32(idx);
+// 
+// 		idx = table->get_index("name");
+// 		proto.stName = table->get_text(idx);
+// 
+// 		idx = table->get_index("desc");
+// 		proto.stDesc = table->get_text(idx);
+// 
+// 		idx = table->get_index("desc2");
+// 		proto.stDesc2 = table->get_text(idx);
+// 
+// 		idx = table->get_index("att");
+// 		proto.stAtt = table->get_text(idx);
+// 
+// 		idx = table->get_index("color");
+// 		proto.colorStr = table->get_text(idx);
+// 
+// 		idx = table->get_index("isEffect");
+// 		proto.b_eft = table->get_integer32(idx) ==1;
+// 
+// 		idx = table->get_index("bodyEffect");
+// 
+// 		std::string tempStr = table->get_text(idx);
+// 		proto.bodyEft = (tempStr == "0") ? "":tempStr;   //周身特效文件名，如果为"0"，则存为""，用empty判断是否资源名有效，如果用"0"的话不判断会造成资源一直等待加载（找不到资源名）,内存泄露，而且用string == "0" 判断开销远大于 empty
+// 
+// 		idx = table->get_index("bodyEffectZoder");
+// 		proto.b_normal_eft = table->get_integer32(idx)==1;
+// 
+// 		idx = table->get_index("force");
+// 		proto.nShwoForce = table->get_integer32(idx);
+// 
+// 		idx = table->get_index("time_limit");
+// 		proto.nTimeLimit = table->get_integer32(idx);
+// 
+// 		idx = table->get_index("show");
+// 		proto.classType = table->get_integer32(idx);
+// 
+// 		idx = table->get_index("get_mode");
+// 		proto.stGetMode = table->get_text(idx);
+// 
+// 		idx = table->get_index("link");
+// 		proto.nLinkGetUi = table->get_integer32(idx);
+// 
+// 		_mapTitleProto.insert(std::make_pair(proto.dwID, proto));
+// 
+// 	}
+// 
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+// 
+// }
+
+const tagTitleProto* Attres::getTitleProto( unsigned int dwID )
+{
+	std::map<unsigned int, tagTitleProto>::iterator pIter = _mapTitleProto.find(dwID);
+	if(pIter != _mapTitleProto.end())
+		return &pIter->second;
+	return NULL;
+}
+
+void Attres::loadActiveProto()
+{
+	_vectorActiveProto.clear();
+
+	f_data_set data_set;
+	std::list<std::string> fields;
+	bool ret =data_set.load("Config/db/HuoyueData.xml","id",&fields);
+	CC_ASSERT(ret);
+	std::for_each(	fields.begin(),
+					fields.end(),
+					[&](std::string const& one)
+	{
+		tagActiveProto proto;
+
+		proto.activeID = data_set.get_int("id",one.c_str(),0);
+		proto.strName =data_set.get_string("name",one.c_str(),"");
+		proto.strNpc =data_set.get_string("npc",one.c_str(),"");
+		proto.strReward =data_set.get_string("reward",one.c_str(),"");
+		proto.MapName =data_set.get_string("mapid",one.c_str(),"");
+
+		proto.lvDisc =data_set.get_string("lvDisc",one.c_str(),"");
+		proto.hdTimes =data_set.get_string("continue",one.c_str(),"");
+		proto.TypeName =data_set.get_string("ScriptType",one.c_str(),"");
+
+		proto.nLevel = data_set.get_int("level",one.c_str(),0);
+		proto.nMaxNum = data_set.get_int("number",one.c_str(),0);
+		proto.nActiveValue = data_set.get_int("active_value",one.c_str(),0);
+		proto.nX = data_set.get_int("x",one.c_str(),0);
+		proto.nY = data_set.get_int("y",one.c_str(),0);
+		proto.bOneDone = data_set.get_int("one_done",one.c_str(),0);
+		proto.nOpenUi = (EOPENUI)data_set.get_int("open_ui",one.c_str(),0);
+		proto.ID = data_set.get_int("ID",one.c_str(),0);
+
+		proto.item[0] = data_set.get_int("item1",one.c_str(),0);
+		proto.item[1] = data_set.get_int("item2",one.c_str(),0);
+		proto.item[2] = data_set.get_int("item3",one.c_str(),0);
+
+		proto.recomState = data_set.get_int("recommend",one.c_str(),0);
+		proto.Holiday = data_set.get_int("holiday",one.c_str(),0);
+
+		_vectorActiveProto.push_back(proto);
+	});
+
+	/*
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM HuoyueData");
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		tagActiveProto proto;
+
+		unsigned int idx = table->get_index("name");
+		proto.strName = table->get_text(idx);
+
+		idx = table->get_index("level");
+		proto.nLevel = table->get_integer32(idx);
+
+		idx = table->get_index("npc");
+		proto.strNpc = table->get_text(idx);
+
+		idx = table->get_index("reward");
+		proto.strReward = table->get_text(idx);
+
+		idx= table->get_index("number");
+		proto.nMaxNum = table->get_integer32(idx);
+
+		idx= table->get_index("active_value");
+		proto.nActiveValue = table->get_integer32(idx);
+
+		idx = table->get_index("mapid");
+		proto.MapName = table->get_text(idx);
+
+		idx = table->get_index("x");
+		proto.nX = table->get_integer32(idx);
+
+		idx = table->get_index("y");
+		proto.nY = table->get_integer32(idx);
+
+		idx = table->get_index("one_done");
+		proto.bOneDone = table->get_integer32(idx);
+
+		idx = table->get_index("open_ui");
+		proto.nOpenUi = (EOPENUI)table->get_integer32(idx);
+
+		idx = table->get_index("ID");
+		proto.ID = table->get_integer32(idx);
+		
+		idx=table->get_index("item1");
+		proto.item[0]=table->get_integer32(idx);
+
+		idx=table->get_index("item2");
+		proto.item[1]=table->get_integer32(idx);
+
+		idx=table->get_index("item3");
+		proto.item[2]=table->get_integer32(idx);
+
+		idx=table->get_index("recommend");
+		proto.recomState=table->get_integer32(idx);
+
+		idx=table->get_index("holiday");
+		proto.Holiday=table->get_integer32(idx);
+
+		idx = table->get_index("lvDisc");
+		proto.lvDisc = table->get_text(idx);
+
+		idx = table->get_index("continue");
+		proto.hdTimes = table->get_text(idx);
+
+		idx = table->get_index("ScriptType");
+		proto.TypeName = table->get_text(idx);
+		_vectorActiveProto.push_back(proto);
+
+	}
+
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	*/
+}
+void Attres::loadHuoYueReward(){
+	_vectorHuoYueReward.clear();
+
+	f_data_set data_set;
+	std::list<std::string> fields;
+	bool ret =data_set.load("Config/db/HuoyueReward.xml","ID",&fields);
+	CC_ASSERT(ret);
+	std::for_each(	fields.begin(),
+					fields.end(),
+					[&](std::string const& one)
+	{
+		tagHuoYueReward reward;
+		reward.id=data_set.get_int("ID",one.c_str());
+		reward.HuoYueReward=data_set.get_int("HuoyueReward",one.c_str(),0);
+		std::string tmp;
+		for (int i = 0; i < HuoYueRewardItemNumber ; ++i)
+		{
+			safe_sprintf(tmp,"Item%d",i+1);
+			reward.item[i] = data_set.get_int(tmp.c_str(),one.c_str(),0);
+			safe_sprintf(tmp,"Num%d",i+1);
+			reward.itemNumber[i] = data_set.get_int(tmp.c_str(),one.c_str(),0);
+		}
+
+		_vectorHuoYueReward.push_back(reward);
+	});
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM HuoyueReward");
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row()){
+// 		tagHuoYueReward reward;
+// 		int idx=table->get_index("ID");
+// 		reward.id=table->get_integer32(idx);
+// 		idx=table->get_index("HuoyueReward");
+// 		reward.HuoYueReward=table->get_integer32(idx);
+// 		for(int i = 0;i < HuoYueRewardItemNumber;++i){
+// 			CCString* id=CCString::createWithFormat("%s%d","Item",i+1);
+// 			CCString* num=CCString::createWithFormat("%s%d","Num",i+1);
+// 			idx=table->get_index(id->getCString());
+// 			reward.item[i]=table->get_integer32(idx);
+// 			idx=table->get_index(num->getCString());
+// 			reward.itemNumber[i]=table->get_integer32(idx);
+// 		}
+// 		_vectorHuoYueReward.push_back(reward);
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+}
+const std::vector<tagActiveProto>& Attres::getActiveProtoList()
+{
+	return _vectorActiveProto;
+}
+const std::vector<tagHuoYueReward>&Attres::getHuoYueRewardList(){
+	return _vectorHuoYueReward;
+}
+void Attres::loadActFramsProto()
+{
+	_vecTagActFrameProto.clear();
+
+	
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM actframs");
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		tagActFrameProto proto;
+		unsigned int nIdx = 0;
+
+		nIdx=table->get_index("ActResName");
+		proto.strActResName = table->get_text(nIdx);
+		nIdx=table->get_index("Dir");
+		proto.byDir = table->get_integer32(nIdx);
+		nIdx=table->get_index("ActNum");
+		proto.byActNum = table->get_integer32(nIdx);
+
+		for(int i = 0; i < FRAME_COUNTS; ++i)
+		{
+			stringstream ss;
+			ss<<"f"<<(i+1);
+			nIdx=table->get_index(ss.str());
+			proto.byframe[i] = table->get_integer32(nIdx);
+		}
+			
+
+		_vecTagActFrameProto.push_back(proto);
+	}
+
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+}
+
+const tagActFrameProto* Attres::getTagActFrameProto( const std::string &ActName, unsigned char byDir, unsigned char byActNum )
+{
+	for(size_t i = 0; i < _vecTagActFrameProto.size(); ++i)
+	{
+		tagActFrameProto* pData = &_vecTagActFrameProto[i];
+		if(pData->strActResName == ActName
+			&& pData->byDir == byDir
+			&& pData->byActNum == byActNum)
+			return pData;
+	}
+
+	return NULL;
+}

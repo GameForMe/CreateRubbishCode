@@ -1,0 +1,259 @@
+/**
+ *	@file		BloodFightMgr.h
+ *	@author		zhangyajie
+ *	@date		2016/05/03
+ *	@version	
+ *	@brief		血战到底总的管理类
+ */
+#ifndef __BLOOD_FIGHT_MGR__
+#define __BLOOD_FIGHT_MGR__
+
+#include "CmdAdapter.h"
+#include "GameEventDefine.h"
+#include "xzdd_protocol.h"
+#include "client_common_define.h"
+
+#define BF_NOTICE_PLACARD_ID 4
+#define BF_RANK_AWARD_NUM 3
+
+enum eBFTargetTag
+{
+	BF_Mine_Score,
+	BF_Mine_Rank,
+	BF_Mine_Wins,
+};
+
+enum eBFTitleType
+{
+	BF_Prepare_Null = -1,
+	BF_Prepare_Enter,
+	BF_Prepare_End,//本期活动结束 
+	BF_Battle_End, //战斗内战斗结束倒计时
+	BF_Activity_Close //战斗内战斗结束倒计时
+};
+
+enum eBFGroundType
+{
+	BF_Ground_Null = -1,
+	BF_Ground_Prepare,
+	BF_Ground_Battle,
+};
+
+enum E_REQ_ENTER_RST
+{
+	ERER_Success,           // 进入成功 [2016-5-3 by willing]
+	ERER_Not_Process,       // 不在活动中 [2016-5-3 by willing]
+	ERER_Level_Limit,       // 级别不满足 [2016-5-3 by willing]
+	ERER_Team_Limit,        // 组队玩家不能进入 [2016-5-3 by willing]
+	ERER_Stall_Limit,       // 摆摊状态不能进入 [2016-5-3 by willing]
+	ERER_Exchange_Limit,    // 交易时不能进入 [2016-5-3 by willing]
+	ERER_ComPractice,       // 双休时不能进入 [2016-5-3 by willing]
+	EPER_Map_Limit_Match,   // 此地图不能进行匹配 [2016-5-10 by willing]
+	ERER_Not_Open,          // 玩法没有开启 [2016-5-19 by willing]
+	ERER_CANOT_MATCH,       // 当前不允许匹配 [2016-5-20 by willing]
+
+};
+
+struct BFLocPlayerScore
+{
+	DWORD       dwScore;            // 积分 [2016-5-5 by willing]
+	DWORD       dwSerialWin;        // 当前连胜 [2016-5-5 by willing]
+	DWORD       dwRankings;         // 排名 [2016-5-5 by willing]
+	BFLocPlayerScore()
+	{
+		clear();
+	}
+	void clear()
+	{
+		dwScore = 0;
+		dwSerialWin = 0;
+		dwRankings = 0;
+	}
+};
+
+struct BFActivityTime 
+{
+	double       dwTotalLen;           // 活动的总长度，秒数
+	double       dwOddSecond;          // 活动剩余的秒数
+	double       dwLimitMatchLen;      // 活动开始后，多少秒内不允许匹配
+	double		 dwLimitUpdateItem;	  //地图关闭倒计时用于Update
+	double		 dwLimitEndLen;			//地图关闭需要的总时常
+	DWORD       dwStartHour;          // 开始的小时数 [2016-5-25 by willing]
+	DWORD       dwStartMinute;        // 开始的分钟数 [2016-5-25 by willing]
+	BFActivityTime()
+	{
+		clear();
+	}
+	void clear()
+	{
+		dwTotalLen = 0;  
+		dwOddSecond = 0;  
+		dwLimitMatchLen = 0;
+		dwLimitEndLen = 0;
+		dwLimitUpdateItem = 0;
+		dwStartHour = 0;
+		dwStartMinute = 0;
+	}
+};
+
+struct BFRankAwardData
+{
+	int m_nID;
+	int m_nRank;
+	DWORD m_nItemID[BF_RANK_AWARD_NUM];
+	int m_nItemNum[BF_RANK_AWARD_NUM];
+
+	BFRankAwardData()
+	{
+		clear();
+	}
+	void clear()
+	{
+		m_nID = 0;
+		m_nRank = 0;
+		memset(m_nItemID,0,BF_RANK_AWARD_NUM);
+		memset(m_nItemNum,0,BF_RANK_AWARD_NUM);
+	}
+};
+
+struct BFBattleRoleData
+{
+	DWORD   dwRoleID;                   // 角色ID [2016-5-18 by willing]
+	DWORD   dwMaxHp;
+	DWORD   dwHp;                       
+	DWORD   dwMaxMp;
+	DWORD   dwMp;
+	DWORD   dwTeamID;
+	DWORD	dwClass;
+	bool	m_bIsFriend;
+	BFBattleRoleData()
+	{
+		clear();
+	}
+	void clear()
+	{
+		memset(this,0,sizeof(*this));
+	}
+};
+
+
+const int bf_enter_npc_id = 1671010;
+typedef std::map<unsigned int ,BFBattleRoleData> BFBattleRoleDataMap;
+
+class TargetTouchItem;
+class BloodFightMgr
+{
+public:
+	typedef std::map<int,SXzddRankListItem> map_rank_info;
+public:
+	static BloodFightMgr* getInstance();
+	void Init();
+	void Destroy();
+	void update(float dt);
+
+	//server
+	unsigned int on_server_requst_enter_prepare(s_net_cmd *cmd);//进入准备地图回复
+	unsigned int on_server_requst_prepare_state(s_net_cmd *cmd);//请求准备回复
+	unsigned int on_server_locplayer_bfscore(s_net_cmd *cmd);//推送玩家积分
+	unsigned int on_server_battle_result(s_net_cmd *cmd);//推送战斗结果
+	unsigned int on_server_activity_time(s_net_cmd* cmd);//进入准备地图 推送活动时间信息
+	unsigned int on_server_battle_time(s_net_cmd* cmd);//进入战场推送战斗时间信息
+	unsigned int on_server_recv_rank_info(s_net_cmd* cmd);
+	unsigned int on_server_rec_role_enter_battle(s_net_cmd* cmd);
+	unsigned int on_server_rec_role_arr_change(s_net_cmd *cmd);//队伍里的远程玩家状态改变，主要是对血条之类的处理
+	unsigned int on_server_rec_role_leave_dead(s_net_cmd *cmd);
+	unsigned int on_server_rec_bf_end_result(s_net_cmd *cmd);
+	unsigned int on_server_rec_bf_open_state(s_net_cmd *cmd);
+
+
+	void send_server_enter_prepare_state(); //发送准备消息
+	void send_server_open_rank_layer(); //发送获取排行榜信息
+	void send_server_enter_prepare_ground();//发送进入准备地图的消息
+	void onServerErrorCodeProcess(int pType);//错误消息处理
+
+	//NPC动作处理
+	inline int get_bf_npc_id(){return bf_enter_npc_id;}
+	void processEnterNPCChat(int pIndex);
+	void try_open_battle_notice_layer(); //打开公告栏
+	void try_enter_prepare_ground(); //进入准备地图
+	void try_open_battle_rank_layer(); //打开排行榜
+
+	//battle filed logic
+	void onEnterBFPrepareGround();
+	void onExitBFPrepareGround();
+	void onEnterBFBattleGround();
+	void onExitBFBattleGround();
+	unsigned int onEnterBFInstance(DWORD t_mapId);
+
+	
+public:
+	
+	void onPrepareBtnPressed(bf_prepare_pressed* evt);
+public:// Down is UI logic 
+	void showRankUi(); // show current rank or old rank ui
+	void onMyScorePressed();
+	void onMyRankPressed();
+	void onMineWinsPressed();
+	unsigned int updateBattleGroundUi(); //update game ui in battle ground
+	unsigned int updatePrepareBattleGroundUi(); //update game ui in prepare ground
+	//MiniMap
+	void showTickLabel(bool isShow); //set show MiniMap Time label
+	void updateTickLabel(int time);// update time in MiniMapUi
+	void updatePlayerShow();
+	//Battle ground VS list
+	TargetTouchItem * createTargetItem(eBFTargetTag tag); // add the left task ui item
+	TargetTouchItem * getTargetItem(eBFTargetTag tag); // get the left task ui item
+	void pushPlayerListToTaskUI();
+	void onUpdateBattleScoreInfo(); // update the Battle info ui time and task ui;
+	void refreshPlayerListInfo();
+public:
+	inline e_BFBattleResultType getBattleResultType(){ return m_eBattleResult;};
+	inline DWORD getCurMap(){return m_curMapId;};
+	inline bool getIsInBFBattle() { return m_bIsInBFBattle;};
+	inline int getBFRankItemCount() { return (int)m_mapRankAwardList.size();};
+	bool getBFRankItemInfo(int pRankNum,SXzddRankListItem& pItemInfo);
+	bool getRankAwardDataByRankNum(int pRankNum,BFRankAwardData& pAwardInfo);
+	/*bool getBFBattlePlayerData(unsigned int ,BFBattleRoleData& pData);*/
+	BFBattleRoleDataMap& getBattleRoleData() { return m_mapBattleRoleInfo;};
+	BFLocPlayerScore getLocalPlayerScore() { return m_stLocPlayerScore;}
+
+	void initPlayerBattleInfo();
+	void initRankAwardDataFromXML();
+	bool getIsFriendTypeByRoleID(int roleID);
+
+	void set_bf_active_open(bool isOpen) { m_is_bf_active_open = isOpen;}
+	const bool get_bf_active_open(){return m_is_bf_active_open;}
+
+	void clearMgrInfo();
+private:
+	BloodFightMgr();
+	bool		m_is_bf_active_open; //活动是否开启
+	bool		m_bIsInBFBattle; //是否在血战到底战斗地图中
+	bool		m_bIsPrepare; // 当前玩家是否是准备状态
+	bool		m_bIsShowPreBtn;
+	
+	BFActivityTime m_stBFTimeInfo; //活动时间
+	DWORD		m_curMapId; //当前所在的地图ID
+	eBFTitleType			m_eTitleType; // 仅仅用来表示 倒计时状态 是哪个倒计时
+	eBFGroundType			m_eCurrBFGroundType;//当前战场类型
+	e_BFBattleResultType	m_eBattleResult; //战斗结果
+	std::vector<int>		m_vecPlayerRole; //战斗地图中所有玩家的信息
+	BFLocPlayerScore		m_stLocPlayerScore; //本地玩家积分排行
+	std::map<int,TargetTouchItem *> m_targetItems; //左侧
+// 	// 排行榜数据
+ 	map_rank_info m_mapRankInfo;//排行榜信息 Key 排行榜ID Value 玩家数据
+ 	std::map<int,BFRankAwardData> m_mapRankAwardList; //Key 排行榜名次, Value 奖励数据
+	
+	//战斗数据
+	int		m_nCountDownTime;//战场倒计时总时长
+	int		m_nFightDomeTime;//战场倒计时  
+	int		m_nFightBeginTime;//战场开始时间
+
+	BFBattleRoleData m_stMineBattleData;
+	
+	BFBattleRoleDataMap m_mapBattleRoleInfo;//Key 排行榜roleID, Value 玩家姓名
+
+	int m_nActivityBeginTime;
+};
+
+#endif

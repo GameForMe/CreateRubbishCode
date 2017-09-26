@@ -1,0 +1,695 @@
+#include "CreateRole.h"
+#include "TCPClient.h"
+#include "AppDelegate.h"
+#include "LoginProto.h"
+#include "ServerTime.h"
+#include "World.h"
+#include "MapManager.h"
+#include "CreateRoleUi.h"
+#include "StringMgr.h"
+#include "SelectRole.h"
+#include "DBMgr.h"
+#include "MessageBoxUi.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ClientUpdate.h"
+#include "Login.h"
+#include "CrossSceneUI.h"
+#include "Phyx.h"
+#include "CfgReader.h"
+#include "UiLoader.h"
+#include "MovingBackground.h"
+#include "FilterMgr.h"
+#include "QuestMgr.h"
+#include "VIPMgr.h"
+#include "PackageManager.h"
+#include "ServerListUi.h"
+#include "ClientCfg.h"
+#include "Movie.h"
+#include "UiResourceMgr.h"
+#include "TeamMgr.h"
+#include "WorldLevelMgr.h"
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_WIN32)
+//#include <vld.h>
+#endif
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+#include "wzolJni.h"
+#endif
+
+#if ENABLE_GOTYE==1
+#include "voice/VoiceMgr.h"
+#endif
+
+CreateRole * CreateRole::getInstance()
+{
+	static CreateRole instance;
+	return &instance;
+}
+
+void CreateRole::open()
+{
+	ClientUpdate::getInstance()->_currentScene = ST_CREATEROLESCENE;
+	_moveBack = new MovingBackGround();
+	_moveBack->addToParent(_scene);
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("CreateRoleUi", UiLayerLoader<CreateRoleUi>::loader());
+	ccNodeLoaderLibrary->registerCCNodeLoader("TouchSprite", TouchSpriteLoader::loader());
+	ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	_createRoleUi = dynamic_cast<CreateRoleUi*>(ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "createroleui.ccbi").c_str()));
+	CC_ASSERT(_createRoleUi != NULL);
+
+	std::set<std::string>& resList = ccbReader->getLoadedSpriteSheet();
+	_plist = resList;
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	//ccbReader->release();
+
+	getScene(true);
+
+	
+
+	_scene->addChild(_createRoleUi);
+	_createRoleUi->signalBackBtnClicked.connect(this, &CreateRole::onBackBtnPressed);
+	_createRoleUi->signalBeginBtnClicked.connect(this, &CreateRole::onBeginGameBtnPressed);
+	_createRoleUi->signalRandNameBtnClicked.connect(this, &CreateRole::onRandNameBtnPressed);
+
+	TCP_CLIENT->register_net_cmd("NET_SIS_create_role", this, &CreateRole::onCreateRole);
+	TCP_CLIENT->register_net_cmd("NET_SIS_select_role", this, &CreateRole::onSelectRole);
+	TCP_CLIENT->register_net_cmd("NET_SIS_goto_new_map", this, &CreateRole::onGotoNewMap);
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_role_init_state_att", this, &CreateRole::onRoleInitStateAtt);
+	TCP_CLIENT->register_net_cmd("NET_SIS_Synchronize_Line", this, &CreateRole::onServerSynchronizeLine);
+
+	ClientUpdate::getInstance()->setJoinGame();
+	onRandNameBtnPressed();
+
+}
+
+void CreateRole::close()
+{
+	if (ccbReader)
+	{
+		ccbReader->release();
+	}
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+	CrossSceneUI::getInstance()->close();
+	//_scene->release();
+	_scene = NULL;
+
+	CC_SAFE_DELETE(_moveBack);
+
+	/*
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	std::string pListFile = uiDir + "ccbResources/createroleui.plist";
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFramesFromFile(pListFile.c_str());
+	CCTextureCache::sharedTextureCache()->removeUnusedTextures();
+	*/
+
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_create_role", this, &CreateRole::onCreateRole);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_select_role", this, &CreateRole::onSelectRole);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_goto_new_map", this, &CreateRole::onGotoNewMap);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_role_init_state_att", this, &CreateRole::onRoleInitStateAtt);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Synchronize_Line", this, &CreateRole::onServerSynchronizeLine);
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+}
+
+void CreateRole::onBackBtnPressed()
+{
+	//返回角色列表;
+	if (ClientUpdate::getInstance()->sceneTransationDidFinished())
+	{
+		SelectRole::getInstance()->setRoleIndex(0);
+		SelectRole::getInstance()->open();  //Legend
+		CCDirector::sharedDirector()->replaceScene(SelectRole::getInstance()->getScene());
+		SelectRole::getInstance()->initWithRoleExistInfo();
+	}
+}
+
+void CreateRole::onBeginGameBtnPressed()
+{
+	//SelectRole::getInstance()->close();
+#ifdef _USE_SDK
+	string params;
+	WzolJni::getInstance()->logToServer(LOG_GAMESTART, params);
+#endif
+	eRoleTypeEnum roleType = (eRoleTypeEnum)_createRoleUi->getSelectRoleType();
+	std::string roleName = _createRoleUi->getRoleName();
+	if(roleType == RTE_UNKNOW || roleName.empty())
+		return;
+	size_t curPos = 0;
+	int normalCharCount = 0;
+	int chineseCharCount = 0;
+	int totalCharCount;
+
+	while (curPos < roleName.size()) {
+		int len = utf8_skip_data[(unsigned char)roleName[curPos]];
+		if (len > 1) {
+			chineseCharCount++;
+		}
+		else {
+			normalCharCount++;
+		}
+		curPos += len;
+	}
+	totalCharCount = chineseCharCount  + (normalCharCount + 1)/2;
+	//首先对新建角色进行敏感词过滤;
+	unsigned int ret = FilterMgr::getInstance()->IsNameInNameFilterFile(roleName);
+	if (ret != 0)
+	{
+		if (E_Filter_Name_InFilterFile == ret)
+		{
+			std::string name;
+			c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT msg FROM RoleError WHERE id = ?1");
+			cmd->set_integer32(1 , E_CreateRole_NameInvalid);
+			c_sql_table* table = c_db_manager::getSingleton()->create_table();
+			while(table->retrieve_row())
+			{
+				name = table->get_text(0);
+			}
+			c_db_manager::getSingleton()->destroy_table(table);
+			c_db_manager::getSingleton()->end_operation(cmd);
+			MessageBoxUi *ui = MessageBoxUi::createWithOneBtn("\xE9\x94\x99\xE8\xAF\xAF", name.c_str(), "\xE7\xA1\xAE\xE5\xAE\x9A");
+			_scene->addChild(ui);
+		}
+		return;
+	}
+	NET_SIC_create_role createRole;
+	wchar_t name[512];
+	
+
+
+	memset(name, 0, sizeof(wchar_t) * 512);
+	//根据name，进行长度，特殊字符检查
+	//zhanjiale: 判断是否为英文字母
+	Utf8ToUtf16(roleName.c_str(), name, 512, 0);
+    const int nameLen = 6;
+	if (totalCharCount>6)
+	{
+		ret = E_Filter_Name_TooLong;
+	}
+	else if (totalCharCount == 0)
+	{
+		ret = E_Filter_Name_Null;
+	}
+
+  FilterMgr::getInstance()->IsNameLegal(name,nameLen);
+	if (0 != ret)
+	{
+		int index(0);
+		if (E_Filter_Name_Null == ret)
+		{
+			index = -353;
+		}
+		else if (E_Filter_Name_TooLong == ret)
+		{
+			index = -352;
+		}
+		else
+		{
+			index = 16;
+		}
+		std::string str;
+		c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT msg FROM RoleError WHERE id = ?1");
+		cmd->set_integer32(1 , index);
+		c_sql_table* table = c_db_manager::getSingleton()->create_table();
+		while(table->retrieve_row())
+		{
+			str = table->get_text(0);
+		}
+		c_db_manager::getSingleton()->destroy_table(table);
+		c_db_manager::getSingleton()->end_operation(cmd);
+		MessageBoxUi *ui = MessageBoxUi::createWithOneBtn("\xE9\x94\x99\xE8\xAF\xAF", str.c_str(), "\xE7\xA1\xAE\xE5\xAE\x9A");
+		_scene->addChild(ui);
+		return;
+	}
+	memcpy(createRole.szRoleName, name, sizeof(wchar_t) * X_SHORT_NAME);
+	switch(roleType)
+	{
+	case RTE_MWARRIOR:
+		createRole.eClassType = EV_Warrior;
+		createRole.AvatarAtt.bySex = 1;
+		_userJob = GET_STR(8);
+		break;
+	case RTE_WWARRIOR:
+		createRole.eClassType = EV_Warrior;
+		createRole.AvatarAtt.bySex = 0;
+		_userJob = GET_STR(8);
+		break;
+	case RTE_MMASTER:
+		createRole.eClassType = EV_Mage;
+		createRole.AvatarAtt.bySex = 1;
+		_userJob = GET_STR(9);
+		break;
+	case RTE_WMASTER:
+		createRole.eClassType = EV_Mage;
+		createRole.AvatarAtt.bySex = 0;
+		_userJob = GET_STR(9);
+		break;
+	case RTE_MTAOIST:
+		createRole.eClassType = EV_Taoist;
+		createRole.AvatarAtt.bySex = 1;
+		_userJob = GET_STR(10);
+		break;
+	case RTE_WTAOIST:
+		createRole.eClassType = EV_Taoist;
+		createRole.AvatarAtt.bySex = 0;
+		_userJob = GET_STR(10);
+		break;
+	}
+	TCP_CLIENT->send_net_cmd(&createRole, NP_NORMAL, false);
+	_createRoleUi->setBtnTouch(false);
+	//CrossSceneUI::getInstance()->open(2);
+	//CrossSceneUI::getInstance()->setPecAction(10,20);
+}
+	
+
+void CreateRole::onRandNameBtnPressed()
+{	
+	srand(ServerTime::getInstance()->cal_current_server_dword_time() + ClientUpdate::getInstance()->getCurrentTime());
+
+	// 由于目前姓名库中有些姓名不合法，不合法的要从新随机
+	std::string ret;
+	wchar_t name[512];
+	const int nameLen = 6;
+	do 
+	{
+		int xing = rand()%1501 + 20000;
+		int nam = rand()%1501 + 30000;
+		int nvm = rand()%1501 + 40000;
+		switch(_createRoleUi->getSelectRoleType())
+		{
+		case RT_MWARRIOR:
+		case RT_MMAGE:
+		case RT_MTAOIST:
+			ret = GET_STR(xing) + GET_STR(nam);
+			break;
+		default:
+			ret = GET_STR(xing) + GET_STR(nvm);
+			break;
+		}
+
+		memset(name, 0, sizeof(wchar_t) * 512);
+		Utf8ToUtf16(ret.c_str(), name, 512, 0);
+
+	} while (FilterMgr::getInstance()->IsNameLegal(name,nameLen) != E_Success);
+
+	_createRoleUi->setRoleName(ret);
+}
+
+unsigned int CreateRole::onCreateRole( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_create_role"))
+	{
+		NET_SIS_create_role *createRole = (NET_SIS_create_role*)cmd;
+		if(createRole->dw_error_code == E_Success)
+		{
+			tagSimRole* pRole = (tagSimRole *)createRole->bySimRoleInfo;
+
+			ServerZone::Zone zone;
+			ServerZone::Server server;
+			if (!ServerListUi::getInstance()->getCurDataForLogin(zone, server))
+			{
+				server.serial = 1000;
+			}
+			std::stringstream yy_account;
+			yy_account << server.serial;
+			yy_account << pRole->dw_role_id;
+#if ENABLE_GOTYE==1
+			VoiceMgr::getSingleton()->process(YYS_LOGIN, YY_CPLOGIN, yy_account.str());
+#endif
+
+			NET_SIC_select_role selectRole;
+			selectRole.dw_role_id = pRole->dw_role_id;
+			TCP_CLIENT->send_net_cmd(&selectRole, NP_CRITICAL, false);
+			CrossSceneUI::getInstance()->open(2);
+			CrossSceneUI::getInstance()->setPecAction(20,30);
+			//CrossSceneUI::getInstance()->setPec(25);
+			//CrossSceneUI::getInstance()->setMessage();
+			//QuestMgr::getInstance()->init();
+			//CrossSceneUI::getInstance()->getUiLayer()->setPec(rand()%100);
+#ifdef _USE_SDK
+
+			extern int g_zoneid;
+			extern std::string g_zonename;
+			extern std::string g_zonenum;
+			extern std::string g_areaName;
+
+			WzolJni* jni = WzolJni::getInstance();
+			if(Login::getInstance()->getIsFirstCreateRole()){
+				string params;
+				params += "accountId="+ jni->toString(World::getInstance()->getAccountId());
+				params += "\tserverId="+ jni->toString(g_zoneid);
+				//按照需求只有以前没创建账号才发rolecreate消息
+				jni->logToServer(LOG_CREATE, params);
+				jni->logToServer(LOG_CREATEUI, "");
+				Login::getInstance()->setIsFirstCreateRole(false);
+			}
+			std::string roleName = _createRoleUi->getRoleName();
+			WzolJni::getInstance()->loginGameInfo(2,selectRole.dw_role_id, roleName.c_str(), 1, g_zoneid, g_zonename.c_str(), g_zonenum.c_str(), World::getInstance()->getAccountId(), g_areaName.c_str());
+			WzolJni::getInstance()->logToServer(LOG_GAMELODING,"");
+
+			tagDWORDTime roleCreateTime = pRole->dwDelGuardTime;
+			int utcRoleCreateTime = DwordTime2UTCTime(roleCreateTime); 
+			m_roleCreateTimeMap[pRole->dw_role_id] = utcRoleCreateTime;
+
+			string roleInfo;
+			roleInfo += "roleId=" + jni->toString(pRole->dw_role_id);
+			std::string tempRoleName = convertName(pRole->szRoleName);
+			roleInfo += "\troleName=" + tempRoleName;
+			roleInfo += "\troleLevel=" + jni->toString(1);
+			roleInfo += "\tzoneId=" + jni->toString(g_zoneid);
+			roleInfo += "\tzoneName=" + g_zonename;
+			roleInfo += "\troleCTime=" + jni->toString(utcRoleCreateTime);
+			roleInfo += "\troleLevelMTime=" + jni->toString(utcRoleCreateTime);
+			roleInfo += "\ttype=createRole";
+
+			WzolJni::getInstance()->callPlatform(WHAT_SUBMITROLEINFO, roleInfo);
+#endif
+
+		}
+		else
+		{
+			unsigned int id = createRole->dw_error_code;
+			std::string name;
+			c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT msg FROM RoleError WHERE id = ?1");
+			switch(id)
+			{
+			case (unsigned int)E_CreateRole_RoleCreating:			
+				cmd->set_integer32(1 , E_CreateRole_RoleCreating);
+				break;
+			case (unsigned int)E_CreateRole_RoleEnumNotDone:
+				cmd->set_integer32(1 , E_CreateRole_RoleEnumNotDone);
+				break;
+			case (unsigned int)E_CreateRole_RoleDeleting:
+				cmd->set_integer32(1 , E_CreateRole_RoleDeleting);	
+				break;
+			case (unsigned int)E_CreateRole_RoleNumFull:
+				cmd->set_integer32(1 , E_CreateRole_RoleNumFull);			
+				break;
+			case (unsigned int)E_CreateRole_NameExist:
+				cmd->set_integer32(1 , E_CreateRole_NameExist);				
+				break;
+			case (unsigned int)E_CreateRole_NameInvalid:
+				cmd->set_integer32(1 , E_CreateRole_NameInvalid);				
+				break;
+			case (unsigned int)E_CreateRole_SafeCodeInvalid:
+				cmd->set_integer32(1 , E_CreateRole_SafeCodeInvalid);					
+				break;
+			case (unsigned int)E_CreateRole_InWorld:
+				cmd->set_integer32(1 , E_CreateRole_InWorld);				
+				break;
+			case (unsigned int)E_CreateRole_RoleLoading:
+				cmd->set_integer32(1 , E_CreateRole_RoleLoading);			
+				break;
+			case (unsigned int)E_SystemError:
+				cmd->set_integer32(1 , E_SystemError);				
+				break;
+			case (unsigned int)E_Filter_Name_TooLong:
+				cmd->set_integer32(1 , E_Filter_Name_TooLong);					
+				break;
+			case (unsigned int)E_Filter_Name_Null:
+				cmd->set_integer32(1 , E_Filter_Name_Null);				
+				break;
+			case (unsigned int)E_CreateRole_RoleChangNaming:
+				cmd->set_integer32(1 , E_CreateRole_RoleChangNaming);				
+				break;
+			case (unsigned int)E_CreateRole_RoleCancelDelGuardTime:
+				cmd->set_integer32(1 , E_CreateRole_RoleCancelDelGuardTime);	
+				break;
+			case (unsigned int)E_Filter_Name_Illegal:
+			case (unsigned int)E_Filter_Name_InFilterFile:
+				cmd->set_integer32(1 , E_Filter_Name_Illegal);		
+				break;
+			default:
+				cmd->set_integer32(1 , E_Filter_Name_Illegal);				
+				break;
+			}
+			c_sql_table* table = c_db_manager::getSingleton()->create_table();
+			while(table->retrieve_row())
+			{
+				name = table->get_text(0);
+			}
+			c_db_manager::getSingleton()->destroy_table(table);
+			c_db_manager::getSingleton()->end_operation(cmd);
+			MessageBoxUi *ui = MessageBoxUi::createWithOneBtn("\xE9\x94\x99\xE8\xAF\xAF", name.c_str(), "\xE7\xA1\xAE\xE5\xAE\x9A");
+			_scene->addChild(ui);
+			_createRoleUi->setBtnTouch(true);
+		}
+		
+	}
+	return 0;
+}
+
+unsigned int CreateRole::onSelectRole( s_net_cmd *cmd )
+{
+	//unsigned int sid = message_id_crc("NET_SIS_goto_new_map");
+	if(cmd->id == message_id_crc("NET_SIS_select_role"))
+	{
+		NET_SIS_select_role* selectRole = (NET_SIS_select_role*)cmd;
+		if(selectRole->dw_error_code == E_Success)
+		{
+			RoleManager::getInstance()->init();	
+			RoleManager::getInstance()->getLocalPlayer()->setId(selectRole->dw_role_id);
+			//[bing] 记录一下LP的charid
+			TCP_CLIENT->SetLPCharID(selectRole->dw_role_id);
+			CrossSceneUI::getInstance()->setPecAction(30,40);
+			//CrossSceneUI::getInstance()->setPec(50);
+			TeamMgr::getInstance()->Init_Signal();							// 此处也应该调用一下，不然有可能初始化不到
+			auto iter = m_roleCreateTimeMap.find(selectRole->dw_role_id);
+			if (iter != m_roleCreateTimeMap.end())
+			{
+				LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+				if (lp)
+				{
+					lp->setRoleCreateTime(iter->second);
+				}
+			}
+		}
+			//_selectRoleProperty.id = selectRole->dw_role_id;
+	}
+	return 0;
+}
+
+unsigned int CreateRole::onGotoNewMap( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_goto_new_map"))
+	{
+		NET_SIS_goto_new_map *newMap = (NET_SIS_goto_new_map *)cmd;
+		//_selectRoleProperty.posX = newMap->nPos[0];
+		//_selectRoleProperty.posY = newMap->nPos[2];
+		//_selectRoleProperty.dirX = newMap->nDir[0];
+		//_selectRoleProperty.dirY = newMap->nDir[2];
+		LocalPlayer *player = RoleManager::getInstance()->getLocalPlayer();
+		player->setAttribute(RA_POSX, newMap->nPos[0]);
+		player->setAttribute(RA_POSY, newMap->nPos[2]);
+		player->setAttribute(RA_DIRX, newMap->nDir[0]);
+		player->setAttribute(RA_DIRY, newMap->nDir[2]);
+		//player->setCurLine(newMap->lineId);
+		MapManager::getInstance()->setCurLine(newMap->lineId);
+		RoleHeadUi* roleHeadUi = World::getInstance()->getRoleHeadUi();
+		if (roleHeadUi)
+			roleHeadUi->setShowLine(newMap->lineId);
+		MapManager::getInstance()->changeMap(newMap->dwMapID);
+		
+
+		NET_SIC_get_role_init_state getRoleInit;
+		getRoleInit.eType = ERIT_Att;
+		TCP_CLIENT->send_net_cmd(&getRoleInit, NP_CRITICAL, false);
+		//CrossSceneUI::getInstance()->open(2);
+		CrossSceneUI::getInstance()->setPecAction(40,50);
+		//CrossSceneUI::getInstance()->setPec(75);
+	}
+
+	RoleHeadUi* roleui = World::getInstance()->getRoleHeadUi();
+	if(NULL != roleui)
+		roleui->setShoeEnabled(true);
+
+	MapManager::getInstance()->SetISetEnabled(true);
+	AudioPlayer::getSigletonPtr()->stopAllSoundEffect();
+
+	return 0;
+}
+
+unsigned int CreateRole::onRoleInitStateAtt( s_net_cmd *cmd )
+{
+	//if(cmd->id == message_id_crc("NET_SIS_get_role_init_state_att"))
+	{
+		CHECK_SCENE_TRANSATION_FINISHED;
+		//添加mainui资源
+		std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+		std::string mainuiList = uiDir + std::string("ccbResources/rendui.plist");
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(mainuiList.c_str());
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(std::string(uiDir + "shadow.plist").c_str());
+		//CrossSceneUI::getInstance()->setPec(100);
+		NET_SIS_get_role_init_state_att *roleState = (NET_SIS_get_role_init_state_att*)cmd;
+		extern NET_SIS_get_role_init_state_att *g_roleStateMsg;
+		char* netData = new char[roleState->size];
+		memset(netData, 0, sizeof(roleState->size));
+		//g_roleStateMsg = (NET_SIS_get_role_init_state_att *)netData;
+		//*g_roleStateMsg = *roleState;
+		memcpy((void*)netData,(void*)roleState,sizeof(char)*roleState->size);
+
+		if (g_roleStateMsg)
+		{
+			delete [](char*)g_roleStateMsg;
+		}
+		g_roleStateMsg =  (NET_SIS_get_role_init_state_att *)netData;
+		//_selectRoleProperty.roleType = (RoleType)roleState->eClassType;
+		//_selectRoleProperty.sex = (int)roleState->Avatar.bySex;
+		//_selectRoleProperty.battleMode = (int)roleState->ePKState;
+		WorldLevelMgr::getInstance()->refersh_world_lv(roleState->nWorldLevel);
+
+		LocalPlayer *player = RoleManager::getInstance()->getLocalPlayer();
+		player->initBloodUi();
+		player->setAttribute(RA_ROLETYPE, (RoleType)roleState->eClassType);
+		player->setAttribute(RA_SEX, (int)roleState->Avatar.bySex);
+		player->setAttribute(RA_BATTLEMODE, (int)roleState->ePKState);
+		player->setAttribute(RA_HP, roleState->nAtt[ERA_HP]);
+		player->setAttribute(RA_MP, roleState->nAtt[ERA_MP]);
+		player->setAttribute(RA_MaxHP, roleState->nAtt[ERA_MaxHP]);
+		player->setAttribute(RA_MaxMP, roleState->nAtt[ERA_MaxMP]);
+		player->setAttribute(RA_WalkSpeed, ROLE_BASE_SPEED * roleState->nAtt[ERA_Speed_XZ]);
+		player->setAttribute(RA_RideSpeed, ROLE_BASE_SPEED * roleState->nAtt[ERA_Speed_Mount]);
+		player->setAttribute(RA_DEAD, roleState->dwState & (0x1 << ES_Dead));
+		player->setAttribute(RA_HITRATE, roleState->nAtt[ERA_HitRate]);
+		player->setAttribute(RA_DODGE, roleState->nAtt[ERA_Dodge]);
+		player->setAttribute(RA_CRIT_RATE, roleState->nAtt[ERA_Crit_Rate]);
+		player->setAttribute(RA_UNCRIT_RATE, roleState->nAtt[ERA_UnCrit_Rate]);
+		player->setAttribute(RA_ExAttackMin, roleState->nAtt[ERA_ExAttackMin]);
+		player->setAttribute(RA_ExAttackMax, roleState->nAtt[ERA_ExAttackMax]);
+		player->setAttribute(RA_InAttackMin, roleState->nAtt[ERA_InAttackMin]);
+		player->setAttribute(RA_InAttackMax, roleState->nAtt[ERA_InAttackMax]);
+		player->setAttribute(RA_ArmorEx, roleState->nAtt[ERA_ArmorEx]);
+		player->setAttribute(RA_ArmorIn, roleState->nAtt[ERA_ArmorIn]);
+		player->setAttribute(RA_ExMinDefense, roleState->nAtt[ERA_ExMinDefense]);
+		player->setAttribute(RA_ExMaxDefense, roleState->nAtt[ERA_ExMaxDefense]);
+		player->setAttribute(RA_InMinDefense, roleState->nAtt[ERA_InMinDefense]);
+		player->setAttribute(RA_InMaxDefense, roleState->nAtt[ERA_InMaxDefense]);
+		player->setAttribute(RA_Luck, roleState->nAtt[ERA_Luck]);
+		player->setAttribute(RA_PKVALUE, roleState->iPKValue);
+		player->setAttribute(RA_Knowledge, roleState->nAtt[ERA_Knowledge]);//声望
+		player->setAttribute(RA_Jinengdian, roleState->nAtt[ERA_TalentPoint]);
+		//!战斗力在这里
+		player->setAttribute(RA_BATTLE_POINT , roleState->nEquipRating);
+		player->setAttribute(RA_MEILI_POINT,(int)roleState->nMeiLi);//魅力值
+		player->setAttribute(RA_RONGYU_POINT,roleState->n32CurExploits);//荣誉点
+		player->setAttribute(RA_RideState, roleState->n64RoleState & ERS_Mount);
+		player->setAttribute(RA_BattleMode, roleState->n64RoleState & ERS_Combat);
+		if((roleState->n64RoleState & ERS_IsGrayName) != 0)
+		{
+			player->setAttribute(RA_IsGrayName,1);
+		}
+		else
+		{
+			player->setAttribute(RA_IsGrayName,0);
+		}
+		player->setAttribute(RA_TiLiZhi, roleState->nAtt[ERA_TiLi]);	//[bing] 体力值
+	
+		player->setAttribute(RA_Derate_Wood, roleState->nAtt[ERA_Derate_Wood]);   // 风伤害减免 modify 2016.3.28 噬魔：攻击附带消耗敌人魔法值
+		player->setAttribute(RA_Derate_Fire, roleState->nAtt[ERA_Derate_Fire]);   // 火伤害减免 modify 2016.3.28 破盾：攻击穿透敌人的魔法盾，造成额外百分比伤害（不超过没有魔法盾的伤害）
+		player->setAttribute(RA_Derate_Water, roleState->nAtt[ERA_Derate_Water]);  // 雷伤害减免 modify 2016.3.28 腐蚀：攻击附带减低敌人物防和魔防百分比
+		player->setAttribute(RA_Derate_Injury, roleState->nAtt[ERA_Derate_Injury]);// 内损伤害减免 modify 2016.3.28 真伤：攻击附加真实伤害
+		player->setAttribute(RA_Derate_InAttack, roleState->nAtt[ERA_Derate_InAttack]);  // 远程伤害减免 modify 2016.3.28 抵抗：进入抵抗状态后，减免百分比伤害
+
+		player->setGuild(roleState->dwGuildID);
+		player->setLevel(roleState->nLevel);
+		player->setCurLevelExp(roleState->nCurLevelExp);
+		player->updateCurMaxExp();
+		bool isShowRoleName = RoleManager::getInstance()->getIsShowSelfRoleName();
+		player->setVIPLevel(roleState->nVIPLevel, isShowRoleName);//gx is fuck
+		player->setVIPExp(roleState->dwVIPExp);			//【Ji：】 add
+		player->setLocVIPLevel(roleState->nVIPLevel);	//【Ji：】 add
+		player->setSilverBoxTime(roleState->dwSilverBoxTime);	//【Ji：】 add
+		player->setGoldBoxTime(roleState->dwGoldBoxTime);		//【Ji：】 add
+		player->setInstanceData(roleState->nInstanceData);//gx add
+		player->setRedZuiFlag(roleState->dwRedZuiFlag);//gx add
+		player->setRedLip(player->getRedZuiFlag()); //ssb add
+		//player->setEnemyId(roleState->enemyId);
+
+		//XSea todo: 这里加白银黄金宝箱开启时间
+
+		PackageManager::getInstance()->setTotalChargeYuanBao(roleState->n_total_recharge);//初始化总充值元宝数
+		//		QuestMgr::getInstance()->setEveryANum(GET_VIP_DETAIL(player->getVIPLevel(),XIULUOSHILIAN_ADD));						//【Ji：】
+		//		QuestMgr::getInstance()->setEveryBNum(GET_VIP_DETAIL(player->getVIPLevel(),MOWUSHOULIE_ADD));						//【Ji：】
+		// 当前称号
+		for (int i = 0; i < 3; i++)
+		{
+			player->setCurTille(i, roleState->dwActTitleID[i]);
+		}
+
+		player->setSignLevel(roleState->n_sign_level);
+
+		//外观属性
+		for(int i = 0; i < X_AVATAR_ELEMENT_NUM; i ++)
+		{
+			player->setDisplayAttr((ePlayerDisplayAttr)roleState->AvatarEquip.AvatarEquip[i].byDisplayPos, roleState->AvatarEquip.AvatarEquip[i].dw_data_id);
+		}
+
+		//player->setFashion(roleState->DisplaySet.bFashionDisplay);
+		player->sync_display_flag_from_display_set_data(roleState->DisplaySet);
+		player->initSelectRideLv();
+
+		World::getInstance()->setLoginEnterSceneFlagUpdate();
+		return 0;
+
+		//MapManager::getInstance()->openMap();
+		World::getInstance()->open();
+		CCDirector::sharedDirector()->replaceScene(World::getInstance()->getScene());
+
+		//LocalPlayer Buff
+		RoleHeadUi *roleHeadUi = World::getInstance()->getRoleHeadUi();
+		for(int i = 0; i < roleState->nBuffNum; i ++)
+		{
+			const tagBuffMsgInfo &buffInfo = roleState->Buff[i];
+			player->addPLBuffer(buffInfo.dwBuffTypeID,buffInfo.dwSrcRoleId,buffInfo.nWarpTimes);
+			if (roleHeadUi)
+			{
+				roleHeadUi->setBuffCD(buffInfo.dwBuffTypeID, buffInfo.nPersistTimeLeft, buffInfo.nMaxPersistTime,buffInfo.nWarpTimes);
+			}
+		}
+
+		player->initFsm();
+		player->loadAnimate();
+		player->addToMap();
+		CrossSceneUI::getInstance()->close();
+
+		//[bing] 直接进入新手副本动画
+		if(NULL != MapManager::getInstance())
+		{
+			std::string mapName = MapManager::getInstance()->getMapName(MapManager::getInstance()->getCurMapId());
+			if(mapName != "m1")
+			{
+				CMovie::GetInstance().doNPCScript(1);
+#ifdef _USE_SDK
+				WzolJni *jni = WzolJni::getInstance();
+				if (jni->getIsFirstCreate())
+				{
+					string params;
+					jni->logToServer(LOG_FLASHSTART, params);
+				}
+#endif
+			}
+			//创建角色建立风沙离子特效 //add by XSea 2014.11.13
+			MapManager::getInstance()->playSandParticleEffect();
+		}
+
+	}
+	return 0;
+}
+
+unsigned int CreateRole::onServerSynchronizeLine( s_net_cmd *cmd )
+{
+	MapManager::getInstance()->onServerSynchronizeLine(cmd);
+	return 0;
+}
+
+void CreateRole::runSelectjobAction()
+{
+	if (ccbReader)
+	{
+		ccbReader->getAnimationManager()->runAnimations("choosejob");
+	}
+}
+void CreateRole::setRoleAnim(GameActionNode* node,float action /*= 0.1f*/,bool isBegin /*= false*/,int Tag/* = 0*/,float xScale/* =0.0f*/,float yScale/* =0.0f*/)
+{
+	_moveBack->setRoleAnim(node,action,isBegin,Tag,xScale,yScale);
+}

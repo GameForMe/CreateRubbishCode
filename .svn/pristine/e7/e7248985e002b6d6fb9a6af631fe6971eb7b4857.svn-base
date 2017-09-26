@@ -1,0 +1,607 @@
+#include "RankMgr.h"
+#include "TCPClient.h"
+#include "GuildProto.h"
+#include "RoleInfoProto.h"
+#include "RankUi.h"
+#include "NameMgr2.h"
+#include "UiManager.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "MasterPrenticeMgr.h"
+RankMgr::RankMgr()
+{
+}
+
+RankMgr::~RankMgr()
+{
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_get_level_rank" , this , &RankMgr::onLvlTopten);		
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_get_guild_rank" , this , &RankMgr::onGuildTopten);		
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_get_meili_rank" , this , &RankMgr::onBeautifulTopten);		
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_get_justice_rank" , this , &RankMgr::onBattleTopten);	
+	//NameMgr2::getInstance()->_sigGetName.disconnect(this , &RankMgr::onGetMemberName);	
+}
+
+RankMgr* RankMgr::getInstance()
+{
+	static RankMgr mgr;
+	return &mgr;
+}
+void RankMgr::init()
+{
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_level_rank" , this , &RankMgr::onLvlTopten);		
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_guild_rank" , this , &RankMgr::onGuildTopten);		
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_meili_rank" , this , &RankMgr::onBeautifulTopten);		
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_justice_rank" , this , &RankMgr::onBattleTopten);	
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_master_rank" , this , &RankMgr::onMasterTopten);	
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_reach_rank" , this , &RankMgr::onReachTopten);
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_master_rank_graduates" , this , &RankMgr::onMasterToptenGraduates);
+	REG_NAME_CB(this , &RankMgr::onGetMemberName);
+	REG_GUILD_NAME_CB(this , &RankMgr::onGetGuildName);
+	memset(_init, 0, sizeof(bool) * TT_All);
+	m_levelTime		= ServerTime::getInstance()->cal_current_server_dword_time();
+	m_battleTime	= ServerTime::getInstance()->cal_current_server_dword_time();
+	m_beautifulTime	= ServerTime::getInstance()->cal_current_server_dword_time();
+	m_guildTime		= ServerTime::getInstance()->cal_current_server_dword_time();
+	m_masterTime	= ServerTime::getInstance()->cal_current_server_dword_time();
+	m_reachTime		= ServerTime::getInstance()->cal_current_server_dword_time();
+}
+void RankMgr::Destroy()
+{
+	memset(_init, 0, sizeof(bool) * TT_All);
+	_lvlTopten.clear();
+	_guildTopten.clear();
+	_beauTopten.clear();
+	_battleTopten.clear();
+	_masterTopten.clear();
+	_reachTopten.clear();
+
+	_lvlRoleNameMap.clear();
+	_guildRoleNameMap.clear();
+	_beauRoleNameMap.clear();
+	_battleRoleNameMap.clear();
+	_guildGuildNameMap.clear();
+	_masterNameMap.clear();
+	_reachNameMap.clear();
+
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_level_rank" , this , &RankMgr::onLvlTopten);		
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_guild_rank" , this , &RankMgr::onGuildTopten);		
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_meili_rank" , this , &RankMgr::onBeautifulTopten);		
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_justice_rank" , this , &RankMgr::onBattleTopten);	
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_master_rank" , this , &RankMgr::onMasterTopten);	
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_reach_rank" , this , &RankMgr::onReachTopten); 
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_master_rank_graduates" , this , &RankMgr::onMasterToptenGraduates);
+	UNREG_NAME_CB(this , &RankMgr::onGetMemberName);	
+	UNREG_GUILD_NAME_CB(this , &RankMgr::onGetGuildName);
+	return;
+}
+
+void RankMgr::sendLvlTopten( bool isInit /*= false*/ )
+{
+	DWORD nowTime = ServerTime::getInstance()->cal_current_server_dword_time();
+	DWORD time = CalcTimeDiff(nowTime,m_levelTime);
+	if (isInit || time >= RANK_SEND_TIME_LIMIT)
+	{
+		m_levelTime = nowTime;
+		NET_SIC_get_level_rank cmd;
+		TCP_CLIENT->send_net_cmd(&cmd , NP_IDLE , false);
+	}
+}
+
+void RankMgr::sendBattleTopten( bool isInit /*= false*/ )
+{
+	DWORD nowTime = ServerTime::getInstance()->cal_current_server_dword_time();
+	DWORD time = CalcTimeDiff(nowTime,m_battleTime);
+	if (isInit || time >= RANK_SEND_TIME_LIMIT)
+	{
+		m_battleTime = nowTime;
+		NET_SIC_get_justice_rank cmd;
+		TCP_CLIENT->send_net_cmd(&cmd , NP_IDLE , false);
+	}
+}
+
+void RankMgr::sendBeautifulTopten( bool isInit /*= false*/ )
+{
+	DWORD nowTime = ServerTime::getInstance()->cal_current_server_dword_time();
+	DWORD time = CalcTimeDiff(nowTime,m_beautifulTime);
+	if (isInit || time >= RANK_SEND_TIME_LIMIT)
+	{
+		m_beautifulTime = nowTime;
+		NET_SIC_get_meili_rank cmd;
+		TCP_CLIENT->send_net_cmd(&cmd , NP_IDLE , false);
+	}
+}
+
+void RankMgr::sendGuildTopten( bool isInit /*= false*/ )
+{
+	DWORD nowTime = ServerTime::getInstance()->cal_current_server_dword_time();
+	DWORD time = CalcTimeDiff(nowTime,m_guildTime);
+	if (isInit || time >= RANK_SEND_TIME_LIMIT)
+	{
+		m_guildTime = nowTime;
+		NET_SIC_get_guild_rank cmd;
+		TCP_CLIENT->send_net_cmd(&cmd , NP_IDLE , false);
+	}
+}
+
+void RankMgr::sendMasterTopten( bool isInit /*= false*/ )
+{
+	DWORD nowTime = ServerTime::getInstance()->cal_current_server_dword_time();
+	DWORD time = CalcTimeDiff(nowTime,m_masterTime);
+	if (isInit || time >= RANK_SEND_TIME_LIMIT)
+	{
+		m_masterTime = nowTime;
+		NET_SIC_get_master_rank cmd;
+		TCP_CLIENT->send_net_cmd(&cmd , NP_IDLE , false);
+
+		NET_SIC_get_master_rank_graduates cmd1;
+		TCP_CLIENT->send_net_cmd(&cmd1 , NP_IDLE , false);
+	}
+}
+
+void RankMgr::sendReachTopten( bool isInit /*= false*/ )
+{
+	DWORD nowTime = ServerTime::getInstance()->cal_current_server_dword_time();
+	DWORD time = CalcTimeDiff(nowTime,m_reachTime);
+	if (isInit || time >= RANK_SEND_TIME_LIMIT)
+	{
+		m_reachTime = nowTime;
+		NET_SIC_get_reach_rank cmd;
+		TCP_CLIENT->send_net_cmd(&cmd , NP_IDLE , false);
+	}
+}
+
+unsigned int RankMgr::onLvlTopten( s_net_cmd* cmd )
+{
+	_lvlTopten.clear();
+	LevelTopten lt;
+	NET_SIS_get_level_rank* msg = (NET_SIS_get_level_rank*)cmd;
+	for(int i = 0 ; i < msg->n_num ; ++i)
+	{
+		tagLevelRankInfo ri = msg->st_LevelRank[i];
+		lt.level = ri.nLevel;
+		lt.pro = ri.eClass;
+		lt.id = ri.dw_role_id;
+		lt.ntitle_id = ri.ntitle_id;
+		std::string lname;
+		if(NameMgr2::getInstance()->queryName(lt.id , lname))
+		{
+			lt.name = lname;
+		}
+		else
+		{
+			lt.name = "";
+			_lvlRoleNameMap[ri.dw_role_id] = i;
+		}
+		_lvlTopten.push_back(lt);
+	}
+
+	if(_lvlRoleNameMap.empty())
+		_init[TT_LEVEL] = true;
+
+	GET_UI(RankUi, WCT_RankUi)->updateData();
+	return 0;
+}
+
+unsigned int RankMgr::onBeautifulTopten( s_net_cmd* cmd )
+{
+	_beauTopten.clear();
+	sBeauTopten lt;
+	NET_SIS_get_meili_rank* msg = (NET_SIS_get_meili_rank*)cmd;
+	for(int i = 0 ; i < msg->n_num ; ++i)
+	{
+		tagmeiliRankInfo ri = msg->st_ShihunRank[i];
+		lt.id = ri.dw_role_id;
+		lt.meili = ri.dw_shihun;
+		lt.pro = ri.e_class;
+		lt.sex = ri.by_sex;
+		lt.ntitle = ri.ntitle_id;
+		std::string lname;
+		if(NameMgr2::getInstance()->queryName(lt.id , lname))
+		{
+			lt.name = lname;
+		}
+		else
+		{
+			lt.name = "";
+			_beauRoleNameMap[ri.dw_role_id] = i;
+		}
+		_beauTopten.push_back(lt);
+	}
+
+	if(_beauRoleNameMap.empty())
+		_init[TT_BEAUTIFUL] = true;
+
+	GET_UI(RankUi, WCT_RankUi)->updateData();
+	return 0;
+}
+
+unsigned int RankMgr::onBattleTopten( s_net_cmd* cmd )
+{
+	_battleTopten.clear();
+	sBattleTopten bt;
+	NET_SIS_get_justice_rank* msg = (NET_SIS_get_justice_rank*)cmd;
+	for( int i = 0 ; i < msg->n_num ; ++i)
+	{
+		tagJusticeRankInfo jr = msg->st_JusticeRank[i];
+		bt.id = jr.dw_role_id;
+		bt.pro = jr.e_class;
+		bt.battleval = jr.n32Justice;
+		bt.justice = jr.nLevel;
+		bt.ntitle_id = jr.ntitle_id;
+		std::string lname;
+		if(NameMgr2::getInstance()->queryName(bt.id , lname))
+		{
+			bt.name = lname;
+		}
+		else
+		{
+			bt.name = "";
+			_battleRoleNameMap[jr.dw_role_id] = i;
+		}
+		_battleTopten.push_back(bt);
+	}
+
+	if(_battleRoleNameMap.empty())
+		_init[TT_BATTLE] = true;
+
+	GET_UI(RankUi, WCT_RankUi)->updateData();
+	return 0;
+}
+
+unsigned int RankMgr::onGuildTopten( s_net_cmd* cmd )
+{
+	_guildTopten.clear();
+	GuildTopten gt;
+	NET_SIS_get_guild_rank* msg = (NET_SIS_get_guild_rank*)cmd;
+	for(int i = 0 ; i < msg->n_num ; ++i)
+	{
+		tagGuildRankInfo ri = msg->st_GuildRank[i];
+		gt.lvl = ri.nLevel;
+		gt.nProsperity = ri.nProsperity;
+		gt.roleid = ri.dwLeaderID;
+		gt.gid = ri.dwGuildID;
+		//gt.nAttackSBK = ri.nAttackSBK;
+		
+		std::string lname;
+		if(NameMgr2::getInstance()->queryName(ri.dwLeaderID , lname))
+		{
+			gt.leaderName = lname;
+		}
+		else
+		{
+			gt.leaderName = "";
+			_guildRoleNameMap[gt.roleid] = i;
+		}
+
+		std::string gname;
+		if(NameMgr2::getInstance()->queryGuildName(ri.dwGuildID , gname))
+		{
+			gt.guildName = gname;
+		}
+		else
+		{
+			gt.guildName = "";
+			_guildGuildNameMap[gt.gid] = i;
+		}
+
+		_guildTopten.push_back(gt);
+
+
+		//NET_SIC_get_guild_name ggn;
+		//ggn.dwGuildID = gt.gid;
+		//TCP_CLIENT->send_net_cmd(&ggn, NP_CRITICAL, false);	
+	}
+
+	if(_guildRoleNameMap.empty() && _guildGuildNameMap.empty())
+		_init[TT_GUILD] = true;
+
+	GET_UI(RankUi, WCT_RankUi)->updateData();
+	return 0;
+}
+unsigned int RankMgr::onMasterToptenGraduates(s_net_cmd* cmd)
+{
+	NET_SIS_get_master_rank_graduates* msg = (NET_SIS_get_master_rank_graduates*)cmd;
+	int nNum = msg->n_num;
+	if(msg->isTiShi)
+		MasterPrenticeMgr::getInstance()->OnServer_Chushi_Notice(nNum);
+	
+	GET_UI(RankUi, WCT_RankUi)->updategraduates(nNum);
+	return 0;
+}
+
+unsigned int RankMgr::onMasterTopten(s_net_cmd* cmd)
+{
+	_masterTopten.clear();
+	sMasterTopten bt;
+	NET_SIS_get_master_rank* msg = (NET_SIS_get_master_rank*)cmd;
+	for( int i = 0 ; i < msg->n_num ; ++i)
+	{
+		tagMasterGraduateRankInfo jr = msg->st_MasterRank[i];
+		bt.id = jr.dw_role_id;
+		bt.by_Sex = jr.by_Sex;
+		bt.e_class = (EClassType)jr.e_class;
+		bt.n_Graduates = jr.n_Graduates;
+		bt.n_level_ = jr.n_level_;
+		bt.ntitle_id = jr.ntitle_id;
+		std::string lname;
+		if(NameMgr2::getInstance()->queryName(bt.id , lname))
+		{
+			bt.name = lname;
+		}
+		else
+		{
+			bt.name = "";
+			_masterNameMap[jr.dw_role_id] = i;
+		}
+		_masterTopten.push_back(bt);
+	}
+
+	if(_masterNameMap.empty())
+		_init[TT_MASTER] = true;
+
+	GET_UI(RankUi, WCT_RankUi)->updateData();
+	return 0;
+}
+unsigned int RankMgr::onReachTopten(s_net_cmd* cmd)
+{
+	_reachTopten.clear();
+	sReachTopten bt;
+	NET_SIS_get_reach_rank* msg = (NET_SIS_get_reach_rank*)cmd;
+	for( int i = 0 ; i < msg->n_num ; ++i)
+	{
+		tagtotalReachRank jr = msg->s_reach_rank[i];
+		bt.dw_role_id = jr.dw_role_id;//实际是账号ID
+		bt.dw_role_id_true = jr.dw_role_id_true;//role_id
+		bt.n_total_reach = jr.n_total_reach;
+		bt.by_Sex = jr.by_Sex;
+		bt.e_class = (EClassType)jr.e_class;
+		bt.n_level_ = jr.n_level_;
+		bt.ntitle_id = jr.ntitle_id;
+		std::string lname;
+		if(NameMgr2::getInstance()->queryName(bt.dw_role_id_true,lname))
+		{
+			bt.name = lname;
+		}
+		else
+		{
+			bt.name = "";
+			_reachNameMap[jr.dw_role_id_true] = i;
+		}
+		_reachTopten.push_back(bt);
+	}
+
+	if(_reachNameMap.empty())
+		_init[TT_REACH] = true;
+
+	GET_UI(RankUi, WCT_RankUi)->updateData();
+	return 0;
+}
+void RankMgr::assignName( const std::string& name , unsigned int id )
+{
+	std::map<unsigned int, int>::iterator lvIter = _lvlRoleNameMap.find(id);
+	if(lvIter != _lvlRoleNameMap.end())
+	{
+		int index = lvIter->second;
+		CC_ASSERT(_lvlTopten.size() > (size_t)index);
+		LevelTopten &lt = _lvlTopten[index];
+		CC_ASSERT(lt.id == id);
+		lt.name = name;
+		_lvlRoleNameMap.erase(lvIter);
+		if(_lvlRoleNameMap.empty())
+		{
+			_init[TT_LEVEL] = true;
+			GET_UI(RankUi, WCT_RankUi)->updateData();
+		}
+	}
+
+	std::map<unsigned int, int>::iterator guildIter = _guildRoleNameMap.find(id);
+	if(guildIter != _guildRoleNameMap.end())
+	{
+		int index = guildIter->second;
+		CC_ASSERT(_guildTopten.size() > (size_t)index);
+		GuildTopten &gt = _guildTopten[index];
+		CC_ASSERT(gt.roleid == id);
+		gt.leaderName = name;
+		_guildRoleNameMap.erase(guildIter);
+		if(_guildRoleNameMap.empty())
+		{
+			if(_guildGuildNameMap.empty())
+				_init[TT_GUILD] = true;
+			GET_UI(RankUi, WCT_RankUi)->updateData();
+		}
+	}
+
+	std::map<unsigned int, int>::iterator brIter = _beauRoleNameMap.find(id);
+	if(brIter != _beauRoleNameMap.end())
+	{
+		int index = brIter->second;
+		CC_ASSERT(_beauTopten.size() > (size_t)index);
+		sBeauTopten &bt = _beauTopten[index];
+		CC_ASSERT(bt.id == id);
+		bt.name = name;
+		_beauRoleNameMap.erase(brIter);
+		if(_beauRoleNameMap.empty())
+		{
+			_init[TT_BEAUTIFUL] = true;
+			GET_UI(RankUi, WCT_RankUi)->updateData();
+		}
+	}
+
+	std::map<unsigned int, int>::iterator batIter = _battleRoleNameMap.find(id);
+	if(batIter != _battleRoleNameMap.end())
+	{
+		int index = batIter->second;
+		CC_ASSERT(_battleTopten.size() > (size_t)index);
+		sBattleTopten &bt = _battleTopten[index];
+		CC_ASSERT(bt.id == id);
+		bt.name = name;
+		_battleRoleNameMap.erase(batIter);
+		if(_battleRoleNameMap.empty())
+		{
+			_init[TT_BATTLE] = true;
+			GET_UI(RankUi, WCT_RankUi)->updateData();
+		}
+	}
+
+	std::map<unsigned int, int>::iterator masterIter = _masterNameMap.find(id);
+	if(masterIter != _masterNameMap.end())
+	{
+		int index = masterIter->second;
+		CC_ASSERT(_masterTopten.size() > (size_t)index);
+		sMasterTopten &bt = _masterTopten[index];
+		CC_ASSERT(bt.id == id);
+		bt.name = name;
+		_masterNameMap.erase(masterIter);
+		if(_masterNameMap.empty())
+		{
+			_init[TT_MASTER] = true;
+			GET_UI(RankUi, WCT_RankUi)->updateData();
+		}
+	}
+	//充值榜玩家名称
+	std::map<unsigned int, int>::iterator reachIter = _reachNameMap.find(id);
+	if(reachIter != _reachNameMap.end())
+	{
+		int index = reachIter->second;
+		CC_ASSERT(_reachTopten.size() > (size_t)index);
+		sReachTopten &bt = _reachTopten[index];
+		CC_ASSERT(bt.dw_role_id_true == id);
+		bt.name = name;
+		_reachNameMap.erase(reachIter);
+		if(_reachNameMap.empty())
+		{
+			_init[TT_REACH] = true;
+			GET_UI(RankUi, WCT_RankUi)->updateData();
+		}
+	}
+
+	//switch(_curTT)
+	//{
+	//case TT_LEVEL:
+	//	{
+	//		for(int i = 0 ; i < _lvlTopten.size() ; ++i)
+	//		{
+	//			//!找到了
+	//			if(_lvlTopten[i].id == id)
+	//			{
+	//				_lvlTopten[i].name = name;
+	//				break;
+	//			}
+	//		}
+	//	}
+	//	break;
+	//case TT_GUILD:
+	//	{
+	//		for(int i = 0 ; i < _guildTopten.size() ; ++i)
+	//		{
+	//			//!找到了
+	//			if(_guildTopten[i].roleid == id)
+	//			{
+	//				_guildTopten[i].leaderName = name;
+	//				break;
+	//			}
+	//		}
+	//	}
+	//	break;
+	//case TT_BATTLE:
+	//	{
+	//		for(int i = 0 ; i < _battleTopten.size() ; ++i)
+	//		{
+	//			//!找到了
+	//			if(_battleTopten[i].id == id)
+	//			{
+	//				_battleTopten[i].name = name;
+	//				break;
+	//			}
+	//		}
+	//	}
+	//	break;
+	//case TT_BEAUTIFUL:
+	//	{
+	//		for(int i = 0 ; i < _beauTopten.size() ; ++i)
+	//		{
+	//			//!找到了
+	//			if(_beauTopten[i].id == id)
+	//			{
+	//				_beauTopten[i].name = name;
+	//				break;
+	//			}
+	//		}
+	//	}
+	//	break;
+	//default:
+	//	break;
+	//}
+	////!TODO刷新UI
+	//struct timeval tv;
+	//gettimeofday(&tv , 0);
+	//if(1000*tv.tv_sec - lastsendtime > 3000)
+	//{
+	//	GET_UI(RankUi, WCT_RankUi)->updateData();
+	//	gettimeofday(&tv , 0);
+	//	lastsendtime = tv.tv_sec*1000;
+	//}
+}
+
+
+void RankMgr::onGetMemberName( unsigned int id , const std::string& name )
+{
+	assignName(name , id);
+}
+
+void RankMgr::onGetGuildName( unsigned int id , const std::string& name )
+{
+	std::map<unsigned int, int>::iterator iter = _guildGuildNameMap.find(id);
+	if(iter != _guildGuildNameMap.end()) 
+	{
+		int index = iter->second;
+		CC_ASSERT(_guildTopten.size() > (size_t)index);
+		GuildTopten &gt = _guildTopten[index];
+		CC_ASSERT(gt.gid == id);
+		gt.guildName = name;
+		_guildGuildNameMap.erase(iter);
+		if(_guildGuildNameMap.empty())
+		{
+			if(_guildRoleNameMap.empty())
+				_init[TT_GUILD] = true;
+			GET_UI(RankUi, WCT_RankUi)->updateData();
+		}
+	}
+	//if(_curTT != TT_GUILD)
+	//	return ;
+	//for(int i = 0 ; i < _guildTopten.size() ; ++i)
+	//{
+	//	//!找到了
+	//	if(_guildTopten[i].gid == id)
+	//	{
+	//		_guildTopten[i].guildName = name;
+	//		break;
+	//	}
+	//}
+	//!TODO刷新UI
+	//struct timeval tv;
+	//gettimeofday(&tv , 0);
+	//if(1000*tv.tv_sec - lastsendtime > 3000)
+	//{
+	//	GET_UI(RankUi, WCT_RankUi)->updateData();
+	//	gettimeofday(&tv , 0);
+	//	lastsendtime = tv.tv_sec*1000;
+	//}
+}
+
+int RankMgr::getLocalTotalRechargeRank()
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return 0;
+	for (size_t i = 0; i< _reachTopten.size();i++)
+	{
+		if (_reachTopten[i].dw_role_id_true == ploc->getId())
+		{
+			return i+1;
+		}
+	}
+	return 0;
+}
+
+

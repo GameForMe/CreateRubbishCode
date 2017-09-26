@@ -1,0 +1,351 @@
+#include "EquipUpStarUIMgr.h"
+#include "PackageManager.h"
+#include "CfgReader.h"
+#include "DBMgr.h"
+#include "WorldPacket.h"
+#include "UiManager.h"
+#include "EquipUpStarUi.h"
+#include "ToolTip.h"
+#include "TCPClient.h"
+#include "WorldPacket.h"
+#include "CommonMsgDefine.h"
+#include <algorithm>
+
+//////////////////////////////////////////////////////////////////////////
+EquipUpStarUIMgr::EquipUpStarUIMgr()
+{
+	
+}
+
+EquipUpStarUIMgr::~EquipUpStarUIMgr()
+{
+	CC_SAFE_DELETE(equipNext);
+}
+
+void EquipUpStarUIMgr::removeEquipNext()
+{
+	CC_SAFE_DELETE(equipNext);
+	equipNext = new EquipNextData;
+}
+
+void EquipUpStarUIMgr::send_NET_C2G_REQUEST_EQUIP_STAR_LEVEL_UP()
+{
+	if (getEquipment() == NULL)
+		return;
+	removeEquipNext();
+	WorldPacket C2G_Msg(NET_C2G_REQUEST_EQUIP_STAR_LEVEL_UP);//组装消息头
+	C2G_Msg << getEquipment()->get_item_id();
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_IDLE, false);//发送
+}
+
+void EquipUpStarUIMgr::setEquipmentNext( s_net_cmd *cmd )
+{//结果(DWORD)[0=成功 + 属性个数(INT) + <<属性类型(INT) + 附加值(INT32)>> + 战斗力(INT),非0=错误编号]
+	equipNext = new EquipNextData;
+	WorldPacket Msg((const void*)cmd);
+	Msg >> equipNext->isSuccess;
+	if (equipNext->isSuccess == 0)
+	{
+		Msg >> equipNext->attrIndex;
+		for (int i = 0;i < equipNext->attrIndex; i++)
+		{
+			Msg >> equipNext->TypeAndData[i].attrType;
+			Msg >> equipNext->TypeAndData[i].attrData;
+		}
+		Msg >> equipNext->frghtLi;
+//		if (GET_UI(EquipUpStarUi,WCT_EQUIPUPSTARUI)->showState() != false )
+//		{
+			GET_UI(EquipUpStarUi,WCT_EQUIPUPSTARUI)->updateEquipData();
+//		}
+	}else{
+		GET_UI(EquipUpStarUi,WCT_EQUIPUPSTARUI)->updateNextData();
+		switch( equipNext->isSuccess )
+		{
+		case E_Role_Star_Lv_Up_Equip_Not_Exist: //原装备不存在
+			ToolTip::getInstance()->push("\xE5\x8E\x9F\xE8\xA3\x85\xE5\xA4\x87\xE4\xB8\x8D\xE5\xAD\x98\xE5\x9C\xA8");
+			break;
+		}
+	}
+}
+
+std::map<short, f_item*> &
+	EquipUpStarUIMgr::getEquipUpStarItemMap(bool isFresh)
+{
+	if (isFresh)
+		getAllEquipDate();
+	return mItemMap;
+}
+
+void EquipUpStarUIMgr::getAllEquipDate()
+{
+	mItemMap.clear();
+	mItemList.clear();
+	//增加升星筛选条件 fix by XSea 2014.07.21
+	PackageManager::ItemMap* tmpItemMap = PackageManager::getInstance()->getItemMap(EICT_Bag); //取背包所有物品
+	int suitId = 0; //当前装备套装id
+	EEquipPos ePos = EEP_Null; //当前装备部位
+	//int srcSuitId = 0; //原装备套装id
+	EEquipPos eSrcPos = EEP_Null; //原装备部位
+	unsigned int TmpEquipId = 0; //装备id
+	f_equipment* upStarEquipment = getEquipment();
+	if (!upStarEquipment)
+		return;
+	//遍历背包所有物品
+	for (PackageManager::ItemMap::iterator iter = tmpItemMap->begin();iter != tmpItemMap->end();++iter)
+	{
+		//如果是装备
+		if (MIsEquipment(iter->second->get_item_type_id()))
+		{
+			TmpEquipId = iter->second->get_data()->dw_data_id; //装备id
+			const EquipTypeData* t_data = PackageManager::getInstance()->getEquipTypeDataPointer(TmpEquipId);
+			if (t_data != NULL)
+			{
+				ePos = t_data->posIndex;
+				suitId = t_data->suit_id;
+			}
+//已完成 			c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 			cmd->set_integer32(1 , TmpEquipId);
+// 			c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 			//如果能在表里找到
+// 			while(table->retrieve_row())
+// 			{
+// 				//套装id
+// 				unsigned int idx = table->get_index("suitId");
+// 				suitId = table->get_integer32(idx);
+// 				//装备部位
+// 				idx = table->get_index("PosIndex");
+// 				ePos = (EEquipPos)table->get_integer32(idx);
+// 			}
+// 			c_db_manager::getSingleton()->destroy_table(table);
+// 			c_db_manager::getSingleton()->end_operation(cmd);
+			//同类套装才可当做材料
+			if (suitId == getEquipSuitId())
+			{
+				//同一个流水号装备刨除
+				if (upStarEquipment->get_item_id() == iter->second->get_item_id()) 
+					continue;
+
+				//检查材料与原装备套装部位是否相同 add by XSea 2014.07.21
+				//如果部位为同时拥有多个的，如：护腕、戒指 则特殊处理
+				eSrcPos = getEquipPos(); //原装备部位
+				switch( eSrcPos ) 
+				{
+				case EEP_Wrist1: //护腕特殊处理
+				case EEP_Wrist2: 
+					if( eSrcPos == EEP_Wrist1 || eSrcPos == EEP_Wrist2 )
+					{
+							if( ePos != EEP_Wrist1 && ePos != EEP_Wrist2)
+								continue;
+					}
+					break;
+				case EEP_Finger1: //戒指特殊处理
+				case EEP_Finger2: 
+					if( eSrcPos == EEP_Finger1 
+						|| eSrcPos == EEP_Finger2 )
+					{
+						if( ePos != EEP_Finger1 && ePos != EEP_Finger2)
+							continue;
+					}
+					break;
+				default: //其他部位的处理
+					if( eSrcPos != ePos)
+						continue;
+					break;
+				}
+				//将材料放入容器
+				//mItemMap[index] = iter->second;
+				mItemList.push_back((f_equipment*)iter->second);
+			}
+		}
+	}
+	reorderItemMap();
+}
+
+void EquipUpStarUIMgr::removeEndItem()
+{
+	for (int i = 0;i < 3;i++)
+	{
+		mItemMap.erase(mItemMap.size() - 1);
+	}
+}
+
+EquipUpStarUIMgr * EquipUpStarUIMgr::getInstance()
+{
+	static EquipUpStarUIMgr instance;
+	return &instance;
+}
+
+bool compare_star(f_equipment* it1, f_equipment* it2)
+{
+	int star_1 = it1->get_star_num();
+	int star_2 = it2->get_star_num();
+	int zhan_1 = it1->get_fightli();
+	int zhan_2 = it2->get_fightli();
+	if( star_1 < star_2 )
+	{
+		return true;
+	}
+	else if ((zhan_1 < zhan_2) && (star_1 == star_2))
+	{
+		return true;
+	}
+	return false;
+}
+
+void EquipUpStarUIMgr::reorderItemMap()
+{
+	if (mItemList.empty())
+		return ;
+	UpStarItemList::iterator i,iend =  mItemList.end();
+	mItemList.sort(compare_star);
+	short idx = 0;
+	for (i = mItemList.begin(); i!=iend; ++i,++idx)
+	{
+		mItemMap.insert(UpStarItemMap::value_type(idx,*i));
+	}
+}
+
+
+bool EquipUpStarUIMgr::addSelect(short idx, INT64 id)
+{
+	if (mSelectItemList.size() > MAX_STAR_NUM)
+		return false;
+	UpStarSelectedList::iterator i = mSelectItemList.find(id);
+	if (i != mSelectItemList.end())
+		return false;
+	mSelectItemList.insert(UpStarSelectedList::value_type(id,idx));
+	lockSelect(id);
+	return true;
+}
+bool EquipUpStarUIMgr::removeSelect(INT64 id)
+{
+	UpStarSelectedList::iterator i = mSelectItemList.find(id);
+	if (i != mSelectItemList.end())
+	{
+		unlockSelect(id);
+		mSelectItemList.erase(i);
+		return true;
+	}
+	return false;
+}
+int EquipUpStarUIMgr::getSelectSize()
+{
+	return getSelectList().size();
+}
+void EquipUpStarUIMgr::clearSelect(int startLv)
+{
+	int index=0;
+	UpStarSelectedList::iterator i = mSelectItemList.begin();
+	//UpStarSelectedList::iterator iend = mSelectItemList.end();
+	int nsize = mSelectItemList.size();
+ 	for (int n = 0;n < nsize;n++)
+	{
+		if (index<startLv)
+		{
+			unlockSelect(i->first);
+			mSelectItemList.erase(i++);
+			++index; 
+		}
+		else
+		{
+			++i;
+		}
+		
+	}
+	//mSelectItemList.clear();
+}
+
+void EquipUpStarUIMgr::updateSelect()
+{
+	f_equipment* upStarEquipment = getEquipment();
+	if (!upStarEquipment)
+	{
+		mSelectItemList.clear();
+		return;
+	}
+	UpStarSelectedList::iterator i = mSelectItemList.begin(),iend;
+	while (i != mSelectItemList.end())
+	{
+		f_item* item = PackageManager::getInstance()->getItem(EICT_Bag, i->first);
+		if (item && (item->get_item_type_id() != upStarEquipment->get_item_type_id()))
+		{
+			mSelectItemList.clear();
+			break;
+		}
+		if (item && (item->get_item_id() != upStarEquipment->get_item_id()))
+		{
+			item->unlock();
+			++i;
+		}
+		else
+		{
+			mSelectItemList.erase(i++);
+		}
+	}
+}
+
+const EquipUpStarUIMgr::UpStarSelectedList& 
+	EquipUpStarUIMgr::getSelectList()
+{
+	return mSelectItemList;
+}
+
+void EquipUpStarUIMgr::unlockSelect(INT64 id)
+{
+	f_item* item = getItemByUID(id);
+	if (item)
+		item->unlock();
+}
+void EquipUpStarUIMgr::lockSelect(INT64 id)
+{
+	f_item* item = getItemByUID(id);
+	if (item)
+		item->lock();
+}
+
+f_item* EquipUpStarUIMgr::getItemByUID(INT64 id)
+{
+	UpStarItemMap::iterator i,iend = mItemMap.end();
+	for (i = mItemMap.begin(); i != iend; ++i)
+	{
+		if (i->second->get_item_id() == id)
+			return i->second;
+	}
+	return 0;
+}
+
+f_item* EquipUpStarUIMgr::getItemByIDX(short idx)
+{
+	UpStarItemMap::iterator i = mItemMap.find(idx);
+	if (i != mItemMap.end())
+	{
+		return i->second;
+	}
+	return 0;
+}
+
+void EquipUpStarUIMgr::clearItemMap()
+{
+	UpStarItemMap::iterator i,iend = mItemMap.end();
+	for (i = mItemMap.begin(); i != iend; ++i)
+	{
+		i->second->unlock();
+	}
+	mItemMap.clear();
+	mItemList.clear();
+}
+
+void EquipUpStarUIMgr::setEquipment(f_equipment* equip)
+{
+	mUpId = 0;
+	if (equip)
+	{
+		mUpId = equip->get_item_id();
+		mConType = equip->get_container_type();
+	}
+}
+f_equipment* EquipUpStarUIMgr::getEquipment()
+{
+	f_equipment* q= 0;
+	q = (f_equipment*)PackageManager::getInstance()->getItem((EItemConType)mConType, mUpId);
+	return q;
+}

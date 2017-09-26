@@ -1,0 +1,769 @@
+#include "StallMgr.h"
+#include "DBMgr.h"
+#include "TCPClient.h"
+#include "World.h"
+#include "FilterMgr.h"
+#include "ItemDefine.h"
+#include "ServerTime.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "StallUi.h"
+#include "UiTools.h"
+#include "Auto_ActionMgr.h"
+#include "StringMgr.h"
+#include "ChatMgr.h"
+#include "MessageBoxUi.h"
+#include "ToolTip.h"
+#include "UiManager.h"
+#include "PackageManager.h"
+#include "BaseDefine.h"
+#include "PackageUi.h"
+#include "WorldPacket.h"
+#include "CommonMsgDefine.h"
+#include "f_string_util.h"
+#include "f_string_table.h"
+
+StallMgr::StallMgr():b_InStatePreStall(false)
+					,m_RemoteSellerID(INVALID)
+					,b_InStateStall(false)
+					,m_StallTitle("")
+					,m_TotalIncome(0)
+{
+	//m_LocPlayerID = RoleManager::getInstance()->getLocalPlayer()->getId();
+	memset(m_LocalStallGoodsInfo,0,sizeof(m_LocalStallGoodsInfo));
+	memset(m_RemoteStallGoodsInfo,0,sizeof(m_RemoteStallGoodsInfo));
+	
+}
+StallMgr::~StallMgr()
+{
+	//memset(m_LocalStallGoodsInfo,0,sizeof(m_LocalStallGoodsInfo));
+	//memset(m_RemoteStallGoodsInfo,0,sizeof(m_RemoteStallGoodsInfo));
+
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_start" , this , &StallMgr::OnServerStall_Start);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_set_goods" , this , &StallMgr::OnServerStall_SetGoods);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_unset_goods" , this , &StallMgr::OnServerStall_UnSetGoods);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_set_title" , this , &StallMgr::OnServerStall_SetTitle);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_set_finish" , this , &StallMgr::OnServerStall_SetFinish);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_close" , this , &StallMgr::OnServerStall_Close);
+
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_get" , this , &StallMgr::OnServerGetAllGoods);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_buy" , this , &StallMgr::OnSeverBuyProduct);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_buy_message" , this , &StallMgr::OnServerBuyMsg);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_buy_refresh" , this , &StallMgr::OnServerBuyRefresh);
+
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_get_title", this, &StallMgr::onGetStallName);
+}
+void StallMgr::Init()
+{
+	TCP_CLIENT->register_net_cmd("NET_SIS_stall_start" , this , &StallMgr::OnServerStall_Start);
+	TCP_CLIENT->register_net_cmd("NET_SIS_stall_set_goods" , this , &StallMgr::OnServerStall_SetGoods);
+	TCP_CLIENT->register_net_cmd("NET_SIS_stall_unset_goods" , this , &StallMgr::OnServerStall_UnSetGoods);
+	TCP_CLIENT->register_net_cmd("NET_SIS_stall_set_title" , this , &StallMgr::OnServerStall_SetTitle);
+	TCP_CLIENT->register_net_cmd("NET_SIS_stall_set_finish" , this , &StallMgr::OnServerStall_SetFinish);
+	TCP_CLIENT->register_net_cmd("NET_SIS_stall_close" , this , &StallMgr::OnServerStall_Close);
+
+	TCP_CLIENT->register_net_cmd("NET_SIS_stall_get" , this , &StallMgr::OnServerGetAllGoods);
+	TCP_CLIENT->register_net_cmd("NET_SIS_stall_buy" , this , &StallMgr::OnSeverBuyProduct);
+	TCP_CLIENT->register_net_cmd("NET_SIS_stall_buy_message" , this , &StallMgr::OnServerBuyMsg);
+	TCP_CLIENT->register_net_cmd("NET_SIS_stall_buy_refresh" , this , &StallMgr::OnServerBuyRefresh);
+
+	//TCP_CLIENT->register_net_cmd("NET_SIS_stall_get_title", this, &StallMgr::onGetStallName);
+
+	m_LocPlayerID = RoleManager::getInstance()->getLocalPlayer()->getId();
+	return;
+}
+void StallMgr::Destroy()
+{
+	/*memset(m_LocalStallGoodsInfo,0,sizeof(m_LocalStallGoodsInfo));
+	memset(m_RemoteStallGoodsInfo,0,sizeof(m_RemoteStallGoodsInfo));*/
+	Reset(true);//摆摊所有数据初始化
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_start" , this , &StallMgr::OnServerStall_Start);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_set_goods" , this , &StallMgr::OnServerStall_SetGoods);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_unset_goods" , this , &StallMgr::OnServerStall_UnSetGoods);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_set_title" , this , &StallMgr::OnServerStall_SetTitle);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_set_finish" , this , &StallMgr::OnServerStall_SetFinish);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_close" , this , &StallMgr::OnServerStall_Close);
+
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_get" , this , &StallMgr::OnServerGetAllGoods);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_buy" , this , &StallMgr::OnSeverBuyProduct);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_buy_message" , this , &StallMgr::OnServerBuyMsg);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_buy_refresh" , this , &StallMgr::OnServerBuyRefresh);
+	
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_stall_get_title", this, &StallMgr::onGetStallName);
+	return;
+}
+//bSelfRefresh为true代表就是需要刷新玩家自己的摆摊信息 否则不需要刷新自己的
+void StallMgr::Reset(bool bSelfRefresh /* = false */)
+{
+	if (bSelfRefresh)//需要刷新自己的摆摊信息
+	{
+		for(int i = 0; i < STALL_MAX_DISPLAY; i ++)
+		{
+			tagStallGoodsInfo &info = m_LocalStallGoodsInfo[i];
+			PackageManager::getInstance()->unLockItem(EICT_Bag, info.n64_Serial, false);
+		}
+		GET_UI(Package, WCT_PACKAGEUI)->updateData();
+		memset(m_LocalStallGoodsInfo,0,sizeof(m_LocalStallGoodsInfo));
+		b_InStatePreStall = false;
+		b_InStateStall = false;
+		m_TotalIncome = 0;//在线收益也要清空
+
+		memset(m_RemoteStallGoodsInfo,0,sizeof(m_RemoteStallGoodsInfo));
+		m_RemoteSellerID = INVALID;
+	}
+	else//仅刷新其他玩家的信息
+	{
+		memset(m_RemoteStallGoodsInfo,0,sizeof(m_RemoteStallGoodsInfo));
+		m_RemoteSellerID = INVALID;
+	}
+	return;
+}
+StallMgr* StallMgr::getInstance()
+{
+	static StallMgr mgr;
+	return &mgr;
+}
+/*
+摆摊者相关函数实现
+*/
+void StallMgr::PrepareBaitan()
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(ploc))
+		return;
+
+	//摆摊等级限制
+	if (ploc->getLevel() < Role_Stall_Min_Level)
+	{
+		//您需要达到35级才可以进行摆摊
+		ToolTip::getInstance()->push("\xE6\x82\xA8\xE9\x9C\x80\xE8\xA6\x81\xE8\xBE\xBE\xE5\x88\xB0\x33\x35\xE7\xBA\xA7\xE6\x89\x8D\xE5\x8F\xAF\xE4\xBB\xA5\xE8\xBF\x9B\xE8\xA1\x8C\xE6\x91\x86\xE6\x91\x8A");
+		return;
+	}
+
+	//若玩家在挂机中，则摆摊会停止挂机
+	if (AutoActionMgr::getInstance()->Get_Auto_Action())//gx add
+	{
+		AutoActionMgr::getInstance()->Set_Auto_Action(false);
+	}
+	//若玩家正在双修状态中，则不允许摆摊
+	if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(187));
+		return;
+	}
+	//若玩家处于骑乘状态，应该下马
+	if (ploc->getAttribute(RA_RideState))
+	{
+		RoleManager::getInstance()->sendUnRideMsg();
+	}
+	if (INVALID != m_RemoteSellerID)
+	{
+		CLOSE_UI(WCT_StallUi);
+	}
+	//若未处于摆摊状态中，则要告知服务器准备摆摊
+	if (!b_InStatePreStall)
+	{
+		NET_SIC_stall_start cmd;
+		TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+	}
+	else
+	{
+		//若处于预摆摊或是摆摊状态中，则UI中的格子显示已上架的商品
+		//TODO:UI
+		OPEN_UI(WCT_StallUi);
+		GET_UI(StallUi, WCT_StallUi)->setRoleId(RoleManager::getInstance()->getLocalPlayer()->getId());
+		GET_UI(StallUi, WCT_StallUi)->updateData();
+	}
+	m_RemoteSellerID = (unsigned int)INVALID;//防止无法收摊
+	return;
+}
+unsigned int StallMgr::OnServerStall_Start(s_net_cmd *cmd)
+{
+	NET_SIS_stall_start* msg = (NET_SIS_stall_start*)cmd;
+	if (msg->dw_error_code != 0)
+	{
+		switch (msg->dw_error_code)
+		{
+		case E_Stall_RoleState_NotPermit://处于战姿、行凶和PVP状态不可摆摊
+			{
+				ToolTip::getInstance()->push(GET_STR(187));
+				break;
+			}
+		case E_Stall_Area_NotAllowed:
+			{
+				//所在场景不允许摆摊
+				ToolTip::getInstance()->push(GET_STR(166));
+				break;
+			}
+		case E_Stall_Role_Level_2Low:
+			{
+				ToolTip::getInstance()->push("\xE6\x82\xA8\xE9\x9C\x80\xE8\xA6\x81\xE8\xBE\xBE\xE5\x88\xB0\x33\x35\xE7\xBA\xA7\xE6\x89\x8D\xE5\x8F\xAF\xE4\xBB\xA5\xE8\xBF\x9B\xE8\xA1\x8C\xE6\x91\x86\xE6\x91\x8A");
+				break;
+			}
+		case E_Stall_Role_InStall:
+			{
+				b_InStatePreStall = true;
+				OPEN_UI(WCT_StallUi);
+				GET_UI(StallUi, WCT_StallUi)->setRoleId(m_LocPlayerID);
+				GET_UI(StallUi, WCT_StallUi)->updateData();
+				break;
+			}
+		default:
+			break;
+		}
+	}
+	else
+	{
+		b_InStatePreStall = true;
+		//打开一个空的UI格子界面
+		//TODO:UI
+		OPEN_UI(WCT_StallUi);
+		GET_UI(StallUi, WCT_StallUi)->setRoleId(RoleManager::getInstance()->getLocalPlayer()->getId());
+
+		GET_UI(StallUi, WCT_StallUi)->updateData();
+	}
+
+	return 0;
+}
+//nPrice为该商品用户输入的单价，index为所在格子的索引编号，从0到9
+void StallMgr::StallSetGoods(INT64 n64_serial,INT64 nPrice,unsigned char Index,unsigned int typeID,short num)
+{
+	if (-1 == n64_serial)
+		return;
+	if (!IS_VALID(typeID))
+	{
+		GET_UI(StallUi, WCT_StallUi)->updateData();
+		return;
+	}
+	if (nPrice <= 0)
+	{
+		ToolTip::getInstance()->push(GET_STR(2040));
+		GET_UI(StallUi, WCT_StallUi)->updateData();
+		return;
+	}
+	if (nPrice > 999999)
+	{
+		ToolTip::getInstance()->push(GET_STR(2041));
+		GET_UI(StallUi, WCT_StallUi)->updateData();
+		return;
+	}
+	if (Index >= STALL_MAX_DISPLAY || Index < 0)
+		return;
+	
+	//预先保存一份数据
+	m_TempGoodsInfo.n64_Serial = n64_serial;
+	m_TempGoodsInfo.nPrice = nPrice;
+	m_TempGoodsInfo.byIndex = Index;
+	m_TempGoodsInfo.typeID = typeID;
+	m_TempGoodsInfo.goodsNum = num;
+
+	f_item* pItem = PackageManager::getInstance()->getItem(EICT_Bag,m_TempGoodsInfo.n64_Serial);
+	if (!pItem)
+	{
+		return;
+	}
+	//New
+
+	CC_ASSERT(num != 0);
+	int t_OnePrice = nPrice;
+	const ItemTypeData & pdate = PackageManager::getInstance()->getItemTypeData(pItem->get_item_type_id());
+	if (t_OnePrice < pdate.bottomPrice  || t_OnePrice > pdate.maxPrice )// 判断是否贵重 ZhangYajie TODO;
+	{
+		string strkey;
+		if (pdate.bottomPrice > t_OnePrice)
+		{
+			strkey = STRING_TABLE["Trade_Item_Cheap"];
+			safe_sprintf(strkey,strkey.c_str(),pdate.bottomPrice);
+		}
+		else if (pdate.maxPrice < t_OnePrice)
+		{
+			strkey = STRING_TABLE["Trade_Item_Expensive"];
+			safe_sprintf(strkey,strkey.c_str(),pdate.maxPrice);
+		}
+		ToolTip::getInstance()->push(strkey);
+
+		return ;
+	}
+
+	m_TempGoodsInfo.typeID = pItem->get_item_type_id();//需判断是道具还是装备
+	if (MIsEquipment(m_TempGoodsInfo.typeID))
+	{
+		f_equipment *equip = dynamic_cast<f_equipment*>(pItem);
+		if (!IS_VALID_PTR(equip))
+			return;
+		memcpy(m_TempGoodsInfo.equipAtt,equip->get_equip()->EquipAttitionalAtt,sizeof(m_TempGoodsInfo.equipAtt));
+		memcpy(m_TempGoodsInfo.dwHoleGemID,equip->get_equip()->dwHoleGemID,sizeof(m_TempGoodsInfo.dwHoleGemID));
+		m_TempGoodsInfo.byConsolidateLevel = equip->get_equip()->byConsolidateLevel;
+
+		m_TempGoodsInfo.byQuality = equip->get_equip()->byQuality;
+		m_TempGoodsInfo.nFightLi = equip->get_equip()->nRating;
+		m_TempGoodsInfo.byLuck = equip->m_equipex.byLuck;
+		m_TempGoodsInfo.byHoleNum = equip->m_equipex.byHoleNum;//孔数 gx add 2014.3.25
+	}
+	m_TempGoodsInfo.dwGainTime = pItem->get_gain_time();
+	//
+	NET_SIC_stall_set_goods cmd;
+	cmd.n64_serial = n64_serial;
+	cmd.n64UnitPrice = nPrice;
+	cmd.byIndex = Index;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+	return;
+}
+unsigned int StallMgr::OnServerStall_SetGoods(s_net_cmd *cmd)
+{
+	//2016.4.25 ZhangYajie TODO  在此处接收错误码
+	NET_SIS_stall_set_goods *msg = (NET_SIS_stall_set_goods*)cmd;
+	if (msg->dw_error_code != 0)
+	{
+		switch (msg->dw_error_code)
+		{
+		case E_Stall_Goods_InUsed:
+			//商品已处于使用状态
+			ToolTip::getInstance()->push(GET_STR(167));
+			break;
+		case E_Stall_ItemCanNot_Sold:
+			//指定物品不可摆摊出售
+			ToolTip::getInstance()->push(GET_STR(167));
+			break;
+		default:
+			break;
+		}
+	}
+	else
+	{
+		m_LocalStallGoodsInfo[m_TempGoodsInfo.byIndex] = m_TempGoodsInfo;
+		PackageManager::getInstance()->lockItem(EICT_Bag, m_TempGoodsInfo.n64_Serial);
+	}
+	//TODO：UI刷新货架
+	GET_UI(StallUi, WCT_StallUi)->updateData();
+	return 0;
+}
+void StallMgr::StallUnSetGoods(unsigned char Index)
+{
+	if (Index >= STALL_MAX_DISPLAY)
+		return;
+	NET_SIC_stall_unset_goods cmd;
+	cmd.byIndex = Index;
+	m_TempUnSetGoodsIndex = Index;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+	return;
+}
+unsigned int StallMgr::OnServerStall_UnSetGoods(s_net_cmd *cmd)
+{
+	NET_SIS_stall_unset_goods* msg = (NET_SIS_stall_unset_goods*)cmd;
+	//有错误信息的消息必然是非法消息，不处理
+	if (0 == msg->dw_error_code)
+	{
+		if (m_TempUnSetGoodsIndex >= STALL_MAX_DISPLAY || m_TempUnSetGoodsIndex < 0)
+			return 0;
+		tagStallGoodsInfo &temp = m_LocalStallGoodsInfo[m_TempUnSetGoodsIndex];
+		//memset(&temp,0,sizeof(tagStallGoodsInfo));
+		PackageManager::getInstance()->unLockItem(EICT_Bag, temp.n64_Serial);
+		temp.Clear();
+		//TODO：UI刷新货架
+		GET_UI(StallUi, WCT_StallUi)->updateData();
+	}
+	return 0;
+}
+void StallMgr::StallSetTitle(string inputStr)
+{
+	wchar_t vStr[50];
+	memset(vStr, 0, sizeof(vStr));
+	Utf8ToUtf16(inputStr.c_str(), vStr, 50, 0);
+	//长度检查
+	unsigned int sz = _utf_length(vStr);
+	if (0 == sz)
+	{
+		ToolTip::getInstance()->push(GET_STR(2047));
+		return;
+	}
+	if (sz > STALL_MAX_TITLE_NUM)
+	{
+		//输入内容非法（太长或是为空
+		ToolTip::getInstance()->push(GET_STR(188));
+		return;
+	}
+	//首先进行敏感词过滤
+	if (FilterMgr::getInstance()->IsNameInNameFilterFile(inputStr) != 0)
+	{
+		//含有敏感词
+		ToolTip::getInstance()->push(GET_STR(189));
+		return;
+	}
+	
+	sz++;
+	m_TempStallTitle = inputStr;
+
+	int size = (sz - 1) * sizeof(wchar_t) + sizeof(NET_SIC_stall_set_title);
+	unsigned char* pMsg = new unsigned char[size];
+	NET_SIC_stall_set_title* cmd = (NET_SIC_stall_set_title*)pMsg;
+	cmd->id = message_id_crc("NET_SIC_stall_set_title");
+	memcpy(cmd->szData,vStr,sz*sizeof(wchar_t));
+	cmd->size = size;
+	TCP_CLIENT->send_net_cmd(cmd,NP_NORMAL,false);
+	delete []cmd;
+	return;
+}
+unsigned int StallMgr::OnServerStall_SetTitle(s_net_cmd *cmd)
+{
+	NET_SIS_stall_set_title* msg = (NET_SIS_stall_set_title*)cmd;
+	if (0 == msg->dw_error_code)
+	{
+		m_StallTitle = m_TempStallTitle;
+		StallMgr::getInstance()->StallSetFinish();//收到服务器关于标题设置的消息后，才正式向服务器请求摆摊开始
+	}
+	return 0;
+}
+void StallMgr::StallSetFinish()
+{
+	bool bAvail = false;
+	//若现在没有上架商品，不会正式开始摆摊
+	for (int i = 0;i < STALL_MAX_DISPLAY;i++)
+	{
+		if (m_LocalStallGoodsInfo[i].goodsNum > 0)
+		{
+			bAvail = true;
+			break;
+		}
+	}
+	//仅在有上架商品，才会通知服务器开始摆摊
+	if (bAvail)
+	{
+		NET_SIC_stall_set_finish cmd;
+		TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+	}
+	else
+	{
+		ToolTip::getInstance()->push(GET_STR(2037));//提示用户没有要出售的物品
+	}
+	return;
+}
+unsigned int StallMgr::OnServerStall_SetFinish(s_net_cmd *cmd)
+{
+	//仅考虑自己，视野消息不在这里处理
+	NET_SIS_stall_set_finish* msg = (NET_SIS_stall_set_finish*)cmd;
+	if (m_LocPlayerID != msg->dw_role_id)
+		return 0;
+	if (msg->dw_error_code != 0)
+	{
+		switch (msg->dw_error_code)
+		{
+		case E_Stall_Area_NotAllowed:
+			{
+				//所在场景不允许摆摊
+				ToolTip::getInstance()->push(GET_STR(166));
+			}
+			break;
+		default:
+			break;
+		}
+	}
+	else
+	{
+		b_InStateStall = true;
+		//对于角色需要做啥处理？头上顶个招牌，人物盘腿坐下
+		//UI表现上是否有特殊，？
+		GET_UI(StallUi, WCT_StallUi)->updateData();
+	}
+	return 0;
+}
+void StallMgr::StallSetClose()
+{
+	if (!b_InStateStall)
+		return;
+	NET_SIC_stall_close cmd;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+	return;
+}
+unsigned int StallMgr::OnServerStall_Close(s_net_cmd *cmd)
+{
+	NET_SIS_stall_close* msg = (NET_SIS_stall_close*)cmd;
+	if (msg->dw_error_code != 0)
+		return 0;
+	//若是本地玩家收摊
+	if (m_LocPlayerID == msg->dwStallRoleID)
+	{
+		Reset(true);
+		CLOSE_UI(WCT_StallUi);
+	}
+	//仅我正在购买的摊主收摊才会使本地玩家的UI关闭
+	if (m_RemoteSellerID == msg->dwStallRoleID)
+	{
+		Reset(false);
+		//角色表现上要有个改变
+		//GET_UI(StallUi, WCT_StallUi)->updateData();
+		CLOSE_UI(WCT_StallUi);
+	}
+	return 0;
+}
+/*
+购买者相关函数实现
+*/
+void StallMgr::GetAllGoodsFromSeller(unsigned int roleID)
+{
+	if (!IS_VALID(roleID))
+		return;
+	//自己不能与自己交易
+	if (roleID == m_LocPlayerID)
+		return;
+	
+	//客户端请求查看他人摊位信息 摊主ID
+	WorldPacket C2G_Msg(NET_C2G_REQUEST_LOOK_OTHER_STALL);
+	C2G_Msg << roleID;
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(),NP_NORMAL,false);
+
+	return;
+}
+unsigned int StallMgr::OnServerGetAllGoods(s_net_cmd *cmd)
+{
+	NET_SIS_stall_get* msg = (NET_SIS_stall_get*)cmd;
+	if (msg->dw_error_code != 0)
+		return 0;
+	if (0 == msg->byNum)
+		return 0;
+	OPEN_UI(WCT_StallUi);
+	GET_UI(StallUi, WCT_StallUi)->setRoleId(msg->dwStallRoleID);
+	//首先要更新本地数据
+	memset(m_RemoteStallGoodsInfo,0,sizeof(m_RemoteStallGoodsInfo));
+	m_RemoteSellerID = msg->dwStallRoleID;
+	for (int i = 0,pos = 0;i < msg->byNum;i++)
+	{
+		tagMsgStallGoods goods;
+		tagStallGoodsInfo tempGoods;
+		memcpy(&goods, msg->byData+pos, sizeof(tagMsgStallGoods));
+		pos += sizeof(tagMsgStallGoods)-1;
+		if(goods.byItem == 0)
+		{
+			tagEquip equip;
+			memcpy(&equip, msg->byData+pos, sizeof(tagEquip));
+			pos += sizeof(tagEquip);
+
+			tempGoods.byIndex = goods.byIndex;
+			tempGoods.n64_Serial = equip.n64_serial;
+			tempGoods.typeID = equip.dw_data_id;
+			tempGoods.nPrice = goods.n64UnitPrice;
+			tempGoods.goodsNum = equip.n16Num;
+			//装备的属性
+			tempGoods.byConsolidateLevel = equip.equipSpec.byConsolidateLevel;
+			memcpy(tempGoods.equipAtt,equip.equipSpec.EquipAttitionalAtt,sizeof(tempGoods.equipAtt));
+			memcpy(tempGoods.dwHoleGemID,equip.equipSpec.dwHoleGemID,sizeof(tempGoods.dwHoleGemID));
+
+			tempGoods.byQuality = equip.equipSpec.byQuality;
+			tempGoods.nFightLi = equip.equipSpec.nRating;
+			tempGoods.byLuck = equip.equipSpec.byLuck;
+			tempGoods.byHoleNum = equip.equipSpec.byHoleNum;
+			tempGoods.dwGainTime = equip.dw1stGainTime;
+			//
+			m_RemoteStallGoodsInfo[tempGoods.byIndex] = tempGoods;
+		}
+		else
+		{
+			tagItem item;
+			memcpy(&item, msg->byData+pos, sizeof(tagItem));
+			pos += sizeof(tagItem);
+
+			tempGoods.byIndex = goods.byIndex;
+			tempGoods.n64_Serial = item.n64_serial;
+			tempGoods.typeID = item.dw_data_id;
+			tempGoods.nPrice = goods.n64UnitPrice;
+			tempGoods.goodsNum = item.n16Num;
+			tempGoods.dwGainTime = item.dw1stGainTime;
+			//
+			m_RemoteStallGoodsInfo[tempGoods.byIndex] = tempGoods;
+		}
+	}
+	//TODO:刷新购买者看到的货架界面
+	GET_UI(StallUi, WCT_StallUi)->updateData();
+	return 0;
+}
+void StallMgr::BuyProduct(unsigned char index,short num)
+{
+	if (index >= STALL_MAX_DISPLAY)
+		return;
+	if (num <= 0)//是否应该有最大值判断
+		return;
+	if (!IS_VALID(m_RemoteSellerID))
+		return;
+	tagStallGoodsInfo tmpGoods = m_RemoteStallGoodsInfo[index];
+	if (tmpGoods.goodsNum <= 0)
+		return;
+	NET_SIC_stall_buy cmd;
+	cmd.byIndex = index;
+	cmd.dwStallRoleID = m_RemoteSellerID;
+	cmd.n16Num = num;
+	cmd.n64_serial = tmpGoods.n64_Serial;
+	cmd.n64UnitPrice = tmpGoods.nPrice;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+	return;
+}
+//商品购买者接收该消息
+unsigned int StallMgr::OnSeverBuyProduct(s_net_cmd *cmd)
+{
+	NET_SIS_stall_buy* msg = (NET_SIS_stall_buy*)cmd;
+	if (0 != msg->dw_error_code)
+	{
+		switch (msg->dw_error_code)
+		{
+		case E_Stall_Role_Pull://已收摊
+			ToolTip::getInstance()->push(GET_STR(168));
+			break;
+		case E_Stall_Goods_BeSold://已卖出
+			ToolTip::getInstance()->push(GET_STR(169));
+			break;
+		case E_Stall_Goods_Refresh://待售物品已更新
+			ToolTip::getInstance()->push(GET_STR(170));
+			break;
+		case E_Stall_Goods_Refresh_Price://售价已更新
+			ToolTip::getInstance()->push(GET_STR(170));
+			break;
+		case E_Stall_CustomerMoney_NotEnough://购买者金钱不够
+			RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+			break;
+		case E_Stall_CustomerBag_NoFreeSpace://购买者背包空间不足
+			ToolTip::getInstance()->push(GET_STR(161));
+			break;
+		case E_Stall_GoodsNum_NotEnough://待售物品个数不够
+			ToolTip::getInstance()->push(GET_STR(171));
+			break;
+		default:
+			break;
+		}
+	}
+	return 0;
+}
+//本地摆摊玩家Log记录
+unsigned int StallMgr::OnServerBuyMsg(s_net_cmd *cmd)
+{
+	NET_SIS_stall_buy_message* msg = (NET_SIS_stall_buy_message*)cmd;
+	tagStallGoodsLog tmpLog;
+	tmpLog.uItemTypeID = msg->dw_data_id;
+	tmpLog.price = msg->n64_price;
+	tmpLog.num = msg->n16Number;
+	tagDWORDTime time = msg->dw_time;
+	sprintf(tmpLog.cSoldTime,"%02d:%02d:%02d",time.hour,time.min,time.sec);
+	//读取数据库，获取商品名称
+	c_sql_command* cmd2 = c_db_manager::getSingleton()->begin_operation("SELECT * FROM PackageData WHERE TypeId = ?1");
+	cmd2->set_integer32(1 , tmpLog.uItemTypeID);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		unsigned int idx= table->get_index("Name");
+		string str = table->get_text(idx);
+		memcpy(tmpLog.cItemName,str.c_str(),sizeof(tmpLog.cItemName));
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd2);
+	//log 信息
+	m_SoldGoodsInfo.push_back(tmpLog);
+	m_TotalIncome += tmpLog.price*tmpLog.num;
+	return 0;
+}
+unsigned int StallMgr::OnServerBuyRefresh(s_net_cmd *cmd)
+{
+	NET_SIS_stall_buy_refresh* msg = (NET_SIS_stall_buy_refresh*)cmd;
+	unsigned int localPlayerID = RoleManager::getInstance()->getLocalPlayer()->getId();
+	//若本地玩家是卖家
+	if (localPlayerID == msg->dwStallRoleID)
+	{
+		m_LocalStallGoodsInfo[msg->byIndex].goodsNum = msg->n16Num;
+		//TODO:调用UI刷新摊主的货架界面
+		GET_UI(StallUi, WCT_StallUi)->updateData();
+	}
+	else
+	{
+		//若是本地玩家正在查看的摊主
+		if (m_RemoteSellerID == msg->dwStallRoleID)
+		{
+			m_RemoteStallGoodsInfo[msg->byIndex].goodsNum = msg->n16Num;
+			//TODO:调用UI刷新买家看到的货架界面
+			GET_UI(StallUi, WCT_StallUi)->updateData();
+		}
+	}
+	return 0;
+}
+tagStallGoodsInfo* StallMgr::GetStallGoodsInfo(unsigned int uRoleID)
+{
+	if (!IS_VALID(uRoleID))
+		return NULL;
+	if (m_LocPlayerID == uRoleID)
+	{
+		return m_LocalStallGoodsInfo;
+	}
+	else if (m_RemoteSellerID == uRoleID)
+	{
+		return m_RemoteStallGoodsInfo;
+	}
+	else
+	{
+		return NULL;
+	}
+}
+
+void StallMgr::update( float dt )
+{
+	static float tmpStaticTime = 0.f;
+	tmpStaticTime += dt;
+
+	if(tmpStaticTime > 0.5f)
+	{
+		tmpStaticTime = 0.f;
+
+		if(_needGetStallName.empty())
+			return;
+
+		unsigned char byTemp[sizeof(NET_SIC_stall_get_title)+sizeof(unsigned int)*50];
+		NET_SIC_stall_get_title* pSend = (NET_SIC_stall_get_title*)byTemp;
+		pSend->id = message_id_crc("NET_SIC_stall_get_title");
+		pSend->nNumber = 0;
+		while( !_needGetStallName.empty() )
+		{
+			unsigned int dwID = _needGetStallName.front();
+			pSend->dwStallRoleID[pSend->nNumber++] = dwID;
+			_needGetStallName.pop_front();
+			if( pSend->nNumber >= 50)
+				break;
+		}
+		if( pSend->nNumber > 0 )
+		{
+			pSend->size = sizeof(NET_SIC_stall_get_title)
+				+ sizeof(unsigned int) * (pSend->nNumber - 1);
+			TCP_CLIENT->send_net_cmd(pSend, NP_INSIGNIFICANT, false);
+		}
+	}
+}
+
+void StallMgr::getStallName( unsigned int roleId )
+{
+	for(std::list<unsigned int>::iterator iter = _needGetStallName.begin(); iter != _needGetStallName.end(); ++ iter)
+	{
+		if(*iter == roleId)
+			return;
+	}
+
+	_needGetStallName.push_back(roleId);
+}
+
+unsigned int StallMgr::onGetStallName( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_stall_get_title"))
+	{
+		NET_SIS_stall_get_title *msg = (NET_SIS_stall_get_title*)cmd;
+		if(msg->dw_error_code == 0)
+		{
+			Player *role = dynamic_cast<Player*>(RoleManager::getInstance()->findRole(msg->dwStallRoleID));
+			if(role != NULL)
+			{
+				//需转换
+				tstring tmpStr;
+				char vStr[128];
+				memset(vStr, 0, sizeof(vStr));
+				Utf16ToUtf8(msg->szTitle, vStr, 128, 0);
+				tmpStr.assign(vStr);
+				role->setStallName(tmpStr);
+				role->setStallIcon();
+			}
+		}
+	}
+
+	return 0;
+}

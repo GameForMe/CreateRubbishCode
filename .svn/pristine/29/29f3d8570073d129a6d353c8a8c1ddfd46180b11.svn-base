@@ -1,0 +1,671 @@
+#include "ShopUi.h"
+#include "World.h"
+#include "CfgReader.h"
+#include "BaseDefine.h"
+#include "ShopMgr.h"
+#include "PackageManager.h"
+#include "UiResourceMgr.h"
+#include "UiTools.h"
+#include "ItemTip.h"
+#include "UiManager.h"
+#include "UiLoader.h"
+#include "BuySetUi.h"
+#include "EquipTipUi.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "PackageUi.h"
+#include "QuickSaleUI.h"
+#include "Helper.h"
+
+ShopUiItem::ShopUiItem()
+	: _uiFrame(NULL)
+{
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("ShopUiItemFrame", ShopUiItemLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	_uiFrame = dynamic_cast<ShopUiItemFrame*>(ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "ShopUiItem.ccbi").c_str()));
+	_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+	UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+	ccbReader->release();
+	if(_uiFrame != NULL)
+	{
+		_uiFrame->retain();
+		_uiFrame->_item = this;
+		//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(_uiFrame, 2 ,true);
+	}
+	pShopItemProto = NULL;
+	/*std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	std::string pShopUiList = sSEDir + "shopui.plist";
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(pShopUiList.c_str());*/
+}
+
+ShopUiItem::~ShopUiItem()
+{
+	if(_uiFrame != NULL)
+	{
+		//CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(_uiFrame);
+		_uiFrame->release();
+		_uiFrame = NULL;
+	}
+
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+}
+
+void ShopUiItem::setData( const tagShopItemProto &itemProto )
+{
+	switch(itemProto.nMoneyType)
+	{
+	case SILVER:
+		{
+			CCSprite *yuanbao = dynamic_cast<CCSprite*>(_uiFrame->getChildByTag(SUT_YUANBAO));
+			std::string frameName = "shopui_jinbi";
+			CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName.c_str());
+			yuanbao->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName.c_str()));
+			break;
+			
+		}
+	case DIAMOND:
+		{
+			CCSprite *yuanbao1 = dynamic_cast<CCSprite*>(_uiFrame->getChildByTag(SUT_YUANBAO));
+			std::string frameName = "shopui_zuanshi";
+			yuanbao1->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName.c_str()));
+			break;
+		}
+	default:
+		break;
+
+	}
+	const ItemTypeData & typedata = PackageManager::getInstance()->getItemTypeData(itemProto.dw_data_id);
+	setName(typedata.name);
+	setIcon(PackageManager::getInstance()->getIconFrameName(itemProto.dw_data_id));
+	setMoney(itemProto.nSilver);
+	//_id = itemProto.dw_data_id;
+	pShopItemProto = &itemProto;
+}
+
+
+void ShopUiItem::setName( const std::string &name )
+{
+	if(_uiFrame != NULL)
+	{
+		//CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_uiFrame->getChildByTag(SUT_Name));
+		LabelFT* label = Helper::getLabelFTByParentAndTag(_uiFrame,SUT_Name);
+		if(label != NULL)
+		{
+			label->setString(name.c_str());
+			label->setColor(ccc3(0xff,0xff,0xff)); //商店物品名称改为白色 add by XSea 2014.09.23
+		}
+	}
+}
+
+void ShopUiItem::setLevel( int level )
+{
+	if(_uiFrame != NULL)
+	{
+		//CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_uiFrame->getChildByTag(SUT_Level));
+		LabelFT* label = Helper::getLabelFTByParentAndTag(_uiFrame,SUT_Level);
+		if(label != NULL)
+		{
+			CCString *str = CCString::createWithFormat("%d", level);
+			label->setString(str->getCString());
+		}
+	}
+}
+
+void ShopUiItem::setMoney( int money )
+{
+
+	if(_uiFrame != NULL)
+	{
+		//CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_uiFrame->getChildByTag(SUT_Money));
+		LabelFT* label = Helper::getLabelFTByParentAndTag(_uiFrame,SUT_Money);
+		if(label != NULL)
+		{
+			CCString *str = NULL;
+			if (money / 10000 != 0)
+			{
+				str = CCString::createWithFormat("%d%s", money / 10000, GET_STR(9033).c_str());
+			}else
+			{
+				str = CCString::createWithFormat("%d", money);
+			}
+			
+			label->setString(str->getCString());
+		}
+	}
+}
+
+void ShopUiItem::setIcon( const std::string &frameName )
+{
+	if(_uiFrame != NULL)
+	{
+		CCSprite *iconSprite = dynamic_cast<CCSprite*>(_uiFrame->getChildByTag(SUT_IconSprite));
+		if(iconSprite == NULL)
+		{
+			CCNode *node = _uiFrame->getChildByTag(SUT_IconNode);
+			if(node != NULL)
+			{
+				CCPoint pos = node->getPosition();
+				CCSize size = node->getContentSize();
+				iconSprite = CCSprite::create();
+				iconSprite->setPosition(pos);
+				_uiFrame->addChild(iconSprite, SUT_IconSprite);
+			}
+		}
+
+		if(iconSprite != NULL)
+		{
+			iconSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName.c_str()));
+		}
+	}
+}
+
+cocos2d::CCSize ShopUiItem::getContentSize()
+{
+	if(_uiFrame != NULL)
+	{
+		return _uiFrame->getContentSize();
+	}
+	return CCSize();
+}
+
+void ShopUiItem::setPosition( const CCPoint &pos )
+{
+	if(_uiFrame != NULL)
+	{
+		_uiFrame->setPosition(pos);
+	}
+}
+
+void ShopUiItem::buy(int num)
+{
+	if (pShopItemProto != NULL)
+	{
+		ShopMgr::getInstance()->onBuyItem(pShopItemProto, 2000000003, num);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler ShopUiItemFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler ShopUiItemFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBuyBtnPressed", ShopUiItemFrame::onBuyBtnPressed);
+	return NULL;
+}
+
+void ShopUiItemFrame::onBuyBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	const tagShopItemProto *dataInfo = _item->getData();
+	BuySetUi::getInstance()->open();
+	BuySetUi::getInstance()->setDataId(dataInfo->dw_data_id);
+	BuySetUi::getInstance()->setPrice(dataInfo->nSilver);
+    BuySetUi::getInstance()->setNum(1);
+	switch(dataInfo->nMoneyType)
+	{
+	case SILVER:
+		{
+			BuySetUi::getInstance()->setChangeIcon("buysetui_gold");
+			break;
+
+		}
+	case DIAMOND:
+		{
+			BuySetUi::getInstance()->setChangeIcon("buysetui_zuanshi");
+			break;
+		}
+	case YUANBAO:
+		{
+			BuySetUi::getInstance()->setChangeIcon("buysetui_yuanbao");
+			break;
+		}
+	default:
+		break;
+
+	}
+	BuySetUi::getInstance()->_signalBtnPressed->connect(this, &ShopUiItemFrame::onBuyOkPressed);
+}
+
+bool ShopUiItemFrame::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (!isVisible()||!hasVisibleParents()||!isRunning())
+	{
+		return false;
+	}
+	if (isTouchOnNodeContent(this,pTouch))
+	{
+		return true;
+	}
+	return false;
+}
+
+void ShopUiItemFrame::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (pTouch->cancel_in_scrollview())
+	{
+		return;
+	}
+	CCNode *node = getChildByTag(ShopUiItem::SUT_IconNode);
+	CCPoint pos = UiMgr::getInstance()->getCurScene()->convertTouchToNodeSpace(pTouch);
+	if(isTouchOnNodeContent(node, pTouch))
+	{
+		unsigned int id = _item->getId();
+			if(MIsEquipment(id))
+			{
+				EquipTipUiLayer *ui = EquipTipUi::create();
+				ui->showUi(pos, id);
+			}
+			else
+			{
+				ItemTip::getInstace()->open();
+				ItemTip::getInstace()->setPosition(pos);
+				ItemTip::getInstace()->setDataId(id);
+				ItemTip::getInstace()->hideOpBtn();
+			}
+	}
+}
+
+void ShopUiItemFrame::onEnter()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	CCSprite::onEnter();
+}
+
+void ShopUiItemFrame::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCSprite::onExit();
+}
+
+void ShopUiItemFrame::onBuyOkPressed( bool isOk, int num )
+{
+	if(isOk)
+	{
+		_item->buy(num);
+	}
+}
+
+void ShopUiItemFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+ShopUi::ShopUi()
+{
+
+}
+
+ShopUi::~ShopUi()
+{
+
+}
+
+class ShopItemFrameLayer :public CCLayer
+{
+public:
+ 	CREATE_FUNC(ShopItemFrameLayer);
+ 	bool init() { return true; }
+
+	virtual void onEnter()
+	{
+		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+		CCLayer::onEnter();
+	}
+
+	virtual void onExit()
+	{
+		CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+		CCLayer::onExit();
+	}
+
+	virtual bool ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+	{
+		if(isTouchOnNodeContent(this, pTouch))
+		{
+			return true;
+		}
+		return false;
+	}
+};
+
+CCNode * ShopUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["ShopUiLayer"] = UiLayerLoader<ShopUiLayer>::loader();
+	nodeLoaders["ShopItemFrameLayer"] = UiLayerLoader<ShopItemFrameLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("shopui", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+ShopUiLayer * ShopUi::getUiLayer()
+{
+	return getUiNodeByTag<ShopUiLayer>(WCT_SHOPUI);
+}
+
+void ShopUi::setData( unsigned int shopId )
+{
+	ShopUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setData(shopId);
+	}
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler ShopUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler ShopUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", ShopUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRepairAllBtnPressed", ShopUiLayer::onRepairAllBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSellBtnPressed", ShopUiLayer::onSellBtnPressed);
+	return NULL;
+}
+
+void ShopUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	//_touchstate = false;
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(SUT_Frame));
+	CC_ASSERT(_frame != NULL);
+	_contentLayer = dynamic_cast<CCLayer*>(_frame->getChildByTag(SUT_ContentLayer));
+	CC_ASSERT(_contentLayer != NULL);
+
+	_scrollView = CCScrollView::create(_contentLayer->getContentSize());
+	_contentLayer->addChild(_scrollView);
+
+	_container = CCNode::create();
+	//_container->retain();
+	//_container->setContentSize(CCSize(_contentLayer->getContentSize().width , _contentLayer->getContentSize().height * 3));
+	_container->setContentSize(_contentLayer->getContentSize());
+	_container->setPositionY(0.0f);
+	_scrollView->setContainer(_container);
+	_scrollView->setTouchEnabled(true);
+	//_scrollView->setBounceable(true);
+	_scrollView->setContentSize(_container->getContentSize());
+	_scrollView->setDirection(kCCScrollViewDirectionVertical);
+	_scrollView->setContentOffset(_scrollView->maxContainerOffset());
+	CC_ASSERT(_container != NULL && _scrollView != NULL);
+
+	PackageUi* ui = getUiNodeByTag<PackageUi>(WCT_PACKAGEUI);
+	if (ui)
+	{
+		ui->updateSaleEffect(true);
+	}
+	setAllChildernButtonPriority(this, 0);
+}
+
+void ShopUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	DropDragDelegate::getInstance()->addDropLayer(this);
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void ShopUiLayer::onExit()
+{
+	removeAllItem();
+	DropDragDelegate::getInstance()->removeDropLayer(this);
+	PackageUi* ui = getUiNodeByTag<PackageUi>(WCT_PACKAGEUI);
+	if (ui)
+	{
+		ui->updateSaleEffect(false);
+	}
+	if(IS_UI_OPEN(WCT_QuickSale))
+	{
+		CLOSE_UI(WCT_QuickSale);
+		QuickSaleUI* ui = GET_UI(QuickSaleUI, WCT_QuickSale);
+		if(ui != NULL)
+		{
+			ui->SetCanClick(false);
+		}
+	}
+	CCLayer::onExit();
+	BuySetUi::getInstance()->close();
+	//CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+
+void ShopUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_SHOPUI);
+}
+
+void ShopUiLayer::onRepairAllBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//if (_shopId==9)
+	//{
+	//	if(isShowLeftTime())//以前随身商店的全部修理是点卡特权
+	//	{
+	//		ShopMgr::getInstance()->onRepair();
+	//	}
+	//	else
+	//	{
+	//		//ToolTip::getInstance()->push(GET_STR( 7159));
+	//		//ToolTip::getInstance()->push("\xE9\x9C\x80\xE8\xA6\x81\x56\x49\x50\x36\xE6\x89\x8D\xE8\x83\xBD\xE5\xBC\x80\xE5\x90\xAF\xE6\xAD\xA4\xE5\x8A\x9F\xE8\x83\xBD");
+	//		RechargeNewUiMgr::GetInstance()->setCurrentRechargeState(6);
+	//		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+	//	}
+	//}
+	//else
+	//{
+		ShopMgr::getInstance()->onRepair();
+	//}
+
+}
+
+void ShopUiLayer::onSellBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	ShopMgr::getInstance()->onSellAll();
+}
+
+void ShopUiLayer::addContentItem( CCNode *item )
+{
+	CC_ASSERT(_container != NULL && item != NULL);
+	_container->addChild(item);
+	_scrollView->update_child_touch_clip_rect();
+}
+
+void ShopUiLayer::removeContentItem( CCNode *item )
+{
+	CC_ASSERT(_container != NULL && item != NULL);
+	_container->removeChild(item);
+}
+
+float ShopUiLayer::getContentLayerHeight()
+{
+	if(_contentLayer != NULL)
+	{
+		return _contentLayer->getContentSize().height;
+	}
+	return 0;
+}
+
+CCNode * ShopUiLayer::getContainer()
+{
+	return _container;
+}
+
+short ShopUiLayer::getItemBegin( CCTouch &touch, eGetResult &result )
+{
+	if(isTouchOnNodeContent(_frame, &touch))
+	{
+		result = GR_SUCCESS;
+	}
+	else
+	{
+		result = GR_ERROR;
+	}
+	return -1;
+}
+
+short ShopUiLayer::getItemEnd( CCTouch &touch, eGetResult &result, EItemConType src, short itemIndex )
+{
+	if(isTouchOnNodeContent(_frame, &touch))
+	{
+		result = GR_SUCCESS;
+		if(src == EICT_Bag)
+		{
+			f_item *item = PackageManager::getInstance()->getItem(src, itemIndex);
+			if(item != NULL)
+			{
+				ShopMgr::getInstance()->onSellItem(0, item->get_item_id());
+			}
+		}
+	}
+	else
+	{
+		result = GR_ERROR;
+	}
+
+	return -1;
+}
+
+bool ShopUiLayer::onClicked( CCTouch &touch )
+{
+	if(isTouchOnNodeContent(_frame, &touch))
+	{
+		if(isTouchOnNodeContent(_container, &touch))
+		{
+			return false;
+		}
+		return true;
+	}
+	return false;
+}
+
+bool ShopUiLayer::onDoubleClicked( CCTouch &touch )
+{
+	return false;
+}
+
+void ShopUiLayer::setData( unsigned int shopId )
+{
+	_shopId=shopId;
+	const tagShopProto *shopData = ShopMgr::getInstance()->get_shop_data(shopId);
+	for(int i = 0; i < MAX_SHOP_COMMON_ITEM; i ++)
+	{
+		const tagShopItemProto &itemData = shopData->Item[i];
+		if(itemData.dw_data_id != INVALID_SHOPITEM_ID && 
+			itemData.dw_data_id != 0)
+		{
+			ShopUiItem *item = new ShopUiItem;
+			item->setData(itemData);
+			addItem(item);
+		}
+		else
+		{
+			break;
+		}
+	}
+	updateList();
+}
+
+void ShopUiLayer::addItem( ShopUiItem *item )
+{
+	if(item != NULL)
+	{
+		addContentItem(item->getUiFrame());
+		_items.push_back(item);
+	}
+}
+
+void ShopUiLayer::removeItem( unsigned int itemId )
+{
+	for(ShopUiItemList::iterator iter = _items.begin(); iter != _items.end(); ++ iter)
+	{
+		ShopUiItem *item = *iter;
+		if(item->getId() == itemId)
+		{
+			removeContentItem(item->getUiFrame());
+			delete item;
+			_items.erase(iter);
+			break;
+		}
+	}
+}
+
+void ShopUiLayer::removeAllItem()
+{
+	for(ShopUiItemList::iterator iter = _items.begin(); iter != _items.end(); ++ iter)
+	{
+		ShopUiItem *item = *iter;
+		removeContentItem(item->getUiFrame());
+		delete item;
+	}
+	_items.clear();
+}
+
+void ShopUiLayer::updateList()
+{
+	CCNode *container = getContainer();
+	if(container == NULL)
+		return;
+
+	//得到总高度;
+	int itemCount = (int)_items.size();
+	int lineCount = itemCount / 2 + itemCount % 2;
+	float height = SHOP_ITEM_HEIGHT * lineCount + SHOP_ITEM_SPACE * (lineCount - 1);//
+	if(height < getContentLayerHeight())
+		height = getContentLayerHeight();
+
+	CCSize containerSize = container->getContentSize();
+	_scrollView->setContentSize(CCSize(containerSize.width, height));
+	int index = 0;
+	for(ShopUiItemList::iterator iter = _items.begin(); iter != _items.end(); ++ iter)
+	{
+		ShopUiItem *item = *iter;
+		int posX = (index % 2) * (SHOP_ITEM_WIDTH + SHOP_ITEM_SPACE);
+		int posY = height  - (index / 2) * (SHOP_ITEM_HEIGHT + SHOP_ITEM_SPACE);
+		item->setPosition(ccp(posX, posY));
+		index ++;
+	}
+	container->setPositionY(- height + SHOP_ITEM_SPACE + SHOP_ITEM_HEIGHT * 3);
+}
+
+bool ShopUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_frame, pTouch))
+	{
+		if(isTouchOnNodeContent(_contentLayer, pTouch))
+		{
+			for(ShopUiItemList::iterator iter = _items.begin(); iter != _items.end(); ++ iter)
+			{
+				ShopUiItem *item = *iter;
+				item->getUiFrame()->ccTouchBegan(pTouch, pEvent);
+			}
+		}
+		return true;
+	}
+	return false;
+}
+
+void ShopUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_frame, pTouch))
+	{
+		if(isTouchOnNodeContent(_contentLayer, pTouch))
+		{
+			for(ShopUiItemList::iterator iter = _items.begin(); iter != _items.end(); ++ iter)
+			{
+				ShopUiItem *item = *iter;
+				item->getUiFrame()->ccTouchEnded(pTouch, pEvent);
+			}
+		}
+	}
+}
+
+

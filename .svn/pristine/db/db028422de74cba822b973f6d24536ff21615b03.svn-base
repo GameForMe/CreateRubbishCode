@@ -1,0 +1,256 @@
+#include "NewGuildBibleUi.h"
+#include "UiLoader.h"
+#include "UiResourceMgr.h"
+#include "UiManager.h"
+#include "CfgReader.h"
+#include "UiTools.h"
+#include "Loading.h"
+#include "Login.h"
+#include "ClientCfg.h"
+#include "MessageBoxUi.h"
+#include "DBMgr.h"
+#include <algorithm>
+NewguildListItem::NewguildListItem()
+	:_btntag(-1)
+{
+	CCSprite *sprite = CCSprite::create();
+	sprite->setTag(NT_Button);
+	_node->addChild(sprite);
+	sprite->setAnchorPoint(ccp(0.5f, 1.0f));
+	sprite->setPositionX(60.f);
+}
+
+NewguildListItem::~NewguildListItem()
+{
+
+}
+
+void NewguildListItem::onTouch( CCTouch *touck )
+{
+
+}
+
+void NewguildListItem::onSelectChanged( bool select)
+{
+	CCSprite *sprite = dynamic_cast<CCSprite*>(_node->getChildByTag(NT_Button));
+	CC_ASSERT(sprite != NULL);
+	if (select)
+	{
+		sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(_listBtnh[_btntag]));
+		GET_UI(NewGuildBibleUi,WCT_NewGuildBibleUi)->updateData(_btntag);
+	}
+	else
+	{
+		sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(_listBtnn[_btntag]));
+	}
+}
+
+void NewguildListItem::setData(const char * name)
+{
+	CCSprite *sprite = getSprite();
+	CC_ASSERT(sprite != NULL);
+	sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(name));
+}
+
+CCSprite * NewguildListItem::getSprite()
+{
+	return dynamic_cast<CCSprite*>(_node->getChildByTag(NT_Button));
+}
+
+void NewguildListItem::setBtnTag( int tag )
+{
+	if (tag != -1)
+	{
+		_btntag = tag;
+	}
+}
+
+cocos2d::CCSize NewguildListItem::getContentSize()
+{
+	return _node->getChildByTag(NT_Button)->getContentSize();
+}
+
+/////////////////////////////////////////////////////
+
+NewGuildBibleUi::NewGuildBibleUi()
+{
+
+}
+
+NewGuildBibleUi::~NewGuildBibleUi()
+{
+
+}
+
+CCNode * NewGuildBibleUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["NewGuildBibleUiLayer"] = UiLayerLoader<NewGuildBibleUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("newguildbibleui", nodeLoaders, _loadSpriteSheet);
+	if(uiNode)
+	{
+		NewGuildBibleUiLayer *uiLayer = dynamic_cast<NewGuildBibleUiLayer*>(uiNode);
+		CC_ASSERT(uiLayer != NULL);
+		uiLayer->updateDisplay();
+	}
+	return uiNode;
+}
+
+void NewGuildBibleUi::updateData(int tag)
+{
+	NewGuildBibleUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+		uiLayer->updateData(tag);
+}
+
+NewGuildBibleUiLayer * NewGuildBibleUi::getUiLayer()
+{
+	return getUiNodeByTag<NewGuildBibleUiLayer>(WCT_NewGuildBibleUi);
+}
+
+void NewGuildBibleUi::updateDisplay()
+{
+	NewGuildBibleUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+		uiLayer->updateDisplay();
+}
+
+
+////////////////////////////////////////////////////////////////////////
+
+NewGuildBibleUiLayer::NewGuildBibleUiLayer()
+	: _frame(NULL)
+	, _newguildList(NULL)
+	, _newguildScrollView(NULL)
+	, _detailSprite(NULL)
+
+{
+
+}
+
+NewGuildBibleUiLayer::~NewGuildBibleUiLayer()
+{
+	 	CC_SAFE_DELETE(_newguildList);
+}
+
+void NewGuildBibleUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(NT_Frame));
+	_newguildContent = _frame->getChildByTag(NT_NewGuildBibleContent);
+	CC_ASSERT(_frame != NULL && _newguildContent != NULL);
+
+	_newguildScrollView = createScrollViewWithContent(_newguildContent);
+	CC_ASSERT(_newguildScrollView != NULL);
+	_newguildContent->addChild(_newguildScrollView);
+	_newguildList = new VerticalList<NewguildListItem>;
+	_newguildList->addToScrollView(_newguildScrollView); 
+	_newguildList->setMinSize(_newguildContent->getContentSize());
+
+	_detailSprite  = dynamic_cast<CCSprite*>(_frame->getChildByTag(NT_DetailSprite));
+	CC_ASSERT(_detailSprite != NULL);
+
+	setAllChildernButtonPriority(this,-1);
+}
+
+cocos2d::SEL_MenuHandler NewGuildBibleUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler NewGuildBibleUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", NewGuildBibleUiLayer::onCloseBtnPressed);
+	return NULL;
+}
+
+void NewGuildBibleUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void NewGuildBibleUiLayer::onExit()
+{
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool NewGuildBibleUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_frame, pTouch))
+	{
+		_stPt = _frame->convertTouchToNodeSpace(pTouch);
+		return true;
+	}
+	return false;
+}
+
+void NewGuildBibleUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint pt = _frame->convertTouchToNodeSpace(pTouch);
+	if(ccpDistance(pt, _stPt) < TOUCH_MOVE_DIS)
+	{
+		if(isTouchOnNodeContent(_newguildContent, pTouch))
+		{
+			NewguildListItem *item = _newguildList->getSelectItem();
+			if(_newguildList->onTouch(pTouch) == NULL)
+				_newguildList->setSelectItem(item);
+		}
+	}
+}
+
+void NewGuildBibleUiLayer::updateDisplay()
+{
+	//如果没有显示区域列表，则显示;
+	if(_newguildList->getItemCount() == 0)
+	{
+		for(int i=0; i < 20; i++) 
+		{
+			NewguildListItem *item = new NewguildListItem;
+			item->setData(_listBtnn[i]);
+			item->setBtnTag(i);
+			_newguildList->addItem(item);
+		}
+		_newguildList->updateDisplay();
+		if(_newguildList->getSelectItem() == NULL)
+		{
+			_newguildList->setSelectItem(1);
+		}
+	}
+}
+
+void NewGuildBibleUiLayer::updateData(int tag)
+{
+	if (tag != -1 && tag != 0 &&tag != 6 &&tag != 12 &&tag != 17)
+	{
+		const char* image[] = {
+			"",
+			"newguildbibleui_richangrenwu",
+			"newguildbibleui_yanhuotumo",
+			"newguildbibleui_anquanguji",
+			"newguildbibleui_yinjiu",
+			"newguildbibleui_shuangxiu",
+			"",
+			"newguildbibleui_zhuangbeishengji",
+			"newguildbibleui_zhuangbeiqianghua",
+			"newguildbibleui_zhuangbeijianding",
+			"newguildbibleui_baoshixiangqian",
+			"newguildbibleui_zhufuxingyun",
+			"",
+			"newguildbibleui_kuangdongwabao",
+			"newguildbibleui_fubenxunbao",
+			"newguildbibleui_xiangyaofumo",
+			"newguildbibleui_yewaitanxian",
+			"",
+			"newguildbibleui_meirihuodong",
+			"newguildbibleui_meirihuoyue",
+		};
+		_detailSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(image[tag]));
+		_detailSprite->setVisible(true);
+	}
+}
+
+void NewGuildBibleUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_NewGuildBibleUi);
+}

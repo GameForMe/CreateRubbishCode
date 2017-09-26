@@ -1,0 +1,94 @@
+#include "RadioMutex.h"
+#include "RadioButton.h"
+#include "CommonDefine.h"
+
+RadioMutex::RadioMutex()
+: m_enable_callback(true)
+, m_select_default_on_enter(false)
+{
+}
+
+void RadioMutex::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	mvecRodioBtns.clear();
+
+	if ( this->getChildren() && this->getChildrenCount() > 0 )
+	{
+		CCObject* child;
+		CCARRAY_FOREACH(this->getChildren(), child)
+		{
+			RadioButton* pBtn = dynamic_cast<RadioButton*>(child);
+			if (pBtn)
+			{
+				pBtn->getButton()->addTargetWithActionForControlEvents(this,
+					cccontrol_selector(RadioMutex::onListen),
+					CCControlEventTouchUpInside);
+
+				mvecRodioBtns.push_back(pBtn);
+			}
+		}
+	}
+}
+
+void RadioMutex::onListen( CCObject* pSender, CCControlEvent pCCControlEvent )
+{
+	BOOST_FOREACH(RadioButton* pBtn,mvecRodioBtns)
+	{
+		bool selected = pBtn->getButton() == pSender;
+		pBtn->setShowSelected(selected);
+
+		if(selected && m_enable_callback&& m_selected_fn)
+		{
+			m_selected_fn(pBtn->getTag());
+		}
+	}
+}
+
+void RadioMutex::selDefault()
+{
+	select(0);
+}
+
+void RadioMutex::onEnter()
+{
+	CCNode::onEnter();
+
+	if(m_select_default_on_enter)
+	{
+		selDefault();
+	}
+}
+
+void RadioMutex::select(size_t idx, bool enable_callback)
+{
+	if (idx >= 0 && idx < mvecRodioBtns.size())
+	{
+		m_enable_callback = enable_callback;
+		mvecRodioBtns[idx]->getButton()->sendActionsForControlEvents(CCControlEventTouchUpInside);
+		m_enable_callback = true;
+	}
+}
+
+void RadioMutex::arrange( RadioButtonArray const& btns )
+{
+	RadioMutex* self  =this;
+	void BOOST_LOCAL_FUNCTION(RadioButton* pBtn,bind self)
+	{
+		pBtn->getButton()->removeTargetWithActionForControlEvents(self,\
+			cccontrol_selector(RadioMutex::onListen),\
+			CCControlEventTouchUpInside);
+	}BOOST_LOCAL_FUNCTION_NAME(RemoveTarget);
+
+	boost::for_each(mvecRodioBtns,RemoveTarget);
+
+	mvecRodioBtns = btns;
+
+	void BOOST_LOCAL_FUNCTION(RadioButton* pBtn,bind self)
+	{
+		pBtn->getButton()->addTargetWithActionForControlEvents(self,\
+			cccontrol_selector(RadioMutex::onListen),\
+			CCControlEventTouchUpInside);
+	}BOOST_LOCAL_FUNCTION_NAME(AddTarget);
+
+	boost::for_each(mvecRodioBtns,AddTarget);
+}

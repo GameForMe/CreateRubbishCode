@@ -1,0 +1,2363 @@
+#include "AnimationCache.h"
+#include "BSpriteReader.h"
+#include "CfgReader.h"
+#include "BSAnimate.h"
+#include "DBMgr.h"
+#include "MapManager.h"
+#include "Movie.h"
+#include "Attres.h"
+
+#include "PoolDefine.h"
+#include "UiLoader.h"
+#include "SkillUi.h"
+#include "CheckButton.h"
+
+#include "UiManager.h"
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+#include "wzolJni.h"
+#endif
+
+#include "f_data_set.h"
+#include "f_string_util.h"
+
+//#ifdef CC_PROFILE_ENABLE
+#include "cc_profiler.h"
+
+#include "f_simple_res_guard.h"
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+#include "CCFileUtilsAndroid.h"
+#endif
+//#endif
+
+AnimationCache::AnimationCache()
+	: _frames(0), curMemCanUse(200)
+{
+	m_decode_thread = new c_thread(_decode_thread_func , 0 , this);
+}
+
+AnimationCache::~AnimationCache()
+{
+	CC_SAFE_DELETE(m_decode_thread);
+
+	//cleanup_reader();
+
+	//releaseAllAnim();
+	//releaseResAll();
+}
+
+AnimationCache* AnimationCache::getInstance()
+{
+	static AnimationCache animationCache;
+	return &animationCache;
+}
+
+void AnimationCache::createAnisFromFile( const void* pData, const char *fileName, const std::string &name, eAnimsType animType,  AnimateList &animateList, int backZorder, int frontZorder)
+{
+	//[bing] 如果正在播放动画用单线程加载资源 否则动画有些特效图可能播不出来特效已经过去了
+	//if(CMovie::GetInstance().IsPlay())
+	//{
+	//	createAnisFromFileNew(pData, fileName, name, animType, animateList, backZorder, frontZorder, true);
+	//	return;
+	//}
+
+	key_to_reader::iterator iter = m_waiting_reader_queue.find(name);
+	if(iter != m_waiting_reader_queue.end())
+	{
+		//m_decode_q.lock();
+		mutex_guard<c_safe_list<bsprite_reader_ptr> > dec_lock(m_decode_q);
+		bsprite_reader_ptr& reader = iter->second;
+		reader->addAnimatList(animateList);
+		//m_decode_q.unlock();
+		return;
+	}
+
+	createDecodeByName(pData,fileName,name,animType,&animateList,backZorder,frontZorder);
+}
+
+const size_t g_fsMax = 40;	//[bing] 动作包括特效最大40帧
+// float g_weight_array[g_fsMax] = { 1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,
+// 	 							  1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,
+// 	 							  1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,
+// 								  1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f };
+
+float g_weight_array[g_fsMax] = { 0 };
+
+void AnimationCache::createAnisFromFileNew(const void* pData, const char *fileName, const std::string &name, eAnimsType animType,  AnimateList &animateList, int backZorder, int frontZorder, bool bMainThreadLoad,int nRetainCnt/*=false*/,LoadedCallback cb/*=LoadedCallback()*/)
+{
+	//CC_ASSERT(!name.empty());
+
+	if (name.empty())
+	{
+		return;
+	}
+
+	Animations anims;
+	//anims.unremovable = bPreload;
+	anims.ref =nRetainCnt;
+// 	if (anims.ref <= 0 && AT_Sin==animType && name == "E1_4")
+// 	{
+// 		anims.increaseRef();
+// 	}
+
+	if(bMainThreadLoad)
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(fileName);
+
+	int type = 1;
+	switch (animType)
+	{
+	case AT_Player:	type = 1;	break;
+	case AT_Weapon: type = 2;	break;
+	case AT_Wing:	type = 3;	break;	//[bing] 翅膀type == 3
+	case AT_Ride:	type = 9;	break;	//坐骑
+	case AT_A_Player: type = 5;	break;	//[bing] 角色装备界面纸娃娃相关
+	case AT_A_Weapon: type = 6;	break;
+	case AT_A_Wing: type = 7;	break;
+	case AT_RideTexiao:	type = 8;	break;	//坐骑特效
+	case AT_RidePlayer: 	type = 4;	break;	//坐骑玩家
+	}
+
+	int zorder = -1;
+// 	float g_weight_array[g_fsMax] = { 1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,
+// 		1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,
+// 		1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,
+// 		1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f };
+	//memset(&g_weight_array[0],1,sizeof(float)*g_fsMax);
+	//std::for_each(g_weight_array , g_weight_array+g_fsMax ,[](float& one){one= 1.0f;} );
+
+	float baseValue = 0.1f;
+
+	if (AT_Npc==animType)
+	{
+		geneNPCBSAnimation(name,animType,anims,g_weight_array,frontZorder,zorder,baseValue);
+	}
+	else if (AT_Monster==animType || AT_Monster5==animType || AT_Monster8==animType)
+	{
+		//baseValue /= 2.0f;
+		geneMonsterBSAnimation(name,animType,anims,g_weight_array,frontZorder,zorder,baseValue);
+	}
+	else if (AT_Sin==animType || AT_Special==animType)
+	{
+		geneSinSpecBSAnimation(name,animType,anims,g_weight_array,frontZorder,zorder,baseValue);
+	}
+	//[bing] 8方向特效
+	else if(AT_Oct == animType)
+	{
+		geneOctSpecBSAnimation(name,animType,anims,g_weight_array,frontZorder,zorder,baseValue);
+	}
+	else if(AT_Ride == animType || AT_RideTexiao == animType || AT_RidePlayer==animType)
+	{
+		//baseValue = baseValue*2/3;
+		geneRideBSAnimation(pData,type,name,animType,anims,g_weight_array,frontZorder,zorder,baseValue);
+	}
+	else if(AT_A_Player == animType
+		|| AT_A_Weapon == animType
+		|| AT_A_Wing == animType)
+	{
+		//baseValue = baseValue*2/3;
+		geneAvatorRoleBSAnimation(pData,type,name,animType,anims,g_weight_array,frontZorder,zorder,baseValue);
+	}
+	else if(AT_Player == animType || AT_Weapon == animType || AT_Wing==animType)	//AT_Player or AT_Weapon or AT_Wing
+	{
+		//baseValue = baseValue*2/3;
+		geneRoleBSAnimation(pData,type,name,animType,anims,g_weight_array,frontZorder,backZorder,zorder,baseValue);
+	}
+
+	AnimationMap &animationMap = getAnimationMap(animType);
+	animationMap[name] = anims;
+
+	if (cb)
+	{
+		cb(AnimsUsed(animType,name));
+	}
+
+	if(bMainThreadLoad)
+		addAnimData(animType, animateList, name, animationMap[name]);
+}
+
+void AnimationCache::deleteAnimsFromName( const char *name )
+{
+	//CCString *key = CCString::createWithFormat("bsprite_img_%s_%d",name, 0);
+}
+
+bool AnimationCache::addOctEffect( int id, const std::string &name, AnimateList &animateList )
+{
+	std::map<std::string, Animations>::iterator aniIter = _octEffects.find(std::string(name));
+	if(aniIter != _octEffects.end())
+	{
+		addAnimData(AT_Oct, animateList, name, aniIter->second);
+		return true;
+	}
+
+	std::string effectDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string file = effectDir + std::string(name) + std::string(".plist");
+
+	/*
+	if (!CCFileUtils::sharedFileUtils()->isFileExist(file))
+	{
+		//CCLOG("addOctEffect() not find file %s", file.c_str());
+		return false;
+	}
+	*/
+
+	createAnisFromFile(NULL, file.c_str(), name, AT_Oct, animateList);
+
+	return true;
+}
+
+void AnimationCache::getOctEffect( int id, const std::string &name, AnimateList &animateList )
+{
+	//updateResUsedTime(name, AT_Oct);
+	addOctEffect(id, name, animateList);
+}
+
+bool AnimationCache::addSinEffect( int id, const std::string &name, AnimateList &animateList )
+{
+	std::map<std::string, Animations>::iterator aniIter = _sinEffects.find(std::string(name));
+	if(aniIter != _sinEffects.end())
+	{
+		addAnimData(AT_Sin, animateList, name, aniIter->second);
+		return true;
+	}
+
+	std::string effectDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string file = effectDir + std::string(name) + std::string(".plist");
+
+	/*
+	if (!CCFileUtils::sharedFileUtils()->isFileExist(file))
+	{
+		//CCLOG("addSinEffect() not find file %s", file.c_str());
+		return false;
+	}
+	*/
+
+	createAnisFromFile(NULL, file.c_str(), name, AT_Sin, animateList);
+	return true;
+}
+
+void AnimationCache::getSinEffect( int id, const std::string &name, AnimateList &animateList )
+{
+	//updateResUsedTime(name, AT_Sin);
+	addSinEffect(id, name, animateList);
+}
+
+bool AnimationCache::addSpecialEffect( int id, const std::string &name, AnimateList &animateList)
+{
+	std::map<std::string, Animations>::iterator aniIter = _specialEffects.find(name);
+	if(aniIter != _specialEffects.end())
+	{
+		addAnimData(AT_Special, animateList, name, aniIter->second);
+		return true;
+	}
+
+	std::string effectDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string file = effectDir + std::string(name) + std::string(".plist");
+
+	/*
+	if (!CCFileUtils::sharedFileUtils()->isFileExist(file))
+	{
+		//CCLOG("addSpecialEffect() not find file %s", file.c_str());
+		return false;
+	}
+	*/
+
+	createAnisFromFile(NULL, file.c_str(), name, AT_Special, animateList);
+	return true;
+}
+
+void AnimationCache::getSpecialEffect( int id, const std::string &name, AnimateList &animateList)
+{
+	//updateResUsedTime(name, AT_Special);
+	addSpecialEffect(id, name, animateList);
+	//Animations &effects = _specialEffects[std::string(name)];
+	//effects.ref++;
+	//return effects.anims;
+}
+
+bool AnimationCache::addMonsterAni( int id, const std::string &name, AnimateList &animateList, int nType )
+{
+	std::map<std::string, Animations>::iterator aniIter = _monsterAnims.find(std::string(name));
+	if(aniIter != _monsterAnims.end())
+	{
+		addAnimData(AT_Monster, animateList, name, aniIter->second);
+		return true;
+	}
+
+	std::string monsterDir = CFGReader::instance()->get_profile_string("Art", "Monster", "");
+	std::string file = monsterDir + std::string(name) + std::string(".plist");
+	
+	/*
+	if (!CCFileUtils::sharedFileUtils()->isFileExist(file))
+	{
+		//CCLOG("addMonsterAni() not find file %s", file.c_str());
+		return false;
+	}
+	*/
+
+	if (nType==0)
+		createAnisFromFile(NULL, file.c_str(), name, AT_Monster, animateList);
+	else if (nType==1)
+		createAnisFromFile(NULL, file.c_str(), name, AT_Monster5, animateList);
+	else if (nType==2)
+		createAnisFromFile(NULL, file.c_str(), name, AT_Monster8, animateList);
+	return true;
+}
+
+void AnimationCache::getMonsterAni( int id, const std::string &name, AnimateList &animateList, int nType )
+{
+	//updateResUsedTime(name, AT_Monster);
+	addMonsterAni(id, name, animateList, nType);
+	//Animations &monsterAnis = _monsterAnims[std::string(name)];
+	//monsterAnis.ref++;
+	//return monsterAnis.anims;
+}
+
+bool AnimationCache::addNPCAni( int id, const std::string &name, AnimateList &animateList )
+{
+	std::map<std::string, Animations>::iterator aniIter = _NPCAnims.find(std::string(name));
+	if(aniIter != _NPCAnims.end())
+	{
+		addAnimData(AT_Npc, animateList, name, aniIter->second);
+		return true;
+	}
+
+	std::string monsterDir = CFGReader::instance()->get_profile_string("Art", "NPC", "");
+	std::string file = monsterDir + std::string(name) + std::string(".plist");
+
+	/*
+	if (!CCFileUtils::sharedFileUtils()->isFileExist(file))
+	{
+		//CCLOG("addNPCAni() not find file %s", file.c_str());
+		return false;
+	}
+	*/
+
+	createAnisFromFile(NULL, file.c_str(), name, AT_Npc, animateList);
+	//createAnisFromFileNew(NULL,bspriteFile.c_str(), name, AT_Npc, animateList);
+	return true;
+}
+
+void AnimationCache::getNPCAni( int id, const std::string &name, AnimateList &animateList )
+{
+	//updateResUsedTime(name, AT_Npc);
+	addNPCAni(id, name, animateList);
+	//Animations &NPCAnis = _NPCAnims[std::string(name)];
+	//NPCAnis.ref++;
+	//return NPCAnis.anims;
+}
+
+bool AnimationCache::addWeaponAni( const void* pData, int id, const std::string &name, AnimateList &animateList )
+{
+	std::map<std::string, Animations>::iterator aniIter = _weaponAnims.find(std::string(name));
+	if(aniIter != _weaponAnims.end())
+	{
+		addAnimData(AT_Weapon, animateList, name, aniIter->second);
+
+		return true;
+	}
+
+	std::string weaponDir = CFGReader::instance()->get_profile_string("Art", "Weapon", "");
+	std::string file = weaponDir + std::string(name) + std::string(".plist");
+
+	/*
+	if (!CCFileUtils::sharedFileUtils()->isFileExist(file))
+	{
+		//CCLOG("addWeaponAni() not find file %s", file.c_str());
+		return false;
+	}
+	*/
+
+	createAnisFromFile(pData, file.c_str(), name, AT_Weapon, animateList, RZN_WEAPONBACK, RZN_WEAPONFRONT);
+	//createAnisFromFileNew( pData, bspriteFile.c_str(), name, AT_Weapon, animateList, RZN_WEAPONBACK, RZN_WEAPONFRONT);
+	return true;
+}
+
+void AnimationCache::getWeaponAnis( const void* pData, int id, const std::string &name, AnimateList &animateList )
+{
+	//updateResUsedTime(name, AT_Weapon);
+	addWeaponAni( pData, id, name, animateList);
+}
+
+bool AnimationCache::addWingAni( const void* pData, int id, const std::string &name, AnimateList &animateList )
+{
+	std::map<std::string, Animations>::iterator aniIter = _wingAnims.find(std::string(name));
+	if(aniIter != _wingAnims.end())
+	{
+		addAnimData(AT_Wing, animateList, name, aniIter->second);
+		return true;
+	}
+
+	std::string wingDir = CFGReader::instance()->get_profile_string("Art", "Weapon", "");
+	std::string file = wingDir + std::string(name) + std::string(".plist");
+
+	/*
+	if (!CCFileUtils::sharedFileUtils()->isFileExist(file))
+	{
+		//CCLOG("addWingAni() not find file %s", file.c_str());
+		return false;
+	}
+	*/
+
+	createAnisFromFile(pData, file.c_str(), name, AT_Wing, animateList, RZN_WingBack, RZN_WingFront);
+	//createAnisFromFileNew( pData, bspriteFile.c_str(), name, AT_Wing, animateList, RZN_WingBack, RZN_WingFront);
+	return true;
+}
+
+void AnimationCache::getWingAnis( const void* pData, int id, const std::string &name, AnimateList &animateList )
+{
+	//updateResUsedTime(name, AT_Wing);
+	addWingAni( pData, id, name, animateList);
+}
+
+bool AnimationCache::addPlayerAni( const void* pData, int id, const std::string &name, AnimateList &animateList, int nType )
+{
+	std::map<std::string, Animations>::iterator aniIter = _playerAnims.find(std::string(name));
+	if(aniIter != _playerAnims.end())
+	{
+		addAnimData(AT_Player, animateList, name, aniIter->second);
+		return true;
+	}
+
+	std::string roleDir = CFGReader::instance()->get_profile_string("Art", "Role", "");
+
+	std::string file = roleDir + std::string(name) + std::string(".plist");
+
+	//createAnisFromFile(pData, file.c_str(), name, !bIsRide ? AT_Player : AT_Ride, animateList, RZN_BODY, RZN_BODY);
+	if (nType==1)
+		createAnisFromFile(pData, file.c_str(), name, AT_Player, animateList, RZN_BODY, RZN_BODY);
+	else if (nType==2)
+		createAnisFromFile(pData, file.c_str(), name, AT_RidePlayer, animateList, RZN_BODY, RZN_BODY);
+	else if (nType==3)
+		createAnisFromFile(pData, file.c_str(), name, AT_RideTexiao, animateList, RZN_HPEFFECT, RZN_HPEFFECT);
+	else if (nType==4)
+		createAnisFromFile(pData, file.c_str(), name, AT_Ride, animateList, RZN_ZUOQI, RZN_ZUOQI);
+
+	return true;
+}
+
+void AnimationCache::getPlayerAnis(const void* pData, int id, const std::string &name, AnimateList &animateList, int nType /*= false*/ )
+{
+	//updateResUsedTime(name, AT_Player);
+	addPlayerAni(pData, id, name, animateList, nType);
+}
+
+void AnimationCache::releasePlayerAnis( const char *name )
+{
+	AnimationMap::iterator iter = _playerAnims.find(name);
+	if(iter != _playerAnims.end())
+	{
+		Animations &anims = iter->second;
+		anims.decreaseRef();
+		//CC_ASSERT(anims.ref >= 0);
+		
+		updateResLastUsedTime(anims.ref, name, AT_Player);
+		//if ( releaseOneAnim(name, AT_Player,iter->second) )
+		//	_playerAnims.erase(iter);
+	}
+}
+
+void AnimationCache::releaseWeaponAnis( const char *name )
+{
+	AnimationMap::iterator iter = _weaponAnims.find(name);
+	if(iter != _weaponAnims.end())
+	{
+		Animations &anims = iter->second;
+		anims.decreaseRef();
+		//CC_ASSERT(anims.ref >= 0);
+
+		updateResLastUsedTime(anims.ref, name, AT_Weapon);
+		//if ( releaseOneAnim(name, AT_Weapon,iter->second) )
+		//	_weaponAnims.erase(iter);
+	}
+}
+
+void AnimationCache::releaseWingAnis( const char *name )
+{
+	AnimationMap::iterator iter = _wingAnims.find(name);
+	if(iter != _wingAnims.end())
+	{
+		Animations &anims = iter->second;
+		anims.decreaseRef();
+		//CC_ASSERT(anims.ref >= 0);
+
+		updateResLastUsedTime(anims.ref, name, AT_Wing);
+		//if ( releaseOneAnim(name, AT_Wing,iter->second) )
+		//	_wingAnims.erase(iter);
+	}
+}
+
+void AnimationCache::releaseMonsterAnis( const char *name )
+{
+	AnimationMap::iterator iter = _monsterAnims.find(name);
+	if(iter != _monsterAnims.end())
+	{
+		Animations &anims = iter->second;
+		anims.decreaseRef();
+		//CC_ASSERT(anims.ref >= 0);
+
+		updateResLastUsedTime(anims.ref, name, AT_Monster);
+		//if ( releaseOneAnim(name, AT_Monster,iter->second) )
+		//	_monsterAnims.erase(iter);
+	}
+}
+
+void AnimationCache::releaseNPCAnis( const char *name )
+{
+	AnimationMap::iterator iter = _NPCAnims.find(name);
+	if(iter != _NPCAnims.end())
+	{
+		Animations &anims = iter->second;
+		anims.decreaseRef();
+		//CC_ASSERT(anims.ref >= 0);
+
+		updateResLastUsedTime(anims.ref, name, AT_Npc);
+		//if ( releaseOneAnim(name, AT_Npc,iter->second) )
+		//	_NPCAnims.erase(iter);
+	}
+}
+
+void AnimationCache::releaseSinEffect( const char *name, bool del)
+{
+	AnimationMap::iterator iter = _sinEffects.find(name);
+	if(iter != _sinEffects.end())
+	{
+		Animations &anims = iter->second;
+		anims.decreaseRef();
+		//CC_ASSERT(anims.ref >= 0);
+
+		updateResLastUsedTime(anims.ref, name, AT_Sin);
+		//if ( del &&  releaseOneAnim(name, AT_Sin,iter->second) )
+		//	_sinEffects.erase(iter);
+	}
+}
+
+void AnimationCache::releaseSpecislEffect( const char *name )
+{
+	AnimationMap::iterator iter = _specialEffects.find(name);
+	if(iter != _specialEffects.end())
+	{
+		Animations &anims = iter->second;
+		anims.decreaseRef();
+		//CC_ASSERT(anims.ref >= 0);
+
+		updateResLastUsedTime(anims.ref, name, AT_Special);
+		//if ( releaseOneAnim(name, AT_Special,iter->second) )
+		//	_specialEffects.erase(iter);
+	}
+}
+
+void AnimationCache::releaseOctEffect( const char *name )
+{
+	AnimationMap::iterator iter = _octEffects.find(name);
+	if(iter != _octEffects.end())
+	{
+		Animations &anims = iter->second;
+		anims.decreaseRef();
+		//CC_ASSERT(anims.ref >= 0);
+
+		updateResLastUsedTime(anims.ref, name, AT_Oct);
+		//if ( releaseOneAnim(name, AT_Oct,iter->second) )
+		//	_octEffects.erase(iter);
+	}
+}
+
+void AnimationCache::update( float dt )
+{
+	CCProfile("AnimationCacheUpdate");
+	/*
+	if(_frames != 0)
+	{
+		-- _frames;
+		if(_frames == 5)
+		{
+			//checkAndReleaseAllAnis();
+		}
+		else if(_frames == 0)
+		{
+			//CCTextureCache::sharedTextureCache()->removeUnusedTextures();
+		}
+	}
+	*/
+
+	if(!m_wait_setup_queue.empty())
+	{
+		//m_setup_q.lock();
+		mutex_guard<c_safe_list<SetupNode> > setup_lock(m_wait_setup_queue);
+		SetupNode setup_node = m_wait_setup_queue.front();
+		m_wait_setup_queue.pop_front();
+		//m_setup_q.unlock();
+
+		//ZHJL： UI读CCBI的，直接用32位图片格式
+		//CCTexture2DPixelFormat currentFormat = CCTexture2D::defaultAlphaPixelFormat();
+		//CCTexture2D::setDefaultAlphaPixelFormat(kCCTexture2DPixelFormat_RGBA4444);
+		
+		dealWithSetupNode(setup_node);
+		//ZHJL： UI读CCBI的，直接用32位图片格式，用完再设回来
+		//CCTexture2D::setDefaultAlphaPixelFormat(currentFormat);
+	}
+	else
+	{
+		//releaseResByLongTime();
+		//releaseResByCurMem();
+	}
+
+	dealWithAnimation();
+
+}
+
+bool AnimationCache::checkAndRelease( AnimationMap &animMap, eAnimsType animType )
+{
+	bool released = false;
+	for(AnimationMap::iterator iter = animMap.begin(); iter != animMap.end();)
+	{
+		Animations &anims = iter->second;
+		//CC_ASSERT(anims.ref >= 0);
+		if(anims.ref <= 0)
+		{
+			releaseOneAnim(iter->first.c_str(), animType, anims);
+
+			animMap.erase(iter ++);
+			released = true;
+		}
+		else
+		{
+			++iter;
+		}
+	}
+	return released;
+}
+
+// bool SetupNodeBigerSort(SetupNode& pNode1, SetupNode& pNode2)
+// {
+// 	return pNode1.img->getDataLen() > pNode2.img->getDataLen();
+// }
+
+//--------------------------------------------------------
+#ifdef OVD_PLATFORM_WINDOWS
+unsigned int AnimationCache::_decode_thread_func(void* thread_)
+#else 
+void* AnimationCache::_decode_thread_func(void* thread_)
+#endif
+{
+	AnimationCache* self = (AnimationCache*)((c_thread*)thread_)->lock_user_data();
+	((c_thread*)thread_)->unlock_user_data();
+	do
+	{
+		//((c_thread*)thread_)->yield();
+
+		if(!self->m_decode_q.empty())
+		{
+			//self->m_decode_q.lock();
+			mutex_guard<c_safe_list<bsprite_reader_ptr> > dec_lock(self->m_decode_q);
+			/*BSPriteReader**/bsprite_reader_ptr reader = self->m_decode_q.front();
+			self->m_decode_q.pop_front();
+			//self->m_decode_q.unlock();
+
+			if(!reader)
+			{
+				CCLOG("AnimationCache reader is NULL!!");
+				continue;
+			}
+
+// 			if (reader->GetResType() == 1)
+// 			{
+// 				//CCLog("AnimationCache LoadImg %s", reader->get_name().c_str());
+// 
+// 				unsigned long nSize = 0;
+// 				unsigned char *pBuffer = CCFileUtils::sharedFileUtils()->getFileData(reader->get_file_name().c_str(), "rb", &nSize);
+// 				if (nSize>0 && pBuffer!=NULL)
+// 				{
+// 					SetupNode node;
+// 					node.img = new CCImage();
+// 					node.img->initWithImageData(pBuffer, nSize, CCImage::kFmtJpg);
+// 					CC_SAFE_DELETE_ARRAY(pBuffer);
+// 					node.reader = reader;
+// 					self->m_setup_q.lock();
+// 					self->m_setup_q.push_back(node);
+// 					self->m_setup_q.unlock();
+// 				}
+// 			}
+			/*else */if(reader->GetResType() == 2)
+			{
+				std::string texturePath = reader->get_file_name();
+				// remove .xxx
+				size_t startPos = texturePath.find_last_of("."); 
+				texturePath = texturePath.erase(startPos);
+
+				//CCLog("AnimationCache LoadImg %s", texturePath.c_str());
+
+				unsigned long nSize = 0;
+				unsigned char *pBuffer = NULL;
+				//修改如果存在pvr.ccz文件，则用pvr.ccz
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+	CCFileUtilsAndroid* f_util = (CCFileUtilsAndroid*)(CCFileUtils::sharedFileUtils());
+	unsigned char* memInPack = 	f_util->getFileDataForAsync((texturePath + ".pvr.ccz").c_str(), "rb", &nSize);
+	pBuffer = DecFileHelper::getFileDataByMem(memInPack,nSize,&nSize);
+#else
+	pBuffer = 	DecFileHelper::getFileData((texturePath + ".pvr.ccz").c_str(), "rb", &nSize);
+	//pBuffer = 	CCFileUtils::sharedFileUtils()->getFileData((texturePath + ".pvr.ccz").c_str(), "rb", &nSize);
+#endif
+				if (nSize>0 && pBuffer!=NULL)
+				{
+					SetupNode node;
+					node.reader = reader;
+					//保存读取到的pvr.ccz数据
+					//node.data = pBuffer;
+					node.file_data = std::shared_ptr<unsigned char>(pBuffer,[](unsigned char* p){ if(p) delete[] p;});
+					//node.data.assign(nSize,0);
+					//memcpy(&node.data[0],pBuffer,nSize);
+					node.len = nSize;
+
+					unsigned long nSize1 = 0;
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+
+					CCFileUtilsAndroid* f_util = (CCFileUtilsAndroid*)(CCFileUtils::sharedFileUtils());
+					unsigned char *memInPack = 	f_util->getFileDataForAsync(reader->get_file_name().c_str(), "rb", &nSize1);
+					unsigned char *pBuffer1 = DecFileHelper::getFileDataByMem(memInPack,nSize1,&nSize1);
+#else
+					unsigned char *pBuffer1 = DecFileHelper::getFileData(reader->get_file_name().c_str(), "rb", &nSize1);
+					//unsigned char *pBuffer1 = CCFileUtils::sharedFileUtils()->getFileData(reader->get_file_name().c_str(), "rb", &nSize1);
+#endif
+					GUARD_NEW_ARRAY_PTR(pBuffer1);
+					if (nSize1>0 && pBuffer1!=NULL)
+					{
+						node.dict = dic_ptr(CCDictionary::createWithContentsOfFileBufs((char*)pBuffer1, nSize1)
+							,[](CCDictionary* dic){if(dic) dic->release();});
+						//CC_SAFE_DELETE_ARRAY(pBuffer1);
+					}
+					mutex_guard<c_safe_list<SetupNode> > setup_lock(self->m_wait_setup_queue);
+					//self->m_setup_q.lock();
+					self->m_wait_setup_queue.push_back(node);
+					//self->m_setup_q.unlock();
+				}
+				else
+				{
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+					CCFileUtilsAndroid* f_util = (CCFileUtilsAndroid*)(CCFileUtils::sharedFileUtils());
+					unsigned char* memInPack = 	f_util->getFileDataForAsync((texturePath + ".png").c_str(), "rb", &nSize);
+					pBuffer = DecFileHelper::getFileDataByMem(memInPack,nSize,&nSize);
+#else
+					pBuffer = 	DecFileHelper::getFileData((texturePath + ".png").c_str(), "rb", &nSize);
+					//pBuffer = 	CCFileUtils::sharedFileUtils()->getFileData((texturePath + ".png").c_str(), "rb", &nSize);
+#endif
+					GUARD_NEW_ARRAY_PTR(pBuffer);
+					if (nSize>0 && pBuffer!=NULL)
+					{
+						SetupNode node;
+						node.img =image_ptr( new CCImage(),[](CCImage* img){ if(img) delete img;});
+						node.img->initWithImageData(pBuffer, nSize, CCImage::kFmtPng);
+						//CC_SAFE_DELETE_ARRAY(pBuffer);
+
+						node.reader = reader;
+
+						unsigned long nSize1 = 0;
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+						CCFileUtilsAndroid* f_util = (CCFileUtilsAndroid*)(CCFileUtils::sharedFileUtils());
+						unsigned char *memInPack = 	f_util->getFileDataForAsync(reader->get_file_name().c_str(), "rb", &nSize1);
+						unsigned char *pBuffer1 = DecFileHelper::getFileDataByMem(memInPack,nSize1,&nSize1);
+#else
+						unsigned char *pBuffer1 = 	DecFileHelper::getFileData(reader->get_file_name().c_str(), "rb", &nSize1);
+						//unsigned char *pBuffer1 = CCFileUtils::sharedFileUtils()->getFileData(reader->get_file_name().c_str(), "rb", &nSize1);
+#endif
+						GUARD_NEW_ARRAY_PTR(pBuffer1);
+						if (nSize1>0 && pBuffer1!=NULL)
+						{
+							node.dict = dic_ptr(CCDictionary::createWithContentsOfFileBufs((char*)pBuffer1, nSize1)
+								,[](CCDictionary* dic){if(dic) dic->release();});
+							//CC_SAFE_DELETE_ARRAY(pBuffer1);
+						}
+						mutex_guard<c_safe_list<SetupNode> > setup_lock(self->m_wait_setup_queue);
+						//self->m_setup_q.lock();
+						self->m_wait_setup_queue.push_back(node);
+						//self->m_setup_q.unlock();
+					}
+				}
+			}
+// 			else if (reader->GetResType() == 3)
+// 			{//要把CCBI文件读出来，并把CCBI中需要加载的PLIST PNG加载完放到FRAMSCASH中
+// 				unsigned long nSize = 0;		
+// 				unsigned char *pBuffer = CCFileUtils::sharedFileUtils()->getFileData(reader->get_file_name().c_str(), "rb", &nSize);
+// 				if (nSize>0 && pBuffer!=NULL)
+// 				{
+// 					reader->setFileBuf(pBuffer, nSize);
+// 
+// 					SetupNode node;
+// 					node.reader = reader;
+// 					self->m_setup_q.lock();
+// 					self->m_setup_q.push_back(node);
+// 					self->m_setup_q.unlock();
+// 				}
+// 			}
+// 			else if (reader->GetResType() == 4)
+// 			{//将解析出的需要加载的图片资源，加载出来，主线程用来生成需要的IMG文件
+// 				unsigned long nSize = 0;
+// 				std::map<std::string,FileData>::iterator iter1 = reader->mImgPlist.begin();
+// 				for ( ; iter1!=reader->mImgPlist.end(); ++iter1)
+// 				{
+// 					//这里还需要换下文件扩展名
+// 					std::string texturePath = (iter1->first).c_str();
+// 					size_t startPos = texturePath.find_last_of("."); 
+// 					texturePath = texturePath.erase(startPos);
+// 					// append .png
+// 					texturePath = texturePath.append(".png");
+// 
+// 					nSize = 0;
+// 					unsigned char *pBuffer1 = CCFileUtils::sharedFileUtils()->getFileData(texturePath.c_str(), "rb", &nSize);
+// 					if (nSize>0 && pBuffer1!=NULL)
+// 					{
+// 						(iter1->second).data = pBuffer1;
+// 						(iter1->second).size = nSize;
+// 
+// 						unsigned long nSize1 = 0;		
+// 						unsigned char *pBuffer1 = CCFileUtils::sharedFileUtils()->getFileData((iter1->first).c_str(), "rb", &nSize1);
+// 						if (nSize1>0 && pBuffer1!=NULL)
+// 						{
+// 							(iter1->second).dict = CCDictionary::createWithContentsOfFileBufs((char*)pBuffer1, nSize1);
+// 							CC_SAFE_DELETE_ARRAY(pBuffer1);
+// 						}
+// 					}
+// 				}
+// 
+// 				std::map<std::string,FileData>::iterator iter2 = reader->mImgPng.begin();
+// 				for ( ; iter2!=reader->mImgPng.end(); ++iter2)
+// 				{
+// 					nSize = 0;
+// 					unsigned char *pBuffer1 = CCFileUtils::sharedFileUtils()->getFileData((iter2->first).c_str(), "rb", &nSize);
+// 					if (nSize>0 && pBuffer1!=NULL)
+// 					{
+// 						(iter2->second).data = pBuffer1;
+// 						(iter2->second).size = nSize;
+// 
+// 						unsigned long nSize1 = 0;		
+// 						unsigned char *pBuffer1 = CCFileUtils::sharedFileUtils()->getFileData((iter1->first).c_str(), "rb", &nSize1);
+// 						if (nSize1>0 && pBuffer1!=NULL)
+// 						{
+// 							(iter2->second).dict = CCDictionary::createWithContentsOfFileBufs((char*)pBuffer1, nSize1);
+// 							CC_SAFE_DELETE_ARRAY(pBuffer1);
+// 						}
+// 					}
+// 				}
+// 
+// 				SetupNode node;
+// 				node.reader = reader;
+// 				self->m_setup_q.lock();
+// 				self->m_setup_q.push_back(node);
+// 				self->m_setup_q.unlock();
+// 			}
+		}
+		else
+		{
+			((c_thread*)thread_)->yield();
+		}
+	}while(((c_thread*)thread_)->is_running());
+#ifdef OVD_PLATFORM_WINDOWS
+	return 0xdead;
+#else 
+	return (void*)0xdead;
+#endif
+}
+
+void AnimationCache::releaseAnims( eAnimsType type, const std::string &name )
+{
+	switch(type)
+	{
+	case AT_Ride:
+	case AT_Player:
+	case AT_A_Player:
+		releasePlayerAnis(name.c_str());
+		break;
+	case AT_Npc:
+		releaseNPCAnis(name.c_str());
+		break;
+	case AT_Monster:
+	case AT_Monster5:
+	case AT_Monster8:
+		releaseMonsterAnis(name.c_str());
+		break;
+	case AT_Weapon:
+	case AT_A_Weapon:
+		releaseWeaponAnis(name.c_str());
+		break;
+	case AT_Sin:
+		releaseSinEffect(name.c_str());
+		break;
+	case AT_Oct:
+		releaseOctEffect(name.c_str());
+		break;
+	case AT_Special:
+		releaseSpecislEffect(name.c_str());
+		break;
+	case AT_A_Wing:
+	case AT_Wing:
+		releaseWingAnis(name.c_str());
+		break;
+	}
+}
+
+void AnimationCache::releaseAnims( std::vector<AnimsUsed> &anims )
+{
+	if (anims.empty())
+	{
+		return;
+	}
+
+	for(std::vector<AnimsUsed>::iterator iter = anims.begin(); iter != anims.end(); ++iter)
+	{
+		AnimsUsed &anim = *iter;
+		releaseAnims(anim.animType, anim.name);
+	}
+	anims.clear();
+}
+
+bool AnimationCache::checkAndReleaseAllAnis()
+{
+	bool ret = false;
+	ret = checkAndRelease(_playerAnims, AT_Player) || ret; 
+	ret = checkAndRelease(_sinEffects, AT_Sin) || ret;
+	ret = checkAndRelease(_octEffects, AT_Oct) || ret;
+	ret = checkAndRelease(_specialEffects, AT_Special) || ret;
+	ret = checkAndRelease(_monsterAnims, AT_Monster) || ret;
+	ret = checkAndRelease(_NPCAnims, AT_Npc) || ret;
+	ret = checkAndRelease(_weaponAnims, AT_Weapon) || ret;
+	ret = checkAndRelease(_wingAnims, AT_Wing) || ret;
+	return ret;
+}
+
+// void AnimationCache::releaseAllAnim( )
+// {
+// 	releaseAnimMap(_playerAnims);
+// 	releaseAnimMap(_sinEffects);
+// 	releaseAnimMap(_octEffects);
+// 	releaseAnimMap(_specialEffects);
+// 	releaseAnimMap(_monsterAnims);
+// 	releaseAnimMap(_NPCAnims);
+// 	releaseAnimMap(_weaponAnims);
+// 	releaseAnimMap(_wingAnims);
+// }
+
+// void AnimationCache::releaseAnimMap( AnimationMap &animMap )
+// {
+// 	for(AnimationMap::iterator iter = animMap.begin(); iter != animMap.end(); ++iter)
+// 	{
+// 		Animations &anims = iter->second;
+// // 		for(std::vector<BSAnimation*>::iterator it = anims.bs_animation_array.begin(); it != anims.bs_animation_array.end(); ++it)
+// // 		{
+// // 			BSAnimation *anim = *it;
+// // 
+// // 			//CCSpriteFrame* pFrame = anim->getOrigSpriteFrame();
+// // 			//if(pFrame)
+// // 				//CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFramesFromTexture(pFrame->getTexture());
+// // 
+// // 			//anim->release();
+// // 			//BSAnimationProxy::getInstance()->getAnimationPool().Delete(anim);
+// // 			delete anim;
+// // 		}
+// // 		std::vector<BSAnimation*>& animation_array  = anims.bs_animation_array;
+// // 		std::for_each(animation_array.begin(),
+// // 						animation_array.end(),
+// // 						[](BSAnimation* one)
+// // 						{
+// // 						  if(one) delete one;
+// // 						});
+// 
+// 		anims.bs_animation_array.clear();
+// 	}
+// 	animMap.clear();
+// }
+
+void AnimationCache::releaseUnUsedAnims()
+{
+	_frames = 10;
+}
+
+void AnimationCache::createDefList( int num, AnimateList &animateList, bool autoRelease /*= true*/)
+{
+	for(int i = 0; i < num; i ++)
+	{
+		BSAnimate *animate = BSAnimate::create();
+		if(!autoRelease)
+			animate->retain();
+		animateList.push_back(animate);
+	}
+}
+
+void AnimationCache::releaseDefList( AnimateList &animateList )
+{
+	for(AnimateList::iterator iter = animateList.begin(); iter != animateList.end(); ++ iter)
+	{
+		BSAnimate *animate = *iter;
+		animate->release();
+	}
+	animateList.clear();
+}
+
+void AnimationCache::updateAnimate( BSPriteReader *reader )
+{
+	//CCLog("updateAnimate begin");
+
+	CC_ASSERT(reader != NULL);
+
+	animate_action_cache_data data;
+	data.type = reader->getAnimType();
+	data.name = reader->get_key();
+
+	//CCLog("updateAnimate %s", data.name.c_str());
+	//可能还没有setup成功就释放掉AnimateList里的BSAnimate了，所以这里要检查一下BSAnimate的引用计数,而且我们认为一个animatelist里的BSAnimate的生命周期都是一样的
+	std::list<AnimateList> &animate_list_array = reader->getAnimList();
+	for(std::list<AnimateList>::iterator iter = animate_list_array.begin(); iter != animate_list_array.end(); ++iter)
+	{
+		AnimateList& list  = *iter;
+		if (list.empty())
+		{
+			continue;
+		}
+		BSAnimate* first = list.front();
+		if (first->isSingleReference())
+		{
+			//std::for_each(list.begin(),list.end(),boost::bind(&BSAnimate::release,_1));//release掉reader里的retain，也不加入_animationDataList
+			continue;
+		}
+		//else
+		//{
+		//std::for_each(list.begin(),list.end(),boost::bind(&BSAnimate::retain,_1));//拷贝的话需要retain一下
+		data.animList = *iter;
+		//}
+
+		//data.animList = *iter;
+		_animationDataList.push_back(data);
+	}
+
+	//CCLog("updateAnimate end");
+}
+
+void AnimationCache::initAnimation( animate_action_cache_data &data )
+{
+	//CCLog("initAnimation begin");
+	AnimationMap &animationMap = getAnimationMap(data.type);
+	std::map<std::string, Animations>::iterator aniIter = animationMap.find(data.name);
+	CC_ASSERT(aniIter != animationMap.end());
+	Animations &anims = aniIter->second;
+	anims.increaseRef();
+
+	//CCLog("initAnimation %s", data.name.c_str());
+
+	auto animationIter = anims.bs_animation_array.begin();
+	AnimateList::iterator animateIter = data.animList.begin();
+	for(; animateIter != data.animList.end(); ++ animationIter, ++ animateIter)
+	{
+		BSAnimate *animate = *animateIter;
+		//CC_ASSERT(!animate->isSingleReference());
+		//if(!animate->isSingleReference())
+		//{
+		BSAnimation *animation = (*animationIter).get();
+		animate->initWithAnimation(animation);
+		//}
+		//animate->release();//对应bspritereader的析构函数
+	}
+
+	//CCLog("initAnimation end");
+
+	//return data.animList.size();
+}
+
+AnimationCache::AnimationMap & AnimationCache::getAnimationMap( eAnimsType type )
+{
+	switch(type)
+	{
+	case AT_Ride:
+	case AT_RidePlayer:
+	case AT_RideTexiao:
+	case AT_Player:
+	case AT_A_Player:
+		return _playerAnims;
+		break;
+	case AT_Npc:
+		return _NPCAnims;
+		break;
+	case AT_Monster:
+	case AT_Monster5:
+	case AT_Monster8:
+		return _monsterAnims;
+		break;
+	case AT_Weapon:
+	case AT_A_Weapon:
+		return _weaponAnims;
+		break;
+	case AT_Sin:
+		return _sinEffects;
+		break;
+	case AT_Oct:
+		return _octEffects;
+		break;
+	case AT_Special:
+		return _specialEffects;
+		break;
+	case AT_Wing:
+	case AT_A_Wing:
+		return _wingAnims;
+		break;
+	default:
+		CC_ASSERT(0);
+		break;
+	}
+
+	return _playerAnims;
+}
+
+void AnimationCache::addAnimData( eAnimsType type, AnimateList &animList, const std::string &name, Animations &anims )
+{
+	//AnimationDataCache animData;
+	//animData.type = type;
+	//animData.animList = animList;
+	//animData.name = name;
+
+	anims.increaseRef();
+
+	auto animIter = anims.bs_animation_array.begin();
+	for(AnimateList::iterator iter = animList.begin(); iter != animList.end() && animIter != anims.bs_animation_array.end(); ++ iter, ++ animIter)
+	{
+		BSAnimate *animate = *iter;
+		BSAnimation *animation = (*animIter).get();
+		animate->initWithAnimation(animation);
+	}
+}
+
+void AnimationCache::readActFramsTimes(const std::string &name, int actNum, float fs[], int maxCount, float fValue)
+{
+	std::for_each(fs,fs+maxCount,[&](float& one){ one = fValue;});
+//	for (int ff=0; ff<maxCount; ff++)
+//		fs[ff] = fValue;
+	const tagActFrameProto* pData = Attres::getInstance()->getTagActFrameProto(name, 1, actNum);
+	if(!pData)
+		return;
+
+	std::copy(pData->byframe,pData->byframe+FRAME_COUNTS,fs);
+}
+
+//角色动画
+bool AnimationCache::add_A_PlayerAni(const void* pData, int id, const std::string &name, AnimateList &animateList)
+{
+	std::map<std::string, Animations>::iterator aniIter = _playerAnims.find(std::string(name));
+	if(aniIter != _playerAnims.end())
+	{
+		addAnimData(AT_A_Player, animateList, name, aniIter->second);
+		return true;
+	}
+
+	std::string roleDir = CFGReader::instance()->get_profile_string("Art", "Role", "");
+
+	std::string file = roleDir + std::string(name) + std::string(".plist");
+
+	/*
+	if (!CCFileUtils::sharedFileUtils()->isFileExist(file))
+	{
+		//CCLOG("add_A_PlayerAni() not find file %s", file.c_str());
+		return false;
+	}
+	*/
+
+	createAnisFromFile(pData, file.c_str(), name, AT_A_Player, animateList, RZN_BODY, RZN_BODY);
+
+	return true;
+}
+
+void AnimationCache::get_A_PlayerAnis(const void* pData, int id, const std::string &name, AnimateList &animateList)
+{
+	add_A_PlayerAni(pData, id, name, animateList);
+}
+
+//武器动画
+bool AnimationCache::add_A_WeaponAni(const void* pData, int id, const std::string &name, AnimateList &animateList)
+{
+	std::map<std::string, Animations>::iterator aniIter = _weaponAnims.find(std::string(name));
+	if(aniIter != _weaponAnims.end())
+	{
+		addAnimData(AT_A_Weapon, animateList, name, aniIter->second);
+		return true;
+	}
+
+	std::string roleDir = CFGReader::instance()->get_profile_string("Art", "Weapon", "");
+
+	std::string file = roleDir + std::string(name) + std::string(".plist");
+
+	/*
+	if (!CCFileUtils::sharedFileUtils()->isFileExist(file))
+	{
+		//CCLOG("add_A_WeaponAni() not find file %s", file.c_str());
+		return false;
+	}
+	*/
+
+	createAnisFromFile(pData, file.c_str(), name, AT_A_Weapon, animateList, RZN_BODY, RZN_BODY);
+
+	return true;
+}
+
+void AnimationCache::get_A_WeaponAnis(const void* pData, int id, const std::string &name, AnimateList &animateList)
+{
+	add_A_WeaponAni(pData, id, name, animateList);
+}
+
+//翅膀动画
+bool AnimationCache::add_A_WingAni( const void* pData, int id, const std::string &name, AnimateList &animateList)
+{
+	std::map<std::string, Animations>::iterator aniIter = _weaponAnims.find(std::string(name));
+	if(aniIter != _weaponAnims.end())
+	{
+		addAnimData(AT_A_Wing, animateList, name, aniIter->second);
+		return true;
+	}
+
+	std::string roleDir = CFGReader::instance()->get_profile_string("Art", "Weapon", "");
+
+	std::string file = roleDir + std::string(name) + std::string(".plist");
+
+	/*
+	if (!CCFileUtils::sharedFileUtils()->isFileExist(file))
+	{
+		//CCLOG("add_A_WingAni() not find file %s", file.c_str());
+		return false;
+	}
+	*/
+
+	createAnisFromFile(pData, file.c_str(), name, AT_A_Wing, animateList, RZN_WingBack, RZN_WingFront);
+
+	return true;
+}
+
+void AnimationCache::get_A_WingAnis( const void* pData, int id, const std::string &name, AnimateList &animateList)
+{
+	add_A_WingAni(pData, id, name, animateList);
+}
+
+void AnimationCache::createImgFromFile( unsigned short byIdx, unsigned int mapID, const char *fileName )
+{
+	CC_ASSERT("do not use!!!");
+// 	std::map<std::string, BSPriteReader*>::iterator iter = _curDecodeQ.find(fileName);
+// 	if(iter != _curDecodeQ.end())
+// 	{
+// 		;
+// 	}
+// 	else
+// 	{
+// 		AnimationCache::AnimateList animateList;
+// 		const char *file = fileName;
+// 		BSPriteReader* reader = new BSPriteReader(fileName, fileName, AT_Null, &animateList, byIdx, mapID);
+// 		reader->SetResType(1);
+// 		_curDecodeQ[fileName] = reader;
+// 		m_decode_q.lock();
+// 		m_decode_q.push_back(reader);
+// 		m_decode_q.unlock();
+// 	}
+}
+void AnimationCache::loadUI(int index, const char *ccbifileName)
+{
+	CC_ASSERT("no implemetation!!!");
+	return;
+
+	/*
+	std::map<std::string, BSPriteReader*>::iterator iter = _curDecodeQ.find(ccbifileName);
+	if(iter != _curDecodeQ.end())
+	{
+		;
+	}
+	else
+	{
+		const char *file = ccbifileName;
+		std::string roleDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+		std::string fileName = roleDir + std::string(ccbifileName) + std::string(".ccbi");
+		BSPriteReader* reader = new BSPriteReader(fileName.c_str(), ccbifileName, AT_Null, NULL, index, 0);
+		reader->SetResType(3);
+		_curDecodeQ[ccbifileName] = reader;
+		m_decode_q.lock();
+		m_decode_q.push_back(reader);
+		m_decode_q.unlock();
+	}
+	*/
+}
+
+
+bool AnimationCache::releaseOneAnim(const char *name, eAnimsType animType, Animations &anims)
+{
+	if(anims.ref <= 0)
+	{
+		anims.bs_animation_array.clear();
+
+		std::string effectDir = getAnimsDict(animType);
+		releaseOneAnimByRealName(effectDir,name);
+
+		return true;
+	}
+	return false;
+}
+
+//获取目录
+std::string AnimationCache::getAnimsDict(eAnimsType animType)
+{
+	switch(animType)
+	{
+	case AT_Ride:
+	case AT_RideTexiao:
+	case AT_Player:
+	case AT_A_Player:
+		return CFGReader::instance()->get_profile_string("Art", "Role", "");
+		break;
+	case AT_Npc:
+		return CFGReader::instance()->get_profile_string("Art", "NPC", "");
+		break;
+	case AT_Monster:
+	case AT_Monster5:
+	case AT_Monster8:
+		return CFGReader::instance()->get_profile_string("Art", "Monster", "");
+		break;
+	case AT_Weapon:
+	case AT_A_Weapon:
+	case AT_Wing:
+	case AT_A_Wing:
+		return CFGReader::instance()->get_profile_string("Art", "Weapon", "");
+		break;
+	case AT_Sin:
+	case AT_Oct:
+	case AT_Special:
+		return CFGReader::instance()->get_profile_string("Art", "Effect", "");
+		break;
+	default:
+		CC_ASSERT(0);
+		break;
+	}
+	return std::string("");
+}
+
+//void AnimationCache::updateResLastUsedTime(int refCount, const char *name, int nType)
+void AnimationCache::updateResLastUsedTime(int refCount, const std::string &name, int nType)
+{
+	if (refCount>0)
+		return;
+
+	long id = message_id_crc(name.c_str());
+	auto iter = _resMap.find(id);
+	if (iter==_resMap.end())
+	{
+		res_data_ptr p(new sResData());
+		//sResData* p = new sResData();
+		p->resid = id;
+		p->restype = nType;
+		p->lastUsedTime = clock();
+		p->resSize = 0;
+		int len = name.size();
+		if (len>=32)
+			len = 31;
+		memcpy(p->resname, name.c_str(),len);
+		_resMap[id] = p;
+	}
+	else
+	{
+		//sResData* p = iter->second;
+		res_data_ptr p = iter->second;
+		if (p)
+			p->lastUsedTime = clock();
+	}
+}
+
+void AnimationCache::updateResSize(const std::string &name, int nSize)
+{
+	long id = message_id_crc(name.c_str());
+	
+	auto iter = _resMap.find(id);
+	if (iter != _resMap.end())
+		iter->second->restype = nSize;
+// 	if (iter==_resMap.end())
+// 	{
+// 	}
+// 	else
+// 	{
+// 		sResData* p = iter->second;
+// 		if (p)
+// 			p->resSize = nSize;
+// 	}
+}
+void AnimationCache::releaseResByLongTime()
+{
+	auto iter = _resMap.begin();
+	clock_t t_cur = clock();
+
+	//bool bDelete = false;
+	while (iter!=_resMap.end())
+	{
+		//bDelete = false;
+		res_data_ptr p = iter->second;
+		if (p)
+		{
+			long min =( (t_cur - p->lastUsedTime)/CLOCKS_PER_SEC)/60;
+			//暂定10分钟
+			int _time = 10;
+			if (curMemCanUse <= 100)
+				_time = 1;
+			else
+			if (curMemCanUse <= 150)
+				_time = 1;
+			else
+			if (curMemCanUse <= 200)
+				_time = 1;
+			else
+			if (curMemCanUse <= 250)
+				_time = 1;
+			else
+			if (curMemCanUse <= 300)
+				_time = 2;
+			else
+			if (curMemCanUse <= 500)
+				_time = 3;
+			else
+			if (curMemCanUse <= 600)
+				_time = 4;
+			else
+			if (curMemCanUse <= 800)
+				_time = 5;
+			if (min>_time)
+			{
+				//如果没有引用，可以删除的，才从管理表中移除
+				releaseResTry(p->resname,p->restype);
+				_resMap.erase(iter);
+				return;
+// 				{
+// 					//如果没有被删除，说明正被使用，或者没有这个资源，也直接从管理表中删除，因为正被使用的资源不需要管理
+// 					_resMap.erase(iter++);
+// 					//bDelete = true;
+// 					//delete p;
+// 					//p = NULL;
+// 
+// 					//一次只删一个
+// 					return;
+// 				}
+			}
+		}
+
+		//if (!bDelete)
+		++iter;
+	}
+}
+void AnimationCache::releaseResByCurMem()
+{
+	int curMemUsed = 0;
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+	//static int nCount = 0;
+	//nCount++;
+	//if (nCount == 3600)
+	{
+		//nCount = 0;
+
+		curMemCanUse = WzolJni::getInstance()->getSystemMemorySizeCanUse();
+		curMemUsed = WzolJni::getInstance()->getUseMemorySizeValue();
+		int static m1 = curMemCanUse;
+		int static m2 = curMemUsed;
+		if (m1!=curMemCanUse)
+		{
+			m1 = curMemCanUse;
+		}
+		if (m2!=curMemUsed)
+		{
+			m2 = curMemUsed;
+		}
+		CCLog("+++++++++++++++++++++++++++++++++++++++++++++++");
+		CCLog("MemorySize --- CanUse():%d --- used : %d", m1, m2);
+		CCTextureCache::sharedTextureCache()->dumpCachedTextureInfo();		
+		CCLog("MemorySize --- CanUse():%d --- used : %d", m1, m2);
+		CCLog("+++++++++++++++++++++++++++++++++++++++++++++++");
+
+		//if (curMemCanUse<100)
+		//	releaseResAll();
+	}
+
+#endif
+
+	if (curMemCanUse>300)
+		return;
+
+	auto iter = _resMap.begin();
+
+	while (iter!=_resMap.end())
+	{
+		res_data_ptr p = iter->second;
+		if (p)
+		{
+			//如果没有引用，可以删除的，要从管理表中移除
+			releaseResTry(p->resname,p->restype);
+
+			//如果没有被删除，说明正被使用，或者没有这个资源，也直接从管理表中删除，因为正被使用的资源不需要管理
+			_resMap.erase(iter++);
+			//delete p;
+			//p = NULL;
+		}
+		else
+			++iter;
+	}
+
+	_resMap.clear();
+}
+
+bool AnimationCache::releaseResTry(const char *name, int nType)
+{
+	AnimationMap &animMap = getAnimationMap((eAnimsType)nType);
+
+	bool released = false;
+	AnimationMap::iterator iter = animMap.find(std::string(name));
+	if (iter != animMap.end())
+	{
+		Animations &anims = iter->second;
+		//CC_ASSERT(anims.ref >= 0);
+		if(anims.ref <= 0)
+		{
+			releaseOneAnim(iter->first.c_str(), (eAnimsType)nType, anims);
+
+			animMap.erase(iter);
+			released = true;
+		}
+	}
+
+	return released;
+}
+// void AnimationCache::releaseResAll()
+// {
+// // 	std::map<long, sResData*>::iterator iter = _resMap.begin();
+// // 	while (iter!=_resMap.end())
+// // 	{
+// // 		sResData* p = iter->second;
+// // 		if (p)
+// // 		{
+// // 			delete p;
+// // 			p = NULL;
+// // 		}
+// // 
+// // 		++iter;
+// // 	}
+// 	_resMap.clear();
+// }
+
+bool AnimationCache::setupPlayerAni( const void* pData,const std::string &name,int nType,bool bRetain )
+{
+	std::map<std::string, Animations>::iterator aniIter = _playerAnims.find(std::string(name));
+	if(aniIter != _playerAnims.end())
+	{
+		//addAnimData(AT_Player, name, aniIter->second);
+		if (bRetain)
+		{
+			Animations& anim  = aniIter->second;
+			anim.increaseRef();
+		}
+		return true;
+	}
+
+	std::string roleDir = CFGReader::instance()->get_profile_string("Art", "Role", "");
+
+	std::string file = roleDir + std::string(name) + std::string(".plist");
+
+	//createAnisFromFile(pData, file.c_str(), name, !bIsRide ? AT_Player : AT_Ride, animateList, RZN_BODY, RZN_BODY);
+	if (nType==1)
+		setupAnisFromFileWithoutAniList(pData, file.c_str(), name, AT_Player, RZN_BODY, RZN_BODY,bRetain);
+	else if (nType==2)
+		setupAnisFromFileWithoutAniList(pData, file.c_str(), name, AT_RidePlayer, RZN_BODY, RZN_BODY,bRetain);
+	else if (nType==3)
+		setupAnisFromFileWithoutAniList(pData, file.c_str(), name, AT_RideTexiao, RZN_HPEFFECT, RZN_HPEFFECT,bRetain);
+	else if (nType==4)
+		setupAnisFromFileWithoutAniList(pData, file.c_str(), name, AT_Ride, RZN_ZUOQI, RZN_ZUOQI,bRetain);
+
+	return false;
+
+}
+
+void AnimationCache::setupAnisFromFileWithoutAniList( const void* pData, const char *fileName, const std::string &name, eAnimsType animType, int backZorder /*= -1*/, int frontZorder /*= -1*/,bool bPreload/*=false*//* ,LoadedCallback cb=LoadedCallback()*/)
+{
+	//[bing] 如果正在播放动画用单线程加载资源 否则动画有些特效图可能播不出来特效已经过去了
+// 	if(CMovie::GetInstance().IsPlay())
+// 	{
+// 		createAnisFromFileNew(pData, fileName, name, animType, animateList, backZorder, frontZorder, true);
+// 		return;
+// 	}
+
+ 	key_to_reader::iterator iter = m_waiting_reader_queue.find(name);
+ 	if(iter != m_waiting_reader_queue.end())
+ 	{
+ 		//m_decode_q.lock();
+		mutex_guard<c_safe_list<bsprite_reader_ptr> > dec_lock(m_decode_q);
+ 		bsprite_reader_ptr& reader = iter->second;
+ 		//reader->addAnimatList(animateList);
+		reader->increaseRetainCnt();
+ 		//m_decode_q.unlock();
+ 		return;
+ 	}
+
+	createDecodeByName(pData,fileName,name,animType,NULL,backZorder,frontZorder,bPreload);
+}
+
+//这里不维护引用计数
+BSAnimation* AnimationCache::peekBSAnimation(int type, std::string const& name,size_t pos )
+{
+	AnimationMap& target=getAnimationMap((eAnimsType)type) ;
+
+	AnimationMap::iterator iter = target.find(name);
+	if (iter != target.end())
+	{
+		Animations& ani  = iter->second;
+		CC_ASSERT(ani.ref >0);
+		if (ani.ref>0 && pos < ani.bs_animation_array.size())
+		{
+			//ani.increaseRef();
+			return ani.bs_animation_array[pos].get();
+		}
+	}
+	return NULL;
+}
+
+bool AnimationCache::setupWeaponAni( const void* pData,const std::string &name,int nType,bool bRetain )
+{
+	std::map<std::string, Animations>::iterator aniIter = _weaponAnims.find(std::string(name));
+	if(aniIter != _weaponAnims.end())
+	{
+		//addAnimData(AT_Weapon, animateList, name, aniIter->second);
+		if (bRetain)
+		{
+			Animations& anim = aniIter->second;
+			anim.increaseRef();
+		}
+
+		return true;
+	}
+
+	std::string weaponDir = CFGReader::instance()->get_profile_string("Art", "Weapon", "");
+	std::string file = weaponDir + std::string(name) + std::string(".plist");
+
+	/*
+	if (!CCFileUtils::sharedFileUtils()->isFileExist(file))
+	{
+		//CCLOG("addWeaponAni() not find file %s", file.c_str());
+		return false;
+	}
+	*/
+
+	setupAnisFromFileWithoutAniList(pData, file.c_str(), name, AT_Weapon, RZN_WEAPONBACK, RZN_WEAPONFRONT,bRetain);
+	//createAnisFromFileNew( pData, bspriteFile.c_str(), name, AT_Weapon, animateList, RZN_WEAPONBACK, RZN_WEAPONFRONT);
+	return false;
+}
+
+bool AnimationCache::setupWingAni( const void* pData,const std::string &name,int nType ,bool bRetain)
+{
+	CC_ASSERT(!name.empty());
+	std::map<std::string, Animations>::iterator aniIter = _wingAnims.find(std::string(name));
+	if(aniIter != _wingAnims.end())
+	{
+		//addAnimData(AT_Wing, animateList, name, aniIter->second);
+		if (bRetain)
+		{
+			Animations& anim = aniIter->second;
+			anim.increaseRef();
+		}
+
+		return true;
+	}
+
+	std::string wingDir = CFGReader::instance()->get_profile_string("Art", "Weapon", "");
+	std::string file = wingDir + std::string(name) + std::string(".plist");
+
+	/*
+	if (!CCFileUtils::sharedFileUtils()->isFileExist(file))
+	{
+		//CCLOG("addWingAni() not find file %s", file.c_str());
+		return false;
+	}
+	*/
+
+	setupAnisFromFileWithoutAniList(pData, file.c_str(), name, AT_Wing, RZN_WingBack, RZN_WingFront,bRetain);
+	//createAnisFromFileNew( pData, bspriteFile.c_str(), name, AT_Wing, animateList, RZN_WingBack, RZN_WingFront);
+	return false;
+}
+
+void AnimationCache::setupEffectAnim( eAnimsType type,const std::string &name,bool preload )
+{
+	AnimationMap& map  = getAnimationMap(type);
+	std::map<std::string, Animations>::iterator aniIter = map.find(name);
+	if(aniIter != map.end())
+	{
+		//addAnimData(AT_Sin, animateList, name, aniIter->second);
+		if (preload)
+		{
+			Animations& anim = aniIter->second;
+			anim.increaseRef();
+		}
+		return;
+	}
+
+	std::string effectDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string file = effectDir + std::string(name) + std::string(".plist");
+	/*
+	if (!CCFileUtils::sharedFileUtils()->isFileExist(file))
+	{
+	//CCLOG("addSinEffect() not find file %s", file.c_str());
+	return false;
+	}
+	*/
+
+	setupAnisFromFileWithoutAniList(NULL, file.c_str(), name, type,-1,-1,preload);
+}
+
+bool AnimationCache::setupMonsterAni( std::string const& name,int nType ,bool bRetain)
+{
+	std::map<std::string, Animations>::iterator aniIter = _monsterAnims.find(std::string(name));
+	if(aniIter != _monsterAnims.end())
+	{
+		//addAnimData(AT_Monster, animateList, name, aniIter->second);
+		if (bRetain)
+		{
+			Animations& anims = aniIter->second;
+			anims.increaseRef();
+		}
+		return true;
+	}
+
+	std::string monsterDir = CFGReader::instance()->get_profile_string("Art", "Monster", "");
+	std::string file = monsterDir + std::string(name) + std::string(".plist");
+	
+	/*
+	if (!CCFileUtils::sharedFileUtils()->isFileExist(file))
+	{
+		//CCLOG("addMonsterAni() not find file %s", file.c_str());
+		return false;
+	}
+	*/
+
+	if (nType==0)
+		setupAnisFromFileWithoutAniList(NULL, file.c_str(), name, AT_Monster,-1,-1,bRetain);
+	else if (nType==1)
+		setupAnisFromFileWithoutAniList(NULL, file.c_str(), name, AT_Monster5,-1,-1,bRetain);
+	else if (nType==2)
+		setupAnisFromFileWithoutAniList(NULL, file.c_str(), name, AT_Monster8,-1,-1,bRetain);
+	else
+		return false;
+
+	return true;
+}
+
+void AnimationCache::releaseAnimsNew( std::vector<AnimsUsed> &anims )
+{
+	BOOST_FOREACH(AnimsUsed const& one,anims)
+	{
+		releaseAnimsNew(one.animType,one.name);
+	}
+}
+
+void AnimationCache::releaseAnimsNew( eAnimsType type,std::string const& name )
+{
+	BOOST_AUTO(iter ,m_waiting_reader_queue.find(name));
+	if (iter!= m_waiting_reader_queue.end())
+	{
+		//m_decode_q.lock();
+		mutex_guard<c_safe_list<bsprite_reader_ptr> > dec_lock(m_decode_q);
+		bsprite_reader_ptr& reader = iter->second;
+		reader->decreaseReatainCnt();
+		//m_decode_q.unlock();
+	}
+	else
+	{
+		releaseAnims(type,name);
+	}
+}
+
+void AnimationCache::dealWithAnimation()
+{
+	while(!_animationDataList.empty())
+	{
+		animate_action_cache_data &data = *_animationDataList.begin();
+		initAnimation(data);
+		_animationDataList.pop_front();
+	}
+}
+
+void AnimationCache::dealWithSetupNode( SetupNode& setup_node )
+{	
+	bool bDeleteReader = true;
+
+	switch (setup_node.reader->GetResType())
+	{
+// 	case 1:
+// 		{
+// 			MapManager::getInstance()->FillImgFromImage(setup_node.img, (unsigned short)setup_node.reader->getValue1(),(unsigned int) setup_node.reader->getValue2(),setup_node.reader->get_key().c_str());
+// 		}
+// 		break;
+	case 2:
+		{
+			geneTextureAndCacheSpriteFrame(setup_node);
+		}
+		break;
+	default:
+		CC_ASSERT("no implemetation!!");
+	}
+
+	m_waiting_reader_queue.erase(setup_node.reader->get_key());
+
+	//CC_SAFE_RELEASE(setup_node.img);
+
+// 	if (bDeleteReader)
+// 	{
+// 		//CC_SAFE_DELETE(setup_node.reader);
+// 		//CC_SAFE_DELETE_ARRAY(setup_node.data);
+// 		//CC_SAFE_RELEASE(setup_node.dict);
+// 	}
+}
+
+void AnimationCache::geneTextureAndCacheSpriteFrame( SetupNode& setup_node )
+{
+	if(setup_node.img)
+	{
+		CCTexture2D* pTex = CCTextureCache::sharedTextureCache()->addUIImage(setup_node.img.get(), setup_node.reader->get_file_name().c_str());
+		//CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(node.reader->get_name().c_str(),pTex);
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFileDictionary(setup_node.reader->get_file_name().c_str(), setup_node.dict.get(), pTex);
+		//CC_SAFE_RELEASE_NULL(setup_node.dict);
+	}
+	else 
+	{
+		CCSpriteFrameCache::sharedSpriteFrameCache()->
+			addSpriteFramesWithFileDictionaryPvrccz(setup_node.reader->get_file_name().c_str(),
+													setup_node.dict.get(),
+													setup_node.file_data.get(),
+													setup_node.len);
+		//CC_SAFE_DELETE_ARRAY(setup_node.data);
+		//CC_SAFE_RELEASE_NULL(setup_node.dict);
+	}
+
+	unsigned int aLongData[2]={0};
+	aLongData[0] = setup_node.reader->getValue1();
+	aLongData[1] = setup_node.reader->getValue2();
+
+	AnimateList animateList;
+	createAnisFromFileNew((const void*)aLongData, setup_node.reader->get_file_name().c_str(), setup_node.reader->get_key(), setup_node.reader->getAnimType(), animateList, setup_node.reader->getBackZorder(), setup_node.reader->getFrontZorder(), false,setup_node.reader->getRetainCnt(),setup_node.reader->getCB());
+
+	if(setup_node.reader->getAnimList().size() > 0)
+	{
+		//unsigned int* pLongData = new unsigned int[2];
+		//*pLongData = node.reader->getValue1();
+		//*(pLongData + 1) = node.reader->getValue2();
+		//CC_SAFE_DELETE_ARRAY(pLongData);
+		updateAnimate(setup_node.reader.get());
+	}
+	// 			else
+	// 			{
+	// 				createAnisFromFileNew((const void*)aLongData, node.reader->get_name().c_str(), node.reader->get_key(), node.reader->getAnimType(), animateList, node.reader->getBackZorder(), node.reader->getFrontZorder(), false);
+	// 			}
+}
+
+
+void AnimationCache::geneNPCBSAnimation( const std::string &name, eAnimsType animType,Animations& anims, float* fs,int frontZorder ,int& outZOder,float const& baseValue)
+{
+// 	char strName[256];
+// 	memset(strName,0,256);
+// 	memcpy(strName,name.c_str(),strlen(name.c_str()));
+// 	char* pName = strName;
+	//[bing] NPC 名称为 N_01 加2位取01
+	//pName += 2;
+	//BSAnimation* act = BSAnimation::create();
+	//BSAnimation* act = BSAnimationProxy::getInstance()->getAnimationPool().New();
+	CC_ASSERT(name.size() >2);
+	std::string sub_name(name.begin()+2, name.end());
+
+	bsanimation_ptr act= bsanimation_ptr(new BSAnimation);
+	WHEN_SCOPE_EXIT_DO{act->cal_split_time();};
+
+	//act->retain();
+	//act->init();
+	outZOder = frontZorder;
+	readActFramsTimes(name,1,fs,g_fsMax,2.0f);
+
+	//每帧，不用管帧数，中断找不到了，就说明没了动作结束了
+	CCSpriteFrameCache* sprite_frame_cache = CCSpriteFrameCache::sharedSpriteFrameCache();
+	for (int j=1; j<= g_fsMax; j++)
+	{	
+		std::string frame_key;
+		safe_sprintf(frame_key,"73%s%d%02d",sub_name.c_str(),1,j);
+
+		CCSpriteFrame* frame = sprite_frame_cache->spriteFrameByName(frame_key.c_str());
+		if (frame)
+			act->addSpriteFrame(frame, fs[j-1] * baseValue, outZOder);
+		else 
+		{
+			if(j == 1)
+				CCLOG("AT_Npc FileKey not find %s", frame_key.c_str());
+			break;
+		}
+	}
+
+	anims.bs_animation_array.push_back(act);
+}
+
+void AnimationCache::geneMonsterBSAnimation( const std::string &name, eAnimsType animType,Animations& anims, float* fs,int frontZorder,int& outZOder,float const& baseValue )
+{
+	int dnums = 2;
+	if (AT_Monster5==animType)
+		dnums = 8;
+	else if (AT_Monster8==animType)
+		dnums = 8;
+
+	//for (int ff=0; ff<g_fsMax; ff++)
+	//	fs[ff] = 5.0f;
+
+// 	char strName[256]={0};
+// 	memset(strName,0,256);
+// 	memcpy(strName,name.c_str(),strlen(name.c_str()));
+// 	char* pName = strName;
+// 	pName += 4;
+
+	bool isHuoQiang = false;
+	float huoqiang = 0.0f;
+	if (strcmp(name.c_str(),"mon_081") == 0)	//火墙特殊处理，暂时这么处理吧
+	{
+		isHuoQiang = true;
+		huoqiang = 1.0f;
+	}
+	else if (strcmp(name.c_str(),"mon_084") == 0 || strcmp(name.c_str(),"mon_086") == 0)
+	{
+		isHuoQiang = true;
+		huoqiang = 2.0f;
+	}
+	CC_ASSERT(name.size() >4);
+	std::string sub_name(name.begin() + 4,name.end());
+	//动作
+	for (int i=1; i<=3; i++)
+	{	//方向
+		for (int d=1; d<=dnums; d++)
+		{
+			//BSAnimation* act = BSAnimation::create();
+			//BSAnimation* act = BSAnimationProxy::getInstance()->getAnimationPool().New();
+			bsanimation_ptr act= bsanimation_ptr(new BSAnimation);
+			WHEN_SCOPE_EXIT_DO{act->cal_split_time();};
+			//act->retain();
+			//act->init();
+			outZOder = frontZorder;
+			if (isHuoQiang)
+			{
+				readActFramsTimes(name,i,fs,g_fsMax,huoqiang);
+			}
+			else
+			{
+				if (i == 3)
+					readActFramsTimes(name,i,fs,g_fsMax,10.0f);
+				else
+
+					readActFramsTimes(name,i,fs,g_fsMax,2.0f);
+			}
+
+			//每帧，不用管帧数，中断找不到了，就说明没了动作结束了
+			for (int j=1; j<= g_fsMax; j++)
+			{
+				//CCString* str = CCString::createWithFormat("8%s%d%02d%02d",pName,d,i,j);
+				std::string key_frame;
+				safe_sprintf(key_frame,"8%s%d%02d%02d",sub_name.c_str(),d,i,j);
+				CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(key_frame.c_str());
+				if (frame)
+					act->addSpriteFrame(frame, fs[j-1] * baseValue, outZOder);
+				else
+				{
+					if(j == 1)
+						CCLOG("AT_Monster FileKey not find %s", key_frame.c_str());
+					break;
+				}
+			}
+			anims.bs_animation_array.push_back(act);
+		}
+	}
+}
+
+void AnimationCache::geneSinSpecBSAnimation( const std::string &name, eAnimsType animType,Animations& anims, float* fs,int frontZorder,int& outZOder,float const& baseValue )
+{
+	//for (int ff=0; ff<g_fsMax; ff++)
+	//	fs[ff] = 1.25f;
+
+	//BSAnimation* act = BSAnimation::create();
+	//BSAnimation* act = BSAnimationProxy::getInstance()->getAnimationPool().New();
+	bsanimation_ptr act= bsanimation_ptr(new BSAnimation);
+	WHEN_SCOPE_EXIT_DO{act->cal_split_time();};
+	//act->retain();
+	//act->init();
+	outZOder = frontZorder;			
+	readActFramsTimes(name,1,fs,g_fsMax);
+
+	//每帧，不用管帧数，中断找不到了，就说明没了动作结束了
+	for (int j=1; j<=g_fsMax; j++)
+	{
+		std::string frame_key;
+		safe_sprintf(frame_key,"%s%02d",name.c_str(),j);
+		//CCString* str = CCString::createWithFormat("%s%02d",name.c_str(),j);
+		CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frame_key.c_str());
+		if (frame)
+			act->addSpriteFrame(frame, fs[j-1] * baseValue, outZOder);
+		else 
+		{
+			if(j == 1)
+				CCLOG("AT_Sin FileKey not find %s", frame_key.c_str());
+			break;
+		}
+	}
+
+	anims.bs_animation_array.push_back(act);
+}
+
+void AnimationCache::geneOctSpecBSAnimation( const std::string &name, eAnimsType animType,Animations& anims, float* fs,int frontZorder,int& zorder,float const& baseValue )
+{
+	//for (int ff=0; ff<g_fsMax; ff++)
+	//	fs[ff] = 1.25f;
+
+	int d = 1;
+	int nTureDir;
+	for (; d<=8; d++)
+	{
+		//BSAnimation* act = BSAnimation::create();
+		//BSAnimation* act = BSAnimationProxy::getInstance()->getAnimationPool().New();
+		bsanimation_ptr act= bsanimation_ptr(new BSAnimation);
+		WHEN_SCOPE_EXIT_DO{act->cal_split_time();};
+		//act->retain();
+		//act->init();
+		zorder = frontZorder;
+
+		nTureDir = d;
+
+		readActFramsTimes(name,1,fs,g_fsMax,1.0f);
+		//每帧，不用管帧数，中断找不到了，就说明没了动作结束了
+		for (int j=1; j<=g_fsMax; j++)
+		{
+			std::string frame_key;
+			safe_sprintf(frame_key,"%s%d%02d",name.c_str() , nTureDir, j);
+			//CCString* str = CCString::createWithFormat("%s%d%02d",
+			//	name.c_str() , nTureDir, j);
+			CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frame_key.c_str());
+			if (frame)
+				act->addSpriteFrame(frame, fs[j-1] * baseValue, zorder);
+			else 
+			{
+				if(j == 1)
+					CCLOG("AT_Oct FileKey not find %s", frame_key.c_str());
+				break;
+			}
+		}
+		anims.bs_animation_array.push_back(act);
+	}
+}
+
+void AnimationCache::geneRideBSAnimation(void const* pData,int type, const std::string &name, eAnimsType animType,Animations& anims, float* fs,int frontZorder,int& zorder,float const& baseValue )
+{
+	assert(pData != NULL);
+
+	unsigned char* pCharData = (unsigned char*)pData;
+	unsigned int dwJob = *(unsigned int*)pCharData;
+	unsigned int dwSuitNum = *(unsigned int*)(pCharData + sizeof(unsigned int));
+
+	//动作
+	for (int i=1; i<=8; i++)
+	{	//方向
+		int d = 1;
+		if(i == 7)
+		{
+			//[bing] SIT只有一个朝向 向下
+			d = 5;
+		}
+
+		for (; d<=8; d++)
+		{
+			//BSAnimation* act = BSAnimation::create();
+			//BSAnimation* act = BSAnimationProxy::getInstance()->getAnimationPool().New();
+			bsanimation_ptr act= bsanimation_ptr(new BSAnimation);
+			WHEN_SCOPE_EXIT_DO{act->cal_split_time();};
+			//act->retain();
+			//act->init();
+			zorder = frontZorder;
+
+			//[bing] 现在是左侧3方向变成镜像 资源进来时是按逆时针顺序进 所以是8,7,6先进
+			int nTureDir = d;
+			if(d == 2)
+				nTureDir = 8;
+			else if(d == 3)
+				nTureDir = 7;
+			else if(d == 4)
+				nTureDir = 6;
+
+			if (1==i)
+				readActFramsTimes(name,i,fs,g_fsMax,2.0f);
+			else
+				readActFramsTimes(name,i,fs,g_fsMax,1.0f);
+
+			//每帧，不用管帧数，中断找不到了，就说明没了动作结束了
+			for (int j=1; j<=g_fsMax && g_fsMax > 0; j++)
+			{
+				//CCString* str = CCString::createWithFormat("%02d%d%02d%d%02d%02d",
+				//	dwJob ,type, dwSuitNum, nTureDir, i, j);
+
+				std::string frame_key;
+				safe_sprintf(frame_key,"%02d%d%02d%d%02d%02d",dwJob ,type, dwSuitNum, nTureDir, i, j);
+
+				CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frame_key.c_str());
+				if (frame)
+					act->addSpriteFrame(frame, fs[j-1] * baseValue, zorder);
+				else 
+				{
+					//if(j == 1)
+					//	CCLOG("AT_Player... FileKey not find %s", str->getCString());
+					break;
+				}
+			}
+			anims.bs_animation_array.push_back(act);
+		}
+	}
+}
+
+void AnimationCache::geneAvatorRoleBSAnimation( void const* pData,int type,const std::string &name, eAnimsType animType,Animations& anims, float* fs,int frontZorder,int& zorder,float const& baseValue )
+{
+	assert(pData != NULL);
+
+	unsigned char* pCharData = (unsigned char*)pData;
+	unsigned int dwJob = *(unsigned int*)pCharData;
+	unsigned int dwSuitNum = *(unsigned int*)(pCharData + sizeof(unsigned int));
+
+	//就一个站立动作
+	//目前就一个面 面向下
+	//BSAnimation* act = BSAnimation::create();
+	//BSAnimation* act = BSAnimationProxy::getInstance()->getAnimationPool().New();
+	bsanimation_ptr act= bsanimation_ptr(new BSAnimation);
+	WHEN_SCOPE_EXIT_DO{act->cal_split_time();};
+	//act->retain();
+	//act->init();
+	zorder = frontZorder;
+
+	readActFramsTimes(name,1,fs,g_fsMax,2.0f);
+
+	//每帧，不用管帧数，中断找不到了，就说明没了动作结束了
+	for (int j=1; j<=g_fsMax; j++)
+	{
+		std::string frame_key;
+		safe_sprintf(frame_key,"%02d%d%02d%d%02d%02d",dwJob ,type, dwSuitNum, 5, 1, j);
+		//CCString* str = CCString::createWithFormat("%02d%d%02d%d%02d%02d",
+		//	dwJob ,type, dwSuitNum, 5, 1, j);
+		CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frame_key.c_str());
+		if (frame)
+			act->addSpriteFrame(frame, fs[j-1] * baseValue, zorder);
+		else if(j == 1)
+		{
+			CCLOG("AT_Oct FileKey not find %s",frame_key.c_str());
+			break;
+		}
+	}
+	anims.bs_animation_array.push_back(act);
+}
+
+void AnimationCache::geneRoleBSAnimation( void const* pData,int type,const std::string &name, eAnimsType animType,Animations& anims, float* fs,int frontZorder,int backZorder,int& zorder,float const& baseValue )
+{
+	assert(pData != NULL);
+
+	unsigned char* pCharData = (unsigned char*)pData;
+	unsigned int dwJob = *(unsigned int*)pCharData;
+	unsigned int dwSuitNum = *(unsigned int*)(pCharData + sizeof(unsigned int));
+
+	//动作
+	for (int i=1; i <= 8; i++)
+	{	//方向
+		int d = 1;
+		if(i == 7)
+		{
+			//[bing] SIT只有一个朝向 向下
+			d = 8;
+		}
+
+		for (; d<=8; d++)
+		{
+			//BSAnimation* act = BSAnimation::create();
+			//BSAnimation* act = BSAnimationProxy::getInstance()->getAnimationPool().New();
+			bsanimation_ptr act= bsanimation_ptr(new BSAnimation);
+			WHEN_SCOPE_EXIT_DO{act->cal_split_time();};
+			//act->retain();
+			//act->init();
+			zorder = frontZorder;
+
+			if( 1 != d && 2 != d && 3 != d && 4 != d
+				&& type == 2)
+				zorder = backZorder;
+			else if(AT_Wing == animType
+				&& 4 != d && 5 != d && 6 != d )
+			{
+				//下面3个方向翅膀在前 剩下的都在后面
+				zorder = backZorder;
+			}
+
+			//[bing]特殊处理下打坐 打坐时武器在身后
+			if(i == 7 && AT_Weapon == animType)
+			{
+				zorder = frontZorder;
+			}
+
+			int nTureDir = i == 7 ? 5 : d;
+
+			if (1==i)
+				readActFramsTimes(name,i,fs,g_fsMax,2.0f);
+			else
+				readActFramsTimes(name,i,fs,g_fsMax,1.0f);
+
+			if(i == 7)
+			{
+				//因为坐下只有2帧 动的抽了 放慢点
+				fs[1] = 10.0f;
+				fs[2] = 10.0f;
+			}
+
+			//每帧，不用管帧数，中断找不到了，就说明没了动作结束了
+			for (int j=1; j<=g_fsMax; j++)
+			{
+				std::string frame_key;
+				safe_sprintf(frame_key,"%02d%d%02d%d%02d%02d",dwJob ,type, dwSuitNum, nTureDir, i, j);
+
+				//CCString* str = CCString::createWithFormat("%02d%d%02d%d%02d%02d",
+				//	dwJob ,type, dwSuitNum, nTureDir, i, j);
+				CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frame_key.c_str());
+				if (frame)
+					act->addSpriteFrame(frame, fs[j-1] * baseValue, zorder);
+				else 
+				{
+					//if(j == 1)
+					//	CCLOG("AT_Player... FileKey not find %s", str->getCString());
+					break;
+				}
+			}
+			anims.bs_animation_array.push_back(act);
+		}
+	}
+}
+
+void AnimationCache::initSplit()
+{
+	f_data_set dataset;
+	std::list<std::string> fields;
+	bool ret =dataset.load("Config/AnimFileSplit.xml","name",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+			std::string name = dataset.get_string("name",one.c_str());
+			int	num = dataset.get_int("split",one.c_str(),2);
+
+			_animPlistToRealPlist.insert(std::make_pair(name,num));
+	});
+}
+
+void AnimationCache::createDecodeByName(const void* pData, const char *fileName, const std::string &name, eAnimsType animType,  AnimateList *animateList, int backZorder, int frontZorder,bool bPreload)
+{
+	unsigned int nValue1 = 0;
+	unsigned int nValue2 = 0;
+
+	if(pData)
+	{
+		nValue1 = *(unsigned int*)pData;
+		nValue2 = *((unsigned int*)pData + 1);
+	}
+	
+	//不再使用文件是否存在的查询，因为ios下cpu时钟消耗大，造成卡顿
+	auto finder = _animPlistToRealPlist.find(fileName);
+	if (finder != _animPlistToRealPlist.end())
+	{
+		//多文件映射分支
+		std::string texturePath = fileName;
+		// remove .xxx
+		size_t startPos = texturePath.find_last_of("."); 
+		texturePath = texturePath.erase(startPos);
+
+		for (int i=1; i<=finder->second;++i)
+		{
+			std::string checkstr = CCString::createWithFormat("%s_%d", texturePath.c_str(), i)->getCString();
+			checkstr += ".plist";
+
+			bsprite_reader_ptr reader = bsprite_reader_ptr(new BSPriteReader(checkstr.c_str(), "", animType, NULL, 0, 0));
+			reader->SetResType(2);
+
+			if (bPreload)
+			{
+				reader->increaseRetainCnt();
+			}
+			if (i == finder->second)
+			{
+				reader->setparma( checkstr.c_str(), name, animType, animateList, nValue1, nValue2);
+				reader->setZorder(backZorder, frontZorder);
+				m_waiting_reader_queue[name] = reader;
+			}
+
+			mutex_guard<c_safe_list<bsprite_reader_ptr> > dec_lock(m_decode_q);
+			//m_decode_q.lock();
+			m_decode_q.push_back(reader);
+			//m_decode_q.unlock();
+		}
+	}
+	else
+	{
+		//单文件
+// 		unsigned int nValue1 = 0;
+// 		unsigned int nValue2 = 0;
+// 
+// 		if(pData)
+// 		{
+// 			nValue1 = *(unsigned int*)pData;
+// 			nValue2 = *((unsigned int*)pData + 1);
+// 		}
+		const char *file = fileName;
+		bsprite_reader_ptr reader = bsprite_reader_ptr(new BSPriteReader(file, name, animType, animateList, nValue1, nValue2));
+		reader->setZorder(backZorder, frontZorder);
+		reader->SetResType(2);
+
+		if (bPreload)
+		{
+			reader->increaseRetainCnt();
+		}
+
+		m_waiting_reader_queue[name] = reader;
+		mutex_guard<c_safe_list<bsprite_reader_ptr> > dec_lock(m_decode_q);
+		//m_decode_q.lock();
+		m_decode_q.push_back(reader);
+		//m_decode_q.unlock();
+	}
+}
+
+void AnimationCache::releaseOneAnimByRealName( std::string const& path,std::string const&	keyname )
+{
+	CCLOG("release anim from anim cache: %s",keyname.c_str());
+
+	std::string tmp = path+keyname+".plist";
+	auto finder = _animPlistToRealPlist.find(tmp);
+	if (finder != _animPlistToRealPlist.end())
+	{
+		//std::stringstream ss;
+		for (int i = 1; i <=finder->second  ; ++i)
+		{
+			//ss.str("");
+			//ss<<effectDir<<name<<"_"<<i<<".plist";
+			safe_sprintf(tmp,"%s%s_%d.plist",path,keyname,i);
+			CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFramesFromFile(tmp.c_str());
+		}
+	}
+	else
+	{
+		CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFramesFromFile(tmp.c_str());
+	}
+}
+
+bool AnimationCache::init()
+{
+	initSplit();
+
+	return true;
+}
+
+void AnimationCache::cleanup_reader()
+{
+	mutex_guard<c_safe_list<bsprite_reader_ptr> > dec_lock(m_decode_q);
+	//m_decode_q.lock();
+	m_decode_q.clear();
+	//m_decode_q.unlock();
+	//m_setup_q.lock();
+	mutex_guard<c_safe_list<SetupNode> > setup_lock(m_wait_setup_queue);
+// 	std::for_each(m_wait_setup_queue.begin(),m_wait_setup_queue.end(),
+// 		[](SetupNode& node){if(node.data) delete[] node.data;});
+	m_wait_setup_queue.clear();
+	//m_setup_q.unlock();
+	m_waiting_reader_queue.clear();
+}

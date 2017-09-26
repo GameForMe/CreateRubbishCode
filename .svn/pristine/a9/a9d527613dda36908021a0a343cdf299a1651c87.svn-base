@@ -1,0 +1,559 @@
+#include "cocos2d.h"
+#include "TCPClient.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "MapManager.h"
+#include "MessageBoxUi.h"
+#include "World.h"
+#include "BaseDefine.h"
+#include "RemoteRoleStateMgr.h"
+#include <algorithm>
+#include "DBMgr.h"
+#include "RoleInfoProto.h"
+#include "RoleEquipUi.h"
+#include "RoleRingUi.h"
+#include "RoleAttrUi.h"
+#include <time.h>
+#include "RoleInfoUi.h"
+#include "StringMgr.h"
+#include "ChatMgr.h"
+#include "UiManager.h"
+#include "ToolTip.h"
+#include "NameMgr2.h"
+#include "NewRoleTitleUi.h"
+
+RemoteRoleStateMgr::RemoteRoleStateMgr():m_RemoteRoleID(INVALID),fightLi(0),dwMeiLi(0),rongYu(0),pkvalue(0),m_Physical(0)
+{
+#if 1 //lzz
+	struct timeval tv;
+	gettimeofday(&tv , 0);
+	m_require_time = tv.tv_sec*1000;
+#else
+	m_require_time = clock();
+#endif
+	memset(m_displayAttrId,0,sizeof(m_displayAttrId));
+	m_month_card_time.Clear();
+	m_remote_suit_num.clear();
+	/*TCP_CLIENT->register_net_cmd("NET_SIS_get_remote_role_equip_info" , this , &RemoteRoleStateMgr::onServerGetRemoteRoleEquipInfo);
+	
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_remote_role_equip_info_offline" , this , &RemoteRoleStateMgr::onServerCanntGetRoleInfo);
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_role_card" , this , &RemoteRoleStateMgr::onServerGetRemoteSocialData);
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_guild_name" , this , &RemoteRoleStateMgr::OnServerGetGuildName);*/
+}
+RemoteRoleStateMgr::~RemoteRoleStateMgr()
+{
+	//NameMgr2::getInstance()->_sigGetName.disconnect(this , &RemoteRoleStateMgr::onGetName);
+	//m_map_remote_role_equip.clear();
+	//memset(&m_RemoteRole_Tag,0,sizeof(tagRoleInfo));
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_get_remote_role_equip_info" , this , &RemoteRoleStateMgr::onServerGetRemoteRoleEquipInfo);
+	////TCP_CLIENT->unregister_net_cmd("NET_SIS_get_remote_role_state" , this , &RemoteRoleStateMgr::onServerGetRemoteRoleData);
+	
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_get_remote_role_equip_info_offline" , this , &RemoteRoleStateMgr::onServerCanntGetRoleInfo);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_get_role_card" , this , &RemoteRoleStateMgr::onServerGetRemoteSocialData);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_get_guild_name" , this , &RemoteRoleStateMgr::OnServerGetGuildName);
+}
+void RemoteRoleStateMgr::Destroy()
+{
+	m_RemoteRoleID = (unsigned int)INVALID;
+	m_map_remote_role_equip.clear();
+	m_remote_suit_num.clear();
+	//memset(&m_RemoteRole_Tag,0,sizeof(tagRoleInfo));
+	m_RemoteRole_Tag.clear();
+	memset(&m_RemoteSocialData,0,sizeof(tagRoleSocialInfo));
+	memset(m_displayAttrId,0,sizeof(m_displayAttrId));
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_remote_role_equip_info" , this , &RemoteRoleStateMgr::onServerGetRemoteRoleEquipInfo);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_remote_role_equip_info_offline" , this , &RemoteRoleStateMgr::onServerCanntGetRoleInfo);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_role_card" , this , &RemoteRoleStateMgr::onServerGetRemoteSocialData);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_OtherMonthCardBegin" , this , &RemoteRoleStateMgr::onServerGetMonthCardData);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_get_guild_name" , this , &RemoteRoleStateMgr::OnServerGetGuildName);
+	UNREG_NAME_CB(this , &RemoteRoleStateMgr::onGetName);
+	UNREG_GUILD_NAME_CB(this, &RemoteRoleStateMgr::OnServerGetGuildName);
+}
+void RemoteRoleStateMgr::init()
+{
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_remote_role_equip_info" , this , &RemoteRoleStateMgr::onServerGetRemoteRoleEquipInfo);
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_remote_role_equip_info_offline" , this , &RemoteRoleStateMgr::onServerCanntGetRoleInfo);
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_role_card" , this , &RemoteRoleStateMgr::onServerGetRemoteSocialData);
+	TCP_CLIENT->register_net_cmd("NET_SIS_OtherMonthCardBegin" , this , &RemoteRoleStateMgr::onServerGetMonthCardData);
+	//TCP_CLIENT->register_net_cmd("NET_SIS_get_guild_name" , this , &RemoteRoleStateMgr::OnServerGetGuildName);
+
+	REG_NAME_CB(this , &RemoteRoleStateMgr::onGetName);
+	REG_GUILD_NAME_CB(this, &RemoteRoleStateMgr::OnServerGetGuildName);
+}
+RemoteRoleStateMgr* RemoteRoleStateMgr::getInstance()
+{
+	static RemoteRoleStateMgr mgr;
+	return &mgr;
+}
+void RemoteRoleStateMgr::RequestRemoteRoleEquipInfo(unsigned int uDestRoleID)
+{
+	if (!IS_VALID(uDestRoleID))
+		return;
+	ResetAllEquip();//首先需要清除上一个玩家的信息
+	NET_SIC_get_remote_role_equip_info cmd;
+	cmd.dw_role_id = uDestRoleID;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_INSIGNIFICANT , false);
+	//请求远程玩家的社交信息
+	NET_SIC_get_role_card cmd2;
+	cmd2.dw_role_id = uDestRoleID;
+	TCP_CLIENT->send_net_cmd(&cmd2, NP_INSIGNIFICANT, false);
+
+	NET_C2S_OtherMonthCardBegin cmd3;
+	cmd3.dw_role_id = uDestRoleID;
+	TCP_CLIENT->send_net_cmd(&cmd3, NP_INSIGNIFICANT, false);
+	return;
+}
+unsigned int RemoteRoleStateMgr::onServerGetRemoteRoleEquipInfo(s_net_cmd *cmd)
+{
+	NET_SIS_get_remote_role_equip_info* msg = (NET_SIS_get_remote_role_equip_info*)cmd;
+	if (msg->dw_role_id != GetRemoteRoleID())
+		return 0;
+	//ResetAllEquip();
+	OPEN_UI(WCT_ROLEEQUIPUI);
+	GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPlayerId(msg->dw_role_id);
+	//处理玩家基本状态信息
+	m_RemoteRole_Tag.uRoleID = msg->dw_role_id;
+	m_RemoteRole_Tag.level = msg->nLevel;
+	m_RemoteRole_Tag._roleData[ERRA_MaxHP] = msg->nAtt[ERRA_MaxHP];
+	m_RemoteRole_Tag._roleData[ERRA_HP] = msg->nAtt[ERRA_HP];
+	m_RemoteRole_Tag._roleData[ERRA_MaxMP] = msg->nAtt[ERRA_MaxMP];
+	m_RemoteRole_Tag._roleData[ERRA_MP] = msg->nAtt[ERRA_MP];
+	m_RemoteRole_Tag._roleData[ERRA_HitRate] = msg->nAtt[ERRA_HitRate];
+	m_RemoteRole_Tag._roleData[ERRA_Dodge] = msg->nAtt[ERRA_Dodge];
+	m_RemoteRole_Tag._roleData[ERRA_Crit_Rate] = msg->nAtt[ERRA_Crit_Rate];
+	m_RemoteRole_Tag._roleData[ERRA_UnCrit_Rate] = msg->nAtt[ERRA_UnCrit_Rate];
+	m_RemoteRole_Tag._roleData[ERRA_ExAttackMin] = msg->nAtt[ERRA_ExAttackMin];
+	m_RemoteRole_Tag._roleData[ERRA_ExAttackMax] = msg->nAtt[ERRA_ExAttackMax];
+	m_RemoteRole_Tag._roleData[ERRA_InAttackMin] = msg->nAtt[ERRA_InAttackMin];
+	m_RemoteRole_Tag._roleData[ERRA_InAttackMax] = msg->nAtt[ERRA_InAttackMax];
+	m_RemoteRole_Tag._roleData[ERRA_ArmorEx] = msg->nAtt[ERRA_ArmorEx];
+	m_RemoteRole_Tag._roleData[ERRA_ArmorIn] = msg->nAtt[ERRA_ArmorIn];
+	m_RemoteRole_Tag._roleData[ERRA_ExAttack] = msg->nAtt[ERRA_ExAttack];
+	m_RemoteRole_Tag._roleData[ERRA_ExDefense] = msg->nAtt[ERRA_ExDefense];
+	m_RemoteRole_Tag._roleData[ERRA_InAttack] = msg->nAtt[ERRA_InAttack];
+	m_RemoteRole_Tag._roleData[ERRA_InDefense] = msg->nAtt[ERRA_InDefense];
+	m_RemoteRole_Tag._roleData[ERRA_Luck] = msg->nAtt[ERRA_Luck];
+	m_RemoteRole_Tag._roleData[ERRA_ShengW] = msg->nAtt[ERRA_ShengW];
+	m_RemoteRole_Tag._roleData[ERRA_Derate_Wood] = msg->nAtt[ERRA_Derate_Wood];
+	m_RemoteRole_Tag._roleData[ERRA_Derate_Water] = msg->nAtt[ERRA_Derate_Water];
+	m_RemoteRole_Tag._roleData[ERRA_Derate_Injury] = msg->nAtt[ERRA_Derate_Injury];
+	m_RemoteRole_Tag._roleData[ERRA_Derate_InAttack] = msg->nAtt[ERRA_Derate_InAttack];
+	m_RemoteRole_Tag._roleData[ERRA_Derate_Fire] = msg->nAtt[ERRA_Derate_Fire];
+	m_RemoteRole_Tag._otherGongFa.reamLevel=msg->nAtt[ERRA_GongFa];
+	m_GuildID = msg->dwGuildID;
+	m_SpouseID = msg->dwSpouseID;
+	m_ClassType = msg->byClass;
+	m_Sex = msg->bySex;
+	fightLi = msg->nFightLi;
+	dwMeiLi = msg->dwMeili;
+	rongYu = msg->nRongyu;
+	pkvalue = msg->nPKvalue;
+	m_Physical = msg->nPhysical;
+
+	m_remote_suit_num.clear();
+	for(int i = 0; i < MAX_ROLE_SUIT_NUM; ++i)
+	{
+		m_remote_suit_num.insert(make_pair(msg->nSuitID[i], msg->nSuitCount[i]));
+	}
+
+	//外观属性
+	for(int i = 0; i < X_AVATAR_ELEMENT_NUM; i ++)
+	{ 
+		setDisplayAttr((ePlayerDisplayAttr)msg->AvatarEquip.AvatarEquip[i].byDisplayPos, msg->AvatarEquip.AvatarEquip[i].dw_data_id);
+	}
+	m_RemoteRole_Tag._otherGongFa.items.clear();
+	EEquipPos pos = EEP_Null;
+	tagEquipViewInfo* pEquip = reinterpret_cast<tagEquipViewInfo*>(msg->byEquip);
+	for (int i = 0;i < msg->nEquipNum;i++)
+	{
+		if(pEquip[i].byHoldNum==0)
+		{
+			pos = GetEquipPos(pEquip[i].dw_data_id);
+			if (EEP_Null != pos)
+			{
+				//对戒指与护腕需要特殊处理
+				if (EEP_Finger1 == pos && (m_map_remote_role_equip.find(EEP_Finger1) != m_map_remote_role_equip.end()))
+				{
+					pos = EEP_Finger2;
+				}
+				if (EEP_Wrist1 == pos && (m_map_remote_role_equip.find(EEP_Wrist1) != m_map_remote_role_equip.end()))
+				{
+					pos = EEP_Wrist2;
+				}
+				m_map_remote_role_equip.insert(std::make_pair(pos,pEquip[i]));
+			}
+		}
+		else if(pEquip[i].byHoldNum==1)//功法
+		{
+			tagOtherGongFaItem item;
+			item.id=pEquip[i].dw_data_id;
+			item.level=pEquip[i].nLevel;
+			item.zhanli=pEquip[i].nRating;
+			m_RemoteRole_Tag._otherGongFa.items.push_back(item);
+		}
+	}
+	
+	//处理玩家名字，若已经存在，则不需向服务器发送
+	if (NameMgr2::getInstance()->queryName(msg->dw_role_id,m_RemoteRole_Tag.strName))
+	{
+	}
+	//得到配偶名字，若配偶存在
+	if (IS_VALID(m_SpouseID))
+	{
+		if (NameMgr2::getInstance()->queryName(m_SpouseID,m_SpouseName))
+		{
+		}
+	}
+	else
+		m_SpouseName.clear();
+	//请求该玩家的所在帮会名称
+	if (IS_VALID(m_GuildID))
+	{
+		//{
+			//NET_SIC_get_guild_name ggn;
+			//ggn.dwGuildID = m_GuildID;
+			//TCP_CLIENT->send_net_cmd(&ggn, NP_NORMAL, false);
+			std::string guildName;
+			if(NameMgr2::getInstance()->queryGuildName(m_GuildID, guildName))
+			{
+				OnServerGetGuildName(m_GuildID, guildName);
+			}
+		//}	
+	}
+	else
+		m_GuildName.clear();
+	//调用UI接口，刷新装备界面
+	updateRoleEquipUi(msg->dw_role_id);
+	//若名字还没收到，则不刷新UI
+	if (!m_RemoteRole_Tag.strName.empty())
+	{
+		//调用UI接口刷新
+		updateRoleAttrUi(msg->dw_role_id);
+	}
+	return 0;
+}
+void RemoteRoleStateMgr::RequestRemoteRoleData(unsigned int uDestRoleID)
+{
+	//首先需要判断是否是视野内的玩家,非视野内的玩家不处理
+	Role* pRole = RoleManager::getInstance()->findRole(uDestRoleID);
+	//若存在于视野内
+	if (IS_VALID_PTR(pRole))
+	{
+		if (CT_PLAYER != pRole->getCreatureType())
+			return;
+		//memset(&m_RemoteRole_Tag,0,sizeof(tagRoleInfo));
+		m_RemoteRole_Tag.clear();
+		char vStr[128];
+		memset(vStr, 0, sizeof(char) * 128);
+		Utf16ToUtf8(pRole->getName(), vStr, 128, 0);
+		m_RemoteRole_Tag.strName.assign(vStr);
+		m_RemoteRole_Tag.level = pRole->getLevel();
+		m_RemoteRole_Tag.uRoleID = uDestRoleID;
+		m_RemoteRole_Tag._roleData[ERRA_MaxHP] = pRole->getAttribute(RA_MaxHP);
+		m_RemoteRole_Tag._roleData[ERRA_HP] = pRole->getAttribute(RA_HP);
+		m_RemoteRole_Tag._roleData[ERRA_MaxMP] = pRole->getAttribute(RA_MaxMP);
+		m_RemoteRole_Tag._roleData[ERRA_MP] = pRole->getAttribute(RA_MP);
+		m_RemoteRole_Tag._roleData[ERRA_HitRate] = pRole->getAttribute(RA_HITRATE);
+		m_RemoteRole_Tag._roleData[ERRA_Dodge] = pRole->getAttribute(RA_DODGE);
+		m_RemoteRole_Tag._roleData[ERRA_Crit_Rate] = pRole->getAttribute(RA_CRIT_RATE);
+		m_RemoteRole_Tag._roleData[ERRA_UnCrit_Rate] = pRole->getAttribute(RA_UNCRIT_RATE);
+		m_RemoteRole_Tag._roleData[ERRA_ExAttackMin] = pRole->getAttribute(RA_ExAttackMin);
+		m_RemoteRole_Tag._roleData[ERRA_ExAttackMax] = pRole->getAttribute(RA_ExAttackMax);
+		m_RemoteRole_Tag._roleData[ERRA_InAttackMin] = pRole->getAttribute(RA_InAttackMin);
+		m_RemoteRole_Tag._roleData[ERRA_InAttackMax] = pRole->getAttribute(RA_InAttackMax);
+		m_RemoteRole_Tag._roleData[ERRA_ArmorEx] = pRole->getAttribute(RA_ArmorEx);
+		m_RemoteRole_Tag._roleData[ERRA_ArmorIn] = pRole->getAttribute(RA_ArmorIn);
+		m_RemoteRole_Tag._roleData[ERRA_ExAttack] = pRole->getAttribute(RA_ExMinDefense);
+		m_RemoteRole_Tag._roleData[ERRA_ExDefense] = pRole->getAttribute(RA_ExMaxDefense);
+		m_RemoteRole_Tag._roleData[ERRA_InAttack] = pRole->getAttribute(RA_InMinDefense);
+		m_RemoteRole_Tag._roleData[ERRA_InDefense] = pRole->getAttribute(RA_InMaxDefense);
+		m_RemoteRole_Tag._roleData[ERRA_Luck] = pRole->getAttribute(RA_Luck);
+		//外观属性
+		for(int i = 0; i < X_AVATAR_ELEMENT_NUM; i ++)
+		{
+			setDisplayAttr(ePlayerDisplayAttr(i), ((Player*)pRole)->getDisplayAttr(ePlayerDisplayAttr(i)));
+		}
+	}
+	/*//若不存在，则需要向服务器请求
+	else
+	{
+		memset(&m_RemoteRole_Tag,0,sizeof(tagRoleInfo));
+		NET_SIC_get_remote_role_state cmd;
+		cmd.nRoleNum = 1;
+		cmd.dw_role_id[0] = uDestRoleID;
+		TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+
+	}*/
+	return;
+}
+unsigned int RemoteRoleStateMgr::onServerGetRemoteRoleData(s_net_cmd *cmd)
+{
+	NET_SIS_get_remote_role_state* msg = (NET_SIS_get_remote_role_state*)cmd;
+	m_RemoteRole_Tag.uRoleID = msg->RoleData.dwID;
+	m_RemoteRole_Tag.level = msg->RoleData.nLevel;
+	m_RemoteRole_Tag._roleData[ERRA_MaxHP] = msg->RoleData.nAtt[ERRA_MaxHP];
+	m_RemoteRole_Tag._roleData[ERRA_HP] = msg->RoleData.nAtt[ERRA_HP];
+	m_RemoteRole_Tag._roleData[ERRA_MaxMP] = msg->RoleData.nAtt[ERRA_MaxMP];
+	m_RemoteRole_Tag._roleData[ERRA_MP] = msg->RoleData.nAtt[ERRA_MP];
+	m_RemoteRole_Tag._roleData[ERRA_HitRate] = msg->RoleData.nAtt[ERRA_HitRate];
+	m_RemoteRole_Tag._roleData[ERRA_Dodge] = msg->RoleData.nAtt[ERRA_Dodge];
+	m_RemoteRole_Tag._roleData[ERRA_Crit_Rate] = msg->RoleData.nAtt[ERRA_Crit_Rate];
+	m_RemoteRole_Tag._roleData[ERRA_UnCrit_Rate] = msg->RoleData.nAtt[ERRA_UnCrit_Rate];
+	m_RemoteRole_Tag._roleData[ERRA_ExAttackMin] = msg->RoleData.nAtt[ERRA_ExAttackMin];
+	m_RemoteRole_Tag._roleData[ERRA_ExAttackMax] = msg->RoleData.nAtt[ERRA_ExAttackMax];
+	m_RemoteRole_Tag._roleData[ERRA_InAttackMin] = msg->RoleData.nAtt[ERRA_InAttackMin];
+	m_RemoteRole_Tag._roleData[ERRA_InAttackMax] = msg->RoleData.nAtt[ERRA_InAttackMax];
+	m_RemoteRole_Tag._roleData[ERRA_ArmorEx] = msg->RoleData.nAtt[ERRA_ArmorEx];
+	m_RemoteRole_Tag._roleData[ERRA_ArmorIn] = msg->RoleData.nAtt[ERRA_ArmorIn];
+	m_RemoteRole_Tag._roleData[ERRA_ExAttack] = msg->RoleData.nAtt[ERRA_ExAttack];
+	m_RemoteRole_Tag._roleData[ERRA_ExDefense] = msg->RoleData.nAtt[ERRA_ExDefense];
+	m_RemoteRole_Tag._roleData[ERRA_InAttack] = msg->RoleData.nAtt[ERRA_InAttack];
+	m_RemoteRole_Tag._roleData[ERRA_InDefense] = msg->RoleData.nAtt[ERRA_InDefense];
+	m_RemoteRole_Tag._roleData[ERRA_Luck] = msg->RoleData.nAtt[ERRA_Luck];
+	//外观属性
+	for(int i = 0; i < X_AVATAR_ELEMENT_NUM; i ++)
+	{
+		setDisplayAttr((ePlayerDisplayAttr)msg->RoleData.AvatarEquip.AvatarEquip[i].byDisplayPos, msg->RoleData.AvatarEquip.AvatarEquip[i].dw_data_id);
+	}
+	//若名字还没收到，则不刷新UI
+	if (!m_RemoteRole_Tag.strName.empty())
+	{
+		//调用UI接口刷新
+		updateRoleAttrUi(msg->RoleData.dwID);
+	}
+	return 0;
+}
+void RemoteRoleStateMgr::onGetName(unsigned int roleid , const std::string& name)
+{
+	if (roleid == m_RemoteRole_Tag.uRoleID)
+	{
+		//这样做是与接收远程玩家状态的信息比较时间的先后，
+		if (-1 !=m_RemoteRole_Tag.level)
+		{
+			m_RemoteRole_Tag.strName = name;
+			//调用UI接口刷新
+			updateRoleAttrUi(roleid);
+		}
+	}
+	else if (m_SpouseID == roleid)
+	{
+		m_SpouseName = name;
+		updateRoleInfoUi(m_RemoteRoleID);
+	}
+	else
+	{
+		//do nothing
+	}
+}
+
+unsigned int RemoteRoleStateMgr::onServerCanntGetRoleInfo(s_net_cmd *cmd)
+{
+	GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPopupPreUiOnClose(false);
+	GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPopTag(RRP_NORMAL);
+
+	GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->setPopupPreUiOnClose(false);
+	GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->setPopTag(RRP_NORMAL);
+
+	GET_UI(RoleInfoUi, WCT_RoleInfoUi)->setPopupPreUiOnClose(false);
+	GET_UI(RoleInfoUi, WCT_RoleInfoUi)->setPopTag(RRP_NORMAL);
+
+	GET_UI(NewRoleTitleUi, WCT_RoleTitleUi)->setPopupPreUiOnClose(false);
+	GET_UI(NewRoleTitleUi, WCT_RoleTitleUi)->setPopTag(RRP_NORMAL);
+
+	//NET_SIS_get_remote_role_equip_info_offline* msg = (NET_SIS_get_remote_role_equip_info_offline*)cmd;
+	ToolTip::getInstance()->push(GET_STR(178));
+	return 0;
+}
+const tagEquipViewInfo* RemoteRoleStateMgr::GetEquipInfoByIndex(EEquipPos posIndex)
+{
+	RemoteRoleEquipInfo::const_iterator iter = m_map_remote_role_equip.find(posIndex);
+	if (iter != m_map_remote_role_equip.end())
+	{
+		return &(iter->second);
+	}
+	return NULL;
+}
+/*UI初始化调用函数*/
+void RemoteRoleStateMgr::RefreshRemoteRoleAllInfo(unsigned int uRoleID)
+{
+	unsigned int timeDif(0);
+	unsigned int curTime(0);
+#if 1 //lzz
+	struct timeval tv;
+	gettimeofday(&tv , 0);
+	curTime = tv.tv_sec*1000;
+#else
+	curTime = clock();
+#endif
+	timeDif = curTime - m_require_time;
+	//同一远程玩家的请求，在15秒内不会重复向服务器发送请求
+	if ((uRoleID == GetRemoteRoleID()) && (timeDif < 15000))//暂定5秒
+	{
+		if (m_RemoteRole_Tag.level == -1)
+		{
+			GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPopupPreUiOnClose(false);
+			GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPopTag(RRP_NORMAL);
+
+			GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->setPopupPreUiOnClose(false);
+			GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->setPopTag(RRP_NORMAL);
+
+			GET_UI(RoleInfoUi, WCT_RoleInfoUi)->setPopupPreUiOnClose(false);
+			GET_UI(RoleInfoUi, WCT_RoleInfoUi)->setPopTag(RRP_NORMAL);
+
+			GET_UI(NewRoleTitleUi, WCT_RoleTitleUi)->setPopupPreUiOnClose(false);
+			GET_UI(NewRoleTitleUi, WCT_RoleTitleUi)->setPopTag(RRP_NORMAL);
+
+			CLOSE_UI(WCT_ROLEEQUIPUI);
+			ToolTip::getInstance()->push(GET_STR(178));
+			return;
+		}
+
+		updateRoleEquipUi(uRoleID);//调用UI接口，刷新装备界面
+		updateRoleAttrUi(uRoleID);//调用UI接口，刷新人物属性界面
+		
+		OPEN_UI(WCT_ROLEEQUIPUI);
+		GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPlayerId(uRoleID);
+		//ToolTip::getInstance()->push("\xE6\x93\x8D\xE4\xBD\x9C\xE8\xBF\x87\xE4\xBA\x8E\xE9\xA2\x91\xE7\xB9\x81\xEF\xBC\x8C\xE8\xAF\xB7\xE7\xA8\x8D\xE5\x90\x8E\xE9\x87\x8D\xE8\xAF\x95");
+		return;
+	}
+	SetRemoteRoleID(uRoleID);
+	SetRequestTime(curTime);
+
+	RequestRemoteRoleEquipInfo(uRoleID);//请求远程玩家装备以及人物属性状态信息
+	return;
+}
+/**************************类辅助函数*********************************/
+void RemoteRoleStateMgr::ResetAllEquip()
+{
+	m_map_remote_role_equip.clear();
+	//memset(&m_RemoteRole_Tag,0,sizeof(tagRoleInfo));
+	m_RemoteRole_Tag.clear();
+	memset(m_displayAttrId,0,PDA_End*sizeof(unsigned int));
+	memset(&m_RemoteSocialData,0,sizeof(tagRoleSocialInfo));
+}
+EEquipPos RemoteRoleStateMgr::GetEquipPos(unsigned int typeID)
+{
+	EEquipPos retPos = EEP_Null;
+	if (-1 == typeID)
+		return retPos;
+	//读取数据库
+//已完成 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 	cmd->set_integer32(1,typeID);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("PosIndex");
+// 		retPos = (EEquipPos)(table->get_integer32(idx));
+// 		break;
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	const EquipTypeData* data = PackageManager::getInstance()->getEquipTypeDataPointer(typeID);
+	if (data != NULL)
+	{
+		retPos = data->posIndex;
+	}
+
+	return retPos;
+}
+int RemoteRoleStateMgr::GetRoleSignalDataInfo(int index)
+{
+	if (index <= ERRA_Null || index >= ERRA_End)
+		return -1;
+	return m_RemoteRole_Tag._roleData[index];
+}
+
+void RemoteRoleStateMgr::updateRoleEquipUi( unsigned int playerId )
+{
+	RoleEquipUi *equipUi = GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI);
+	if(equipUi != NULL && equipUi->getPlayerId() == playerId)
+	{
+		equipUi->updateEquipment();
+		equipUi->updateDisplay();
+	}
+
+	GET_UI(RoleRingUi,WCT_ROLERINGUI)->updateEquipment();
+	GET_UI(RoleRingUi,WCT_ROLERINGUI)->updateDisplay();
+}
+
+void RemoteRoleStateMgr::updateRoleAttrUi( unsigned int playerId )
+{
+	GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->updateAttr();
+}
+
+unsigned int RemoteRoleStateMgr::onServerGetRemoteSocialData(s_net_cmd *cmd)
+{
+	NET_SIS_get_role_card* msg = (NET_SIS_get_role_card*)cmd;
+	if (msg->dw_role_id != GetRemoteRoleID())
+		return 0;
+	tagVCardData* pData = reinterpret_cast<tagVCardData*>(msg->pData);
+	m_RemoteSocialData.byStar = pData->customVCardData.byConstellation;
+	memcpy(m_RemoteSocialData.chCity,pData->customVCardData.chCity,sizeof(pData->customVCardData.chCity));
+	memcpy(m_RemoteSocialData.bySignature,pData->customVCardData.byData,MIN(pData->customVCardData.bySignatureSize,2*LEN_MAX_SIGNATURE));
+	updateRoleInfoUi(m_RemoteRoleID);
+	return 0;
+}
+unsigned int RemoteRoleStateMgr::onServerGetMonthCardData(s_net_cmd *cmd)
+{
+	NET_SIS_OtherMonthCardBegin* msg = (NET_SIS_OtherMonthCardBegin*)cmd;
+	if (msg->dw_role_id != GetRemoteRoleID())
+		return 0;
+	m_month_card_time = msg->dw_month_card_time;
+	updateRoleInfoUi(m_RemoteRoleID);
+	return 0;
+}
+
+void RemoteRoleStateMgr::OnServerGetGuildName( unsigned int guildId, const std::string& guildName)
+{
+	if(guildId == m_GuildID)
+	{
+		m_GuildName.assign(guildName);
+		updateRoleInfoUi(m_RemoteRoleID);
+	}
+}
+
+void RemoteRoleStateMgr::updateRoleInfoUi( unsigned int playerId )
+{
+	GET_UI(RoleInfoUi, WCT_RoleInfoUi)->updateData(playerId);
+}
+
+bool RemoteRoleStateMgr::bEquipBind( const tagEquipViewInfo *equipInfo )
+{
+	if (!equipInfo)
+		return true;
+	return EBS_Unbind != equipInfo->byBind && EBS_Unknown != equipInfo->byBind;
+}
+
+bool RemoteRoleStateMgr::tryToRefreshRemotePlayerInfo( unsigned int dwID )
+{
+	unsigned int roleId = dwID;
+	Role *role = RoleManager::getInstance()->findRole(roleId);
+	if(role != NULL)
+	{
+		LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+		if(!ploc)
+			return false;
+		if (ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))//摆摊交易中禁止操作
+		{
+			ToolTip::getInstance()->push(GET_STR(7209));
+			return false;
+		}
+		RefreshRemoteRoleAllInfo(roleId);
+		return true;
+	}
+
+	return false;
+	//CLOSE_UI(WCT_SelectFunction);
+}
+
+int RemoteRoleStateMgr::get_remote_suit_num_by_id(int suit_id)
+{
+	std::map<int, int>::iterator iter = m_remote_suit_num.find(suit_id);
+	if(iter != m_remote_suit_num.end())
+	{
+		return iter->second;
+	}
+
+	return 0;
+}

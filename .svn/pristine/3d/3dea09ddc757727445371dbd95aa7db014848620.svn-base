@@ -1,0 +1,299 @@
+#include "RespItemView.h"
+#include "CommonClient.h"
+#include "LabelEx.h"
+#include "ListControl.h"
+#include "TeamMgr.h"
+#include "GameEventDefine.h"
+#include "CfgReader.h"
+#include "UiTools.h"
+
+const float VIEW_OFFSET = 0.0f;
+RespItemView::RespItemView()
+	:mpContext(NULL)
+{
+
+}
+
+RespItemView::~RespItemView()
+{
+
+}
+
+cocos2d::extension::SEL_CCControlHandler RespItemView::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(RespItemView,onOK);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(RespItemView,onCancel);
+	return NULL;
+}
+
+bool RespItemView::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(LabelEx*,mpContext);
+	return false;
+}
+
+void RespItemView::onOK( CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CC_ASSERT(mptrSharedItem);
+	mptrSharedItem->OK();
+	
+	TeamMgr::getInstance()->removeResp(mptrSharedItem);
+
+	RemoveRespView evt;
+	evt.view =this;
+	SEND_EVENT(&evt);
+}
+
+void RespItemView::onCancel( CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CC_ASSERT(mptrSharedItem);
+	mptrSharedItem->Cancel();
+
+	TeamMgr::getInstance()->removeResp(mptrSharedItem);
+
+	RemoveRespView evt;
+	evt.view =this;
+	SEND_EVENT(&evt);
+}
+
+void RespItemView::setData( boost::shared_ptr<RespItem> const& item )
+{
+	mptrSharedItem = item;
+	
+	mpContext->set_text(mptrSharedItem->getContext());
+}
+
+RespItemView* RespItemView::createItem( const char* szFile,CCObject* pOwer )
+{
+	CCNodeLoaderLibrary* lib  = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	//lib->registerCCNodeLoader("LabelEx",LabelExLoader::loader());
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string strFilepath = CFGReader::instance()->get_ui_ccbi_filepath(szFile);
+	CCNode* node = reader->readNodeGraphFromFile(strFilepath.c_str(),pOwer);
+	CC_ASSERT(node);
+
+	RespItemView* item = dynamic_cast<RespItemView*>(node);
+	return item;
+}
+
+#pragma region RespListView
+RespListView::RespListView()
+	:mpSV(NULL)
+	,mpBG(NULL)
+{
+
+}
+
+RespListView::~RespListView()
+{
+
+}
+
+cocos2d::extension::SEL_CCControlHandler RespListView::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+bool RespListView::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(ListControl*,mpSV);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCScale9Sprite*,mpBG);
+	return false;
+}
+
+void RespListView::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	//mpSV->setContentSize(mpSV->getViewSize());
+
+	moriSize = mpSV->getViewSize();
+	moriBGSize = mpBG->getContentSize();
+
+	initRespList();
+}
+
+void RespListView::onEventRemove( RemoveRespView* pEvent )
+{
+	if (pEvent->view)
+	{
+		size_t nNewSize  = mpSV->items().size() - 1;
+		if (nNewSize > 0)
+		{
+			ListControl::NodeList const& list = mpSV->items();
+			CCSize newSize = moriSize;
+			newSize.height = list.front()->getContentSize().height*nNewSize + VIEW_OFFSET;
+			mpSV->setViewSize(newSize);
+			mpSV->setContentSize(newSize);
+		}
+		mpSV->remove_item(pEvent->view);
+	}
+
+	if (mpSV->items().empty())
+	{
+		closeWithDelay(0.1f);
+		return;
+	}
+
+	size_t nNewSize  = mpSV->items().size();
+	ListControl::NodeList const& list = mpSV->items();
+	if (nNewSize<5)
+	{
+		CCSize newSize = moriSize;
+		newSize.height = list.front()->getContentSize().height*nNewSize + VIEW_OFFSET;
+		mpSV->setViewSize(newSize);
+		mpSV->setContentSize(newSize);
+		mpSV->scroll_to_top();
+
+		float fChange =  moriSize.height - newSize.height;
+		CCSize bgNewSize = moriBGSize;
+		bgNewSize.height -= fChange;
+		mpBG->setContentSize(bgNewSize);
+	}
+
+	if (nNewSize >= 5)
+	{
+		mpSV->setViewSize(moriSize);
+		mpSV->scroll_to_top();
+	}
+}
+
+void RespListView::onEventAdd( RespViewAdd* pEvent )
+{
+	RespItemView* item = RespItemView::createItem("shenqingitem",NULL);
+	boost::shared_ptr<RespItem> const& data = TeamMgr::getInstance()->getLastResp();
+	item->setData(data);
+	mpSV->add_item(item);
+
+	size_t nNewSize = mpSV->items().size();
+	if (nNewSize<5)
+	{
+		CCSize newSize = moriSize;
+		newSize.height = item->getContentSize().height*nNewSize+VIEW_OFFSET;
+		mpSV->setViewSize(newSize);
+		mpSV->setContentSize(mpSV->getViewSize());
+		mpSV->scroll_to_top();
+
+		float fChange =  moriSize.height - newSize.height;
+		CCSize bgNewSize = moriBGSize;
+		bgNewSize.height -= fChange;
+		mpBG->setContentSize(bgNewSize);
+	}
+	else if(nNewSize == 5)
+	{
+		mpSV->setViewSize(moriSize);
+		//mpSV->setContentSize(mpSV->getViewSize());
+		mpSV->scroll_to_top();
+
+		mpBG->setContentSize(moriBGSize);
+	}
+
+}
+
+void RespListView::onEnter()
+{
+	NormalLayer::onEnter();
+
+	REGISTER_EVENT(RespViewAdd,RespListView,onEventAdd);
+	REGISTER_EVENT(RemoveRespView,RespListView,onEventRemove);
+	REGISTER_EVENT(RemoveRespDataToView,RespListView,onEventDataRemove);
+}
+
+void RespListView::onExit()
+{
+	NormalLayer::onExit();
+	UNREGISTER_EVENT(RespViewAdd,RespListView,onEventAdd);
+	UNREGISTER_EVENT(RemoveRespView,RespListView,onEventRemove);
+	UNREGISTER_EVENT(RemoveRespDataToView,RespListView,onEventDataRemove);
+
+}
+
+void RespListView::initRespList()
+{
+	mpSV->clear_list();
+
+	float fHeight = 0;
+	int nNum = 0;
+	WaitRespQueue::RespQueue const& all = TeamMgr::getInstance()->getRespQueue();
+	CC_ASSERT(!all.empty());
+	BOOST_FOREACH(boost::shared_ptr<RespItem> const& data ,all)
+	{
+		RespItemView* item = RespItemView::createItem("shenqingitem",NULL);
+		item->setData(data);
+		fHeight += item->getContentSize().height;
+		CCSize newSize = moriSize;
+		newSize.height = fHeight + VIEW_OFFSET;
+		mpSV->setViewSize(newSize);
+		mpSV->setContentSize(newSize);
+		mpSV->add_item(item);
+		++nNum;
+	}
+
+	if (nNum<5)
+	{
+		CCSize newSize = moriSize;
+		newSize.height = fHeight + VIEW_OFFSET;
+		mpSV->setViewSize(newSize);
+		mpSV->setContentSize(newSize);
+		mpSV->scroll_to_top();
+
+		float fChange =  moriSize.height - newSize.height;
+		CCSize bgNewSize = moriBGSize;
+		bgNewSize.height -= fChange;
+		mpBG->setContentSize(bgNewSize);
+	}
+	else if(nNum >= 5)
+	{
+		mpSV->setViewSize(moriSize);
+		//mpSV->setContentSize(mpSV->getViewSize());
+		mpSV->scroll_to_top();
+
+		mpBG->setContentSize(moriBGSize);
+	}
+}
+
+RespListView* RespListView::createFromCCBI( const char* szFile,CCObject* pOwner )
+{
+	CCNodeLoaderLibrary* lib  = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string strFilepath = CFGReader::instance()->get_ui_ccbi_filepath(szFile);
+	CCNode* node = reader->readNodeGraphFromFile(strFilepath.c_str(),pOwner);
+	CC_ASSERT(node);
+
+	RespListView* view = dynamic_cast<RespListView*>(node);
+	view->setPlistFilePath(reader->getLoadedSpriteSheet());
+	UiResourceMgr::getInstance()->retainPlistFile(reader->getLoadedSpriteSheet());
+	return view;
+}
+
+void RespListView::onEventDataRemove( RemoveRespDataToView* pEvent )
+{
+	ListControl::NodeList& list =mpSV->items();
+	BOOST_FOREACH(CCNode* node,list)
+	{
+		RespItemView* view = dynamic_cast<RespItemView*>(node);
+		if (pEvent->data == view->getData())
+		{
+			view->getData()->Cancel();
+
+			RemoveRespView evt;
+			evt.view  = view;
+			onEventRemove(&evt);
+		
+			break;
+		}
+	}
+}
+
+bool RespListView::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (isTouchOnNodeContent(mpBG,pTouch))
+	{
+		return true;
+	}
+	removeFromParentAndCleanup(true);
+	return false;
+}
+
+
+#pragma endregion RespListView

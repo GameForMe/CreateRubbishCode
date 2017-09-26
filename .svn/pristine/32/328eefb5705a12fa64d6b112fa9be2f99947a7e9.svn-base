@@ -1,0 +1,439 @@
+#include "CrossSceneUI.h"
+#include "World.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "CfgReader.h"
+#include "BaseDefine.h"
+#include "UiResourceMgr.h"
+#include "SelectRole.h"
+#include "CreateRole.h"
+#include "RoleManager.h"
+#include "Login.h"
+#include "UiManager.h"
+#include "DBMgr.h"
+#include "JoyStick.h"
+#include "MapManager.h"
+#include "World.h"
+#include "MiniMapUi.h"
+#include "AnimationCache.h"
+#include "Helper.h"
+
+CrossSceneUI * CrossSceneUI::getInstance()
+{
+	static CrossSceneUI instance;
+	return &instance;
+}
+
+CrossSceneUI::CrossSceneUI()
+	: _inCross(false)
+	,isJoinjjc(false)
+{
+	_layer = NULL;
+}
+
+CrossSceneUI::~CrossSceneUI()
+{
+	if (_layer)
+	{
+		_layer->removeFromParentAndCleanup(true);
+	}
+}
+
+void CrossSceneUI::open( int id,bool isRepetLogin /*= false*/ )
+{
+	_inCross = true;
+	if(isOpen())
+		return;
+	CCScene *scene = UiMgr::getInstance()->getCurScene();
+	if(scene != NULL)
+	{
+		CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+		ccNodeLoaderLibrary->registerCCNodeLoader("CrossSceneUILayer", UiLayerLoader<CrossSceneUILayer>::loader());
+		cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+		CCNode *node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "crossSceneui.ccbi").c_str());
+		_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+		UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+		ccbReader->release();
+		if(node != NULL) {
+			CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+			CCNode *uiNode = CCNode::create();
+			uiNode->addChild(CCLayerColor::create(ccc4(0, 0, 0, 255), winSize.width, winSize.height));
+			uiNode->addChild(node);
+			node->setTag(WCT_CROSSSCENE);
+			node->setPositionX(node->getPositionX() + UiMgr::getInstance()->getOffsetX());
+			node->setPositionY(node->getPositionY() + UiMgr::getInstance()->getOffsetY());
+
+			_layer = dynamic_cast<CrossSceneUILayer*>(node);
+			_layer->show_pro_bar(id != 0);
+
+			rand_message();
+			//[bing] 把movie黑屏去掉
+			scene->removeChildByTag(WCT_BLACKSCENE);
+
+			if(isRepetLogin == false)
+			{
+				scene->addChild(uiNode, WZ_NewPlayerGuideLayer, WCT_CROSSSCENE);
+			}
+			else
+			{
+				scene->addChild(uiNode, WZ_NewPlayerGuideLayer + 1, WCT_CROSSSCENE);
+			}
+
+			//[bing] 跨场景时停止播放音乐
+			AudioPlayer::getSigletonPtr()->stopMusic();
+		}
+	}
+}
+
+void CrossSceneUI::close(bool isRepetLogin)
+{
+	_inCross = false;
+	if (isRepetLogin)
+	{
+		if (_layer)
+		{
+			if (_layer->getParent())
+			{
+				_layer->removeFromParentAndCleanup(true);
+			}
+			else
+			{
+				_layer->release();
+			}
+			_layer = NULL;
+		}
+	}
+	else
+	{
+		CrossSceneUILayer *uiLayer = getUiLayer();
+		if(uiLayer == NULL)
+			return;
+		CCScene *scene = UiMgr::getInstance()->getCurScene();
+		if(scene != NULL)
+		{
+			scene->removeChildByTag(WCT_CROSSSCENE);
+			_layer = NULL;
+		}
+	}
+
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+
+	//AnimationCache::getInstance()->releaseResByCurMem();
+}
+
+bool CrossSceneUI::isOpen()
+{
+	return (getUiLayer() != NULL);
+}
+
+CrossSceneUILayer * CrossSceneUI::getUiLayer()
+{
+// 	CCScene *scene = UiMgr::getInstance()->getCurScene();
+// 	if(scene != NULL)
+// 	{
+// 		CCNode *node = scene->getChildByTag(WCT_CROSSSCENE);
+// 		if(node != NULL)
+// 		{
+// 			CrossSceneUILayer *layer = dynamic_cast<CrossSceneUILayer*>(node->getChildByTag(WCT_CROSSSCENE));
+// 			return layer;
+// 		}
+// 	}
+// 	return NULL;
+	return _layer;
+}
+
+void CrossSceneUI::setPec( int pec )
+{
+	CrossSceneUILayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setPec(pec);
+	}
+}
+
+void CrossSceneUI::setPecAction(int per1, int per2)
+{
+	CrossSceneUILayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setPecAction(per1, per2);
+	}
+}
+int CrossSceneUI::getPec()
+{
+	CrossSceneUILayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		return uiLayer->getPec();
+	}
+	return 0;
+}
+void CrossSceneUI::rand_message()
+{
+	srand(time(0));
+	int randNums = World::getInstance()->getRandMsgNums();
+	int Id = rand() % randNums + 1;
+
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM SenceTips WHERE ID = ?1");
+	cmd->set_integer32(1 , Id);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	//std::string message;
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("Msg");
+		_tipText = table->get_text(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	//return Id;
+
+	CrossSceneUILayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setMessage(_tipText);
+	}
+}
+std::string  const& CrossSceneUI::getMessage()
+{
+	return _tipText;
+}
+void CrossSceneUI::retain()
+{
+	if (_layer)
+	{
+		_layer->retain();
+	}
+}
+
+void CrossSceneUI::closeWithDelay( float fDelay )
+{
+	_inCross = false;
+	CCDirector* dir = CCDirector::sharedDirector();
+	dir->getScheduler()->scheduleSelector(schedule_selector(CrossSceneUI::doClose),this,0,0,fDelay,false);
+
+	
+}
+
+void CrossSceneUI::doClose( float )
+{
+	CCDirector* dir = CCDirector::sharedDirector();
+	dir->getScheduler()->unscheduleSelector(schedule_selector(CrossSceneUI::doClose),this);
+
+	close();
+// 	CrossSceneUILayer *uiLayer = getUiLayer();
+// 	if(uiLayer == NULL)
+// 		return;
+// 	CCScene *scene = UiMgr::getInstance()->getCurScene();
+// 	if(scene != NULL)
+// 	{
+// 		scene->removeChildByTag(WCT_CROSSSCENE);
+// 		_layer = NULL;
+// 	}
+// 
+// 	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+// 	_usedPlistFile.clear();
+}
+
+//////////////////////////////////////////////////////////////////////////
+CrossSceneUILayer::CrossSceneUILayer()
+{
+	_isPecAction = false;
+	_per1 = 0;
+	_per2 = 0;
+	_perCur = 0;
+}
+
+CrossSceneUILayer::~CrossSceneUILayer()
+{
+}
+
+void CrossSceneUILayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	CCSprite* pro = dynamic_cast<CCSprite*>(getChildByTag(1));
+	_pro = initHProgressBarWithSprite(pro);
+	addChild(_pro , pro->getZOrder());
+	CCSprite *msprite=dynamic_cast<CCSprite*>(getChildByTag(0));
+	msprite->setZOrder(2);//vv
+	CCSprite *msprite2=dynamic_cast<CCSprite*>(getChildByTag(2));
+	msprite2->setZOrder(2);//vv
+	pro->setVisible(false);
+	//CCNode *node = getChildByTag(0);
+	//reorderChild(node, 1);
+	_guangEffect = dynamic_cast<CCSprite*>(getChildByTag(987));
+	CC_ASSERT(_guangEffect);
+	_ori_sfx_pos = _guangEffect->getPosition();
+	_guangEffect->removeFromParent();
+	addChild(_guangEffect,3);
+	//_guangEffect->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("guochang_guangxiao"));		//【Ji：】过场动画，控制进度条长短
+	//_guangEffect->setAnchorPoint(ccp(1.0f,0.5f));
+	//_guangEffect->setPosition(ccp(0,pro->getContentSize().height*0.5f));
+
+	//_guangEffect->setVisible(false);
+	//_pro->addChild(_guangEffect,3);
+
+	//场景切换界面进度条文字描边设为1
+
+	
+	_xiaotieshi=Helper::createLabelFT(16,1);//提示语
+	_xiaotieshi->setPosition(ccp(400.0f, 95.0f));
+	addChild(_xiaotieshi, 1);
+
+	CCScheduler *scheduler = CCDirector::sharedDirector()->getScheduler();
+	scheduler->scheduleUpdateForTarget(this, 0, false);
+	CCSprite* backGround = dynamic_cast<CCSprite*>(getChildByTag(3));
+	if(backGround)
+	{
+		const CCSize& winSize = CCDirector::sharedDirector()->getWinSize();
+		CCSize backGroundSize = backGround->getContentSize();
+		backGround->setScale(winSize.width / backGroundSize.width);
+	}
+	
+}
+
+void CrossSceneUILayer::setPec( int per )
+{
+	//CCLOG("--------------------------------------setpec:%d",per);
+	_isPecAction = false;
+	_per1 = 0;
+	_per2 = 0;
+	_perCur = per;
+
+	if (per >100)
+	{
+		per = 100;
+	}
+	_pro->setPercentage(per);
+
+
+	CCSprite* pro = dynamic_cast<CCSprite*>(getChildByTag(1));
+	//float posX = pro->getPositionX() - pro->getContentSize().width / 2.0f;
+	//_guangEffect->setPositionX(ccp( posX + per * 0.01 * pro->getContentSize().width-89, pro->getPositionY()+4));
+	_guangEffect->setPositionX(_ori_sfx_pos.x + pro->getContentSize().width * float(per)/100.0f);
+	//_guangEffect->setVisible(true);
+
+//#ifdef OVD_PLATFORM_WINDOWS
+//	CCDirector::sharedDirector()->drawScene();
+//#endif
+}
+
+void CrossSceneUILayer::setMessage(std::string const& msg)
+{
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM SenceTips WHERE ID = ?1");
+// 	cmd->set_integer32(1 , Id);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	std::string message;
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("Msg");
+// 		message = table->get_text(idx);
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+	_xiaotieshi->setString(msg.c_str());
+}
+
+// int CrossSceneUILayer::setMessageId()
+// {
+// 	srand(time(0));
+// 	int randNums = World::getInstance()->getRandMsgNums();
+// 	int Id = rand() % randNums + 1;
+// 	return Id;
+// }
+
+bool CrossSceneUILayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if ( !isVisible() || !isRunning() || !hasVisibleParents())
+	{
+		return false;
+	}
+	return true;
+}
+
+void CrossSceneUILayer::onEnter()
+{
+//	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -10, true);
+	setTouchPriority(-10);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+}
+
+void CrossSceneUILayer::onExit()
+{
+	//bool flag = CrossSceneUI::getInstance()->getIsJoinjjc();
+	if (CrossSceneUI::getInstance()->getIsJoinjjc())
+	{
+		World::getInstance()->jjcAmine();
+		Joystick *ui = getUiNodeByTag<Joystick>(WCT_JoyStick);
+		if(ui != NULL)
+			ui->ccTouchEnded(NULL,NULL);
+		CrossSceneUI::getInstance()->setIsJoinjjc(false);
+	}
+
+	//神兽剧情副本显示小手
+	if (MapManager::getInstance()->getCurMapId() == GINGKO_VILLAGE_MAP)
+	{
+		World::getInstance()->getMiniMapUi()->showHand(true);
+	}
+	
+
+	CCLayer::onExit();
+//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+
+	CCScheduler *scheduler = CCDirector::sharedDirector()->getScheduler();
+	scheduler->unscheduleUpdateForTarget(this);
+}
+
+
+void CrossSceneUILayer::update( float dt )
+{
+	if (!_isPecAction)
+		return;
+
+	if (_perCur<_per2)
+	{
+		_perCur++;
+		_pro->setPercentage(_perCur);
+
+		CCNode* pro = getChildByTag(1);
+		//float posX = pro->getPositionX() - pro->getContentSize().width / 2.0f;
+		//_guangEffect->setPositionX(ccp( posX + _perCur * 0.01 * pro->getContentSize().width-89, pro->getPositionY()+4));
+		_guangEffect->setPositionX(_ori_sfx_pos.x +pro->getContentSize().width * float(_perCur)/100.0f);
+	}
+}
+
+void CrossSceneUILayer::setPecAction(int per1, int per2)
+{
+	if (per2>=per1 && per1>=_perCur)
+	{
+		_isPecAction = true;
+		_perCur = per1;
+		_per1 = per1;
+		_per2 = per2;
+		_pro->setPercentage(_perCur);
+	}
+	else
+	{
+		_isPecAction = false;
+	}
+}
+int CrossSceneUILayer::getPec()
+{
+	return _perCur;
+}
+
+void CrossSceneUILayer::show_pro_bar( bool val )
+{
+	CC_ASSERT(_pro);
+	_pro->setVisible(val);
+
+	CCNode *tmp=getChildByTag(0);
+	tmp->setVisible(val);
+
+	tmp=getChildByTag(2);
+	tmp->setVisible(val);
+
+	tmp = getChildByTag(987);
+	tmp->setVisible(val);
+}

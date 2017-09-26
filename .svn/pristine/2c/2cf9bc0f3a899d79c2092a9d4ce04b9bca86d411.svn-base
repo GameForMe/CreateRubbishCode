@@ -1,0 +1,944 @@
+/**
+ *	@file		WingEvolveUi.cpp
+ *	@author		guantiejun
+ *	@date		2016/04/19
+ *	@version	
+ *	@brief		翅膀进化界面
+ */
+
+#include "WingEvolveUi.h"
+#include "WingManager.h"
+#include "UiLoader.h"
+#include "UiManager.h"
+#include "CheckButton.h"
+#include "UiTools.h"
+#include "CommonClient.h"
+#include "PackageManager.h"
+#include "UsefulFunction.h"
+#include "f_string_table.h"
+#include "World.h"
+#include "tools.h"
+#include "EquipTipUi.h"
+#include "PackageManager.h"
+#include "client_common_define.h"
+#include "PlacardManager.h"
+#include "LabelEx.h"
+#include "ListControl.h"
+
+const string point_dark = "chibang_jinhua_btnn";
+const string point_shine = "chibang_jinhua_btnh";
+const int can_move_distance = 20;
+const int point_num_max = 10;
+
+WingEvolveUi::WingEvolveUi()
+{
+
+}
+
+WingEvolveUi::~WingEvolveUi()
+{
+
+}
+
+CCNode * WingEvolveUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["WingEvolveUiLayer"] = UiLayerLoader<WingEvolveUiLayer>::loader();
+	nodeLoaders["CheckButton"] = CheckButtonLoader::loader();
+	nodeLoaders["LabelEx"] = LabelExLoader::loader();
+	nodeLoaders["ListControl"] = ListControlLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("chibangjinhua", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+WingEvolveUiLayer * WingEvolveUi::getUiLayer()
+{
+	return getUiNodeByTag<WingEvolveUiLayer>(WCT_WING_EVOLVE_UI);
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+WingEvolveUiLayer::WingEvolveUiLayer()
+: m_node_1(NULL)
+, m_node_2(NULL)
+, m_node_3(NULL)
+, m_bottom_node(NULL)
+, m_wing_name(NULL)
+, m_put_cue(NULL)
+, m_level_cue(NULL)
+, m_special_cue(NULL)
+, m_special_right_cue(NULL)
+, m_button_left(NULL)
+, m_button_right(NULL)
+, m_list(NULL)
+, m_light_cue_node(NULL)
+, m_left_sprite(NULL)
+, m_right_sprite(NULL)
+, m_dest_name(NULL)
+, m_src_name(NULL)
+, m_item_name(NULL)
+, m_need_num_1(NULL)
+, m_need_num_2(NULL)
+, m_item_node_1(NULL)
+, m_item_node_2(NULL)
+, m_item_node_3(NULL)
+, m_button_wing(NULL)
+, m_buff_cue_1(NULL)
+, m_buff_cue_2(NULL)
+, m_no_att_cue(NULL)
+, m_success_effect(NULL)
+, m_wing_id(INVALID)
+, m_dest_wing_id(INVALID)
+, m_is_move(false)
+, m_every_move_x(0.0)
+, m_begin_offset_x(0.0)
+, m_cur_pos(0)
+,m_wing_spec_text(NULL)
+{
+	for(int i = 0; i < max_base_att; ++i)
+	{
+		m_base_att_name[i] = NULL;
+		m_base_att_value[i] = NULL;
+	}
+
+	for(int i = 0; i < max_add_att; ++i)
+	{
+		m_add_att_name[i] = NULL;
+		m_add_att_value[i] = NULL;
+	}
+
+	m_all_vector.clear();
+}
+
+WingEvolveUiLayer::~WingEvolveUiLayer()
+{
+	m_all_vector.clear();
+}
+
+cocos2d::extension::SEL_CCControlHandler WingEvolveUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(WingEvolveUiLayer,onEvolve);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(WingEvolveUiLayer,onLeft);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(WingEvolveUiLayer,onRight);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(WingEvolveUiLayer,onCue);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(WingEvolveUiLayer,onItem);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(WingEvolveUiLayer,onClose);
+
+	return NULL;
+}
+
+cocos2d::SEL_MenuHandler WingEvolveUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+
+	return NULL;
+}
+
+bool WingEvolveUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*, m_node_1);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*, m_node_2);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*, m_node_3);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*, m_bottom_node);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(LabelEx*, m_level_cue);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(LabelEx*, m_special_cue);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(LabelEx*, m_special_right_cue);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(ListControl*, m_list);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*, m_light_cue_node);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*, m_left_sprite);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*, m_right_sprite);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*, m_button_left);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*, m_button_right);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"wing_spec_text",LabelEx*, m_wing_spec_text);
+
+	return false;
+}
+
+void WingEvolveUiLayer::onEnter()
+{
+	REGISTER_EVENT(evolve_success_event,WingEvolveUiLayer,evolve_success);
+	REGISTER_EVENT(item_num_change,WingEvolveUiLayer,on_event_item_change);
+
+	NormalLayer::onEnter();
+}
+
+void WingEvolveUiLayer::onExit()
+{
+	UiResourceMgr::getInstance()->releasePlistFile(m_plist);
+
+	UNREGISTER_EVENT(evolve_success_event,WingEvolveUiLayer,evolve_success);
+	UNREGISTER_EVENT(item_num_change,WingEvolveUiLayer,on_event_item_change);
+
+	NormalLayer::onExit();
+}
+
+bool WingEvolveUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	m_is_move = false;
+	m_every_move_x = 0.0;
+
+	CCPoint list_point = m_list->convertTouchToNodeSpace(pTouch);
+	const CCSize& list_size = m_list->getViewSize();
+	CCRect list_rect(0.0f, 0.0f, list_size.width, list_size.height);
+	if(list_rect.containsPoint(list_point))
+	{
+		m_is_move = true;
+		m_every_move_x = list_point.x;
+		m_begin_offset_x = m_list->getContentOffset().x;
+	}
+	return true;
+}
+
+void WingEvolveUiLayer::ccTouchMoved(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if(m_is_move)
+	{
+		CCPoint list_point = m_list->convertTouchToNodeSpace(pTouch);
+		float need_move = list_point.x - m_every_move_x;
+		CCPoint point = ccp(m_list->getContentOffset().x + need_move, m_list->getContentOffset().y);
+
+		if(point.x > 0)
+		{
+			point.x = 0;
+		}
+
+		if(point.x < m_list->getViewSize().width - m_list->getContentSize().width)
+		{
+			point.x = m_list->getViewSize().width - m_list->getContentSize().width;
+		}
+
+		m_list->setContentOffset(point);
+
+		m_every_move_x = list_point.x;
+	}
+}
+
+void WingEvolveUiLayer::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+	touch_end(pTouch);
+}
+
+void WingEvolveUiLayer::ccTouchCancelled(CCTouch *pTouch, CCEvent *pEvent)
+{
+	touch_end(pTouch);
+}
+
+void WingEvolveUiLayer::touch_end(CCTouch *pTouch)
+{
+	if(!IS_VALID_PTR(pTouch))
+		return;
+
+	if(!m_is_move)
+		return;
+
+	float cur_offset_x = m_list->getContentOffset().x;
+	if(abs(cur_offset_x - m_begin_offset_x) > can_move_distance)
+	{
+		m_cur_pos = (cur_offset_x > m_begin_offset_x) ? (m_cur_pos - 1) : (m_cur_pos + 1);
+	}
+
+	move_list(false);
+
+	m_is_move = false;
+	m_every_move_x = 0.0;
+}
+
+void WingEvolveUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	CC_ASSERT(m_wing_spec_text);
+	m_wing_spec_text->setPosition(ccpAdd(m_wing_spec_text->getPosition(),ccp(2,4)));
+
+	m_wing_name = Helper::getLabelFTByParentAndTag(m_node_1, 1);
+	m_put_cue = Helper::getLabelFTByParentAndTag(m_node_1, 2);
+
+	//---------------------------------------
+
+	m_dest_name = Helper::getLabelFTByParentAndTag(m_node_2, 1);
+	m_src_name = Helper::getLabelFTByParentAndTag(m_node_2, 2);
+	m_item_name = Helper::getLabelFTByParentAndTag(m_node_2, 3);
+	m_need_num_1 = Helper::getLabelFTByParentAndTag(m_node_2, 4);
+	m_need_num_2 = Helper::getLabelFTByParentAndTag(m_node_2, 5);
+
+	m_item_node_1 = m_node_2->getChildByTag(6);
+	m_item_node_2 = m_node_2->getChildByTag(7);
+	m_item_node_3 = m_node_2->getChildByTag(8);
+	m_button_wing = dynamic_cast<CCControlButton*>(m_node_2->getChildByTag(10));
+
+	//---------------------------------------
+
+	for(int i = 0; i < max_base_att; ++i)
+	{
+		m_base_att_name[i] = Helper::getLabelFTByParentAndTag(m_node_3, i + 11);
+		m_base_att_value[i] = Helper::getLabelFTByParentAndTag(m_node_3, i + 21);
+	}
+
+	for(int i = 0; i < max_add_att; ++i)
+	{
+		m_add_att_name[i] = Helper::getLabelFTByParentAndTag(m_node_3, i + 31);
+		m_add_att_value[i] = Helper::getLabelFTByParentAndTag(m_node_3, i + 41);
+	}
+
+	Helper::getLabelFTByParentAndTag(m_node_3, 1);
+	Helper::getLabelFTByParentAndTag(m_node_3, 2);
+	Helper::getLabelFTByParentAndTag(m_node_3, 3);
+	Helper::getLabelFTByParentAndTag(m_node_3, 4);
+	m_buff_cue_1 = Helper::getLabelFTByParentAndTag(m_node_3, 5);
+	m_buff_cue_2 = Helper::getLabelFTByParentAndTag(m_node_3, 6);
+	m_no_att_cue = Helper::getLabelFTByParentAndTag(m_node_3, 100);
+
+	m_success_effect = get_success_effect();
+
+	m_list->set_vertical_mode(false);
+	m_list->setTouchEnabled(false);
+}
+
+void WingEvolveUiLayer::onEvolve(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	WingManager::getInstance()->send_evolve(get_wing_id());
+}
+
+void WingEvolveUiLayer::onLeft(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	m_cur_pos = m_cur_pos - 1;
+	move_list(false);
+}
+
+void WingEvolveUiLayer::onRight(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	m_cur_pos = m_cur_pos + 1;
+	move_list(false);
+}
+
+void WingEvolveUiLayer::onCue(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	f_equipment* equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(m_wing_id));
+	if(!IS_VALID_PTR(equip))
+		return;
+
+	const WingEvolve& wing_data = WingManager::getInstance()->get_one_wing_evolve_data(equip->get_item_type_id());
+	if(wing_data.placard_index > 0)
+	{
+		PlacardManager::getInstance()->open_placard_node(wing_data.placard_index);
+	}
+}
+
+void WingEvolveUiLayer::onItem(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	if(IS_VALID(m_dest_wing_id) && (m_dest_wing_id != 0))
+	{
+		f_equipment* equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(m_wing_id));
+		if(!IS_VALID_PTR(equip))
+			return;
+
+		EquipTipUiLayer* tip = EquipTipUi::create();
+		tip->show_compare_by_related_id(equip, m_dest_wing_id);
+	}
+}
+
+void WingEvolveUiLayer::onClose(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	CLOSE_UI(WCT_WING_EVOLVE_UI);
+}
+
+void WingEvolveUiLayer::evolve_success(evolve_success_event* event)
+{
+	set_wing_id(event->equip_id);
+	refresh_node();
+	play_success_effect();
+}
+
+void WingEvolveUiLayer::open_node_init(INT64 wing_id)
+{
+	set_wing_id(wing_id);
+
+	get_all_equip_vector();
+	create_effect_list();
+	create_cue_point();
+
+	refresh_node();
+}
+
+void WingEvolveUiLayer::set_wing_id(INT64 wing_id)
+{
+	m_wing_id = wing_id;
+}
+
+void WingEvolveUiLayer::get_all_equip_vector()
+{
+	m_all_vector.clear();
+
+	f_equipment* equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(m_wing_id));
+	if(!IS_VALID_PTR(equip))
+		return;
+
+	const WingEvolve& wing_data = WingManager::getInstance()->get_one_wing_evolve_data(equip->get_item_type_id());
+	int equip_type = wing_data.equip_type;
+	if(IS_VALID_VAL(equip_type))
+	{
+		WingManager::map_wing_evolve_att& wing_evolve_data = WingManager::getInstance()->get_wing_evolve();
+
+		std::for_each(wing_evolve_data.begin(), wing_evolve_data.end(), [&](WingManager::map_wing_evolve_att::value_type const& one)
+		{
+			if(one.second.equip_type == equip_type)
+			{
+				m_all_vector.push_back(one.first);
+			}
+		});
+	}
+}
+
+void WingEvolveUiLayer::create_effect_list()
+{
+	if(m_all_vector.empty())
+		return;
+
+	m_list->clear_list();
+
+	BOOST_FOREACH(DWORD const& one, m_all_vector)
+	{
+		const WingEvolve& wing_data = WingManager::getInstance()->get_one_wing_evolve_data(one);
+		CCNode* node = CCNode::create();
+		node->setContentSize(m_list->getViewSize());
+
+		add_effect_to_node(node, wing_data.effect_name);
+		m_list->add_item(node);
+	}
+}
+
+void WingEvolveUiLayer::create_cue_point()
+{
+	m_light_cue_node->removeAllChildrenWithCleanup(true);
+	int distance = m_light_cue_node->getContentSize().width / point_num_max;
+	int left_distance = 0;
+	int vector_size = m_all_vector.size();
+	if(vector_size >= point_num_max)
+	{
+		distance = m_light_cue_node->getContentSize().width / vector_size;
+	}
+	else
+	{
+		left_distance = (m_light_cue_node->getContentSize().width - distance * vector_size) / 2;
+	}
+
+	for(int i = 0; i < vector_size; ++i)
+	{
+		CCSprite* sprite = CCSprite::create();
+		sprite->setAnchorPoint(ccp(1.0, 1.0));
+		sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(point_dark.c_str()));
+		sprite->setPosition(ccp(left_distance + i * distance + 20, 18));
+		m_light_cue_node->addChild(sprite, 0, i);
+	}
+}
+
+void WingEvolveUiLayer::move_list(bool is_init)
+{
+	if(m_cur_pos < 0)
+	{
+		m_cur_pos = 0;
+	}
+
+	if(m_cur_pos >= (int)m_all_vector.size())
+	{
+		m_cur_pos = m_all_vector.size() - 1;
+	}
+
+	if(is_init)
+	{
+		m_list->scroll_to_pos(m_cur_pos);
+	}
+	else
+	{
+		m_list->setContentOffset(ccp(-m_cur_pos * m_list->getViewSize().width, m_list->getContentOffset().y), true);
+	}
+
+	refresh_left_info();
+}
+
+void WingEvolveUiLayer::add_effect_to_node(CCNode* node, std::string effect_name)
+{
+	if(!IS_VALID_PTR(node))
+		return;
+
+	stringstream ss;
+	ss<<effect_name<<".plist";
+	std::string effect_name1 = CFGReader::instance()->get_profile_string("Art", "Effect", "") + ss.str();
+	GameActionNode* effect1 = GameActionNode::create();
+	effect1->InitWithPList(effect_name1.c_str(), effect_name.c_str());
+	CCSize size1 = node->getContentSize();
+	effect1->setPosition(ccp(size1.width / 2.0f, (size1.height / 2.0f) + 30));
+	node->addChild(effect1);
+	effect1->BeginAction(0.1f, true);
+
+	std::string effect_name2 = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_157.plist";
+	GameActionNode* effect2 = GameActionNode::create();
+	effect2->InitWithPList(effect_name2.c_str(), "E1_157");
+	CCSize size2 = node->getContentSize();
+	effect2->setPosition(ccp(size2.width / 2.0f - 20, size2.height / 2.0f + 70));
+	node->addChild(effect2);
+	effect2->BeginAction(0.1f, true);
+}
+
+void WingEvolveUiLayer::refresh_node()
+{
+	f_equipment* equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(m_wing_id));
+	if(!IS_VALID_PTR(equip))
+		return;
+
+	for(int i = 0; i < (int)m_all_vector.size(); ++i)
+	{
+		if(equip->get_item_type_id() == m_all_vector[i])
+		{
+			m_cur_pos = i;
+			break;
+		}
+	}
+
+	move_list(true);
+
+	const WingEvolve& wing_data = WingManager::getInstance()->get_one_wing_evolve_data(equip->get_item_type_id());
+
+	// 如果最高等级了 则不取下一级 当前按钮为左
+	bool is_max_level = (!IS_VALID(wing_data.target_id) || (wing_data.target_id == 0));
+	m_node_2->setVisible(!is_max_level);
+	m_node_3->setVisible(is_max_level);
+
+	if(is_max_level)
+	{
+		refresh_att_node();
+	}
+	else
+	{
+		const EquipTypeData* equip_data_next = PackageManager::getInstance()->getEquipTypeData(wing_data.target_id);
+		CC_ASSERT(equip_data_next);
+		m_dest_name->setString(equip_data_next->name);
+		m_src_name->setString(equip->GetItemName());
+
+		DWORD need_item_id = wing_data.need_item_id;
+		const ItemTypeData& item_data = PackageManager::getInstance()->getItemTypeData(need_item_id);
+		m_item_name->setString(item_data.name);
+
+		m_need_num_1->setString("1/1");
+		m_need_num_1->setColor(ccGREEN);
+
+		int need_num = wing_data.need_item_num;
+		int cur_num = PackageManager::getInstance()->getItemNumber(EICT_Bag, need_item_id);
+		stringstream ss;
+		ss<<cur_num<<"/"<<need_num;
+		m_need_num_2->setString(ss.str().c_str());
+		bool enough_need_item = need_num <= cur_num;
+		m_need_num_2->setColor(enough_need_item ? ccGREEN : ccRED);
+
+		refresh_icon(equip->get_item_id(), wing_data.target_id, need_item_id,enough_need_item);
+	}
+}
+
+void WingEvolveUiLayer::refresh_left_info()
+{
+	f_equipment* equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(m_wing_id));
+	if(!IS_VALID_PTR(equip))
+		return;
+
+	if(m_cur_pos >= (int)m_all_vector.size())
+		return;
+
+	DWORD type_id = m_all_vector[m_cur_pos];
+
+	m_level_cue->setVisible(false);
+	m_wing_spec_text->setVisible(false);
+	m_special_cue->setVisible(false);
+
+	m_put_cue->setVisible(true);
+	m_left_sprite->setVisible(true);
+	m_right_sprite->setVisible(true);
+
+	// 显示名称状态
+	const EquipTypeData* equip_type_data = PackageManager::getInstance()->getEquipTypeData(type_id);
+	m_wing_name->setString(equip_type_data->name);
+	if(equip->get_item_type_id() == type_id)
+	{
+		m_put_cue->setString(STRING_TABLE["wing_cur_put"]);
+	}
+	else
+	{
+		if(m_cur_pos > 0)
+		{
+			const EquipTypeData* equip_type_data = PackageManager::getInstance()->getEquipTypeData(m_all_vector[m_cur_pos - 1]);
+			string text;
+			safe_sprintf(text, STRING_TABLE["wing_cur_put_2"], equip_type_data->name);
+			m_put_cue->setString(text.c_str());
+		}
+		else
+		{
+			m_put_cue->setVisible(false);
+			m_left_sprite->setVisible(false);
+			m_right_sprite->setVisible(false);
+		}
+	}
+
+	// 显示下方属性
+	const WingEvolve& wing_data = WingManager::getInstance()->get_one_wing_evolve_data(type_id);
+	bool is_wing = equip_type_data->posIndex == EEP_Body1;
+	if(is_wing)
+	{
+		m_level_cue->setVisible(true);
+		m_wing_spec_text->setVisible(true);
+
+		string wing_level_cue = "";
+		safe_sprintf(wing_level_cue, STRING_TABLE["wing_evolve_level_cue"], wing_data.upper_limit);
+		m_level_cue->set_text(wing_level_cue.c_str());
+
+		float wing_spec_att_stren_pct =0;
+		stBuffStrenEffect stren_effect;
+		EquipTipUiLayer::get_wing_equip_stren(type_id,equip->get_equip()->nLevel,wing_spec_att_stren_pct,stren_effect);
+		if (stren_effect.is_valid())
+		{
+			std::string tmp;
+			std::string buff_key;
+			safe_sprintf(buff_key,"equip_buff_text_evo_%d",stren_effect.buff_id);
+			safe_sprintf(tmp,STRING_TABLE[buff_key.c_str()],stren_effect.effect_val,stren_effect.persist_time);
+			m_wing_spec_text->set_text(tmp);
+		}
+	}
+	else
+	{
+		m_special_cue->setVisible(true);
+
+		int special_index = wing_data.placard_index;
+		string special_dest_1 = wing_data.dest_1;
+		string special_dest_2 = wing_data.dest_2;
+		refresh_special_att(m_special_cue, special_index, special_dest_1, special_dest_2);
+	}
+
+	for(int i = 0; i < (int)m_all_vector.size(); ++i)
+	{
+		CCSprite* sprite =dynamic_cast<CCSprite*>(m_light_cue_node->getChildByTag(i));
+		if(sprite)
+		{
+			string pic = (i == m_cur_pos) ? point_shine : point_dark.c_str();
+			sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(pic.c_str()));
+		}
+	}
+
+	m_button_left->setVisible(m_cur_pos != 0);
+	m_button_right->setVisible(m_cur_pos != (int)m_all_vector.size() - 1);
+}
+
+void WingEvolveUiLayer::refresh_att_node()
+{
+	f_equipment* equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(m_wing_id));
+	if(!IS_VALID_PTR(equip))
+		return;
+
+	// 基础属性
+	std::map<ERoleAttribute, std::string> BaseAttrNameStr;
+	BaseAttrNameStr[ERA_MaxHP] = "\xE7\x94\x9F\xE5\x91\xBD\xEF\xBC\x9A"/*STRING_TABLE["ERA_MaxHP"]*/;
+	BaseAttrNameStr[ERA_MaxMP] = "\xE9\xAD\x94\xE5\x8A\x9B\xEF\xBC\x9A"/*STRING_TABLE["ERA_MaxMP"]*/;
+	BaseAttrNameStr[ERA_ExAttackMin] = "\xE7\x89\xA9\xE6\x94\xBB\xEF\xBC\x9A"/*STRING_TABLE["ERA_ExAttackMin"]*/;
+	BaseAttrNameStr[ERA_ExAttackMax] = "\xE7\x89\xA9\xE6\x94\xBB\xEF\xBC\x9A"/*STRING_TABLE["ERA_ExAttackMax"]*/;
+	BaseAttrNameStr[ERA_InAttackMin] = "\xE9\xAD\x94\xE6\x94\xBB\xEF\xBC\x9A"/*STRING_TABLE["ERA_InAttackMin"]*/;
+	BaseAttrNameStr[ERA_InAttackMax] = "\xE9\xAD\x94\xE6\x94\xBB\xEF\xBC\x9A"/*STRING_TABLE["ERA_InAttackMax"]*/;
+	BaseAttrNameStr[ERA_ArmorIn] = "\xE9\x81\x93\xE6\x94\xBB\xEF\xBC\x9A"/*STRING_TABLE["ERA_ArmorIn"]*/;
+	BaseAttrNameStr[ERA_ArmorEx] = "\xE9\x81\x93\xE6\x94\xBB\xEF\xBC\x9A"/*STRING_TABLE["ERA_ArmorEx"]*/;
+	BaseAttrNameStr[ERA_ExMinDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xEF\xBC\x9A"/*STRING_TABLE["ERA_ExMinDefense"]*/;
+	BaseAttrNameStr[ERA_ExMaxDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xEF\xBC\x9A"/*STRING_TABLE["ERA_ExMaxDefense"]*/;
+	BaseAttrNameStr[ERA_InMinDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xEF\xBC\x9A"/*STRING_TABLE["ERA_InMinDefense"]*/;
+	BaseAttrNameStr[ERA_InMaxDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xEF\xBC\x9A"/*STRING_TABLE["ERA_InMaxDefense"]*/;
+	BaseAttrNameStr[ERA_HitRate] = "\xE5\x91\xBD\xE4\xB8\xAD\xEF\xBC\x9A"/*STRING_TABLE["ERA_HitRate"]*/;
+	BaseAttrNameStr[ERA_Dodge] = "\xE9\x97\xAA\xE9\x81\xBF\xEF\xBC\x9A"/*STRING_TABLE["ERA_Dodge"]*/;
+	BaseAttrNameStr[ERA_Crit_Rate] = "\xE6\x9A\xB4\xE5\x87\xBB\xEF\xBC\x9A"/*STRING_TABLE["ERA_Crit_Rate"]*/;
+	BaseAttrNameStr[ERA_UnCrit_Rate] = "\xE5\x85\x8D\xE6\x9A\xB4\xEF\xBC\x9A"/*STRING_TABLE["ERA_UnCrit_Rate"]*/;
+	BaseAttrNameStr[ERA_UnCrit_Amount] = "\xE5\x85\x8D\xE7\x88\x86\xEF\xBC\x9A"/*STRING_TABLE["ERA_UnCrit_Amount"]*/;
+
+	int att_value[ERA_End] = {0};
+	for(int i = 0; i < MAX_BASE_ATT; i++)
+	{
+		ERoleAttribute att_type = equip->m_equipex.EquipAttitionalAtt[i].eRoleAtt;
+		if(att_type != ERA_Null && att_type != ERA_Luck)
+		{
+			int temp_value = equip->m_equipex.EquipAttitionalAtt[i].nValue + getConsolidateAtt(equip->m_equipex.EquipAttitionalAtt[i].nValue, equip->get_equip_consolidate_level());
+			if(temp_value > 0)
+			{
+				att_value[att_type] = temp_value;
+			}
+		}
+	}
+
+	std::vector<string> base_value;
+	std::vector<string> base_name;
+
+	for(int i = 0; i < MAX_BASE_ATT; i++)
+	{
+		ERoleAttribute att_type = equip->m_equipex.EquipAttitionalAtt[i].eRoleAtt;
+		if(att_type != ERA_Null && att_type != ERA_Luck)
+		{
+			if(att_value[att_type] > 0)
+			{
+				if(att_type == ERA_ExAttackMin || att_type == ERA_InAttackMin || att_type == ERA_ArmorEx || att_type == ERA_ExMinDefense || att_type == ERA_InMinDefense)
+				{
+					string str;
+					safe_sprintf(str, "%d - %d", att_value[att_type], att_value[att_type + 1]);
+					base_value.push_back(str);
+				}
+				else if(att_type == ERA_ExAttackMax || att_type == ERA_InAttackMax || att_type == ERA_ArmorIn || att_type == ERA_ExMaxDefense || att_type == ERA_InMaxDefense)
+				{
+					continue;
+				}
+				else
+				{
+					string str;
+					safe_sprintf(str, "%d", att_value[att_type]);
+					base_value.push_back(str);
+				}
+
+				base_name.push_back(BaseAttrNameStr[att_type]);
+			}
+		}
+	}
+
+	for(int i = 0; i < max_base_att; ++i)
+	{
+		m_base_att_name[i]->setVisible(false);
+		m_base_att_value[i]->setVisible(false);
+
+		for(size_t i = 0; i < base_value.size(); ++i)
+		{
+			m_base_att_name[i]->setVisible(true);
+			m_base_att_value[i]->setVisible(true);
+			m_base_att_name[i]->setString(base_name[i]);
+
+			string str;
+			safe_sprintf(str, "%d", base_value[i]);
+			m_base_att_value[i]->setString(str.c_str());
+		}
+	}
+
+	// 附加属性
+	std::map<ERoleAttribute, std::string> IndentifyAttrNameStr;
+	IndentifyAttrNameStr[ERA_ExAttackMax] = "\xE7\x89\xA9\xE6\x94\xBB\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";
+	IndentifyAttrNameStr[ERA_ExAttackMin] = "\xE7\x89\xA9\xE6\x94\xBB\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";
+	IndentifyAttrNameStr[ERA_ExMaxDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";
+	IndentifyAttrNameStr[ERA_ExMinDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";
+	IndentifyAttrNameStr[ERA_InAttackMax] = "\xE9\xAD\x94\xE6\x94\xBB\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";
+	IndentifyAttrNameStr[ERA_InAttackMin] = "\xE9\xAD\x94\xE6\x94\xBB\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";
+	IndentifyAttrNameStr[ERA_ArmorIn] = "\xE9\x81\x93\xE6\x94\xBB\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";
+	IndentifyAttrNameStr[ERA_ArmorEx] = "\xE9\x81\x93\xE6\x94\xBB\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";
+	IndentifyAttrNameStr[ERA_InMaxDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";
+	IndentifyAttrNameStr[ERA_InMinDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";
+	IndentifyAttrNameStr[ERA_HitRate] = "\xE5\x91\xBD\xE4\xB8\xAD\xEF\xBC\x9A";
+	IndentifyAttrNameStr[ERA_Dodge] = "\xE9\x97\xAA\xE9\x81\xBF\xEF\xBC\x9A";
+	IndentifyAttrNameStr[ERA_Crit_Rate] = "\xE6\x9A\xB4\xE5\x87\xBB\xEF\xBC\x9A";
+	IndentifyAttrNameStr[ERA_UnCrit_Rate] = "\xE5\x85\x8D\xE6\x9A\xB4\xEF\xBC\x9A";
+	IndentifyAttrNameStr[ERA_MaxHP] = "\xE7\x94\x9F\xE5\x91\xBD\xE5\x80\xBC\xEF\xBC\x9A";
+	IndentifyAttrNameStr[ERA_MaxMP] = "\xE9\xAD\x94\xE5\x8A\x9B\xE5\x80\xBC\xEF\xBC\x9A";
+
+	std::vector<int> add_value;
+	std::vector<string> add_name;
+
+	tagRoleAttEffect tempTagRoleAttEffect;
+	for (INT32 i = MAX_BASE_ATT; i < MAX_ADDITIONAL_EFFECT ; i++)
+	{
+		tempTagRoleAttEffect = equip->get_equip()->EquipAttitionalAtt[i];
+		if (tempTagRoleAttEffect.eRoleAtt != NULL && tempTagRoleAttEffect.nValue > 0)
+		{
+			add_value.push_back(tempTagRoleAttEffect.nValue);
+			add_name.push_back(BaseAttrNameStr[tempTagRoleAttEffect.eRoleAtt]);
+		}
+	}
+
+	for(int i = 0; i < max_add_att; ++i)
+	{
+		m_add_att_name[i]->setVisible(false);
+		m_add_att_value[i]->setVisible(false);
+
+		for(size_t i = 0; i < add_value.size(); ++i)
+		{
+			m_add_att_name[i]->setVisible(true);
+			m_add_att_value[i]->setVisible(true);
+
+			m_add_att_name[i]->setString(add_name[i]);
+
+			string str;
+			safe_sprintf(str, "%d", add_value[i]);
+			m_add_att_value[i]->setString(str.c_str());
+		}
+	}
+
+	m_no_att_cue->setVisible(add_value.empty());
+	m_buff_cue_1->setVisible(false);
+	m_buff_cue_2->setVisible(false);
+	m_special_right_cue->setVisible(false);
+
+	const EquipTypeData* equip_type_data = PackageManager::getInstance()->getEquipTypeData(equip->get_item_type_id());
+	bool is_wing = equip_type_data->posIndex == EEP_Body1;
+	if(is_wing)
+	{
+		// 特殊属性
+		int fly_level = equip->get_equip()->nLevel;
+		float wing_spec_att_stren_pct =0;
+		stBuffStrenEffect stren_effect;
+		EquipTipUiLayer::get_wing_equip_stren(equip->get_item_type_id(),fly_level,wing_spec_att_stren_pct,stren_effect);
+
+		//翅膀特性增强全属性
+		std::string tmp;
+		if (wing_spec_att_stren_pct)
+		{
+			safe_sprintf(tmp,STRING_TABLE["equip_wing_spec_att"],fly_level,wing_spec_att_stren_pct);
+			m_buff_cue_2->setString(tmp.c_str());
+			m_buff_cue_2->setVisible(true);
+		}
+
+		if (stren_effect.is_valid())
+		{
+			std::string buff_key;
+			safe_sprintf(buff_key,"equip_buff_text_tip_%d",stren_effect.buff_id);
+			safe_sprintf(tmp,STRING_TABLE[buff_key.c_str()],stren_effect.effect_val,stren_effect.persist_time);
+			m_buff_cue_1->setString(tmp.c_str());
+			m_buff_cue_1->setVisible(true);
+		}
+	}
+	else
+	{
+		const WingEvolve& wing_data = WingManager::getInstance()->get_one_wing_evolve_data(equip->get_item_type_id());
+		refresh_special_att(m_special_right_cue, wing_data.placard_index, wing_data.dest_1, wing_data.dest_2);
+	}
+}
+
+void WingEvolveUiLayer::refresh_special_att(LabelEx* label, int special_index, std::string special_dest_1, std::string special_dest_2)
+{
+	if(!IS_VALID_PTR(label))
+		return;
+
+	if(special_index > 0)
+	{
+		string str;
+		safe_sprintf(str, "special_ring_att_%d", special_index);
+
+		string text;
+		if(special_dest_2.empty())
+		{
+			safe_sprintf(text, STRING_TABLE[str.c_str()], special_dest_1.c_str());
+		}
+		else
+		{
+			safe_sprintf(text, STRING_TABLE[str.c_str()], special_dest_1.c_str(), special_dest_2.c_str());
+		}
+
+		label->set_top_down(true);
+		label->set_text(text.c_str());
+		label->setVisible(true);
+	}
+}
+
+void WingEvolveUiLayer::refresh_icon(INT64 src_equip_id, DWORD dest_equip_type_id, DWORD item_type_id,bool enough_need_item)
+{
+	m_dest_wing_id = dest_equip_type_id;
+
+	m_item_node_1->removeAllChildrenWithCleanup(true);
+	m_item_node_2->removeAllChildrenWithCleanup(true);
+	m_item_node_3->removeAllChildrenWithCleanup(true);
+
+	f_equipment* equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(m_wing_id));
+	if(!IS_VALID_PTR(equip))
+		return;
+
+	ItemNode* item_2 = ItemNode::create();
+	if(!IS_VALID_PTR(item_2))
+	{
+		return;
+	}
+
+	item_2->hideItemOpBtn();
+	item_2->setAnchorPoint(ccp(0.5,0.5));
+	item_2->setPosition(ccp(m_item_node_2->getContentSize().width/2 ,m_item_node_2->getContentSize().height/2));
+	m_item_node_2->addChild(item_2);
+	item_2->setIsEquipUI(WCT_EQUIP_TIPS_UI_TAG);
+	item_2->hideItemOpBtnEx();
+	item_2->initWithItem(equip, false);
+	item_2->setNum(1);
+	item_2->setClickable(true);
+
+	ItemNode* item_3 = ItemNode::create();
+	if(!IS_VALID_PTR(item_3))
+	{
+		return;
+	}
+
+	item_3->hideItemOpBtn();
+	item_3->setAnchorPoint(ccp(0.5,0.5));
+	item_3->setPosition(ccp(m_item_node_3->getContentSize().width/2 ,m_item_node_3->getContentSize().height/2));
+	m_item_node_3->addChild(item_3);
+	item_3->setDataId(item_type_id);
+	item_3->setNum(1);
+	item_3->setClickable(true);
+	item_3->set_guide_to_buy(!enough_need_item);
+	
+	if(IS_VALID(dest_equip_type_id) && (dest_equip_type_id != 0))
+	{
+		m_button_wing->setBackgroundSpriteFrameForState(PackageManager::getInstance()->getIconSpriteFrame(dest_equip_type_id), CCControlStateNormal);
+		m_button_wing->setBackgroundSpriteFrameForState(PackageManager::getInstance()->getIconSpriteFrame(dest_equip_type_id), CCControlStateHighlighted);
+		m_button_wing->setBackgroundSpriteFrameForState(PackageManager::getInstance()->getIconSpriteFrame(dest_equip_type_id), CCControlStateDisabled);
+		m_button_wing->setBackgroundSpriteFrameForState(PackageManager::getInstance()->getIconSpriteFrame(dest_equip_type_id), CCControlStateSelected);
+		m_button_wing->setZoomOnTouchDown(false);
+	}
+}
+
+GameActionNode* WingEvolveUiLayer::get_success_effect()
+{
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+	std::string sSESuccess = sSEDir + "E1_77.plist";
+	m_plist.insert(sSESuccess);
+	UiResourceMgr::getInstance()->retainPlistFile(m_plist);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSESuccess.c_str());
+
+	GameActionNode* effect = GameActionNode::create();
+	effect->InitTextureWithSpriteFrame("E1_77");
+	effect->setPosition((this->getContentSize().width * 2 / 3) + 12, this->getContentSize().height / 2);
+	this->addChild(effect, RZN_EFFECT);
+	CC_ASSERT(effect);
+	return effect;
+}
+
+void WingEvolveUiLayer::play_success_effect()
+{
+	if(!IS_VALID_PTR(m_success_effect))
+		return;
+
+	if(m_success_effect->GetActionState())
+	{
+		m_success_effect->StopAction();
+	}
+	m_success_effect->playAnimOnce(0.12f, false);
+}
+
+void WingEvolveUiLayer::on_event_item_change( item_num_change* evt )
+{
+	f_equipment* equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(m_wing_id));
+	if(!IS_VALID_PTR(equip))
+		return;
+
+	const WingEvolve& wing_data = WingManager::getInstance()->get_one_wing_evolve_data(equip->get_item_type_id());
+
+	// 如果最高等级了 则不取下一级 当前按钮为左
+	bool is_max_level = (!IS_VALID(wing_data.target_id) || (wing_data.target_id == 0));
+
+	if(is_max_level)
+	{
+		return;
+	}
+	else
+	{
+		DWORD need_item_id = wing_data.need_item_id;
+		if (need_item_id != evt->item_type_id) return;
+
+		int need_num = wing_data.need_item_num;
+		int cur_num = PackageManager::getInstance()->getItemNumber(EICT_Bag, need_item_id);
+		stringstream ss;
+		ss<<cur_num<<"/"<<need_num;
+		m_need_num_2->setString(ss.str().c_str());
+		bool enough_need_item = need_num <= cur_num;
+		m_need_num_2->setColor(enough_need_item ? ccGREEN : ccRED);
+
+		refresh_icon(equip->get_item_id(), wing_data.target_id, need_item_id,enough_need_item);
+	}
+}

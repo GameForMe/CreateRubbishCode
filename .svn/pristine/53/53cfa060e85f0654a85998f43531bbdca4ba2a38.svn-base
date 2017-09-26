@@ -1,0 +1,803 @@
+#include "TreasureLoftUi.h"
+#include "UiManager.h"
+#include "UiLoader.h"
+#include "CfgReader.h"
+#include "LocalPlayer.h"
+#include "TouchSprite.h"
+#include "UiTools.h"
+#include "ClientCfg.h"
+#include "GambleMgr.h"
+#include "PackageUi.h"
+#include "GambleProto.h"
+#include "MartialEquipUi.h"
+#include "RoleManager.h"
+#include "ActivityMgr.h"
+#include "PackageManager.h"
+#include "item.h"
+#include "StringMgr.h"
+#include "UiTools.h"
+#include "World.h"
+#include "SystemUi.h"
+#include "ItemNode.h"
+#include "NewPlayerGuide.h"
+#include "RoleManager.h"
+#include "DBMgr.h"
+#include "ToolTip.h"
+#include "MessageBoxUi.h"
+#include "ItemTip.h"
+#include "ItemNode.h"
+#include <algorithm>
+#include <math.h>
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "UiResourceMgr.h"
+
+CCNode* TreasureLoftUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["TreasureLoftUiLayer"] = UiLayerLoader<TreasureLoftUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("treasureloftui", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+TreasureLoftUiLayer * TreasureLoftUi::getUiLayer()
+{
+	return getUiNodeByTag<TreasureLoftUiLayer>(WCT_TreasureLoftUi);
+}
+
+void TreasureLoftUi::updateData()
+{
+	TreasureLoftUiLayer* layer = getUiLayer();
+	if (layer != NULL)
+	{
+		layer->updateData();
+	}
+}
+
+void TreasureLoftUi::setRandDiceNum( int i )
+{
+	TreasureLoftUiLayer* layer = getUiLayer();
+	if (layer != NULL)
+	{
+		layer->setRandDiceNum(i);
+	}
+}
+
+void TreasureLoftUi::runAnimation()
+{
+	TreasureLoftUiLayer* layer = getUiLayer();
+	if (layer != NULL)
+	{
+		layer->runAnimation();
+	}
+}
+
+void TreasureLoftUi::onGetReward()
+{
+	TreasureLoftUiLayer* layer = getUiLayer();
+	if (layer != NULL)
+	{
+		layer->onGetReward();
+	}
+}
+
+////////////////////////////////////////////////////
+
+TreasureLoftUiLayer::TreasureLoftUiLayer()
+	:_frame(NULL)
+	,_rolldiceEnable(true)
+	,_rolldangqianEnable(true)
+	,_roleImage(NULL)
+	,m_selfPosIndex(0)
+	,m_targetPosIndex(0)
+	,m_floor(0)
+	,_rewardboxAnim(NULL)
+	,_rewardboxAnimNode(NULL)
+	,_leverlStart(NULL)
+	,_initStart(NULL)
+	,_doubleEffect(NULL)
+	,_threeEffece(NULL)
+	,_initIndex(0)
+{
+	schedule(schedule_selector(TreasureLoftUiLayer::update), 1 / 60);
+	
+}
+
+TreasureLoftUiLayer::~TreasureLoftUiLayer()
+{
+	unscheduleAllSelectors();
+}
+
+cocos2d::SEL_MenuHandler TreasureLoftUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler TreasureLoftUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", TreasureLoftUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", TreasureLoftUiLayer::onCloseBtn2Pressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRolldiceBtnPressed", TreasureLoftUiLayer::onRolldiceBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onInstructBtnPressed", TreasureLoftUiLayer::onInstructBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onDangQIBtnPressed", TreasureLoftUiLayer::onDangQIBtnPressed);
+	return NULL;
+}
+
+void TreasureLoftUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(NT_Frame));
+	CC_ASSERT(_frame != NULL);
+
+  _levelsprite= dynamic_cast<CCSprite*>(_frame->getChildByTag(99));//关卡设置精灵显示
+	CC_ASSERT(_levelsprite != NULL);
+
+	_diceSprite= dynamic_cast<CCSprite*>(_frame->getChildByTag(TLU_DiceSprite));
+	CC_ASSERT(_diceSprite != NULL);
+
+	_rewardboxAnimNode = _frame->getChildByTag(TLU_AnimateNode);
+	CC_ASSERT(_rewardboxAnimNode != NULL);
+
+	_leverlStart = dynamic_cast<CCSprite*>(_frame->getChildByTag(TLU_LevelStart));
+	CC_ASSERT(_leverlStart != NULL);
+
+	_initStart = _frame->getChildByTag(TLU_InitStart);
+	CC_ASSERT(_initStart != NULL);
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+	std::string sSESurround = sSEDir + "E1_30.plist";
+	_plist.insert(sSESurround);
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSESurround.c_str());
+
+	_rewardAcNode = this->getRewardAcNode();
+	_frame->addChild(_rewardAcNode, RZN_EFFECT);
+
+	for(int i = TLU_RewardStart; i < TLU_RewardEnd; i ++)//vvvv
+	{
+		CCNode* n = _frame->getChildByTag(i);
+		CC_ASSERT(n != NULL);
+		m_ItemPos[i - TLU_RewardStart] = n->getPosition();
+
+		CCSprite* sprite = CCSprite::create();
+		sprite->setPosition(m_ItemPos[i - TLU_RewardStart]);
+		sprite->setTag(TLU_ItemNodeSprite + i - TLU_RewardStart);
+		_frame->addChild(sprite);
+	}
+
+	for (int i = 0; i < 4; i++)
+	{
+		CCNode* n = _frame->getChildByTag(i + TLU_ItemBegin);
+		CC_ASSERT(n != NULL);
+
+		m_RewardItem[i] = ItemNode::create();
+  		m_RewardItem[i]->setPosition(n->getPosition());
+ 		m_RewardItem[i]->setBlank();
+ 		_frame->addChild(m_RewardItem[i],1);
+		m_RewardItem[i]->getSurroundSE("E1_39");
+	}
+
+	
+// 
+// 	CCControlButton *btn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(TLU_RollDiceBtn));
+// 	CCControlButton *btn2 = dynamic_cast<CCControlButton*>(_frame->getChildByTag(TLU_RollDangQianBtn));
+// 	LocalPlayer* pLocPlayer = RoleManager::getInstance()->getLocalPlayer();
+// 	if (pLocPlayer->getRoleDayClearInfo(ERDCT_CBG_FreeGamble) < 1)
+// 	{
+// 		setButtonSpriteFrame(btn,"treasureloftui_freebtnn","treasureloftui_freebtnh","treasureloftui_freebtnhd");
+// 		setButtonSpriteFrame(btn2,"treasureloftui_freebtnn","treasureloftui_freebtnh","treasureloftui_freebtnhd");
+// 	}
+// 	else
+// 	{
+// 		setButtonSpriteFrame(btn,"treasureloftui_rolldicebtnn","treasureloftui_rolldicebtnh","treasureloftui_rolldicebtnd");
+// 		setButtonSpriteFrame(btn2,"treasureloftui_dangqianbtnn","treasureloftui_dangqianbtnh","treasureloftui_dangqianbtnd");
+// 	}
+	updateData();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this,1, true);
+	isRunAnmiation = false;
+}
+
+void TreasureLoftUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	this->stopAllActions();
+	stopRewardBoxAnimate();
+	CLOSE_UI(WCT_TreasureLoftUi);
+}
+
+void TreasureLoftUiLayer::onInstructBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	showInstructFrame(true);
+}
+
+void TreasureLoftUiLayer::onDangQIBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	if (PackageManager::getInstance()->getBlankCount() < 1)
+	{
+		ToolTip::getInstance()->push(GET_STR(161));
+		return;
+	}
+	//检查开放等级
+	int nOpenLevel = GetFunOpenLevel(EFOL_TreasureHouse);
+	if (ploc->getLevel() < nOpenLevel)//50级才开放，到达指定等级才会显示
+	{
+		//提示等级不足
+		return;
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_22);
+	int vipLevel = ploc->getVIPLevel();
+	if (vipLevel < 10)
+	{
+		RechargeNewUiMgr::GetInstance()->setCurrentRechargeState(10);
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+		return ;
+	}
+	GambleMgr::getInstance()->setIsYiqiDangqian(true);
+	GambleMgr::getInstance()->setCheckedYiqiCurFloor(m_floor);
+	sendRollMessageToServer();
+	CCControlButton *btn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(TLU_RollDiceBtn));
+	CCControlButton *btn2 = dynamic_cast<CCControlButton*>(_frame->getChildByTag(TLU_RollDangQianBtn));
+	setButtonSpriteFrame(btn2,"treasureloftui_dangqianbtnn","treasureloftui_dangqianbtnh","treasureloftui_dangqianbtnd");
+	setButtonSpriteFrame(btn,"treasureloftui_rolldicebtnn","treasureloftui_rolldicebtnh","treasureloftui_rolldicebtnd");
+}
+
+void TreasureLoftUiLayer::onRolldiceBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	if (PackageManager::getInstance()->getBlankCount() < 1)
+	{
+		ToolTip::getInstance()->push(GET_STR(161));
+		return;
+	}
+	//检查开放等级
+	int nOpenLevel = GetFunOpenLevel(EFOL_TreasureHouse);
+	if (ploc->getLevel() < nOpenLevel)//50级才开放，到达指定等级才会显示
+	{
+		//提示等级不足
+		return;
+	}
+	if (isRunAnmiation)
+		return;
+	sendRollMessageToServer();
+	CCControlButton *btn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(TLU_RollDiceBtn));
+	CCControlButton *btn2 = dynamic_cast<CCControlButton*>(_frame->getChildByTag(TLU_RollDangQianBtn));
+	setButtonSpriteFrame(btn,"treasureloftui_rolldicebtnn","treasureloftui_rolldicebtnh","treasureloftui_rolldicebtnd");
+	setButtonSpriteFrame(btn2,"treasureloftui_dangqianbtnn","treasureloftui_dangqianbtnh","treasureloftui_dangqianbtnd");
+	setEnableDiceBtnClick(false);
+}
+
+void TreasureLoftUiLayer::onCloseBtn2Pressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	showInstructFrame(false);
+	
+}
+
+void TreasureLoftUiLayer::onExit()
+{
+	GambleMgr::getInstance()->setIsYiqiDangqian(false);
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+}
+
+int TreasureLoftUiLayer::getItemUnderPoint( const CCPoint &point )
+{
+	for(int i = 0 ; i < 4; i ++)
+	{
+		float x = m_RewardItem[i]->getPositionX();
+		float y = m_RewardItem[i]->getPositionY();
+		CCRect rect(x - ITEMNODE_CONTENTWIDTH / 2, y - ITEMNODE_CONTENTHEIGHT / 2, ITEMNODE_CONTENTWIDTH, ITEMNODE_CONTENTHEIGHT);
+		if(rect.containsPoint(point))
+		{
+			return i;
+		}
+	}
+	return -1;
+}
+
+// bool TreasureLoftUiLayer::setItemSelect( int index )
+// {
+// 	if (index < TLU_ItemBegin || index > TLU_ItemEnd)
+// 		return false;
+// 	_selectSprite->setPosition(m_RewardPos[index]);
+// 	if (!_selectSprite->isVisible())
+// 		_selectSprite->setVisible(true);
+// 
+// 	_selectindex = index;
+// 	return true;
+// }
+
+bool TreasureLoftUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		//确定是否点击显示tips;
+		int index = getItemUnderPoint(framePoint);
+		if (index >= 0 && index < 4)
+		{
+			ItemTip::getInstace()->open();
+			ItemTip::getInstace()->setPosition(m_RewardItem[index]->getPosition());
+			ItemTip::getInstace()->setDataId(_treasurLoftList.BigRewardId[index]);
+			ItemTip::getInstace()->hideOpBtn();
+ 		}
+		return true;
+	}
+	return false;
+}
+
+void TreasureLoftUiLayer::updateData()
+{
+	//玩家当前在藏宝阁中的位置;
+	stopRewardBoxAnimate();
+	LocalPlayer* pLocPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if (NULL == pLocPlayer)
+		return ;
+	if (World::getInstance()->GetDayClearFlag())
+	{
+		setEnableDiceBtnClick(true);
+	}
+	else
+	{
+		setEnableDiceBtnClick(false);
+	}
+
+	_initIndex = pLocPlayer->getRoleDayClearInfo(ERDCT_CGB_BLOCK_INDEX);
+	if (_initIndex >= 78)
+	{
+		_initIndex = 0;
+	}
+	//第一次打开藏宝阁 ;
+	m_floor = _initIndex / MAX_CBG_BLOCK_NUM;
+	if (GambleMgr::getInstance()->getIsYiqiDangqian())
+	{
+		if (m_floor != GambleMgr::getInstance()->getCheckedYiqiCurFloor())
+		{
+			GambleMgr::getInstance()->setIsYiqiDangqian(false);
+		}
+	}
+	m_selfPosIndex = _initIndex % MAX_CBG_BLOCK_NUM;//vvv
+	_roleImage = dynamic_cast<CCSprite*>(_frame->getChildByTag(TLU_RoleImage));
+	CC_ASSERT(_roleImage != NULL);
+	_roleImage->setZOrder(2);
+	if (m_targetPosIndex >= TREALOFTMAXGRID || 0 == m_selfPosIndex)// TREALOFTMAXGRID =27
+	{
+		_roleImage->setPosition(_initStart->getPosition());
+	}
+	else
+	{
+		_roleImage->setPosition(m_ItemPos[m_selfPosIndex - TLU_RewardStart]);
+		m_targetPosIndex = 0;
+	}
+	
+	std::string levelStartName;
+// 	switch (m_floor)
+// 	{
+// 	case 0:
+// 		levelStartName = "treasureloftui_start";
+// 		break;
+// 	case 1:
+// 		levelStartName = "treasureloftui_doubleaward";
+// 		break;
+// 	case 2:
+// 		levelStartName = "treasureloftui_threeaward";
+// 		break;
+// 	}
+
+	//_leverlStart->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(levelStartName.c_str()));
+	
+
+	CCString* str = CCString::createWithFormat("treasureloftui_frame%d", m_floor + 1);
+	CCSpriteFrame *frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str->getCString());
+	_levelsprite->setDisplayFrame(frame);
+	_treasurLoftList = getRewardForLevel(m_floor);
+	for (int i = TLU_RewardStart; i < (TLU_RewardEnd - 1); i++)//vvv
+	{
+		CCSprite *sprite = dynamic_cast<CCSprite*>(_frame->getChildByTag(TLU_ItemNodeSprite + i - TLU_RewardStart));
+		sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(_treasurLoftList.RewardName[i - TLU_RewardStart].c_str()));
+	}
+
+	for (int i = 0; i < 4; i++)
+	{
+//		m_RewardItem[i]->stopAnimation();
+		m_RewardItem[i]->setDataId(_treasurLoftList.BigRewardId[i]);
+		m_RewardItem[i]->setNum(_treasurLoftList.BigRewardNum[i]); 
+//		m_RewardItem[i]->runAnimation("qianghua15");
+		m_RewardItem[i]->setVisible(true);
+	}
+	CCControlButton *btn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(TLU_RollDiceBtn));
+	CCControlButton *btn2 = dynamic_cast<CCControlButton*>(_frame->getChildByTag(TLU_RollDangQianBtn));
+	if (pLocPlayer->getRoleDayClearInfo(ERDCT_CBG_FreeGamble) < 1)
+	{
+		setButtonSpriteFrame(btn,"treasureloftui_freebtnn","treasureloftui_freebtnh","treasureloftui_freebtnhd");
+		//setButtonSpriteFrame(btn2,"treasureloftui_freebtnn","treasureloftui_freebtnh","treasureloftui_freebtnhd");
+	}
+	else
+	{
+		setButtonSpriteFrame(btn,"treasureloftui_rolldicebtnn","treasureloftui_rolldicebtnh","treasureloftui_rolldicebtnd");
+		setButtonSpriteFrame(btn2,"treasureloftui_dangqianbtnn","treasureloftui_dangqianbtnh","treasureloftui_dangqianbtnd");
+	}
+
+
+}
+
+void TreasureLoftUiLayer::showInstructFrame( bool show )
+{
+	//CCSize size = CCDirector::sharedDirector()->getWinSize();
+	CCSprite *instructframe  = dynamic_cast<CCSprite*>(getChildByTag(NT_InstructFrame));
+	CC_ASSERT(instructframe != NULL);
+	instructframe->setVisible(show);
+
+}
+
+void TreasureLoftUiLayer::runAnimation()
+{
+	setEnableDiceBtnClick(false);
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_27);//摇色子音效
+	CCAnimation *animation = CCAnimation::create();
+	const char *prefixStr = "treasureloftui_dice";
+	for(int i = 1; i < 7; i++)
+	{
+		std::ostringstream ostr;
+		ostr << prefixStr << 2*i;
+		CCSpriteFrame *frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(ostr.str().c_str());
+		CC_ASSERT(frame != NULL);
+		animation->addSpriteFrame(frame);
+	}
+	animation->setDelayPerUnit(0.05f);
+	_diceSprite->runAction(CCRepeatForever::create(CCAnimate::create(animation)));
+}
+
+void TreasureLoftUiLayer::AnimationCallBack( CCNode* node )
+{
+	//将目标Index发送给服务器;
+	_roleImage->stopAllActions();
+	_rewardAcNode->setPosition(_roleImage->getPosition());
+	_rewardAcNode->playAnimOnce(0.08f, false);
+	int m_targetToServerIndex = m_targetPosIndex + m_floor * TREALOFTMAXGRID;
+	GambleMgr::getInstance()->SendCBG_Gamble_Reward(m_targetToServerIndex);
+	if (m_targetPosIndex >= TREALOFTMAXGRID)
+	{
+		runRewardBoxAnimate();
+		_diceSprite->setVisible(false);
+		//给获得宝箱提示;
+	}
+	else
+	{
+// 			if ( 5 == m_targetToServerIndex||
+// 				15 == m_targetToServerIndex||
+// 				38 == m_targetToServerIndex||
+// 				45 == m_targetToServerIndex||
+// 				69 == m_targetToServerIndex||
+// 				78 == m_targetToServerIndex)
+// 			{
+// 				setEnableDiceBtnClick(false);
+// 			}
+// 			else
+		/*{*/
+				
+		/*}*/
+		isRunAnmiation = false;
+	}
+}
+
+void TreasureLoftUiLayer::runMoveAnimation( CCPoint selfindex,CCPoint targetindex)
+{
+	setEnableDiceBtnClick(false);
+	isRunAnmiation = true;
+	CCArray *actionArray = CCArray::create();
+	CCDelayTime * time = CCDelayTime::create(0.2f);
+	if (m_targetPosIndex > m_selfPosIndex)
+	{
+		for (int i = m_selfPosIndex; i <= m_targetPosIndex ; i++)
+		{
+			if(0 == i)
+				continue;
+ 			CCMoveTo* moveto = CCMoveTo::create(0.2f,m_ItemPos[i - TLU_RewardStart]);
+			CCScaleTo* scale1 = CCScaleTo::create(0.2f,1.2f,1.2f);
+			CCSpawn *spawn1 = CCSpawn::createWithTwoActions(moveto, scale1);
+			CCScaleTo* scale2 = CCScaleTo::create(0.2f,0.8f,0.8f);
+			CCSequence *sequence = CCSequence::create(spawn1,scale2,time,NULL);
+			actionArray->addObject(sequence);
+		}
+	} 
+	else
+	{
+		for (int i = m_selfPosIndex; i >= m_targetPosIndex ; i--)
+		{
+			if(0 == i)
+				continue;
+			CCMoveTo* moveto = CCMoveTo::create(0.2f,m_ItemPos[i - TLU_RewardStart]);
+			CCScaleTo* scale1 = CCScaleTo::create(0.2f,1.2f,1.2f);
+			CCSpawn *spawn1 = CCSpawn::createWithTwoActions(moveto, scale1);
+			CCScaleTo* scale2 = CCScaleTo::create(0.2f,0.8f,0.8f);
+			CCSequence *sequence = CCSequence::create(spawn1,scale2,time,NULL);
+			actionArray->addObject(sequence);
+		}
+	}
+	CCSequence *s = CCSequence::create(actionArray);
+	CCSequence *action = CCSequence::createWithTwoActions(s, CCCallFuncN::create(this, SEL_CallFuncN(&TreasureLoftUiLayer::AnimationCallBack)));
+
+	_roleImage->runAction(action);
+}
+//设置一骑当千状态  ()
+void TreasureLoftUiLayer::setEnableDianQianBtnClick( bool enable )
+{
+// 	if(_frame != NULL)
+// 	{
+// 		
+// 		_rolldangqianEnable = enable;
+// 		CCControlButton *btn2 = dynamic_cast<CCControlButton*>(_frame->getChildByTag(TLU_RollDangQianBtn));
+// 		CC_ASSERT(btn2 != NULL);
+// 		btn2->setEnabled(enable);
+// 		
+// 	}
+}
+void TreasureLoftUiLayer::setEnableDiceBtnClick( bool enable )
+{
+	if(_frame != NULL)
+	{
+		_rolldiceEnable = enable;
+		CCControlButton *btn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(TLU_RollDiceBtn));
+		CC_ASSERT(btn != NULL);
+		btn->setEnabled(enable);
+
+		_rolldangqianEnable = enable;
+		CCControlButton *btn2 = dynamic_cast<CCControlButton*>(_frame->getChildByTag(TLU_RollDangQianBtn));
+		CC_ASSERT(btn2 != NULL);
+		btn2->setEnabled(enable);
+		//_rolldangqianEnable
+	}
+}
+
+void TreasureLoftUiLayer::setRandDiceNum( int i )
+{
+	_diceSprite->stopAllActions();
+	if (i > 0 && i <= MAX_SHAI_POINTS)
+	{
+		CCString* str = CCString::createWithFormat("treasureloftui_dice%d",2*i - 1);
+		_diceSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str->getCString()));
+	}
+	setEnableDiceBtnClick(false);
+	//玩家当前在藏宝阁中的位置;
+ 	LocalPlayer* pLocPlayer = RoleManager::getInstance()->getLocalPlayer();
+ 	if (NULL == pLocPlayer)
+ 		return ;
+  	_initIndex = pLocPlayer->getRoleDayClearInfo(ERDCT_CGB_BLOCK_INDEX);
+	if (-CBG_BACK_BLOCKS_NUM == i)
+	{
+		_initIndex += CBG_BACK_BLOCKS_NUM;
+	}
+
+	m_selfPosIndex = _initIndex % TREALOFTMAXGRID;
+	m_targetPosIndex = m_selfPosIndex + i;
+	m_targetPosIndex = m_targetPosIndex > TREALOFTMAXGRID? 	TREALOFTMAXGRID : m_targetPosIndex;
+	int temp = m_targetPosIndex - TLU_RewardStart;
+	if(temp < 0 || temp > MAX_CBG_BLOCK_NUM)
+		return;
+	runMoveAnimation(_roleImage->getPosition(),m_ItemPos[temp]);
+}
+
+TreasureLoftReward TreasureLoftUiLayer::getRewardForLevel( int level )
+{
+	TreasureLoftReward rewardInfo;
+	if (level < 0 || level > 2)
+		return rewardInfo;
+	
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM TreasureLoftReward WHERE Id = ?1");
+	cmd->set_integer32(1,level);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("Level");
+		rewardInfo.level = table->get_integer32(idx);
+		idx = table->get_index("Title");
+		rewardInfo.title= table->get_text(idx);
+		for (int i = 0; i < REWARDNUM;i++)
+		{
+			CCString* str = CCString::createWithFormat("Grid%d",i);
+			idx = table->get_index(str->getCString());
+			rewardInfo.RewardIndex[i] = table->get_integer32(idx);
+			CCString* str2 = CCString::createWithFormat("Name%d",i);
+			idx = table->get_index(str2->getCString());
+			rewardInfo.RewardName[i] = table->get_text(idx);
+		}
+		for (int i = 0; i < BIGREWARDNUM; i++)
+		{
+			CCString* str = CCString::createWithFormat("RewardId%d",i);
+			idx = table->get_index(str->getCString());
+			rewardInfo.BigRewardId[i] = table->get_integer32(idx);
+			CCString* str2 = CCString::createWithFormat("RewardNum%d",i);
+			idx = table->get_index(str2->getCString());
+			rewardInfo.BigRewardNum[i] = table->get_integer32(idx);
+		}
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	return rewardInfo;
+}
+
+void TreasureLoftUiLayer::runRewardBoxAnimate()
+{
+/*
+	if (_rewardboxAnim == NULL)
+	{*/
+/*
+		AnimationCache::AnimateList anims;
+		AnimationCache::createDefList(1, anims);
+		AnimationCache::getInstance()->getSinEffect(0,"baoxiang", anims);
+		BSAnimate *animste = anims[0];
+		_rewardboxAnim = CCSprite::create();
+		//_rewardboxAnim->setAnchorPoint(ccp(0.0f, 1.0f));
+		_rewardboxAnim->setPosition(_rewardboxAnimNode->getPosition());
+		_frame->addChild(_rewardboxAnim);*/
+
+		CCSprite* tempSp = CCSprite::create();
+		_frame->addChild(tempSp);
+		CCDelayTime* updateTime = CCDelayTime::create(2.0f);
+
+		CCCallFuncN * callfunc1 =  CCCallFuncN::create(this, SEL_CallFuncN(&TreasureLoftUiLayer::showPassLevelPrompt)); 
+		
+		CCCallFuncN *callfunc2 = CCCallFuncN::create(this, SEL_CallFuncN(&TreasureLoftUiLayer::runRewardBoxAniCallback));
+
+		CCSequence *s  = CCSequence::create(callfunc1 ,updateTime,callfunc2,NULL);
+
+		tempSp->runAction(s);
+/*	}*/
+}
+
+void TreasureLoftUiLayer::stopRewardBoxAnimate()
+{
+	if (_rewardboxAnim != NULL)
+	{
+		_rewardboxAnim->stopAllActions();
+		_rewardboxAnim->removeFromParent();
+		_rewardboxAnim = NULL;
+	}
+}
+
+void TreasureLoftUiLayer::runRewardBoxAniCallback( CCNode* node )
+{
+	setEnableDiceBtnClick(true);
+	_diceSprite->setVisible(true);
+	isRunAnmiation = false;
+}
+
+void TreasureLoftUiLayer::update( float dt )
+{
+	LocalPlayer* pLocPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if (NULL == pLocPlayer)
+		return ;
+	CCControlButton *btn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(TLU_RollDiceBtn));
+	CC_ASSERT(btn != NULL);
+	CCControlButton *btn2 = dynamic_cast<CCControlButton*>(_frame->getChildByTag(TLU_RollDangQianBtn));
+	CC_ASSERT(btn2 != NULL);
+	/*
+	if (pLocPlayer->getRoleDayClearInfo(ERDCT_CBG_FreeGamble) < 1)
+	{
+		setButtonSpriteFrame(btn,"treasureloftui_freebtnn","treasureloftui_freebtnh","treasureloftui_freebtnhd");
+	}
+	else
+	{
+		setButtonSpriteFrame(btn,"treasureloftui_rolldicebtnn","treasureloftui_rolldicebtnh","treasureloftui_rolldicebtnd");
+	}
+	*/
+	//刷新活动图标特效
+	World::getInstance()->getMiniMapUi()->updateActivityAnimation();
+}
+
+void TreasureLoftUiLayer::sendRollMessageToServer()
+{
+	showInstructFrame(false);
+	//摇色子时给服务器发送消息;
+	GambleMgr::getInstance()->CBG_GambelForOnce();
+}
+
+void TreasureLoftUiLayer::showPassLevelPrompt( CCNode* node )
+{
+	if(m_floor < 0 || m_floor > 2)
+		return;
+	std::stringstream ss;
+	ss<< (m_floor + 1);
+	std::string str = replaceStr(GET_STR(6021),"**",ss.str());
+	ToolTip::getInstance()->push(str.c_str(),3.0f);
+}
+
+cocos2d::CCRect TreasureLoftUiLayer::GetBtnPos( int nTag )
+{
+	SetNodeTintTo(_frame->getChildByTag(nTag));
+	CCPoint cp = _frame->getChildByTag(nTag)->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = _frame->getChildByTag(nTag)->getContentSize();
+	return CCRect(cp.x, cp.y, cs.width, cs.height);
+}
+
+GameActionNode* TreasureLoftUiLayer::getRewardAcNode()
+{
+	GameActionNode* rewardAxNode = GameActionNode::create();
+// 	for (int i = 1; i < 99; ++i)
+// 	{
+// 		CCString* rewardStr = CCString::createWithFormat("%s%02d", "E1_30", i);
+// 		if(!rewardAxNode->AddTexture(rewardStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+	rewardAxNode->InitTextureWithSpriteFrame("E1_30");
+	return rewardAxNode;
+}
+
+void TreasureLoftUiLayer::onGetReward()
+{
+	setEnableDiceBtnClick(true);
+}
+
+// void TreasureLoftUiLayer::runLevel2Anim()
+// {
+// 	AnimationCache::AnimateList animateList;
+// 	AnimationCache::createDefList(2, animateList);
+// 	AnimationCache::getInstance()->getSpecialEffect(0x3000,"jianglitexiao", animateList);
+// 	BSAnimate *animste = animateList[0];
+// 	if (_doubleEffect == NULL)
+// 	{
+// 		_doubleEffect = CCSprite::create();
+// 		_doubleEffect->setAnchorPoint(ccp(0.0f, 1.0f));
+// 		_doubleEffect->setPosition(ccp(_initStart->getPositionX(),_initStart->getPositionY() - 60.0f));
+// 		_doubleEffect->runAction(CCRepeatForever::create(animste));
+// 		_frame->addChild(_doubleEffect);
+// 	}
+// 	else
+// 	{
+// 		_doubleEffect->runAction(CCRepeatForever::create(animste));
+// 	}
+// }
+// 
+// void TreasureLoftUiLayer::runLevel3Anim()
+// {
+// 	AnimationCache::AnimateList animateList;
+// 	AnimationCache::createDefList(2, animateList);
+// 	AnimationCache::getInstance()->getSpecialEffect(0x3000,"jianglitexiao", animateList);
+// 	BSAnimate *animste = animateList[1];
+// 	if (_threeEffece == NULL)
+// 	{
+// 		_threeEffece = CCSprite::create();
+// 		_threeEffece->setAnchorPoint(ccp(0.0f, 1.0f));
+// 		_threeEffece->setPosition(ccp(_initStart->getPositionX(),_initStart->getPositionY() - 60.0f));
+// 		_threeEffece->runAction(CCRepeatForever::create(animste));
+// 		_frame->addChild(_threeEffece);
+// 	}
+// 	else
+// 	{
+// 		_threeEffece->runAction(CCRepeatForever::create(animste));
+// 	}
+// }
+// 
+// void TreasureLoftUiLayer::stopLevel2Animation()
+// {
+// 	if(_doubleEffect != NULL)
+// 	{
+// 		_doubleEffect->stopAllActions();
+// 		_doubleEffect->removeFromParent();
+// 		_doubleEffect = NULL;
+// 	}
+// 
+// }
+// 
+// void TreasureLoftUiLayer::stopLevel3Animation()
+// {
+// 	if (_threeEffece != NULL)
+// 	{
+// 		_threeEffece->stopAllActions();
+// 		_threeEffece->removeFromParent();
+// 		_threeEffece = NULL;
+// 	}
+// }
+
+

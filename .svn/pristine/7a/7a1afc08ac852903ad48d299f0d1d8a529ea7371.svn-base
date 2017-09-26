@@ -1,0 +1,1135 @@
+#include "StoreUi.h"
+#include "CfgReader.h"
+#include "World.h"
+#include "BaseDefine.h"
+#include "TouchSprite.h"
+#include "MallMgr.h"
+#include "PackageManager.h"
+#include "InputMessageBox.h"
+#include "UiTools.h"
+#include "ItemTip.h"
+#include "UiManager.h"
+#include "UiLoader.h"
+#include "BuySetUi.h"
+#include "Loading.h"
+#include "EquipTipUi.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "StoreRechargeUi.h"
+#include "UiResourceMgr.h"
+#include "ServerTime.h"
+#include "NewPlayerGuide.h"
+#include "ShortCutUi.h"
+#include "JoyStick.h"
+#include "SystemUi.h"
+#include "StringMgr.h"
+#include "TimeCardNodeUi.h"
+#include "Helper.h"
+#include "KaifuHuodongMgr.h"
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+#include "wzolJni.h"
+#endif
+
+StoreUiItem::StoreUiItem()
+	: _uiFrame(NULL)
+{
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("StoreUiItemFrame", StoreUiItemLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	_uiFrame = dynamic_cast<StoreUiItemFrame*>(ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "storeuiitem.ccbi").c_str()));
+	_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+	UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+	ccbReader->release();
+	if(_uiFrame != NULL)
+	{
+		_uiFrame->retain();
+		_uiFrame->_item = this;
+	}
+}
+
+StoreUiItem::~StoreUiItem()
+{
+	if(_uiFrame != NULL)
+	{
+		_uiFrame->release();
+		_uiFrame = NULL;
+	}
+
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+}
+
+void StoreUiItem::setName( const std::string &name )
+{
+	if(_uiFrame != NULL)
+	{
+		//CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_uiFrame->getChildByTag(SUT_Name));
+		LabelFT *label =Helper::getLabelFTByParentAndTag(_uiFrame, SUT_Name);
+		if(label != NULL)
+		{
+			label->setString(name.c_str());
+		}
+	}
+}
+
+void StoreUiItem::setLevel( int level )
+{
+	if(_uiFrame != NULL)
+	{
+		//CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_uiFrame->getChildByTag(SUT_Level));
+		LabelFT *label =Helper::getLabelFTByParentAndTag(_uiFrame, SUT_Level);
+		if(label != NULL)
+		{
+			CCString *str = CCString::createWithFormat("%d", level);
+			label->setString(str->getCString());
+		}
+	}
+}
+
+void StoreUiItem::setMoney( int money )
+{
+	if(_uiFrame != NULL)
+	{
+		//CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_uiFrame->getChildByTag(SUT_Money));
+		LabelFT *label =Helper::getLabelFTByParentAndTag(_uiFrame, SUT_Money);
+		if(label != NULL)
+		{
+			CCString *str = CCString::createWithFormat("%d", money);
+			label->setString(str->getCString());
+		}
+	}
+}
+
+void StoreUiItem::setIcon( const std::string &frameName )
+{
+	if(_uiFrame != NULL)
+	{
+		CCSprite *iconSprite = dynamic_cast<CCSprite*>(_uiFrame->getChildByTag(SUT_IconSprite));
+		if(iconSprite == NULL)
+		{
+			CCNode *node = _uiFrame->getChildByTag(SUT_IconNode);
+			if(node != NULL)
+			{
+				CCPoint pos = node->getPosition();
+				CCSize size = node->getContentSize();
+				iconSprite = CCSprite::create();
+				iconSprite->setPosition(pos);
+				_uiFrame->addChild(iconSprite, SUT_IconSprite);
+			}
+		}
+
+		if(iconSprite != NULL)
+		{
+			iconSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName.c_str()));
+		}
+	}
+}
+
+cocos2d::CCSize StoreUiItem::getContentSize()
+{
+	if(_uiFrame != NULL)
+	{
+		return _uiFrame->getContentSize();
+	}
+
+	return CCSize();
+}
+
+void StoreUiItem::setPosition( const CCPoint &pos )
+{
+	if(_uiFrame != NULL)
+	{
+		_uiFrame->setPosition(pos);
+	}
+}
+
+void StoreUiItem::buy(int num)
+{
+	MallMgr::getInstance()->BuyProduct(_dataInfo.typeIndex, _dataInfo.dwID, num);
+}
+
+void StoreUiItem::setData( const Tag_MallItemInfo &dataInfo )
+{
+	_dataInfo = dataInfo;
+
+	const ItemTypeData & typedata = PackageManager::getInstance()->getItemTypeData(_dataInfo.uItemTypeID);
+	setName(typedata.name);
+	setIcon(PackageManager::getInstance()->getIconFrameName(_dataInfo.uItemTypeID));
+	CCSprite* nSale=(CCSprite*)_uiFrame->getChildByTag(8);
+	
+ 	if (_dataInfo.isInPromote())//若处于促销期
+ 	{
+		//CCLabelTTF* nSaleNum=(CCLabelTTF*)nSale->getChildByTag(1);
+		LabelFT *nSaleNum =Helper::getLabelFTByParentAndTag(nSale, 1);
+		CCString* str=CCString::createWithFormat("%.0f%s",(float)_dataInfo.nSalePrice /_dataInfo.nPrice * 10,GET_STR(9070).c_str());
+		setMoney(_dataInfo.nSalePrice);
+		if (nSaleNum)
+		{
+			nSaleNum->setString(str->getCString());
+		}
+ 	}
+ 	else//若正常售卖
+	{
+		setMoney(dataInfo.nPrice);
+		nSale->setVisible(false);
+	}
+	
+	/*if (_dataInfo.nSalePrice!=_dataInfo.nPrice)//若处于促销期
+	{
+		CCLabelTTF* nSaleNum=(CCLabelTTF*)nSale->getChildByTag(1);
+		CCString* str=CCString::createWithFormat("%.1f",(float)_dataInfo.nSalePrice/_dataInfo.nPrice*10);
+		setMoney(_dataInfo.nSalePrice);
+		nSaleNum->setString(str->getCString());
+	}
+	else//若正常售卖
+	{
+		setMoney(dataInfo.nPrice);
+		nSale->setVisible(false);
+	}*/
+	setLimitGoods(_dataInfo.isNewGoods());
+//	setDiscountGood(_dataInfo.isInPromote());
+	if (dataInfo.typeIndex == 5)
+	{
+		//CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_uiFrame->getChildByTag(SUT_Rongyudian));
+		LabelFT *label =Helper::getLabelFTByParentAndTag(_uiFrame, SUT_Rongyudian);
+		if(label != NULL)
+		{
+			CCString *str = CCString::create("\xE8\x8D\xA3\xE8\xAA\x89\xE7\x82\xB9");
+			label->setString(str->getCString());
+		}
+	}
+	if(dataInfo.typeIndex==3)
+	{
+		CCSprite *label=dynamic_cast<CCSprite*>(_uiFrame->getChildByTag(SUT_Rongyudian));
+		if(label!=NULL)
+		{
+			/*CCRect rect(0,0,label->getContentSize().width,label->getContentSize().height);
+			CCSpriteFrame* spriteFrame=CCSpriteFrame::create("storeui_zuanshi",rect);
+			label->setDisplayFrame(spriteFrame);*/
+			label->initWithSpriteFrameName("storeui_zuanshi");
+		}
+	}
+
+
+	// plist
+	if (dataInfo.bShowIconPlist)
+	{
+		std::string sSEDir01= CFGReader::instance()->get_profile_string("Art", "Effect", "");
+		std::string sSEPlist = sSEDir01 + "E1_95.plist";
+		auto Plist = GameActionNode::create();
+		Plist->InitWithPList(sSEPlist.c_str(),"E1_95");
+		_uiFrame->addChild( Plist );
+		Plist->setPosition( _uiFrame->getChildByTag(SUT_IconNode)->getPosition());
+		Plist->BeginAction(0.1, true);
+	}
+
+}
+
+void StoreUiItem::showItemTip(const CCPoint &pos)
+{
+	if(MIsEquipment(_dataInfo.uItemTypeID))
+	{
+		EquipTipUiLayer *ui = EquipTipUi::create();
+		ui->showUi(pos, _dataInfo.uItemTypeID);
+	}
+	else
+	{
+		if(_dataInfo.uItemTypeID == MONTH_CARD_TYPE_ID)
+		{
+			OPEN_UI(WCT_TimeCardNodeUi);
+			TimeCardNodeUiLayer* timeCard = GET_UI(TimeCardNodeUi,WCT_TimeCardNodeUi)->getUiLayer();
+			if(timeCard != NULL)
+			{
+				timeCard->setData("dianka_35yuan", MONTH_CARD_TYPE_ID);
+			}
+		}
+		else if(_dataInfo.uItemTypeID == WEEK_CARD_TYPE_ID)
+		{
+			OPEN_UI(WCT_TimeCardNodeUi);
+			TimeCardNodeUiLayer* timeCard = GET_UI(TimeCardNodeUi,WCT_TimeCardNodeUi)->getUiLayer();
+			if(timeCard != NULL)
+			{
+				timeCard->setData("dianka_10yuan", WEEK_CARD_TYPE_ID);
+			}
+		}
+		else
+		{
+			if (_dataInfo.uItemTypeID == CLASSIC_UPPER_TYPE_ID
+				|| _dataInfo.uItemTypeID == CLASSIC_WEAPON_TYPE_ID )		// 特殊商品使用特殊Tip
+			{
+				SpecialStoreItemTip::getInstance()->open(_dataInfo.uItemTypeID,_dataInfo.nPrice);
+			}
+			else if (CLASSIC_MONTH_CARD_TYPE_ID == _dataInfo.uItemTypeID)
+			{
+				MonthCardItemTip::getInstance()->open();
+				MonthCardItemTip::getInstance()->setPosition(pos);
+			}
+			else
+			{
+				ItemTip::getInstace()->open();
+				ItemTip::getInstace()->setDataId(_dataInfo.uItemTypeID);
+				ItemTip::getInstace()->setPosition(pos);
+				ItemTip::getInstace()->hideOpBtn();
+				//ItemTip::getInstace()->show_buy_btn(true);
+			}
+		}
+		
+	}
+}
+
+//限时，打折商品限时标签;
+void StoreUiItem::setLimitGoods( bool isshow )
+{
+	CCSprite *limitsprite = CCSprite::create();
+	CC_ASSERT(limitsprite != NULL);
+	limitsprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("storeui_xianshi"));
+	limitsprite->setAnchorPoint(ccp(0.0f, 0.5f));
+	limitsprite->setVisible(isshow);
+	limitsprite->setPosition(ccp(0.0f,71.0f));
+	_uiFrame->addChild(limitsprite);
+}
+
+void StoreUiItem::setDiscountGood( bool isshow )
+{
+	CCSprite *discsprite = CCSprite::create();
+	CC_ASSERT(discsprite != NULL);
+	discsprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("storeui_dazhe"));
+	discsprite->setAnchorPoint(ccp(0.0f, 0.5f));
+	discsprite->setVisible(isshow);
+	discsprite->setPosition(ccp(0.0f,71.0f)); 
+	_uiFrame->addChild(discsprite);
+}
+
+cocos2d::CCPoint StoreUiItem::getBtnPostion()
+{
+	//return _uiFrame->getChildByTag(SUT_Btn)->convertToWorldSpace(_uiFrame->getChildByTag(SUT_Btn)->getPosition());
+	return _uiFrame->getChildByTag(SUT_Btn)->convertToWorldSpace(ccp(0,0));
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler StoreUiItemFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler StoreUiItemFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBuyBtnPressed", StoreUiItemFrame::onBuyBtnPressed);
+	return NULL;
+}
+
+void StoreUiItemFrame::onBuyBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	const Tag_MallItemInfo &dataInfo = _item->getData();
+	if(dataInfo.uItemTypeID == MONTH_CARD_TYPE_ID)//如果是月卡
+	{
+		OPEN_UI(WCT_TimeCardNodeUi);
+		TimeCardNodeUiLayer* timeCard = GET_UI(TimeCardNodeUi,WCT_TimeCardNodeUi)->getUiLayer();
+		if(timeCard != NULL)
+		{
+			timeCard->setData("dianka_35yuan", MONTH_CARD_TYPE_ID);
+		}
+	}
+	else if(dataInfo.uItemTypeID == WEEK_CARD_TYPE_ID)//如果是周卡
+	{
+		OPEN_UI(WCT_TimeCardNodeUi);
+		TimeCardNodeUiLayer* timeCard = GET_UI(TimeCardNodeUi,WCT_TimeCardNodeUi)->getUiLayer();
+		if(timeCard != NULL)
+		{
+			timeCard->setData("dianka_10yuan", WEEK_CARD_TYPE_ID);
+		}
+	}
+	else{
+		BuySetUi::getInstance()->open();
+		NewPlayerGuider::getInstance()->onUiOpen(WCT_BuySetUi);
+		BuySetUi::getInstance()->setDataId(dataInfo.uItemTypeID);
+		//gx add 增加打折显示
+		Tag_MallItemInfo tag_Temp = dataInfo;
+		if (tag_Temp.isInPromote())
+		{
+			BuySetUi::getInstance()->setPrice(dataInfo.nSalePrice);
+		}
+		else
+		{
+			BuySetUi::getInstance()->setPrice(dataInfo.nPrice);
+		}
+		//end
+		BuySetUi::getInstance()->setNum(1);
+		BuySetUi::getInstance()->_signalBtnPressed->connect(this, &StoreUiItemFrame::onOkBtnPressed);
+		if (dataInfo.typeIndex == 5)
+		{
+			BuySetUi::getInstance()->setChangeIcon("buysetui_rongyudian");
+		}
+		if(dataInfo.typeIndex == 3)
+		{
+			BuySetUi::getInstance()->setChangeIcon("storeui_zuanshi");
+		}
+		//_item->buy();
+		//InputMessageBox::getInstace()->open();
+		//InputMessageBox::getInstace()->setNumOnly(true);
+		//InputMessageBox::getInstace()->setDefaultText(1);
+		//InputMessageBox::getInstace()->getBtnSignal()->connect(this, &StoreUiItemFrame::onOkBtnPressed);
+	}
+}
+
+void StoreUiItemFrame::onOkBtnPressed( bool isOk, int num )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_20);
+	if(isOk)
+	{
+		if(num > 0)
+		{
+			_item->buy(num);
+		}
+	}
+}
+
+void StoreUiItemFrame::onEnter()
+{
+	CCSprite::onEnter();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this,1,true);
+	setAllChildernButtonEnable(this,false);
+	setAllChildernButtonEnable(this,true);
+}
+
+void StoreUiItemFrame::onExit()
+{
+	CCSprite::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool StoreUiItemFrame::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (!isVisible()||!hasVisibleParents()||!isRunning())
+	{
+		return false;
+	}
+	int tag = _item->getIconNodeTag();
+	CCNode *node = getChildByTag(tag);
+
+	if(isTouchOnNodeContent(node, pTouch))
+	{
+		CCScene *scene = UiMgr::getInstance()->getCurScene();
+		_stPt = scene->convertTouchToNodeSpace(pTouch);
+		return true;
+	}
+
+	return false;
+}
+
+void StoreUiItemFrame::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	int tag = _item->getIconNodeTag();
+	CCNode *node = getChildByTag(tag);
+
+	if(isTouchOnNodeContent(node, pTouch))
+	{
+		CCScene *scene = UiMgr::getInstance()->getCurScene();
+		CCPoint pt = scene->convertTouchToNodeSpace(pTouch);
+		if(ccpDistance(_stPt, pt) < TOUCH_MOVE_DIS)
+		{
+			_item->showItemTip(pt);
+		}
+	}
+}
+
+void StoreUiItemFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	//setAllChildernButtonPriority(this,1);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+StoreUi::StoreUi()
+{
+
+}
+
+StoreUi::~StoreUi()
+{
+
+}
+
+class StoreItemFrameLayer : public CCLayer
+{
+public:
+	CREATE_FUNC(StoreItemFrameLayer);
+	bool init() { return true; }
+
+	virtual void onEnter()
+	{
+		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1 , true);//StoreItemFrameLayer
+		CCLayer::onEnter();
+	}
+
+	virtual void onExit()
+	{
+		CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+		CCLayer::onExit();
+	}
+
+	virtual bool ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+	{
+		if (!isVisible()||!hasVisibleParents()||!isRunning())
+		{
+			return false;
+		}
+		if(isTouchOnNodeContent(this, pTouch))
+			return true;
+		return false;
+	}
+};
+
+CCNode * StoreUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["StoreUiLayer"] = UiLayerLoader<StoreUiLayer>::loader();
+	nodeLoaders["StoreItemFrameLayer"] = UiLayerLoader<StoreItemFrameLayer>::loader();
+	nodeLoaders["TouchSprite"] = TouchSpriteLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("storeui", nodeLoaders, _loadSpriteSheet);
+	if(uiNode)
+	{
+		StoreUiLayer *uiLayer = dynamic_cast<StoreUiLayer*>(uiNode);
+		CC_ASSERT(uiLayer != NULL);
+		uiLayer->updateMoney();
+		uiLayer->updateDiamond();
+		uiLayer->updateRongyu();
+		uiLayer->updateData();
+	}
+	if(IS_UI_OPEN(WCT_TimeCardNodeUi))
+	{
+		CLOSE_UI(WCT_TimeCardNodeUi);
+	}
+	return uiNode;
+}
+
+StoreUiLayer * StoreUi::getUiLayer()
+{
+	return getUiNodeByTag<StoreUiLayer>(WCT_STOREUI);
+}
+
+void StoreUi::updateData()
+{
+	StoreUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateData();
+	}
+}
+
+void StoreUi::updateMoney()
+{
+	StoreUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateMoney();
+	}
+}
+void StoreUi::updateDiamond()
+{
+	StoreUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateDiamond();
+	}
+}
+void StoreUi::updateRongyu()
+{
+	StoreUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateRongyu();
+	}
+}
+
+cocos2d::CCRect StoreUi::getGuildBtnPos( int tag )
+{
+	StoreUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		return uiLayer->getGuildBtnPos(tag);
+	}
+	return CCRect();
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler StoreUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler StoreUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", StoreUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChongzhiBtnPressed", StoreUiLayer::onChongzhiBtnPressed);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onStonePressedBtn", StoreUiLayer::onStoneBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onZhuangbanPressedBtn", StoreUiLayer::onZhuangbanBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onReMaiPressedBtn", StoreUiLayer::onReMaiBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChangYongPressedBtn", StoreUiLayer::onChangYongBtnPressed);
+//	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onQiangHuaPressedBtn", StoreUiLayer::onQiangHuaBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onStonePressedBtn",StoreUiLayer::onDiamondBtnPressed);
+	return NULL;
+}
+
+void StoreUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_curentSelect = SUT_TabRemai;
+	_rechargeEffect = NULL;
+	_frame=CCSprite::create();
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(0));
+	CC_ASSERT(_frame != NULL);
+	_contentLayer = dynamic_cast<CCLayer*>(_frame->getChildByTag(SUT_ContentLayer));
+	CC_ASSERT(_contentLayer != NULL);
+
+	_scrollView = CCScrollView::create(_contentLayer->getContentSize());
+	_contentLayer->addChild(_scrollView);
+
+	_container = CCNode::create();
+	//_container->retain();
+	_container->setContentSize(_contentLayer->getContentSize());
+
+ 	_scrollView->setContainer(_container);
+ 	_scrollView->setTouchEnabled(true);
+ 	_scrollView->setBounceable(true);
+ 	_scrollView->setContentSize(_container->getContentSize());
+ 	_scrollView->setDirection(kCCScrollViewDirectionVertical);
+ 	_scrollView->setContentOffset(_scrollView->minContainerOffset());
+	CC_ASSERT(_container != NULL && _scrollView != NULL);
+
+	//初始化tab 的framename;
+	_highlightLab[SUT_TabRemai] = "storeui_remailabh";
+	_highlightLab[SUT_TabChangyong] = "storeui_changyonglabh";
+	_highlightLab[SUT_TabQianghua] = "storeui_qanghualabh";
+	_highlightLab[SUT_TabBaoshi] = "storeui_stonelabh";
+	_highlightLab[SUT_TabZhuangban] = "storeui_zhuangbah";
+	_highlightLab[SUT_TabDuihuan] = "storeui_duihuanlabh";
+
+	_normalLab[SUT_TabRemai] = "storeui_remailabn";
+	_normalLab[SUT_TabChangyong] = "storeui_changyonglabn";
+	_normalLab[SUT_TabQianghua] = "storeui_qinghualabn";
+	_normalLab[SUT_TabBaoshi] = "storeui_stonelabn";
+	_normalLab[SUT_TabZhuangban] = "storeui_zhuangban";
+	_normalLab[SUT_TabDuihuan] = "storeui_duihuanlabn";
+
+	//连接信号;
+	/*getTabSprite(SUT_TabRemai)->signalTouched.connect(this, &StoreUiLayer::onRemaiLabelTouched);
+	getTabSprite(SUT_TabChangyong)->signalTouched.connect(this, &StoreUiLayer::onChangyongLabelTouched);
+	getTabSprite(SUT_TabQianghua)->signalTouched.connect(this, &StoreUiLayer::onQianghuaLabelTouched);*/
+	//getTabSprite(SUT_TabBaoshi)->signalTouched.connect(this, &StoreUiLayer::onBaoshiLabelTouched);
+	//getTabSprite(SUT_TabZhuangban)->signalTouched.connect(this, &StoreUiLayer::onZhuangbanLabelTouched);
+	//getTabSprite(SUT_TabDuihuan)->signalTouched.connect(this, &StoreUiLayer::onDuihuanLabelTouched);
+
+	//加载特效资源
+	m_sBlingSEName = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_52.plist";
+	_rechargeAcNode = GameActionNode::create();
+	_rechargeAcNode->InitWithPList(m_sBlingSEName.c_str(), "E1_52");
+	CCControlButton* rechargeBtn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(SUT_RechargeBtn));
+	CC_ASSERT(rechargeBtn);
+	CCSize rechargeBtnSize = rechargeBtn->getContentSize();
+	_rechargeAcNode->setPosition(ccp(rechargeBtnSize.width / 2.0f, rechargeBtnSize.height / 2.0f));
+	rechargeBtn->addChild(_rechargeAcNode);
+	_rechargeAcNode->playAnimOnce(0.12f, false);
+	setButtonEndble(BT_ReMai,false);
+	
+
+	this->schedule(schedule_selector(StoreUiLayer::displaySE), 5.0f);
+	setAllChildernButtonPriority(this,0);
+
+	showStore();
+
+	if (KaifuHuodongMgr::getInstance()->getIosShowRecharge() == false)
+	{
+		rechargeBtn->setVisible(false);
+	}
+	
+	//if(GET_UI(SystemUi,WCT_SystemUi)->showState() == false)
+	//{
+	//	GET_UI(SystemUi, WCT_SystemUi)->slotChangeShowState(); 
+	//}
+}
+
+void StoreUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	AudioPlayer::getSigletonPtr()->playerSoundNpcEffect(SOUDN_31);
+	CLOSE_UI(WCT_STOREUI);
+}
+
+void StoreUiLayer::onChongzhiBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//点击充值事件;
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	int yuanbaoNum=PackageManager::getInstance()->getTotalChargeYuanBao();
+	if (yuanbaoNum<=0)
+	{
+		OPEN_UI(WCT_ShouChongUi);
+	}
+	else
+	{
+		OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+	}
+}
+
+void StoreUiLayer::addContentItem( CCNode *item )
+{
+	CC_ASSERT(_container != NULL && item != NULL);
+	_container->addChild(item);
+}
+
+void StoreUiLayer::removeContentItem( CCNode *item )
+{
+	CC_ASSERT(_container != NULL && item != NULL);
+	_container->removeChild(item);
+}
+
+float StoreUiLayer::getContentLayerHeight()
+{
+	if(_contentLayer != NULL)
+	{
+		return _contentLayer->getContentSize().height;
+	}
+	return 0;
+}
+
+CCNode * StoreUiLayer::getContainer()
+{
+	return _container;
+}
+
+void StoreUiLayer::onRemaiLabelTouched( TouchSprite* sprite, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+	onTabSelectChanged(_curentSelect, SUT_TabRemai);
+}
+
+void StoreUiLayer::onChangyongLabelTouched( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+	onTabSelectChanged(_curentSelect, SUT_TabChangyong);
+}
+
+void StoreUiLayer::onQianghuaLabelTouched( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+	onTabSelectChanged(_curentSelect, SUT_TabQianghua);
+}
+
+void StoreUiLayer::onBaoshiLabelTouched( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+	onTabSelectChanged(_curentSelect, SUT_TabBaoshi);
+}
+
+void StoreUiLayer::onZhuangbanLabelTouched( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+	onTabSelectChanged(_curentSelect, SUT_TabZhuangban);
+}
+
+void StoreUiLayer::onDuihuanLabelTouched( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+	onTabSelectChanged(_curentSelect, SUT_TabDuihuan);
+}
+void StoreUiLayer::onDiamondLabelTouched( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+	onTabSelectChanged(_curentSelect, SUT_TabDiamond);
+}
+void StoreUiLayer::onTabSelectChanged( eStoreUiTag src, eStoreUiTag cur )
+{
+	CC_ASSERT(src >= SUT_TabRemai && src <=SUT_TabDuihuan &&
+		cur >= SUT_TabRemai && cur <=SUT_TabDuihuan);
+	if(cur != src)
+	{
+		setTabSpriteSelect(src, false);
+		setTabSpriteSelect(cur, true);
+		_curentSelect = cur;
+		GET_UI(StoreUi, WCT_STOREUI)->updateData();
+	}
+}
+
+TouchSprite * StoreUiLayer::getTabSprite( eStoreUiTag tag )
+{
+	CC_ASSERT(_frame != NULL);
+	return dynamic_cast<TouchSprite*>(_frame->getChildByTag(tag));
+}
+
+void StoreUiLayer::setTabSpriteSelect( eStoreUiTag tabTag, bool select )
+{
+	TouchSprite *sprite = getTabSprite(tabTag);
+	if(sprite != NULL)
+	{
+		std::string frameName;
+		if(select)
+		{
+			frameName = _highlightLab[tabTag];
+		}
+		else
+		{
+			frameName = _normalLab[tabTag];
+		}
+
+		if(!frameName.empty())
+		{
+			sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName.c_str()));
+		}
+	}
+}
+
+// CCNode * StoreUiLayer::getHeadPhotoNode()
+// {
+// 	CC_ASSERT(_frame != NULL);
+// 	return _frame->getChildByTag(SUT_TabRemai);////add by vvv 2014.12.05  头像图片去掉  此处tag为临时，防方法调用
+// }
+
+LabelFT * StoreUiLayer::getMoneyLabel()
+{
+	CC_ASSERT(_frame != NULL);
+	//return dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(SUT_Yuanbao));
+	return Helper::getLabelFTByParentAndTag(_frame, SUT_Yuanbao);
+}
+LabelFT* StoreUiLayer::getDiamondLabel()
+{
+	CC_ASSERT(_frame!=NULL);
+	//return dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(SUT_TabDiamondNum));
+	return Helper::getLabelFTByParentAndTag(_frame, SUT_TabDiamondNum);
+}
+LabelFT * StoreUiLayer::getRongyudianLabel()
+{
+	CC_ASSERT(_frame != NULL);
+	//return dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(SUT_Rongyudian));
+	return Helper::getLabelFTByParentAndTag(_frame, SUT_Rongyudian);
+}
+
+void StoreUiLayer::onEnter()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);//StoreUiLayer
+	CCLayer::onEnter();
+	REGISTER_EVENT( SELECTPAGE,StoreUiLayer,setSelectPage);
+}
+
+void StoreUiLayer::onExit()
+{
+	removeAllItem();
+	UNREGISTER_EVENT(SELECTPAGE,StoreUiLayer,setSelectPage);
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+	WaitLoading::getInstance()->stop();
+	BuySetUi::getInstance()->close();
+}
+
+bool StoreUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (!isVisible()||!hasVisibleParents()||!isRunning())
+	{
+		return false;
+	}
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+/*
+		if(isTouchOnNodeContent(_contentLayer, pTouch))
+			return true;
+		return true;*/
+		return true;
+	}
+	else
+	{
+		CLOSE_UI(WCT_STOREUI);
+		return false;
+	}
+}
+
+void StoreUiLayer::resetScrollPosition()
+{
+	if(_scrollView != NULL)
+	{
+		_scrollView->setContentOffset(_scrollView->minContainerOffset());
+	}
+}
+
+void StoreUiLayer::updateMoney()
+{
+	LabelFT *moneyLabel = getMoneyLabel();
+	if(moneyLabel != NULL)
+	{
+		INT64 yuanBao = PackageManager::getInstance()->getYuanBao();
+		std::ostringstream ostr;
+// 		if(yuanBao >= 100000)
+// 		{
+// 			ostr << yuanBao / 10000 << GET_STR(9033).c_str();
+// 		}
+// 		else
+// 		{
+			ostr << yuanBao;
+//		}
+		moneyLabel->setString(ostr.str().c_str());
+	}
+}
+void StoreUiLayer::updateDiamond()
+{
+	LabelFT *diamondLabel=getDiamondLabel();
+	if(diamondLabel!=NULL)
+	{
+		INT64 diamond=PackageManager::getInstance()->getDiamond();
+		std::ostringstream ostr;
+// 		if(diamond >= 100000)
+// 		{
+// 			ostr << diamond / 10000 << GET_STR(9033).c_str();
+// 		}
+// 		else
+// 		{
+			ostr << diamond;
+//		}
+		diamondLabel->setString(ostr.str().c_str());
+	}
+}
+void StoreUiLayer::updateRongyu()
+{
+	LabelFT *rongyuLabel = getRongyudianLabel();
+	if (rongyuLabel != NULL)
+	{
+		LocalPlayer *player = RoleManager::getInstance()->getLocalPlayer();
+		int rongYuDian  = player->getAttribute(RA_RONGYU_POINT);
+		CCString *str = CCString::createWithFormat("\xE8\x8D\xA3\xE8\xAA\x89\xE7\x82\xB9\xEF\xBC\x9A%d",rongYuDian);
+		rongyuLabel->setString(str->getCString());
+	}
+}
+
+
+void StoreUiLayer::addItem( StoreUiItem *item )
+{
+	if(item != NULL)
+	{
+		addContentItem(item->getUiFrame());
+		_items.push_back(item);
+	}
+}
+
+void StoreUiLayer::removeItem( unsigned int itemId )
+{
+	for(StoreUiItemList::iterator iter = _items.begin(); iter != _items.end(); ++ iter)
+	{
+		StoreUiItem *item = *iter;
+		if(item->getId() == itemId)
+		{
+			removeContentItem(item->getUiFrame());
+			delete item;
+			_items.erase(iter);
+			break;
+		}
+	}
+}
+
+void StoreUiLayer::removeAllItem()
+{
+	for(StoreUiItemList::iterator iter = _items.begin(); iter != _items.end(); ++ iter)
+	{
+		StoreUiItem *item = *iter;
+		removeContentItem(item->getUiFrame());
+		delete item;
+	}
+	_items.clear();
+}
+
+void StoreUiLayer::updateList()
+{
+	CCNode *container = getContainer();
+	if(container == NULL)
+		return;
+
+	//得到总高度;
+	int itemCount = _items.size();
+	int lineCount = itemCount / 3 + (itemCount % 3 == 0 ? 0 : 1);
+	float height = STORE_ITEM_HEIGHT * lineCount + STORE_ITEM_SPACE * (lineCount - 1);
+	if(height < getContentLayerHeight())
+		height = getContentLayerHeight();
+
+	CCSize containerSize = container->getContentSize();
+	container->setContentSize(CCSize(containerSize.width, height));
+	_scrollView->setContentSize(container->getContentSize());
+	int index = 0;
+	for(StoreUiItemList::iterator iter = _items.begin(); iter != _items.end(); ++ iter)
+	{
+		StoreUiItem *item = *iter;
+		int posX = (index % 3) * (STORE_ITEM_WIDTH + STORE_ITEM_SPACE);
+		int posY = height - (index / 3) * (STORE_ITEM_HEIGHT + STORE_ITEM_SPACE);
+		item->setPosition(ccp(posX, posY));
+		index ++;
+	}
+
+	resetScrollPosition();
+
+	_scrollView->update_child_touch_clip_rect();
+}
+
+void StoreUiLayer::updateData()
+{
+	if(!MallMgr::getInstance()->isInit())
+	{
+		WaitLoading::getInstance()->start();
+		if (MallMgr::getInstance()->GetNeedReload())
+		{
+			MallMgr::getInstance()->ReloadMallData();
+		}
+	}
+	else
+		WaitLoading::getInstance()->stop();
+	removeAllItem();
+	int index = getCurrentSelect() - StoreUiLayer::SUT_TabRemai;
+	const MallMgr::Mall_SingleItem_Map *mallDataMap = MallMgr::getInstance()->GetSheetItemsByIndex(index);
+	if(mallDataMap != NULL)
+	{
+		//先得到服务器当前时间
+		tagDWORDTime cur_time = ServerTime::getInstance()->cal_current_server_dword_time();
+		for(MallMgr::Mall_SingleItem_Map::const_iterator iter = mallDataMap->begin(); iter != mallDataMap->end(); ++ iter)
+		{
+			const Tag_MallItemInfo &dataInfo = iter->second;
+			if (!MallMgr::getInstance()->CanShowInShell(dataInfo,cur_time))//若该商品还未上架
+				continue;
+			StoreUiItem *item = new StoreUiItem;
+			item->setData(dataInfo);
+			addItem(item);
+		}
+	}
+	updateList();
+}
+
+void StoreUiLayer::displaySE( float dt )
+{
+	_rechargeAcNode->playAnimOnce(0.12f, false);
+}
+
+/*void StoreUiLayer::onStoneBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+	onTabSelectChanged(_curentSelect, SUT_TabBaoshi);
+	setButtonEndble(BT_Stone,false);
+}
+*/
+
+void StoreUiLayer::setSelectPage(SELECTPAGE* sel)
+{
+	switch(sel->num)
+	{
+	case 0:
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+		onTabSelectChanged(_curentSelect, SUT_TabRemai);
+		setButtonEndble(BT_ReMai,false);
+		break;
+	case 1:
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+		onTabSelectChanged(_curentSelect, SUT_TabChangyong);
+		setButtonEndble(BT_ChangYong,false);
+		break;
+	case 2:
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+		onTabSelectChanged(_curentSelect, SUT_TabZhuangban);
+		setButtonEndble(BT_ZhuangBan,false);
+		break;
+	case 3:
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+		onTabSelectChanged(_curentSelect, SUT_TabDiamond);
+		setButtonEndble(BT_Diamond,false);
+		break;
+	default:
+		break;
+	}
+}
+
+void StoreUiLayer::onZhuangbanBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+	onTabSelectChanged(_curentSelect, SUT_TabZhuangban);
+	setButtonEndble(BT_ZhuangBan,false);
+}
+void StoreUiLayer::onDiamondBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+	onTabSelectChanged(_curentSelect, SUT_TabDiamond);
+	setButtonEndble(BT_Diamond,false);
+}
+void StoreUiLayer::setButtonEndble( int tag,bool visible )
+{
+	for ( int i = BT_ReMai; i < BT_End; ++i)
+	{
+		CCControlButton *btn=dynamic_cast<CCControlButton*>(_frame->getChildByTag(i));
+		//CC_ASSERT(btn!=NULL);
+		if(btn!=NULL){
+			if (tag==i)
+			{
+				btn->setEnabled(visible);
+			}
+			else
+			{
+				btn->setEnabled(true);
+			}
+		}
+	}
+
+}
+
+void StoreUiLayer::onReMaiBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+	onTabSelectChanged(_curentSelect, SUT_TabRemai);
+	setButtonEndble(BT_ReMai,false);
+}
+
+void StoreUiLayer::onChangYongBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+	onTabSelectChanged(_curentSelect, SUT_TabChangyong);
+	setButtonEndble(BT_ChangYong,false);
+}
+
+/*void StoreUiLayer::onQiangHuaBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+	onTabSelectChanged(_curentSelect, SUT_TabQianghua);
+	setButtonEndble(BT_Qianghua,false);
+}
+*/
+cocos2d::CCRect StoreUiLayer::getGuildBtnPos( int tag )
+{
+	if (tag == SUT_ContentLayer)
+	{
+		for(StoreUiItemList::iterator iter = _items.begin(); iter != _items.end(); ++ iter)
+		{
+			if (1002004 == (*iter)->getId())
+			{
+				//return CCRect((*iter)->getBtnPostion().x - 117, (*iter)->getBtnPostion().y - 24, 67, 28);
+				return CCRect((*iter)->getBtnPostion().x, (*iter)->getBtnPostion().y, 67, 28);
+			}
+		}
+	}
+	else if (tag == SUT_Close)
+	{
+		CCNode* pNode = _frame->getChildByTag(SUT_Close);
+		CCPoint pos = _frame->convertToWorldSpace(pNode->getPosition());
+		return CCRect(pos.x - 22, pos.y - 13, pNode->getContentSize().width, pNode->getContentSize().height);
+	}
+	
+	return CCRect();
+}
+
+//修改打开商城界面
+StoreUiLayer::eStoreUiTag StoreUiLayer::m_willShowTag = SUT_TabRemai;
+
+void StoreUiLayer::showStore()
+{
+	onTabSelectChanged(_curentSelect, StoreUiLayer::m_willShowTag);
+	setButtonEndble(StoreUiLayer::m_willShowTag + STORE_BTN, false);
+	StoreUiLayer::m_willShowTag = SUT_TabRemai;
+}
+
+
+
+

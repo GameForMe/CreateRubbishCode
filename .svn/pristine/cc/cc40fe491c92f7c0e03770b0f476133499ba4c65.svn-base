@@ -1,0 +1,782 @@
+#include "SBKSDManager.h"
+#include "ServerTime.h"
+#include "f_string_util.h"
+#include "BaseDefine.h"
+#include "TCPClient.h"
+#include "ToolTip.h"
+#include "TaskTraceUi.h"
+#include "World.h"
+#include "TimeCountDownLayer.h"
+#include "CommonMsgDefine.h"
+#include "WorldPacket.h"
+#include "InstanceMgr.h"
+#include "GameEventDefine.h"
+#include "StringMgr.h"
+#include "LocalPlayer.h"
+#include "NameMgr2.h"
+#include "MiniMapUi.h"
+#include "PlacardManager.h"
+
+SBKSDManager::SBKSDManager()
+	: m_actIsOpen(false)
+	, m_inited(false)
+	, m_isInShenDianMap(false)
+	, m_hasPassNum(0)
+	, m_sbkGuildName("")
+	, m_maxCheck(0)
+	, m_remainTime(0)
+	, m_countLayer(NULL)
+	, m_curIsPass(false)
+	, m_enterCounts(0)
+	, m_open_error_num(0)
+{
+	init_reward_data();
+
+	for ( int i = 0 ; i < MAYDROPITEMMAX ; ++i )
+	{
+		std::string keyStr;
+		safe_sprintf(keyStr,"sbk_shendian_drop_item_%d",i+1);
+		m_shenDianDrop[i] = CFG(int,keyStr.c_str(),0);
+	}
+
+	for ( int i = 0 ; i < SHEN_DIAN_GATE_COUNT ; ++i )
+	{
+		m_isPassCheck[i] = false;
+	}
+}
+
+SBKSDManager::~SBKSDManager()
+{
+	clear_defend_data();
+	m_shenDianData.clear();
+	m_targetItems.clear();
+}
+
+bool SBKSDManager::init()
+{
+	m_inited = true;
+
+	if (m_inited)
+	{
+		TCP_CLIENT->register_net_cmd("NET_GS2C_ShenDianUIInfo", this, &SBKSDManager::onServer_Enter_Success);
+		TCP_CLIENT->register_net_cmd("NET_GS2C_ShenDianGate_Monster", this, &SBKSDManager::onServer_View_Defender);
+		TCP_CLIENT->register_net_cmd("NET_GS2C_ShenDian_FirstPrize", this, &SBKSDManager::onServer_First_Prize);
+		TCP_CLIENT->register_net_cmd("NET_GS2C_ShenDian_Succ", this, &SBKSDManager::onServer_Pass_Success);
+		TCP_CLIENT->register_net_cmd("NET_GS2C_ShenDian_Fail", this, &SBKSDManager::onServer_Pass_Fail);
+		TCP_CLIENT->register_net_cmd("NET_GS2C_ShenDian_GateInfo", this, &SBKSDManager::onServer_Gate_Info);
+		TCP_CLIENT->register_net_cmd("NET_GS2C_ShenDian_State", this, &SBKSDManager::onServer_Is_Open);
+	}
+
+	return m_inited;
+}
+
+void SBKSDManager::destory()
+{
+	if (m_inited)
+	{
+		clear_defend_data();
+
+		std::for_each(m_targetItems.begin(),m_targetItems.end(),[](map<int,TargetTouchItem *>::value_type const kv)
+		{
+			delete (kv.second);
+		});
+		m_targetItems.clear();
+
+		m_isInShenDianMap = false;
+		m_remainTime = 0;
+		m_enterCounts = 0;
+
+		TCP_CLIENT->unregister_net_cmd("NET_GS2C_ShenDianUIInfo", this, &SBKSDManager::onServer_Enter_Success);
+		TCP_CLIENT->unregister_net_cmd("NET_GS2C_ShenDianGate_Monster", this, &SBKSDManager::onServer_View_Defender);
+		TCP_CLIENT->unregister_net_cmd("NET_GS2C_ShenDian_FirstPrize", this, &SBKSDManager::onServer_First_Prize);
+		TCP_CLIENT->unregister_net_cmd("NET_GS2C_ShenDian_Succ", this, &SBKSDManager::onServer_Pass_Success);
+		TCP_CLIENT->unregister_net_cmd("NET_GS2C_ShenDian_Fail", this, &SBKSDManager::onServer_Pass_Fail);
+		TCP_CLIENT->unregister_net_cmd("NET_GS2C_ShenDian_GateInfo", this, &SBKSDManager::onServer_Gate_Info);
+		TCP_CLIENT->unregister_net_cmd("NET_GS2C_ShenDian_State", this, &SBKSDManager::onServer_Is_Open);
+
+		deleteCountLayer();
+
+		m_inited = false;
+	}
+}
+
+bool SBKSDManager::ShenDianIsOpen()
+{
+	return m_actIsOpen;
+}
+
+unsigned int SBKSDManager::onServer_Is_Open(s_net_cmd* cmd)
+{
+	NET_GS2C_ShenDian_State* msg = (NET_GS2C_ShenDian_State*)cmd;
+	if (msg->bOpen)
+	{
+		m_open_error_num = msg->bOpen;
+	}
+	m_actIsOpen = !msg->bOpen;
+	return 0;
+}
+
+void SBKSDManager::init_reward_data()
+{
+	f_data_set dataSet;
+	std::list<std::string> fields;
+	bool ret = dataSet.load("Config/sbk_shendian_reward.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	m_shenDianData.clear();
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& oneStr)
+	{
+		int check_point = dataSet.get_int("id",oneStr.c_str());
+
+		shendian_check_data data;
+		data.check_point = dataSet.get_int("id",oneStr.c_str());
+		data.check_time = dataSet.get_int("time",oneStr.c_str());
+		data.reward_jinbi = dataSet.get_int("jinbi",oneStr.c_str());
+		data.reward_exp = dataSet.get_int("exp",oneStr.c_str());
+
+		for ( int i = 0 ; i < FIRSTPASSITEMMAX ; ++i )
+		{
+			std::string keyStr;
+			safe_sprintf(keyStr,"pass_item_%d",i+1);
+			data.item_first_pass_id[i] = dataSet.get_int(keyStr.c_str(),oneStr.c_str());
+			safe_sprintf(keyStr,"item%d_num",i+1);
+			data.item_first_pass_num[i] = dataSet.get_int(keyStr.c_str(),oneStr.c_str());
+		}
+
+		data.moster_id = dataSet.get_int("monster_id",oneStr.c_str());
+		data.moster_level = dataSet.get_int("monster_level",oneStr.c_str());
+		data.map_id = dataSet.get_dword("map_id",oneStr.c_str());
+
+		m_shenDianData.insert(std::make_pair(check_point,data));
+	});
+}
+
+void SBKSDManager::send_Enter_Shendian()
+{
+	EWeek weekDay = ServerTime::getInstance()->get_current_week_day();
+	if (weekDay == EWeek_SUN || weekDay == EWeek_SAT )
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["shendian_time_close"]);
+		return;
+	}
+	if (!m_actIsOpen)
+	{
+		openErrorTips();
+		return;
+	}
+	NET_C2GS_Request_Enter_ShenDian cmd;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,true);
+}
+
+void SBKSDManager::createTargetItem(ShenDianTargetTag tag)
+{
+	TargetTouchItem* item = getTargetItem(tag);
+	TaskTraceUi* taskTraceUi = World::getInstance()->getTaskTraceUi();
+	CC_ASSERT(taskTraceUi);
+	if (taskTraceUi)
+	{
+		if (!item)
+		{
+			 item = new TargetTouchItem();
+			 string str;
+
+			 switch(tag)
+			 {
+			 case TTag_Pass:
+				 {
+					 int passNumber = getHasPassNum();
+					 safe_sprintf(str,"%d",passNumber);
+					 item->appendText(STRING_TABLE["pass_check_point"],"shendian_pass_title",ccGREEN);
+					 item->appendText(str,"shendian_pass_num",ccRED);
+				 }
+				 break;
+			 case TTag_Remain:
+				 {
+					 int remainNumber = getRemainPassNum();
+					 safe_sprintf(str,"%d",remainNumber);
+					 item->appendText(STRING_TABLE["remain_check_point"],"shendian_remain_title",ccGREEN);
+					 item->appendText(str,"shendian_remain_num",ccRED);
+				 }
+				 break;
+			 case TTag_Time:
+				 {
+					 if (is_pass_cur_level())
+					 {
+						 if (getRemainPassNum())
+						 {
+							 item->appendText(STRING_TABLE["into_next_level_leader"],"shendian_time_title",ccYELLOW);
+							 item->appendText("","shendian_time_num",ccRED);
+						 }
+						 else
+						 {
+							 item->appendText(STRING_TABLE["shendian_finish_please_level"],"shendian_time_title",ccGREEN);
+							 item->appendText("","shendian_time_num",ccRED);
+						 }
+					 }
+					 else
+					 {
+						 item->appendText(STRING_TABLE["remain_time"],"shendian_time_title",ccGREEN);
+						 unsigned int remainTime = getRemainTime();
+						 unsigned int min = remainTime/60;
+						 unsigned int sec = remainTime%60;
+						 safe_sprintf(str,STRING_TABLE["num_minute_mun_second"],min,sec);
+						 item->appendText(str,"shendian_time_num",ccRED);
+					 }
+
+					 item->signalItem.connect(this,&SBKSDManager::onTaskUITimePressed);
+				 }
+				 break;
+			 default:
+				 break;
+			 }
+			 m_targetItems.insert(make_pair(tag,item));
+		}
+		taskTraceUi->appendTargetItem(item);
+	}
+}
+
+TargetTouchItem* SBKSDManager::getTargetItem(ShenDianTargetTag tag)
+{
+	auto iter = m_targetItems.find(tag);
+
+	if (iter!=m_targetItems.end())
+	{
+		return iter->second;
+	}
+
+	return NULL;
+}
+
+void SBKSDManager::updateTargetItem(ShenDianTargetTag tag)
+{
+	TargetTouchItem* item = getTargetItem(tag);
+	std::string numStr;
+	CC_ASSERT(item);
+
+	if (item)
+	{
+		switch(tag)
+		{
+		case TTag_Pass:
+			{
+				int passNum = getHasPassNum();
+				safe_sprintf(numStr,"%d",passNum);
+				item->updateText("shendian_pass_num",numStr);
+			}
+			break;
+		case TTag_Remain:
+			{
+				int remainNum = getRemainPassNum();
+				safe_sprintf(numStr,"%d",remainNum);
+				item->updateText("shendian_remain_num",numStr);
+			}
+			break;
+		case TTag_Time:
+			{
+				if (is_pass_cur_level())
+				{
+					if (getRemainPassNum())
+					{
+						item->updateTextAndColor("shendian_time_title",STRING_TABLE["into_next_level_leader"],ccYELLOW);
+						item->updateTextAndColor("shendian_time_num","",ccRED);
+					}
+					else
+					{
+						item->updateTextAndColor("shendian_time_title",STRING_TABLE["shendian_finish_please_level"],ccGREEN);
+						item->updateTextAndColor("shendian_time_num","",ccRED);
+					}
+				}
+				else
+				{
+					item->updateTextAndColor("shendian_time_title",STRING_TABLE["remain_time"],ccGREEN);
+					unsigned int remainTime = getRemainTime();
+					unsigned int min = remainTime/60;
+					unsigned int sec = remainTime%60;
+					safe_sprintf(numStr,STRING_TABLE["num_minute_mun_second"],min,sec);
+					item->updateTextAndColor("shendian_time_num",numStr,ccRED);
+				}
+			}
+			break;
+		default:
+			break;
+		}
+	}
+}
+
+bool SBKSDManager::is_pass_cur_level()
+{
+	return m_curIsPass;
+}
+
+void SBKSDManager::onTaskUITimePressed()
+{
+	if (is_pass_cur_level())
+	{
+		if (getRemainPassNum())
+		{
+			send_Next_Gate();/*进入下一关*/
+		}
+		else
+		{
+			InstanceMgr::getInstance()->LeaveInstanceMap();
+		}
+	}
+}
+
+void SBKSDManager::onEnterShenDianMap()
+{
+	if (!m_isInShenDianMap)
+	{
+		createTargetItem(TTag_Pass);
+		createTargetItem(TTag_Remain);
+		createTargetItem(TTag_Time);
+		updateTargetItem(TTag_Pass);
+		updateTargetItem(TTag_Remain);
+		updateTargetItem(TTag_Time);
+		m_isInShenDianMap = true;
+		MiniMapUi* miniMapUi = World::getInstance()->getMiniMapUi();
+		if(miniMapUi)
+		{
+			miniMapUi->hideUi(m_isInShenDianMap);
+			miniMapUi->showIntruduce1Btn(m_isInShenDianMap);
+		}
+	}
+}
+
+void SBKSDManager::onExitShenDianMap()
+{
+	if (m_isInShenDianMap)
+	{
+		TaskTraceUi* taskTraceUI = World::getInstance()->getTaskTraceUi();
+		if (taskTraceUI)
+		{
+			taskTraceUI->removeTargetItems();
+		}
+		//m_targetItems.clear();
+		m_isInShenDianMap = false;
+		MiniMapUi *miniMapUi = World::getInstance()->getMiniMapUi();
+		if(miniMapUi)
+		{
+			miniMapUi->hideUi(m_isInShenDianMap);
+			miniMapUi->showIntruduce1Btn(m_isInShenDianMap);
+		}
+		deleteCountLayer();
+	}
+}
+
+unsigned int SBKSDManager::onServer_Enter_Success(s_net_cmd* cmd)
+{
+	NET_GS2C_ShenDianUIInfo* msg = (NET_GS2C_ShenDianUIInfo*)cmd;
+
+	if (msg)
+	{
+		if (!msg->dwErrorCode)
+		{
+			m_sbkGuildName = convertName(msg->strSBKGuildName);
+			setIsPassCheck(msg->nPrizeFlag);
+			setEnterCounts(msg->nEnterCounts);
+			RoleManager::getInstance()->getLocalPlayer()->setShenDianEnterCounts(msg->nEnterCounts);
+			OPEN_UI(WCT_ShenDian_Enter_UI);
+		}
+		else
+		{
+			m_open_error_num = msg->dwErrorCode;
+			openErrorTips();
+		}
+	}
+
+	return 0;
+}
+
+void SBKSDManager::send_View_Defender(int checkPoint)
+{
+	auto itor = m_defendPlayerData.find(checkPoint);
+	if (itor != m_defendPlayerData.end())
+	{
+		openDefenderTips(checkPoint);
+		return;
+	}
+	NET_C2GS_Query_ShenDianGate_Monster cmd;
+	cmd.nGateIndex = checkPoint;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,true);
+}
+
+unsigned int SBKSDManager::onServer_View_Defender(s_net_cmd* cmd)
+{
+	NET_GS2C_ShenDianGate_Monster* msg = (NET_GS2C_ShenDianGate_Monster*)cmd;
+	auto itor = m_defendPlayerData.find(msg->nGateIndex);
+	if (itor != m_defendPlayerData.end())
+	{
+		return 0;
+	}
+	if (msg)
+	{
+		check_defender_data check_data;
+		for ( int i = 0 ; i < SHEN_DIAN_GATE_NPC_COUNT ; ++i )
+		{
+			defend_data data;
+			data.isMonster = (bool)msg->shenDianMonster[i].nIsMonster;
+			data.classType = msg->shenDianMonster[i].nClass;
+			data.name = convertName(msg->shenDianMonster[i].szRoleName);
+			data.level = msg->shenDianMonster[i].nLevel;
+			data.attNum = msg->shenDianMonster[i].nEquipRating;
+			check_data.push_back(data);
+		}
+		m_defendPlayerData.insert(std::make_pair(msg->nGateIndex,check_data));
+		openDefenderTips(msg->nGateIndex);
+	}
+	return 0;
+}
+
+void SBKSDManager::clear_defend_data()
+{
+	std::for_each(m_defendPlayerData.begin(),m_defendPlayerData.end(),
+		[&](defend_player_data::value_type& data)
+	{
+		data.second.clear();
+	});
+	m_defendPlayerData.clear();
+}
+
+void SBKSDManager::send_Firse_Prize()
+{
+	if (!m_actIsOpen)
+	{
+		openErrorTips();
+		return;
+	}
+	NET_C2GS_ShenDian_FirstPrize cmd;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,true);
+}
+
+unsigned int SBKSDManager::onServer_First_Prize(s_net_cmd* cmd)
+{
+	NET_GS2C_ShenDian_FirstPrize* msg = (NET_GS2C_ShenDian_FirstPrize*)cmd;
+	
+	if (msg)
+	{
+		if (!msg->dwErrorCode)
+		{
+			setIsPassCheck(msg->nFirstPrizeFlag);
+			OPEN_UI(WCT_ShenDian_First_UI);
+		}
+		else
+		{
+			m_open_error_num = msg->dwErrorCode;
+			openErrorTips();
+		}
+	}
+	return 0;
+}
+
+void SBKSDManager::setIsPassCheck(int passNum)
+{
+	for ( int i = 0 ; i < SHEN_DIAN_GATE_COUNT ; ++i )
+	{
+		m_isPassCheck[i] = passNum & ( 0x01 << i);
+		if (m_isPassCheck[i])
+		{
+			m_maxCheck = i+1;
+		}
+	}
+}
+
+void SBKSDManager::update(float dt)
+{
+	if (m_isInShenDianMap && m_remainTime )
+	{
+		static float shenDianCount = 0;
+		shenDianCount += dt;
+		if (shenDianCount < 1)
+		{
+			return;
+		}
+		m_remainTime--;
+		if (!is_pass_cur_level())
+		{
+			shenDianCount = 0;
+			if (m_remainTime < 20 && m_remainTime > 0)
+			{
+				if (m_countLayer == NULL)
+				{
+					m_countLayer = new TimeCountDownLayer();
+					m_countLayer->init(m_remainTime);
+				}
+				else
+				{
+					m_countLayer->update(m_remainTime);
+				}
+			}
+			if (m_remainTime <=0)
+			{
+				deleteCountLayer();
+			}
+			updateTargetItem(TTag_Time);
+		}
+		else
+		{
+			deleteCountLayer();
+		}	
+	}	
+}
+
+const SBKSDManager::defend_player_data& SBKSDManager::getCheckData()
+{
+	return m_defendPlayerData;
+}
+
+const SBKSDManager::check_data& SBKSDManager::getData()
+{
+	return m_shenDianData;
+}
+
+void SBKSDManager::send_Team_Enter()
+{
+// 
+// 	点击“组队进入”时，进行一系列判断
+// 		1）判断本服当前有无沙城城主行会成员备份数据（备份数据规则见下文），如没有，则提示“当前没有行会占领沙巴克，此活动暂不开启”
+// 		2）判断备份数据中的人数是否足够15人，如不足15人，则提示“沙巴克行会人数不足15人，此活动暂不开启”						
+// 		6）如点击者是队长，则判断队内所有成员状态（包括自己）
+// 		①判断队内所有成员等级是否达到50级或以上，如有人未达到，则提示“队员XXX未达到50级，无法进入活动地图”
+// 		②判断队内所有成员是否今日剩余进入次数是否为0，如有人为0，则提示“队员XXX今天的剩余次数为0，无法再次进入”
+// 		③判断队内所有成员是否和自己在同一地图，如否，则提示“队员XXX不在盟重，无法申请进入副本”
+// 
+// 		7）以上如均判断通过，则其他队员会收到提示（现有功能）
+	EWeek weekDay = ServerTime::getInstance()->get_current_week_day();
+	if (weekDay == EWeek_SUN || weekDay == EWeek_SAT )
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["shendian_time_close"]);
+		return;
+	}
+	if (m_enterCounts >= 1)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["enter_counts_limit"]);
+		return;
+	}
+	if (canInShenDian())
+	{
+		WorldPacket SIC_Msg(NET_C2G_ENTER_FUBEN);		//组装消息头
+		SIC_Msg << EEFBT_SHENDIAN;
+		SIC_Msg << m_shenDianData[m_hasPassNum+1].map_id;
+		TCP_CLIENT->send_net_cmd((const s_net_cmd*)SIC_Msg.contents(), NP_IDLE, false);		//发送z
+	}
+}
+
+void SBKSDManager::showIndex(int index)
+{
+	switch(index)
+	{
+	case 0:
+		send_Enter_Shendian();
+		break;
+	case 1:
+		send_Firse_Prize();
+		break;
+	case 2:
+ 		PlacardManager::getInstance()->open_placard_node(SHENDIANDESCID); //沙巴克神殿介绍 
+		break;
+	default:
+		break;;
+	}
+}
+
+void SBKSDManager::openDefenderTips(int checkPoint)
+{
+	if (!IS_UI_OPEN(WCT_ShenDian_Tips_UI))
+	{
+		OPEN_UI(WCT_ShenDian_Tips_UI);
+	}
+	shendian_checkpoint trans;
+	trans.check_point = checkPoint;
+	SEND_EVENT(&trans);
+}
+
+bool SBKSDManager::isInShenDianMap(unsigned int mapID)
+{
+	bool isInMap = false;
+	std::for_each(m_shenDianData.begin(),m_shenDianData.end(),[&](check_data::value_type const& data)
+	{
+		if (data.second.map_id == mapID)
+		{
+			isInMap = true;
+		}
+	});
+	return isInMap;
+}
+
+unsigned int SBKSDManager::onServer_Pass_Success(s_net_cmd* cmd)
+{
+	NET_GS2C_ShenDian_Succ* msg = (NET_GS2C_ShenDian_Succ*)cmd;
+	m_curIsPass = true;
+	m_hasPassNum++;
+	int gold = msg->nGold;
+	int exp = msg->nExp;
+	int extraExp = msg->nExtraExp;
+	int isFirstPrize = msg->nIsFirstPrize;
+
+	updateTargetItem(TTag_Pass);
+	updateTargetItem(TTag_Remain);
+	updateTargetItem(TTag_Time);
+
+	LocalPlayer* localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if (localPlayer->getAttribute(RA_DEAD))
+	{
+		return 0;
+	}
+
+	OPEN_UI(WCT_ShenDian_Success_UI);
+	shendian_success trans;
+	trans.check_point = m_hasPassNum;
+	trans.exp_team = extraExp;
+	trans.is_first = isFirstPrize;
+	SEND_EVENT(&trans);
+
+	ToolTip::getInstance()->push(STRING_TABLE["shendian_pass_success"]);
+
+	
+	return 0;
+}
+
+unsigned int SBKSDManager::onServer_Pass_Fail(s_net_cmd* cmd)
+{
+	NET_GS2C_ShenDian_Fail* msg = (NET_GS2C_ShenDian_Fail*)cmd;
+
+	m_remainTime = 0;
+	updateTargetItem(TTag_Time);
+	deleteCountLayer();
+
+	OPEN_UI(WCT_ShenDian_Fail_UI);
+
+	ToolTip::getInstance()->push(STRING_TABLE["shendian_pass_fail"]);
+
+	return 0;
+}
+
+void SBKSDManager::send_Next_Gate()
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	TeamMgr* teamMgr = TeamMgr::getInstance();
+	if (!teamMgr->is_inteam())
+	{
+		ToolTip::getInstance()->push(GET_STR(9071));
+		return;
+	}
+	if (!(teamMgr->is_team_leader(player->getId())))
+	{
+		ToolTip::getInstance()->push(GET_STR(9072));
+		return;
+	}
+	if (player->getAttribute(RA_DEAD))
+	{
+		return;
+	}
+	WorldPacket SIC_Msg(NET_C2G_ENTER_FUBEN);		//组装消息头
+	SIC_Msg << EEFBT_SHENDIAN;
+	SIC_Msg << m_shenDianData[m_hasPassNum+1].map_id;
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)SIC_Msg.contents(), NP_IDLE, false);		//发送z
+}
+
+unsigned int SBKSDManager::onServer_Gate_Info(s_net_cmd* cmd)
+{
+	NET_GS2C_ShenDian_GateInfo* msg = (NET_GS2C_ShenDian_GateInfo*)cmd;
+	if (msg->nGateIndex>=0 && msg->nGateIndex<=SHEN_DIAN_GATE_COUNT+1)
+	{
+		m_hasPassNum = msg->nGateIndex - 1;
+	}
+	else
+	{
+		CC_ASSERT(false);
+		m_hasPassNum = 0;
+	}
+	m_curIsPass = false;
+
+	m_remainTime = msg->nRemainTimeSec;
+	m_curIsPass = msg->bComplete;
+
+	if (!m_isInShenDianMap)
+	{
+		onEnterShenDianMap();
+	}
+	else
+	{
+		updateTargetItem(TTag_Pass);
+		updateTargetItem(TTag_Remain);
+		updateTargetItem(TTag_Time);
+	}
+
+	return 0;
+}
+
+bool SBKSDManager::canInShenDian()
+{
+	int levelLimit = CFG(int,"sbk_shendian_level_limit",50);
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	TeamMgr* teamMgr = TeamMgr::getInstance();
+	if (!teamMgr->is_inteam())
+	{
+		ToolTip::getInstance()->push(GET_STR(9071));
+		return false;
+	}
+	if (!(teamMgr->is_team_leader(player->getId())))
+	{
+		ToolTip::getInstance()->push(GET_STR(9072));
+		return false;
+	}
+	if (teamMgr->get_teammate_num() < SDMINTEAMERNUM)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["shendian_team_not_enough"]);
+		return false;
+	}
+	if (player->getLevel()<levelLimit)
+	{
+		std::string limitStr;
+		safe_sprintf(limitStr,STRING_TABLE["team_leader_level_not_enough"],levelLimit);
+		ToolTip::getInstance()->push(limitStr);
+		return false;
+	}
+	if (!teamMgr->isAllRoleLevelEnough(levelLimit))
+	{
+		std::string limitStr;
+		safe_sprintf(limitStr,STRING_TABLE["teamer_level_not_enough"],levelLimit);
+		ToolTip::getInstance()->push(limitStr);
+		return false;
+	}
+	return true;
+}
+
+void SBKSDManager::deleteCountLayer()
+{
+	if (m_countLayer)
+	{
+		delete m_countLayer;
+		m_countLayer = NULL;
+	}
+}
+
+void SBKSDManager::send_Change_TeamLeader()
+{
+	NET_C2GS_ShenDian_ChangeTeamLeader cmd;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+}
+
+void SBKSDManager::openErrorTips()
+{
+	switch(m_open_error_num)
+	{
+	case ESHENDIAN_NOT_OPEN:
+		ToolTip::getInstance()->push(STRING_TABLE["shendian_not_open"]);
+		break;
+	case ESHENDIAN_NPC_SMALL:
+		ToolTip::getInstance()->push(STRING_TABLE["shendian_guild_member_not_enough"]);
+		break;
+	case ESHENDIAN_TODAY_NOTOPEN:
+		ToolTip::getInstance()->push(STRING_TABLE["shendian_time_close"]);
+		break;
+	case ESHENDIAN_NOT_SBK_GUILD:
+		ToolTip::getInstance()->push(STRING_TABLE["shendian_guild_not_exit"]);
+		break;
+	default:
+		break;
+	}
+}

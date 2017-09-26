@@ -1,0 +1,46 @@
+#include "MiniDump.h"
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_WIN32)
+wchar_t	 c_exception::sz_dump_file_name[1024] = L"log\\serverdump.dmp";
+//--------------------------------------------------------
+void translation(unsigned int ucode_, EXCEPTION_POINTERS* exp_)
+{
+	throw c_exception(ucode_, exp_);
+}
+//--------------------------------------------------------
+long WINAPI exception_filter(EXCEPTION_POINTERS* exp_)
+{
+	c_exception(0, exp_);
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+//--------------------------------------------------------
+void disable_set_unhandled_exception_filter()
+{
+	void* addr = (void*)GetProcAddress(LoadLibrary(L"kernel32.dll"),"SetUnhandledExceptionFilter");
+	if(addr) 
+	{
+		unsigned char code[16];
+		int size = 0;
+		code[size++] = 0x33;
+		code[size++] = 0xC0;
+		code[size++] = 0xC2;
+		code[size++] = 0x04;
+		code[size++] = 0x00;
+		unsigned long oldflag, tmpflag;
+		VirtualProtect(addr, size, PAGE_READWRITE, &oldflag);
+		WriteProcessMemory(GetCurrentProcess(), addr, code, size, NULL);
+		VirtualProtect(addr, size, oldflag, &tmpflag);
+	}
+}
+
+
+c_exception::c_exception(unsigned int ucode_, void* exp_)
+{
+	HANDLE file = ::CreateFile(sz_dump_file_name, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	MINIDUMP_EXCEPTION_INFORMATION info;
+	info.ThreadId = GetCurrentThreadId();
+	info.ExceptionPointers =(EXCEPTION_POINTERS*)exp_;
+	info.ClientPointers = FALSE;
+	MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file,  MiniDumpWithFullMemory, &info, NULL, NULL);
+	::CloseHandle(file);
+}
+#endif

@@ -1,0 +1,247 @@
+#include "CDButton.h"
+#include "UiTools.h"
+#include "Helper.h"
+#include "UIUtil.h"
+
+CDButton::CDButton()
+	: _visibleStop(true)
+	,m_overlap(NULL)
+{
+
+}
+
+
+CDButton * CDButton::createWithSprites( CCSprite *btnSprite, CCSprite *cdSprite )
+{
+	CDButton *btn = CDButton::create();
+	btn->initWithSprites(btnSprite, cdSprite);
+	return btn;
+}
+
+void CDButton::initWithSprites( CCSprite *btnSprite, CCSprite *cdSprite )
+{
+	setBtnSprite(btnSprite);
+	setCDSprite(cdSprite);
+}
+
+bool CDButton::init()
+{
+	_btnSprite = NULL;
+	_cdProgress = NULL;
+	_duration = 0.8f;
+	_prepared = true;
+	_isTouchNow = false;
+	_iBtnTag = 0;
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	return true;
+}
+
+bool CDButton::run(bool f /*= false*/)
+{
+	if(_prepared)
+	{
+		_prepared = false;
+		_cdProgress->stopAllActions();
+		CCAction *action = NULL;
+		if(f)
+		{
+			action = CCSequence::createWithTwoActions(
+				CCProgressFromTo::create(_duration, 0.f, 100.f * _duration / _max), 
+				CCCallFunc::create(this, SEL_CallFunc(&CDButton::prepared)));
+		}
+		else
+		{
+			action = CCSequence::createWithTwoActions(
+				CCProgressFromTo::create(_duration, 100.0f * _duration / _max, 0.0f), 
+				CCCallFunc::create(this, SEL_CallFunc(&CDButton::prepared)));
+		}
+		_cdProgress->runAction(action);
+		_cdProgress->setVisible(true);
+		//setVisible(true);
+		return true;
+	}
+
+	return false;
+}
+
+void CDButton::stop()
+{
+	_cdProgress->stopAllActions();
+	_cdProgress->setVisible(false);
+	prepared();
+}
+
+
+
+void CDButton::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCNode::onExit();
+}
+
+void CDButton::setCDTime( float duration, float max /*= -1 */)
+{
+	_duration = duration;
+	if(max < 0)
+		_max = _duration;
+	else
+		_max = max;
+}
+
+void CDButton::setBtnSprite( CCNode *btnSprite )
+{
+	CC_ASSERT(btnSprite != NULL);
+	if(_btnSprite != NULL)
+		removeChild(_btnSprite, false);
+	_btnSprite = btnSprite;
+	addChild(_btnSprite, 1);
+}
+
+void CDButton::setCDSprite( CCSprite *cdSprite )
+{
+	CC_ASSERT(cdSprite != NULL);
+	if(_cdProgress != NULL)
+		removeChild(_cdProgress, false);
+	_cdProgress = CCProgressTimer::create(cdSprite);
+	addChild(_cdProgress, 2);
+	_cdProgress->setPercentage(0.0f);
+	_cdProgress->setReverseDirection(true);
+}
+
+void CDButton::prepared()
+{
+	_prepared = true;
+	setVisible(_visibleStop);
+}
+
+const CCSize& CDButton::getContentSize()
+{
+	if(_btnSprite == NULL)
+	{
+		return getContentSize();
+	}
+	else
+	{
+		return _btnSprite->getContentSize();
+	}
+}
+
+bool CDButton::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint pt = _cdProgress->convertTouchToNodeSpaceAR(pTouch);
+	CCRect rect = _cdProgress->boundingBox();
+	if(rect.containsPoint(pt))
+	{
+		if(_prepared)
+		{
+			signalClicked.emit();
+			signalClickedAndTag.emit(_iBtnTag);
+		}
+			
+
+		if (!_isTouchNow)
+		{
+			signalClickedEvent.emit(pTouch->getLocation(),CC_TOUCH_EVENT_BEGAN,_iBtnTag);
+		}
+		return true;
+	}
+	return false;
+}
+
+void CDButton::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint pt = _cdProgress->convertTouchToNodeSpaceAR(pTouch);
+	CCRect rect = _cdProgress->boundingBox();
+	if(rect.containsPoint(pt))
+	{
+		_touchBeginPos = pTouch->getLocation();
+		signalClickEnded.emit();
+	}
+	signalClickedEndedAndTag.emit(_iBtnTag,_isTouchNow);
+	if (_isTouchNow)
+	{
+		
+		_isTouchNow = false;
+		signalClickedEvent.emit(pTouch->getLocation(),CC_TOUCH_EVENT_ENDED,_iBtnTag);
+	}
+}
+
+void CDButton::ccTouchMoved( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint framePoint = _cdProgress->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _cdProgress->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(!frameRect.containsPoint(framePoint))
+	{
+		signalClicmove.emit();
+		if (!_isTouchNow)
+		{
+			signalClicmoveAndTag.emit(_iBtnTag);
+		}
+		
+	}
+	else
+	{
+		if (!_isTouchNow)
+		{
+			_isTouchNow = ccpDistance(pTouch->getLocation(),_touchBeginPos) > 10;
+			if (_isTouchNow)
+			{
+				signalClickedEvent.emit(pTouch->getLocation(),CC_TOUCH_EVENT_BEGAN,_iBtnTag);
+			}
+		}
+	}
+	if (_isTouchNow)
+	{
+		signalClickedEvent.emit(pTouch->getLocation(),CC_TOUCH_EVENT_MOVED,_iBtnTag);
+	}
+}
+void CDButton::ccTouchCancelled(CCTouch *pTouch, CCEvent *pEvent)
+{
+	_cdProgress->convertTouchToNodeSpace(pTouch);
+	if (_isTouchNow)
+	{
+		_isTouchNow = false;
+		signalClickedEvent.emit(pTouch->getLocation(),CC_TOUCH_EVENT_CANCELED,_iBtnTag);
+	}
+}
+
+void CDButton::sync_cd_time( float cur,float max )
+{
+	stop();
+
+	setCDTime(cur,max);
+	
+	if(_duration > 0)
+		run();
+}
+
+void CDButton::set_overlap( int overlap )
+{
+  if (!m_overlap)
+  {
+	  TTFConfig config;
+	  m_overlap = Helper::createLabelFT(12,1);
+	  m_overlap->setZOrder(3);
+	  m_overlap->setAnchorPoint(ccp(1,0));
+	  m_overlap->setColor(ccc3(255,102,0));
+	  m_overlap->setAlignment(RIGHT);
+	  UIUtil::childNodeAlign(this,m_overlap,eha_right,eva_bottom,ccp(-2,12));
+  }
+
+
+  std::stringstream ss;
+  ss<<overlap;
+  m_overlap->setString(ss.str());
+  m_overlap->setVisible(overlap > 1);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+void CDButtonLoader::onHandlePropTypeString(CCNode * pNode, CCNode * pParent, const char* pPropertyName, const char * pString, CCBReader * pCCBReader )
+{
+	if(CCString::create(pPropertyName)->isEqual(CCString::create("btnSprite")))
+		((CDButton*)pNode)->setBtnSprite(CCSprite::createWithSpriteFrameName(pString));
+	else if(CCString::create(pPropertyName)->isEqual(CCString::create("cdSprite")))
+		((CDButton*)pNode)->setCDSprite(CCSprite::createWithSpriteFrameName(pString));
+}

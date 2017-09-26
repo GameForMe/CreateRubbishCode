@@ -1,0 +1,191 @@
+#include "BossCardUi.h"
+#include "World.h"
+#include "DBMgr.h"
+#include "CfgReader.h"
+#include "UiLoader.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "Helper.h"
+#include "BossPKMgr.h"
+
+BossCard::BossCard( int bossID, int flushTime )
+	: _cardFrame(NULL)
+{
+	m_nBossID = 0;
+	m_nFlushTime = 0;
+	m_nBossLevel = 0;
+	m_nHour = 0;
+	m_nMin = 0;
+	_pTch = ccp(-1, -1);
+	_bossBGSP = NULL;
+	_challengeSP = NULL;
+
+	CCNodeLoaderLibrary* ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("bosscardui", BossCardUiLoader::loader());
+	cocos2d::extension::CCBReader* ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	_cardFrame = dynamic_cast<BossCardUi*>(ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "bosscardui.ccbi").c_str()));
+	
+	ccbReader->release();
+	if (_cardFrame != NULL)
+	{
+		this->addChild(_cardFrame);
+		m_nBossID = bossID;
+		m_nFlushTime = flushTime;
+		std::string bossName;
+// 		c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM BossChallenge WHERE id = ?1");
+// 		cmd->set_integer32(1, m_nBossID);
+// 		c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 		while(table->retrieve_row())
+// 		{
+// 			unsigned int idx = table->get_index("portrait");
+// 			bossName = table->get_text(idx);
+// 			idx = table->get_index("lv");
+// 			m_nBossLevel = table->get_integer32(idx);
+// 		}
+// 		c_db_manager::getSingleton()->destroy_table(table);
+// 		c_db_manager::getSingleton()->end_operation(cmd);
+
+		const sBossProto* t_data = BossPKMgr::getInstance()->getBossDataByBossID(bossID);
+		CC_ASSERT(t_data != NULL);
+		bossName = t_data->m_sPortrait;
+		m_nBossLevel = t_data->bossLevel;
+
+
+		_bossBGSP = dynamic_cast<CCSprite*>(_cardFrame->getChildByTag(BCT_Portrait));
+		std::string portraitName = bossName + ".png";
+		std::string bossPortrait = CFGReader::instance()->get_profile_string("Art", "Portrait", "") + portraitName;
+		_bossBGSP->initWithFile(bossPortrait.c_str());
+		_cardFrame->setAnchorPoint(ccp(0.5f, 0.5f));
+		_challengeSP = dynamic_cast<CCSprite*>(_cardFrame->getChildByTag(BCT_ChallengeState));
+// 		_levelLabel = dynamic_cast<CCLabelTTF*>(_cardFrame->getChildByTag(BCT_BossLevel));
+// 		_flushTimeLabel = dynamic_cast<CCLabelTTF*>(_cardFrame->getChildByTag(BCT_BossTime));
+		_levelLabel = Helper::getLabelFTByParentAndTag(_cardFrame, BCT_BossLevel);
+		CC_ASSERT(_levelLabel);
+		_flushTimeLabel = Helper::getLabelFTByParentAndTag(_cardFrame, BCT_BossTime);
+		CC_ASSERT(_flushTimeLabel);
+		_challengeButton = dynamic_cast<CCControlButton*>(_cardFrame->getChildByTag(BCT_ChallengeButton));
+		m_nHour = m_nFlushTime / 3600;
+		m_nMin = m_nFlushTime / 60;
+		while(m_nMin >= 60)
+			m_nMin -= 60;
+		m_nSec = m_nFlushTime % 60;
+		CCString* tmStr = CCString::createWithFormat("%02d:%02d:%02d", m_nHour, m_nMin, m_nSec);
+		CCString* lvStr = CCString::createWithFormat("%d", m_nBossLevel);
+		if (_levelLabel)
+			_levelLabel->setString(lvStr->getCString());
+		if (_flushTimeLabel)
+			_flushTimeLabel->setString(tmStr->getCString());
+		
+		auto plocLevel = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+		if (0 < m_nFlushTime || plocLevel < m_nBossLevel)
+		{
+			_challengeSP->setVisible(false);	
+			_challengeButton->setEnabled(false);
+		}
+		_challengeButton->addTargetWithActionForControlEvents(this, cccontrol_selector(BossCard::onChallengePressed), CCControlEventTouchUpInside);
+	}
+
+	this->autorelease();
+
+	this->schedule(schedule_selector(BossCard::updateFlushTime), 1.0f);
+	this->schedule(schedule_selector(BossCard::updateBossDes), 0.1f);
+}
+
+BossCard::~BossCard()
+{
+
+}
+
+void BossCard::setDelegate( PanelTipsDelegate* panelTipsDelegate )
+{
+	_myDelegate = panelTipsDelegate;
+}
+
+void BossCard::setTouched( CCTouch* pTouch )
+{
+	_pTch = _bossBGSP->convertToNodeSpace(pTouch->getLocation());
+}
+
+void BossCard::updateFlushTime( float dt )
+{
+	--m_nFlushTime;
+	if (0 > m_nFlushTime)
+	{
+		m_nFlushTime = 0;
+		return;
+	}
+	m_nHour = m_nFlushTime / 3600;
+	m_nMin = m_nFlushTime / 60;
+	while(m_nMin >= 60)
+		m_nMin -= 60;
+	m_nSec = m_nFlushTime % 60;
+	CCString* tmStr = CCString::createWithFormat("%02d:%02d:%02d", m_nHour, m_nMin,m_nSec);
+	_flushTimeLabel->setString(tmStr->getCString());
+	auto plocLevel = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	if (0 == m_nFlushTime && plocLevel >= m_nBossLevel)
+	{
+		if (!_challengeSP->isVisible())
+			_challengeSP->setVisible(true);
+		if (!_challengeButton->isEnabled())
+		{
+			_challengeButton->setEnabled(true);
+		}
+	}
+}
+
+void BossCard::updateBossDes( float dt )
+{
+	CCRect frameRect(0.0f,0.0f,_bossBGSP->getContentSize().width,_bossBGSP->getContentSize().height);
+	if (frameRect.containsPoint(_pTch))
+	{
+		_myDelegate->setBossDes(m_nBossID);
+		_pTch = ccp(-1,-1);
+	}
+
+}
+
+void BossCard::onChallengePressed(CCObject* pObject, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if( !player )
+		return;
+	_myDelegate->onChallenge(m_nBossID);
+	//if (player->getLevel() < 40)
+	//{
+	//	ToolTip::getInstance()->push(GET_STR(7229));
+	//}
+	//else
+	//	_myDelegate->onChallenge(m_nBossID);
+}
+
+
+
+cocos2d::SEL_MenuHandler BossCardUi::onResolveCCBCCMenuItemSelector( CCObject* pTarget, const char* pSelectorName )
+{
+
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler BossCardUi::onResolveCCBCCControlSelector( CCObject* pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+bool BossCardUi::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return true;
+}
+
+bool BossCardUi::init()
+{
+	if (!CCNode::init())
+		return false;
+
+	return true;
+}
+
+
+
+

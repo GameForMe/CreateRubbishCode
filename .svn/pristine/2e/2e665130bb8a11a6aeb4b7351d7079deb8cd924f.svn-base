@@ -1,0 +1,2079 @@
+#include "TCPClient.h"
+#include "MessageBoxUi.h"
+#include "World.h"
+#include "ChatMgr.h"
+#include "TeamMgr.h"
+#include "GuildMgr.h"
+#include "SocialMgr.h"
+#include "FilterMgr.h"
+#include "LocalPlayer.h"
+#include "PackageManager.h"
+#include "ChatUi.h"
+#include "StringMgr.h"
+#include "ToolTip.h"
+#include "NameMgr2.h"
+#include "StoreUi.h"
+#include "HookSetUi.h"
+#include "f_string_util.h"
+#include "MallMgr.h"
+
+#include "DBMgr.h"
+#include "RoleManager.h"
+#include "ClientCfg.h"
+#include "ToolTip.h"
+#include "CCLuaEngine.h"
+#include "SecondVerifyMgr.h"
+#if ENABLE_GOTYE==1
+#include "Voice/VoiceMgr.h"
+#endif
+#include "CommonView.h"
+#include <boost/lexical_cast.hpp>
+#include "Helper.h"
+#include "f_simple_res_guard.h"
+
+
+ChatMgr::ChatMgr():m_last_world_chat_time(0)
+	,m_last_map_chat_time(0)
+	,m_last_yyTianXia_chat_time(0)
+	,m_last_yyQili_chat_time(0)
+	,m_last_yyGuild_chat_time(0)
+	,m_last_yyTeam_chat_time(0)
+	,m_last_yyPrivate_chat_time(0)
+	,m_last_yyWorld_chat_time(0)
+	,m_bIsWorldSpeak(false)
+	,m_bIsGuildSpeak(false)
+	,m_bIsTeamSpeak(false)
+	,m_bIsNeedSetPrivateId(false)
+	,m_bIsNoticeDeleteGold(0)
+	,m_IsWorldCharDeleteMoney(0)
+	,m_WorldCharDeleteMoneyNum(0)
+	,channel((ESendChatChannel)0)
+{
+	m_local_player_id = RoleManager::getInstance()->getLocalPlayer()->getId();
+	m_WorldMsg = "";
+	m_IsYY = false;
+	m_ClearText = true;
+	m_Message = "";
+}
+ChatMgr::~ChatMgr()
+{
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_role_char" , this , &ChatMgr::onServer_Receive_Chat_Info);
+};
+ChatMgr* ChatMgr::getInstance()
+{
+	static ChatMgr mgr;
+	return &mgr;
+}
+void ChatMgr::Init()
+{
+	REG_NAME_CB(this , &ChatMgr::onGetName);
+
+	for (size_t i = 0; i < m_chatList.size(); i++)
+	{
+		delete[] m_chatList[i];
+	}
+	m_chatList.clear();
+	m_bIsNeedSetPrivateId = false;
+	m_bIsNoticeDeleteGold = true;
+	TCP_CLIENT->register_net_cmd("NET_SIS_role_char" , this , &ChatMgr::onServer_Receive_Chat_Info);
+	TCP_CLIENT->register_net_cmd("NET_SIS_chat_item" , this , &ChatMgr::onServer_Receive_Chat_ItemInfo);
+	TCP_CLIENT->register_net_cmd("NET_SIS_chat_emotcion" , this , &ChatMgr::onServerChatEmotcion);
+
+	bool speak = GET_UI(HookSetUi, WCT_HookSetUi)->getAutoSetData().data[AutoSetData::ASD_AutoPlayWorldVoice];
+	setWorldSpeak(speak);
+	speak = GET_UI(HookSetUi, WCT_HookSetUi)->getAutoSetData().data[AutoSetData::ASD_AutoPlayGuildVoice];
+	setGuildSpeak(speak);
+	speak = GET_UI(HookSetUi, WCT_HookSetUi)->getAutoSetData().data[AutoSetData::ASD_AutoPlayTeamVoice];
+	setTeamSpeak(speak);
+	return;
+}
+void ChatMgr::Destroy()
+{
+	UNREG_NAME_CB(this , &ChatMgr::onGetName);
+
+	for (size_t i = 0; i < m_chatList.size(); i++)
+	{
+		delete[] m_chatList[i];
+	}
+	m_chatList.clear();
+	m_bIsNeedSetPrivateId = false;
+	m_bIsNoticeDeleteGold = true;
+	m_receive_Temp.clear();
+
+
+	for (size_t i = ERCC_All;i < ERCC_END;i++)
+	{
+		m_receive_chat_array[i].clear();
+		m_vector_speak[i].clear();
+	}
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_role_char" , this , &ChatMgr::onServer_Receive_Chat_Info);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_chat_item" , this , &ChatMgr::onServer_Receive_Chat_ItemInfo);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_chat_emotcion" , this , &ChatMgr::onServerChatEmotcion);
+	return;
+}
+
+void ChatMgr::Send_Chat(const tstring &input_string,ESendChatChannel eChannel,unsigned int dest_id_ /* = INVALID */, unsigned int destName_crc,bool isYY/* = false*/)
+{
+	tstring strMsg(input_string);
+	remove_specified_char_in_string(strMsg,'\n');
+	remove_specified_char_in_string(strMsg,'\r');
+	//长度检查，首先应该转换成UTF16
+	std::wstring vStr = Helper::convert_string_to_wstring<300>(strMsg.c_str());
+	//长度检查
+	unsigned int sz = _utf_length(vStr.c_str());
+	if (0 == sz)
+		return;
+	if (sz > WORLD_CHANNEL_MSG_LEN)
+	{
+		//输入内容非法（太长或）
+		ToolTip::getInstance()->push(GET_STR(179));
+		return;
+	}
+	//首先应判断是否是GM命令
+	if (is_gmorder(strMsg))
+		return;//若是，则直接退出
+	switch(eChannel)
+	{
+	case ESCC_Decree://天下号令
+		Send_Decree_Chat(strMsg,eChannel,isYY);
+		break;
+	case ESCC_Qianli://千里传音
+		Send_Qili_Chat(strMsg,eChannel,isYY);
+		break;
+	case ESCC_World://世界
+		{
+			INT nPlayerMoney = PackageManager::getInstance()->getJinBi();
+			if(m_IsWorldCharDeleteMoney >= 1)
+			{
+				LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+				if(!ploc)
+					return;
+				std::stringstream ss;
+				ss<<"set"<<"_"<<ploc->getId();
+				m_bIsNoticeDeleteGold = ClientCfg::getInstance()->getInt(ss.str(), "ISSendCharDGold", 1);
+				if(m_bIsNoticeDeleteGold > 0)
+				{
+					std::string BasicCharText = GET_STR(9537);
+					CCString* strPlaceMoneyNum = CCString::createWithFormat("%d",m_WorldCharDeleteMoneyNum);
+					std::string strEnd = replaceStr(BasicCharText,"**",strPlaceMoneyNum->getCString()); //替换
+					m_WorldMsg = strMsg;
+					m_IsYY = isYY;
+					MessageBoxUi *messageBox = MessageBoxUi::createWithTwoBtnWithCheck(strEnd.c_str(),GET_STR(98).c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO, false);
+					messageBox->signalOkBtnPressed.connect(this, &ChatMgr::CheckSendChatIsDeleteOkBtnPressed);
+					messageBox->signalCheckStateChange.connect(this, &ChatMgr::CheckSendChatIsDeleteSendChat);
+					messageBox->signalCancelBtnPressed.connect(this, &ChatMgr::CheckSendChatIsDeleteCancelBtnPressed);
+					UiMgr::getInstance()->getCurScene()->addChild(messageBox, WZ_POPUI);
+					m_ClearText = false;
+				}
+				else
+				{
+					if((unsigned int)nPlayerMoney < m_WorldCharDeleteMoneyNum)
+					{
+						RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+						m_ClearText = false;
+					}
+					else
+					{
+						Send_World_Chat(strMsg,eChannel,isYY);
+					}
+
+				}
+			}
+			else
+			{
+				Send_World_Chat(strMsg,eChannel,isYY);
+			}
+
+		}
+
+		break;
+	case ESCC_Guild://行会
+		Send_Guild_Chat(strMsg,eChannel,isYY);
+		break;
+	case ESCC_Team://组队
+		Send_Team_Chat(strMsg,eChannel,isYY);
+		break;
+	case ESCC_Map://附近
+		Send_Map_Chat(strMsg,eChannel);
+		break;
+	case ESCC_SiLiao://私聊
+		Send_Private_Chat(strMsg,eChannel,dest_id_, destName_crc,isYY);
+	default:
+		break;
+	}
+}
+void ChatMgr::CheckSendChatIsDeleteCancelBtnPressed()
+{
+
+
+}
+void ChatMgr::CheckSendChatIsDeleteOkBtnPressed()
+{
+	if(m_bIsNoticeDeleteGold == 0)
+	{
+		LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+		if(!ploc)
+			return ;
+		unsigned int roleID = ploc->getId();
+		std::stringstream ss;
+		ss<<"set"<<"_"<<roleID;
+		ClientCfg::getInstance()->setInt(ss.str(), "ISSendCharDGold",0);
+	}
+	INT nPlayerMoney = PackageManager::getInstance()->getJinBi();
+	if((unsigned int)nPlayerMoney < m_WorldCharDeleteMoneyNum)
+	{
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+	}
+	else
+	{
+		Send_World_Chat(m_WorldMsg,ESCC_World,m_IsYY);
+		ChatUi* pCharUi = GET_UI(ChatUi, WCT_ChatUi);
+		if(pCharUi != NULL)
+		{
+			pCharUi->ClearCharText();
+
+		}
+	}
+
+}
+void ChatMgr::CheckSendChatIsDeleteSendChat(bool IsCheck)
+{
+	if(IsCheck)
+	{
+		m_bIsNoticeDeleteGold = 0;
+	}
+	else
+	{
+		m_bIsNoticeDeleteGold = 1;
+	}
+}
+void ChatMgr::Send_Decree_Chat(const tstring &strMsg,ESendChatChannel eChannel,bool isYY/* = false*/)
+{
+	int nLen = strMsg.length();
+	if (0 == nLen)
+	{
+		ToolTip::getInstance()->push(GET_STR(2047));
+		return;
+	}
+
+	//判断所需道具的耐久度剩余情况;
+	f_item* pItem = PackageManager::getInstance()->getItem(EICT_Bag,(unsigned int)DECREE_NEED_ITEM);
+	if (NULL == pItem)
+	{
+		const ItemTypeData& typeData = PackageManager::getInstance()->getItemTypeData((unsigned int)DECREE_NEED_ITEM);
+		string message ;
+		safe_sprintf(message,STRING_TABLE["chat_without_item"],typeData.name,typeData.recommendedPrice);
+		MessageBoxUi *chatUI = MessageBoxUi::createWithTwoBtnEx(TEXT_UTF8_TISHI,message.c_str(), "\xE8\xB4\xAD\xE4\xB9\xB0","\xE5\x8F\x96\xE6\xB6\x88");
+		World::getInstance()->getScene()->addChild(chatUI, WZ_MESSAGEBOX);
+		chatUI->signalOkBtnPressed.connect(this,&ChatMgr::HLTXItemGet);
+		m_Message = strMsg;
+		channel = eChannel;
+		return;
+	}
+	if (isYY)
+	{
+		unsigned int yyTime = getYYChannelSpeakTime(m_last_yyTianXia_chat_time);
+		if (yyTime < MIN_WORLD_RESPEAK_TIME)
+		{
+			ToolTip::getInstance()->push(GET_STR(2029));
+			return;
+		}
+	}
+
+	Send_ChatMsg2Server(strMsg,eChannel);
+	if (isYY)
+		setYYChannelBeginTime(m_last_yyTianXia_chat_time);
+	//调用UI接口，清除聊天输入框的内容;
+	return;
+}
+void ChatMgr::Send_Qili_Chat(const tstring &strMsg,ESendChatChannel eChannel,bool isYY/* = false*/)
+{
+	int nLen = strMsg.length();
+	if (0 == nLen)
+	{
+		ToolTip::getInstance()->push(GET_STR(2047));
+		return;
+	}
+
+	//判断所需道具的耐久度剩余情况;
+	f_item* pItem = PackageManager::getInstance()->getItem(EICT_Bag,(unsigned int)QIANLI_NEED_ITEM);
+	if (NULL == pItem)
+	{
+		//调用UI接口，在对应频道显示“千里传音缺少相应道具”信息;
+		const ItemTypeData& typeData = PackageManager::getInstance()->getItemTypeData((unsigned int)QIANLI_NEED_ITEM);
+		string message ;
+		safe_sprintf(message,STRING_TABLE["chat_without_item"],typeData.name,typeData.recommendedPrice);
+		MessageBoxUi *chatUI = MessageBoxUi::createWithTwoBtnEx(TEXT_UTF8_TISHI,message.c_str(), "\xE8\xB4\xAD\xE4\xB9\xB0","\xE5\x8F\x96\xE6\xB6\x88");
+		World::getInstance()->getScene()->addChild(chatUI, WZ_MESSAGEBOX);
+		chatUI->signalOkBtnPressed.connect(this,&ChatMgr::QLCYItemGet);
+		m_Message = strMsg;
+		channel = eChannel;
+		return;
+	}
+
+	if (isYY)
+	{
+		unsigned int yyTime = getYYChannelSpeakTime(m_last_yyQili_chat_time);
+		if (yyTime < MIN_WORLD_RESPEAK_TIME)
+		{
+			ToolTip::getInstance()->push(GET_STR(2029));
+			return;
+		}
+	}
+	Send_ChatMsg2Server(strMsg,eChannel);
+	if (isYY)
+		setYYChannelBeginTime(m_last_yyQili_chat_time);	
+	//调用UI接口，清除聊天输入框的内容
+	return;
+}
+void ChatMgr::Send_World_Chat(const tstring &strMsg,ESendChatChannel eChannel,bool isYY/* = false*/)
+{
+	int nLen = strMsg.length();
+	if (0 == nLen)
+	{
+		ToolTip::getInstance()->push(GET_STR(2047));
+		return;
+	}
+	//暂不做等级限制
+	//if (RoleManager::getInstance()->getLocalPlayer()->getLevel() < WORLD_CHANNEL_ROLE_LVL)
+	//{
+	//	//调用UI接口，显示“等级低于10级无法显示该频道”信息
+	//	ToolTip::getInstance()->push(GET_STR(153));
+	//	return;
+	//}
+	unsigned int timeDif(0);
+	unsigned int curTime(0);
+#if 1 //MyMethod()
+	struct timeval tv;
+	gettimeofday(&tv , 0);
+	curTime = tv.tv_sec*1000;
+#else
+	curTime = clock();
+#endif
+	timeDif = curTime - m_last_world_chat_time;
+	unsigned int biaozhun = 0;
+
+	if (isYY)
+	{
+		biaozhun = MIN_WORLD_RESPEAK_TIME;
+	}
+	else
+	{
+		biaozhun = MIN_World_Text_SPEAK_TIME;
+	}
+	//世界频道发言必须超过5秒
+	if (timeDif <= biaozhun)
+	{
+		//调用UI接口，在对应频道显示“世界频道发言间隔为5s”信息
+		//clear_link_info();
+		//调用UI接口，清除聊天输入框的内容
+		ToolTip::getInstance()->push(GET_STR(9538));
+		return;
+	}
+	Send_ChatMsg2Server(strMsg,eChannel);
+#if 1 //lzz
+	struct timeval tv2;
+	gettimeofday(&tv2 , 0);
+	m_last_world_chat_time = tv2.tv_sec*1000;
+#else
+	m_last_world_chat_time = clock();
+#endif
+
+	return;
+}
+void ChatMgr::Send_Guild_Chat(const tstring &strMsg,ESendChatChannel eChannel,bool isYY/* = false*/)
+{
+	int nLen = strMsg.length();
+	if (0 == nLen)
+	{
+		ToolTip::getInstance()->push(GET_STR(2047));
+		return;
+	}
+	//首先判断玩家是否加入公会
+	const sGuildDesc& guild = GuildMgr::getInstance()->getGuildDesc();
+	if (!IS_VALID(guild.id))
+	{
+		ToolTip::getInstance()->push(GET_STR(175));
+		return;
+	}
+	//判断是否重复发言
+	//if (true == is_resaid(strMsg,eChannel))
+	//{
+	//	//调用UI接口，在对应频道显示“重复发言”信息
+	//	//clear_link_info();
+	//	//调用UI接口，清除聊天输入框的内容
+	//	ToolTip::getInstance()->push(GET_STR(174));
+	//	return;
+	//}
+
+	if (isYY)
+	{
+		unsigned int yyTime = getYYChannelSpeakTime(m_last_yyGuild_chat_time);
+		if (yyTime < MIN_REPEAT_SPEAK_TIME)
+		{
+			ToolTip::getInstance()->push(GET_STR(2029));
+			return;
+		}
+	}
+	Send_ChatMsg2Server(strMsg,eChannel);
+	if (isYY)
+		setYYChannelBeginTime(m_last_yyGuild_chat_time);
+	//	unsigned int curTime(0);
+	//#if 1 //lzz
+	//	struct timeval tv;
+	//	gettimeofday(&tv , 0);
+	//	curTime = tv.tv_sec*1000;
+	//#else
+	//	curTime = clock();
+	//#endif
+	//	pushChatRecord(strMsg,curTime,eChannel);
+	return;
+}
+void ChatMgr::Send_Team_Chat(const tstring &strMsg,ESendChatChannel eChannel,bool isYY/* = false*/)
+{
+	int nLen = strMsg.length();
+	if (0 == nLen)
+	{
+		ToolTip::getInstance()->push(GET_STR(2047));
+		return;
+	}
+	//首先判断玩家是否有队伍
+	if (!(TeamMgr::getInstance()->is_inteam()))
+	{
+		//调用UI接口，在对应频道显示“您未加入队伍，无法使用队伍频道”信息
+		//调用UI接口，清除聊天输入框的内容
+		ToolTip::getInstance()->push(GET_STR(175));
+		return;
+	}
+
+	if (isYY)
+	{
+		unsigned int yyTime = getYYChannelSpeakTime(m_last_yyTeam_chat_time);
+		if (yyTime < MIN_REPEAT_SPEAK_TIME)
+		{
+			ToolTip::getInstance()->push(GET_STR(2029));
+			return;
+		}
+	}
+	Send_ChatMsg2Server(strMsg,eChannel);
+	if (isYY)
+		setYYChannelBeginTime(m_last_yyTeam_chat_time);
+	return;
+}
+void ChatMgr::Send_Map_Chat(const tstring &strMsg,ESendChatChannel eChannel)
+{
+	int nLen = strMsg.length();
+	if (0 == nLen)
+	{
+		ToolTip::getInstance()->push(GET_STR(2047));
+		return;
+	}
+
+	unsigned int timeDif(0);
+	unsigned int curTime(0);
+#if 1 //lzz
+	struct timeval tv;
+	gettimeofday(&tv , 0);
+	curTime = tv.tv_sec*1000;
+#else
+	curTime = clock();
+#endif
+	timeDif = curTime - m_last_map_chat_time;
+	//附件频道发言必须超过5秒
+	if (timeDif <= MIN_REPEAT_SPEAK_TIME)
+	{
+		ToolTip::getInstance()->push(GET_STR(2029));
+		return;
+	}
+
+	Send_ChatMsg2Server(strMsg,eChannel);
+#if 1 //lzz
+	struct timeval tv2;
+	gettimeofday(&tv2 , 0);
+	m_last_map_chat_time = tv2.tv_sec*1000;
+#else
+	m_last_map_chat_time = clock();
+#endif
+	return;
+}
+void ChatMgr::Send_Private_Chat(const tstring &strMsg,ESendChatChannel eChannel,unsigned int dest_id_ /* = INVALID */, unsigned int destName_crc,bool isYY/* = false*/)
+{
+	int nLen = strMsg.length();
+	if (0 == nLen)
+	{
+		ToolTip::getInstance()->push(GET_STR(2047));
+		return;
+	}
+	//应建议首字符可以为空格，先试试 add by XSea 2014.10.08
+	/*if (strMsg[0] == (char)0x20)//首字符不应该为空格
+	{
+	//调用UI接口，在对应频道显示“私聊格式不正确”信息
+	//调用UI接口，清除聊天输入框的内容
+	ToolTip::getInstance()->push(GET_STR(176));
+	return;
+	}*/
+	if (isYY)
+	{
+		unsigned int yyTime = getYYChannelSpeakTime(m_last_yyPrivate_chat_time);
+		if (yyTime < MIN_REPEAT_SPEAK_TIME)
+		{
+			ToolTip::getInstance()->push(GET_STR(2029));
+			return;
+		}
+	}
+	Send_ChatMsg2Server(strMsg,eChannel,dest_id_,0, destName_crc);
+	if (isYY)
+		setYYChannelBeginTime(m_last_yyPrivate_chat_time);
+	return;
+}
+
+void ChatMgr::setYYChannelBeginTime(unsigned int &yyTime)
+{
+#if 1
+	struct timeval beginTime;
+	gettimeofday(&beginTime, 0);
+	yyTime = beginTime.tv_sec*1000;
+#else
+	yyTime = clock();
+#endif
+}
+
+void ChatMgr::setYYChannelBeginTimeByChannel(eFrameTag yyChannel)
+{
+	//这里没完善，还需要根据传过来的语音频道来设置对应频道的当前时间，目前只支持世界频道
+#if 1
+	struct timeval beginTime;
+	gettimeofday(&beginTime, 0);
+	m_last_yyWorld_chat_time = beginTime.tv_sec*1000;
+#else
+	m_last_yyWorld_chat_time = clock();
+#endif
+}
+
+unsigned int ChatMgr::getYYChannelSpeakTimeByChannel(eFrameTag yyChannel)
+{
+	unsigned int yyIntervalTime = getYYIntervalTimeByChannel(yyChannel);
+	if (yyIntervalTime == 99999999)//如果获取到的是默认值，则不能语音发言
+	{
+		return 1;
+	}
+	//unsigned int timeDif(0);
+	unsigned int curTime(0);
+#if 1
+	struct timeval time;
+	gettimeofday(&time, 0);
+	curTime = time.tv_sec*1000;
+#else
+	curTime = clock();
+#endif
+	return curTime - yyIntervalTime;
+}
+
+unsigned int ChatMgr::getYYChannelSpeakTime(unsigned int yyTime)
+{
+	//unsigned int timeDif(0);
+	unsigned int curTime(0);
+#if 1
+	struct timeval time;
+	gettimeofday(&time, 0);
+	curTime = time.tv_sec*1000;
+#else
+	curTime = clock();
+#endif
+	return curTime - yyTime;
+}
+
+void ChatMgr::Send_ChatMsg2Server(const tstring &strMsg,ESendChatChannel eChannel,unsigned int dest_id_ /* = INVALID */, unsigned char auto_reply_/* =0 */, unsigned int destName_crc)
+{
+	tstring strInput = strMsg;
+
+	/************************************************************************/
+	/* 发送信息时才将物品信息加入容器                                       */
+	/************************************************************************/
+	std::string FindItemStr = strMsg; //临时组装字符串
+
+	int nApos = 0;  //[bing] 当前位置
+	int nBpos = 0;  //画表情图标的位置
+
+	//先解析字符串中有几个合法的物品信息
+	//先解析物品信息
+
+	std::vector<long long> item_ids;
+	while((nApos = FindItemStr.find( "<i" )) != -1)
+	{
+		//找后半部分字符串中的"/>"
+		FindItemStr = FindItemStr.substr(nApos + 2, -1);
+		if((nBpos = FindItemStr.find("/>")) == -1)
+			continue;
+
+		std::string ItemStr = FindItemStr.substr(0, nBpos + 1);
+		//[bing] 然后解析id和name
+		int nTmpIdPos = ItemStr.find("id=");
+		int nTmpNamePos = ItemStr.find("na=");
+
+		//[bing] 格式正确
+		if(nTmpIdPos != -1
+			&& nTmpNamePos != -1)
+		{
+			//unsigned long long nId = 0;
+			long long nId = boost::lexical_cast<long long>(ItemStr.substr(nTmpIdPos + 3, (nTmpNamePos - 1) - (nTmpIdPos + 3) ).c_str());
+
+			auto finder = std::find(item_ids.begin(),item_ids.end(),nId);
+			if (finder == item_ids.end())
+			{
+				item_ids.push_back(nId);
+			}
+			//#ifdef 0
+			//			nId = (unsigned long long)_atoi64(ItemStr.substr(nTmpIdPos + 3, (nTmpNamePos - 1) - (nTmpIdPos + 3) ).c_str());	//取ID截
+			//#else
+			//			nId = (unsigned long long)atoll(ItemStr.substr(nTmpIdPos + 3, (nTmpNamePos - 1) - (nTmpIdPos + 3) ).c_str());	//取ID截
+			//#endif	
+			//根据id取物品
+			/*	//[bing] 这里不需要检查 直接丢给服务器去找就行了
+			f_item* item = PackageManager::getInstance()->getItem(EICT_Bag, nId);
+			if(!item)
+			{
+			f_item* item = PackageManager::getInstance()->getItem(EICT_Equip, nId);
+			if(!item)
+			continue;
+			}
+			*/
+			//管理器加入这个id
+			//ChatMgr::getInstance()->InputItemId(nId);
+		}
+		FindItemStr = FindItemStr.substr(nBpos + 2/*, -1*/);  //后半部分字符串;
+	}
+
+	/************************************************************************/
+	/* 发送信息时才将物品信息加入容器                                       */
+	/************************************************************************/
+
+	//长度检查，首先应该转换成UTF16
+	wchar_t vStr[300];
+	memset(vStr, 0, sizeof(vStr));
+	Utf8ToUtf16(strMsg.c_str(), vStr,300,0);
+	//长度检查
+	unsigned int sz = _utf_length(vStr);
+	if (0 == sz)
+		return;
+	if (sz > WORLD_CHANNEL_MSG_LEN)
+	{
+		//输入内容非法（太长或）
+		ToolTip::getInstance()->push(GET_STR(179));
+		return;
+	}
+	//进行敏感词过滤
+	if (FilterMgr::getInstance()->words_filter(strInput,500) != 0)
+	{
+		//调用UI接口，清除聊天输入框的内容
+		return;
+	}
+	memset(vStr, 0, sizeof(vStr));
+	Utf8ToUtf16(strInput.c_str(), vStr,300,0);
+	//长度检查
+	sz = _utf_length(vStr);
+	size_t buff_size = sz  * sizeof(wchar_t) + sizeof(NET_SIC_role_char);
+	std::vector<unsigned char>	buff(buff_size);
+
+	NET_SIC_role_char* cmd = (NET_SIC_role_char*)&buff[0];
+	cmd->id = message_id_crc("NET_SIC_role_char");
+	cmd->dwDestRoleID = dest_id_;
+	cmd->dwRoleNameCrc = destName_crc;
+	cmd->byAutoReply = auto_reply_;
+	cmd->byChannel = eChannel;
+
+	size_t max_item_num = item_ids.size();
+	if (max_item_num > Chat_Item_MaxNum)
+		max_item_num = Chat_Item_MaxNum;
+
+	if(max_item_num)
+		memcpy(cmd->m_itemList,&item_ids[0],sizeof(long long)*max_item_num);
+
+	memcpy(cmd->szMsg,vStr,sz*sizeof(wchar_t));
+	cmd->size = buff_size;
+	TCP_CLIENT->send_net_cmd(cmd,NP_NORMAL,false);
+	// 	size_t nPos = sz  * sizeof(wchar_t) + sizeof(NET_SIC_role_char);
+	// 	size_t max_item_num = item_ids.size()>Chat_Item_MaxNum? Chat_Item_MaxNum:item_ids.size();
+	// 	//size_t size = nPos/* + sizeof(unsigned char)*/ + ( max_item_num * sizeof(long long) );
+	// 	//int size = (sz - 1) * sizeof(wchar_t) + sizeof(NET_SIC_role_char);
+	// 	unsigned char* pMsg = new unsigned char[size];
+	// 	GUARD_NEW_ARRAY_PTR(pMsg);
+	// 	memset(pMsg,0,sizeof(unsigned char) * size);
+	// 
+	// 	NET_SIC_role_char* cmd = (NET_SIC_role_char*)pMsg;
+	// 	cmd->id = message_id_crc("NET_SIC_role_char");
+	// 	cmd->dwDestRoleID = dest_id_;
+	// 	cmd->dwRoleNameCrc = destName_crc;
+	// 	cmd->byAutoReply = auto_reply_;
+	// 	cmd->byChannel = eChannel;
+	// 	cmd->nMsgLen = sz;
+	// 	memcpy(cmd->szMsg,vStr,sz*sizeof(wchar_t));
+	// 	cmd->size = size;
+	// 	CCLOG("Send_ChatMsg2Server1 size:%d, nPos:%d", size, nPos);
+	// 	//[bing] 最后接一个物品信息
+	// 	*(pMsg + nPos) = (unsigned char)item_ids.size();
+	// 	nPos += sizeof(unsigned char);	//物品数
+	// 	//物品动态id
+	// 	CCLOG("Send_ChatMsg2Server2 size:%d, nPos:%d", size, nPos);
+	// 	for( size_t i = 0; i < item_ids.size(); ++i )
+	// 	{
+	// 		memcpy(pMsg + nPos, &item_ids[i], sizeof(long long));
+	// 		//*((unsigned long long*)(pMsg + nPos)) = m_vecItemId[i];
+	// 		nPos += sizeof(long long);
+	// 	}
+	// 	CCLOG("Send_ChatMsg2Server3 size:%d, nPos:%d", size, nPos);
+	// 	//m_vecItemId.clear();	//清空物品列表
+	// 
+	// 	TCP_CLIENT->send_net_cmd(cmd,NP_NORMAL,false);
+	//delete []pMsg;
+	//return;
+}
+
+bool ChatMgr::is_resaid(const tstring &str,ESendChatChannel eChannel)
+{
+	size_t i ;
+	unsigned int currentTime(0);
+#if 1 //lzz
+	struct timeval tv;
+	gettimeofday(&tv , 0);
+	currentTime = tv.tv_sec*1000;
+#else
+	currentTime = clock();
+#endif
+	switch(eChannel)
+	{
+	case ESCC_Decree:
+	case ESCC_Qianli:
+		break;//付费频道不做限制
+		//以下几个频道，同一发言在规定时间内不可重复
+	case ESCC_World://世界频道只做时间限制
+		break;
+	case ESCC_Guild:
+		for (i = 0;i < m_vector_speak[ERCC_Guild].size();i++)
+		{
+			if (m_vector_speak[ERCC_Guild][i].send_text == str)
+			{
+				if (currentTime - m_vector_speak[ERCC_Guild][i].send_time <= MIN_REPEAT_SPEAK_TIME)
+				{
+					return true;
+				}
+			}
+		}
+		break;
+	case ESCC_Team:
+		for (i = 0;i < m_vector_speak[ERCC_Team].size();i++)
+		{
+			if (m_vector_speak[ERCC_Team][i].send_text == str)
+			{
+				if (currentTime - m_vector_speak[ERCC_Team][i].send_time <= MIN_REPEAT_SPEAK_TIME)
+				{
+					return true;
+				}
+			}
+		}
+		break;
+	case ESCC_Map:
+		for (i = 0;i < m_vector_speak[ERCC_Map].size();i++)
+		{
+			if (m_vector_speak[ERCC_Map][i].send_text == str)
+			{
+				if (currentTime - m_vector_speak[ERCC_Map][i].send_time <= MIN_REPEAT_SPEAK_TIME)
+				{
+					return true;
+				}
+			}
+		}
+		break;
+	case ESCC_SiLiao:
+		break;//私聊不限制
+	}
+	return false;
+}
+
+bool ChatMgr::is_gmorder(const tstring &str)
+{
+	const tstring gmStr = "~gm";
+	if(str[0]!=('~'))
+		return false;
+	int index = str.find(gmStr);
+	if (0 != index)
+	{
+		return true;
+	}
+
+	if (str == "~gm reload")
+	{
+		CCLuaEngine::defaultEngine()->executeGlobalFunction("reload");
+		return true;
+	}
+
+	tstring strTemp = str.substr(index+3,str.length()-index);
+	if (strTemp.length() > 0)
+	{
+		//[bing] debug Movie
+		//CMovie::GetInstance().doNPCScript(1);
+
+		NET_SIC_gm_command cmd;
+
+		Utf8ToUtf16(strTemp.c_str() , cmd.szCommand , sizeof(cmd.szCommand) , strTemp.length());
+		TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+	}
+	return true;
+}
+void ChatMgr::pushChatRecord(const tstring &str,unsigned int utime,ESendChatChannel eChannel)
+{
+	s_send_chat_info tmpStruct;
+	tmpStruct.send_text = str;
+	tmpStruct.send_time = utime;
+	tmpStruct.send_channel = eChannel;
+	send_chat_record::iterator iter;
+	switch(eChannel)
+	{
+	case ESCC_Guild:
+		if (m_vector_speak[ERCC_Guild].size() < MAX_SAVE_CHAT_RECORD)
+		{
+			m_vector_speak[ERCC_Guild].push_back(tmpStruct);
+		}
+		else if (m_vector_speak[ERCC_Guild].size() == MAX_SAVE_CHAT_RECORD)
+		{
+			iter = m_vector_speak[ERCC_Guild].begin();
+			iter = m_vector_speak[ERCC_Guild].erase(iter);
+			m_vector_speak[ERCC_Guild].push_back(tmpStruct);
+		}
+		else
+		{
+			//
+		}
+		break;
+	case ESCC_Team:
+		if (m_vector_speak[ERCC_Team].size() < MAX_SAVE_CHAT_RECORD)
+		{
+			m_vector_speak[ERCC_Team].push_back(tmpStruct);
+		}
+		else if (m_vector_speak[ERCC_Team].size() == MAX_SAVE_CHAT_RECORD)
+		{
+			iter = m_vector_speak[ERCC_Team].begin();
+			iter = m_vector_speak[ERCC_Team].erase(iter);
+			m_vector_speak[ERCC_Team].push_back(tmpStruct);
+		}
+		else
+		{
+			//
+		}
+		break;
+	case ESCC_Map:
+		if (m_vector_speak[ERCC_Map].size() < MAX_SAVE_CHAT_RECORD)
+		{
+			m_vector_speak[ERCC_Map].push_back(tmpStruct);
+		}
+		else if (m_vector_speak[ERCC_Map].size() == MAX_SAVE_CHAT_RECORD)
+		{
+			iter = m_vector_speak[ERCC_Map].begin();
+			iter = m_vector_speak[ERCC_Map].erase(iter);
+			m_vector_speak[ERCC_Map].push_back(tmpStruct);
+		}
+		else
+		{
+			//
+		}
+		break;
+	default:
+		break;
+	}
+	return;
+}
+
+unsigned int ChatMgr::onServer_Receive_Chat_Info(s_net_cmd *cmd)
+{
+	NET_SIS_role_char* msg = (NET_SIS_role_char*)cmd;
+	msg->gotyeId = 0;
+	switch(msg->dw_error_code)
+	{
+	case E_RoleChat_ForbidChat:					//禁止发言
+		{
+			ToolTip::getInstance()->push(GET_STR(177));
+			return 0;
+		}
+		break;
+	case E_RoleChat_Map_Frequently:					//未满足发言间隔
+	case E_RoleChat_World_Frequently:
+		{
+			ToolTip::getInstance()->push(GET_STR(2029));
+			return 0;
+		}
+		break;
+	case E_RoleChat_Map_RoleNo10:					//禁止发言
+		{
+			return 0;
+		}
+		break;
+	case E_RoleChat_ServerNotReady:				//服务器没有准备好
+		return 0;
+		break;
+	case E_RoleChat_Secret_RemoteRoleLeave:		//私聊,对方不在线
+		{
+			ToolTip::getInstance()->push(GET_STR(178));
+			GET_UI(ChatUi,WCT_ChatUi)->clearInputName(false,"");
+			GET_UI(ChatUi,WCT_ChatUi)->setChatChannel(ESCC_Map);
+			GET_UI(ChatUi,WCT_ChatUi)->resetChannelBtn();
+			return 0;
+		}
+		break;
+	case E_RoleChat_Secret_NoRoleName:		//私聊,此玩家不存在
+		{
+			ToolTip::getInstance()->push(GET_STR(7241));
+			GET_UI(ChatUi,WCT_ChatUi)->clearInputName(false,"");
+			GET_UI(ChatUi,WCT_ChatUi)->setChatChannel(ESCC_Map);
+			GET_UI(ChatUi,WCT_ChatUi)->resetChannelBtn();
+			return 0;
+		}
+
+		break;
+	case E_RoleChat_Secret_NoSelf:		//私聊,不要玩弄自己
+		{
+			ToolTip::getInstance()->push(GET_STR(7203));
+			GET_UI(ChatUi,WCT_ChatUi)->clearInputName(false,"");
+			GET_UI(ChatUi,WCT_ChatUi)->setChatChannel(ESCC_Map);
+			GET_UI(ChatUi,WCT_ChatUi)->resetChannelBtn();
+			return 0;
+		}
+
+		break;
+	case E_RoleChat_TooLength:					//消息过长,发言失败
+		{
+			ToolTip::getInstance()->push(GET_STR(179));
+			return 0;
+		}
+		break;
+	case E_RoleChat_World_NoFortune:				//世界发言,元气不足	
+		return 0;
+		break;
+	case E_RoleChat_World_RoleNo30:
+		{
+			//未满30级不可在世界频道发言
+			ToolTip::getInstance()->push(GET_STR(2370));
+			return 0;
+		}
+		break;
+	case E_RoleChat_Guild_NoJoin:
+		{
+			ToolTip::getInstance()->push(GET_STR(175));
+			return 0;
+		}
+		break;
+	case E_RoleChat_Team_NoJoin:
+		{
+			ToolTip::getInstance()->push(GET_STR(175));
+			return 0;
+		}
+		break;
+	case E_RoleChat_Decree_OutOfYuanBao:
+		{
+			if (ESCC_Decree == (ESendChatChannel)msg->byChannel)
+			{
+				ToolTip::getInstance()->push(GET_STR(233));
+			}
+			else if (ESCC_Qianli == (ESendChatChannel)msg->byChannel)
+			{
+				ToolTip::getInstance()->push(GET_STR(234));
+			}
+			return 0;
+		}
+		break;
+	}
+	if (msg->dw_error_code > 0)
+		return 0;//二次判断，防止错误信息遗漏
+	//黑名单判断,该判断对天下号令和千里传音无效
+	if (ESCC_Decree != (ESendChatChannel)(msg->byChannel) && ESCC_Qianli != (ESendChatChannel)(msg->byChannel))
+	{
+		if (IS_VALID(msg->dwSrcRoleID))
+		{
+			if (SocialMgr::getInstance()->has_black(msg->dwSrcRoleID))
+			{
+				return 0;
+			}
+		}
+	}
+
+	//发消息时已经过滤发言，此处无需重复过滤
+	char* pmsg = new char[cmd->size];
+	memset(pmsg, 0, sizeof(pmsg));
+	memcpy(pmsg, msg, cmd->size);
+	m_chatList.push_back(pmsg);
+	return 0;
+}
+
+unsigned int ChatMgr::onServer_Receive_Chat_ItemInfo(s_net_cmd *cmd)
+{
+	NET_SIS_chat_item* msg = (NET_SIS_chat_item*)cmd;
+
+	int nApos = 0;
+	for(int i = 0; i < msg->byItemNum; ++i )
+	{
+		tagItem *pItem = (tagItem*)(msg->szMsg + nApos);
+		if(MIsEquipment(pItem->dw_data_id))
+		{
+			tagEquip *pEquip = (tagEquip*)(msg->szMsg + nApos);
+			nApos += sizeof(tagEquip);
+			//判断之前是否存储，如果已有数据，不使用insert
+			std::map<unsigned INT64, tagEquip>::iterator tempIt = m_mapChatEquip.find(pEquip->n64_serial);
+			if(tempIt == m_mapChatEquip.end())
+			{
+				m_mapChatEquip.insert(std::make_pair(pEquip->n64_serial, *pEquip));
+			}else{
+				m_mapChatEquip[pEquip->n64_serial] = *pEquip;
+			}
+			//end
+			//m_mapChatEquip.insert(std::make_pair(pEquip->n64_serial, *pEquip));
+		}
+		else
+		{
+			nApos += sizeof(tagItem);
+			//判断之前是否存储，如果已有数据，不使用insert
+			std::map<unsigned INT64, tagItem>::iterator tempIt = m_mapChatItem.find(pItem->n64_serial);
+			if(tempIt == m_mapChatItem.end())
+			{
+				m_mapChatItem.insert(std::make_pair(pItem->n64_serial, *pItem));
+			}else{
+				m_mapChatItem[pItem->n64_serial] = *pItem;
+			}
+			//end
+			//m_mapChatItem.insert(std::make_pair(pItem->n64_serial, *pItem));
+		}
+	}
+
+	return 0;
+}
+
+void ChatMgr::pushReceiveInfo2Channel(NET_SIS_role_char* pMsg, const std::string* sendName, int _time, const std::string* recvName)
+{
+	if (!IS_VALID_PTR(pMsg))
+		return;
+
+	s_receive_chat_info tmpStruct;
+	tmpStruct.send_role_id = pMsg->dwSrcRoleID;
+	tmpStruct.receive_role_id = pMsg->dwDestRoleID;
+	tmpStruct.is_auto_reply = pMsg->byAutoReply;
+	tmpStruct.send_channel = (ESendChatChannel)(pMsg->byChannel);
+	tmpStruct.nVIPLv = pMsg->nVipLv;
+	tmpStruct.bySex = pMsg->bySex;
+	tmpStruct.gotyeId = pMsg->gotyeId;
+	tmpStruct.gotyeTime = _time;
+	//需转换
+	char vStr[500];
+	memset(vStr, 0, sizeof(vStr));
+	Utf16ToUtf8(pMsg->szMsg, vStr, 500,0);
+	tmpStruct.chat_text.assign(vStr);
+
+	//私聊和公告频道不用获取名称的过程
+	if (recvName)
+		tmpStruct.receive_role_name = *recvName;
+	if (sendName)
+	{
+		tmpStruct.send_role_name = *sendName;
+	}
+	// 虽然语音聊天调用此函数会给sendname赋值，但是由于本地名字池中可能没有这个名字，
+	// 因此可能导致相关代码调用queryName()时判断为false，造成bug，
+	// 因此按照禅道需求改成一律走普通聊天处理流程。
+	//else
+	if (ESCC_SiLiao != tmpStruct.send_channel && ESCC_Affiche != tmpStruct.send_channel)
+	{
+		if (IS_VALID(pMsg->dwSrcRoleID) && pMsg->dwSrcRoleID != 0)
+		{
+			bool needName = false;
+			//判断是否知道该玩家的名称
+			if (!NameMgr2::getInstance()->queryName(pMsg->dwSrcRoleID,tmpStruct.send_role_name))
+			{
+				needName = true;
+			}
+			if (IS_VALID(pMsg->dwDestRoleID)  && pMsg->dwDestRoleID != 0)
+			{
+				if (!NameMgr2::getInstance()->queryName(pMsg->dwDestRoleID,tmpStruct.receive_role_name))
+				{
+					needName = true;
+				}
+			}
+
+			if (m_local_player_id != pMsg->dwSrcRoleID)
+			{
+				if (needName)
+				{
+					//需要记录
+					m_receive_Temp.push_back(tmpStruct);
+					return;
+				}
+			}
+		}
+	}
+	switch((ESendChatChannel)(pMsg->byChannel))
+	{
+	case ESCC_Decree:
+		{
+			//首先需要记录个收到消息的时间
+#if 1 //lzz
+			struct timeval tv;
+			gettimeofday(&tv , 0);
+			tmpStruct.receive_Time = tv.tv_sec*1000;
+#else
+			tmpStruct.receive_Time = clock();
+#endif
+			if (m_receive_chat_array[ERCC_Decree].size() >= MAX_DECREE_RECORD_NUM)
+			{
+				receive_chat_record::iterator iter1 = m_receive_chat_array[ERCC_Decree].begin();
+				//TODO:删除
+				GET_UI(ChatUi, WCT_ChatUi)->deleteDecree(*iter1);
+				iter1 = m_receive_chat_array[ERCC_Decree].erase(iter1);
+				m_receive_chat_array[ERCC_Decree].push_back(tmpStruct);
+				//TODO:增加
+				GET_UI(ChatUi, WCT_ChatUi)->appendDecree(tmpStruct);
+			}
+			else
+			{
+				m_receive_chat_array[ERCC_Decree].push_back(tmpStruct);
+				//TODO:增加
+				GET_UI(ChatUi, WCT_ChatUi)->appendDecree(tmpStruct);
+			}
+		}
+		break;
+	case ESCC_Qianli://最多保存20条
+		if (m_receive_chat_array[ERCC_Qianli].size() >= MAX_RECEIVE_CHAT_RECORD_SPECIAL)
+		{
+			//receive_chat_record::iterator iter1 = m_receive_chat_array[ERCC_Qianli].begin();
+			//iter1 = m_receive_chat_array[ERCC_Qianli].erase(iter1);
+			receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_Qianli].begin();
+			//TODO:删除
+			GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+			iter2 = m_receive_chat_array[ERCC_Qianli].erase(iter2);
+			//m_receive_chat_array[ERCC_Qianli].push_back(tmpStruct);
+			m_receive_chat_array[ERCC_Qianli].push_back(tmpStruct);
+			//TODO:增加
+			GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+		}
+		else
+		{
+			//m_receive_chat_array[ERCC_Qianli].push_back(tmpStruct);
+			m_receive_chat_array[ERCC_Qianli].push_back(tmpStruct);
+			//TODO:增加
+			GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+		}
+		break;
+		//公告频道
+	case ESCC_Affiche:
+		{
+			if (m_receive_chat_array[ERCC_All].size() >= MAX_RECEIVE_CHAT_RECORD_SYSTEM)
+			{
+				receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_All].begin();
+				//TODO:删除
+				GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+				iter2 = m_receive_chat_array[ERCC_All].erase(iter2);
+				m_receive_chat_array[ERCC_All].push_back(tmpStruct);
+				//TODO:增加
+				GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+			}
+			else
+			{
+				m_receive_chat_array[ERCC_All].push_back(tmpStruct);
+				//TODO:增加
+				GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+			}
+		}
+		break;
+	case ESCC_World:
+		{
+			if (m_receive_chat_array[ERCC_World].size() >= MAX_RECEIVE_CHAT_RECORD_WORLD)
+			{
+				//receive_chat_record::iterator iter1 = m_receive_chat_array[ERCC_World].begin();
+				//iter1 = m_receive_chat_array[ERCC_World].erase(iter1);
+				receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_World].begin();
+				//TODO:删除
+				GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+				iter2 = m_receive_chat_array[ERCC_World].erase(iter2);
+				//m_receive_chat_array[ERCC_World].push_back(tmpStruct);
+				m_receive_chat_array[ERCC_World].push_back(tmpStruct);
+				//TODO:增加
+				GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+			}
+			else
+			{
+				//m_receive_chat_array[ERCC_World].push_back(tmpStruct);
+				m_receive_chat_array[ERCC_World].push_back(tmpStruct);
+				//TODO:增加
+				GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+			}
+			//#if 1 //lzz
+			//			struct timeval tv;
+			//			gettimeofday(&tv , 0);
+			//			m_last_world_chat_time = tv.tv_sec*1000;
+			//#else
+			//			m_last_world_chat_time = clock();
+			//#endif
+		}
+		break;
+	case ESCC_Guild:
+		if (m_receive_chat_array[ERCC_Guild].size() >= MAX_RECEIVE_CHAT_RECORD_GUILD)
+		{
+			//receive_chat_record::iterator iter1 = m_receive_chat_array[ERCC_Guild].begin();
+			//iter1 = m_receive_chat_array[ERCC_Guild].erase(iter1);
+			receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_Guild].begin();
+			//TODO:删除
+			GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+			iter2 = m_receive_chat_array[ERCC_Guild].erase(iter2);
+			//m_receive_chat_array[ERCC_Guild].push_back(tmpStruct);
+			m_receive_chat_array[ERCC_Guild].push_back(tmpStruct);
+			//TODO:增加
+			GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+		}
+		else
+		{
+			//m_receive_chat_array[ERCC_Guild].push_back(tmpStruct);
+			m_receive_chat_array[ERCC_Guild].push_back(tmpStruct);
+			//TODO:增加
+			GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+		}
+		break;
+	case ESCC_Team:
+		if (m_receive_chat_array[ERCC_Team].size() >= MAX_RECEIVE_CHAT_RECORD_TEAM)
+		{
+			//receive_chat_record::iterator iter1 = m_receive_chat_array[ERCC_Team].begin();
+			//iter1 = m_receive_chat_array[ERCC_Team].erase(iter1);
+			receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_Team].begin();
+			//TODO:删除
+			GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+			iter2 = m_receive_chat_array[ERCC_Team].erase(iter2);
+			//m_receive_chat_array[ERCC_Team].push_back(tmpStruct);
+			m_receive_chat_array[ERCC_Team].push_back(tmpStruct);
+			//TODO:增加
+			GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+		}
+		else
+		{
+			//m_receive_chat_array[ERCC_Team].push_back(tmpStruct);
+			m_receive_chat_array[ERCC_Team].push_back(tmpStruct);
+			//TODO:增加
+			GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+		}
+		break;
+	case ESCC_Map:
+		if (m_receive_chat_array[ERCC_Map].size() >= MAX_RECEIVE_CHAT_RECORD_MAP)
+		{
+			//receive_chat_record::iterator iter1 = m_receive_chat_array[ERCC_Map].begin();
+			//iter1 = m_receive_chat_array[ERCC_Map].erase(iter1);
+			receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_Map].begin();
+			//TODO:删除
+			GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+			iter2 = m_receive_chat_array[ERCC_Map].erase(iter2);
+			//m_receive_chat_array[ERCC_Map].push_back(tmpStruct);
+			m_receive_chat_array[ERCC_Map].push_back(tmpStruct);
+			//TODO:增加
+			GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+		}
+		else
+		{
+			//m_receive_chat_array[ERCC_Map].push_back(tmpStruct);
+			m_receive_chat_array[ERCC_Map].push_back(tmpStruct);
+			//TODO:增加
+			GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+		}
+		//#if 1 //lzz
+		//		struct timeval tv;
+		//		gettimeofday(&tv , 0);
+		//		m_last_map_chat_time = tv.tv_sec*1000;
+		//#else
+		//		m_last_map_chat_time = clock();
+		//#endif
+		break;
+	case ESCC_SiLiao:
+		//我对别人说的
+		if (m_local_player_id == pMsg->dwSrcRoleID)
+		{
+			if (tmpStruct.receive_role_name.size() <= 0)
+			{
+				if (NameMgr2::getInstance()->queryName(pMsg->dwDestRoleID,tmpStruct.receive_role_name)
+					&& NameMgr2::getInstance()->queryName(pMsg->dwSrcRoleID,tmpStruct.send_role_name))
+				{
+				}
+				else
+				{
+					if (m_local_player_id != pMsg->dwDestRoleID)
+					{
+						//需要记录
+						m_receive_Temp.push_back(tmpStruct);
+						return;
+					}
+					//不会进入这里
+				}
+			}
+			if (isNeedPrivate())
+			{
+				setNeedPrivate(false);
+				GET_UI(ChatUi,WCT_ChatUi)->setPrivateId(pMsg->dwDestRoleID);
+			}
+		}
+		//别人对我说的
+		else
+		{
+			if (tmpStruct.send_role_name.size() <= 0)
+			{
+				if (NameMgr2::getInstance()->queryName(pMsg->dwSrcRoleID,tmpStruct.send_role_name)
+					&& NameMgr2::getInstance()->queryName(pMsg->dwDestRoleID,tmpStruct.receive_role_name))
+				{
+				}
+				else
+				{
+					if (m_local_player_id != pMsg->dwSrcRoleID)
+					{
+						//需要记录
+						m_receive_Temp.push_back(tmpStruct);
+						return;
+					}
+					//不会进入这里
+				}
+			}
+		}
+		if (m_receive_chat_array[ERCC_SiLiao].size() >= MAX_RECEIVE_CHAT_RECORD_SILIAO)
+		{
+			//receive_chat_record::iterator iter1 = m_receive_chat_array[ERCC_SiLiao].begin();
+			//iter1 = m_receive_chat_array[ERCC_SiLiao].erase(iter1);
+			receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_SiLiao].begin();
+			//TODO:删除
+			GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+			iter2 = m_receive_chat_array[ERCC_SiLiao].erase(iter2);
+			//m_receive_chat_array[ERCC_SiLiao].push_back(tmpStruct);
+			m_receive_chat_array[ERCC_SiLiao].push_back(tmpStruct);
+			//TODO:增加
+			GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+		}
+		else
+		{
+			//m_receive_chat_array[ERCC_SiLiao].push_back(tmpStruct);
+			m_receive_chat_array[ERCC_SiLiao].push_back(tmpStruct);
+			//TODO:增加
+			GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+		}
+		break;
+	default:
+		break;
+	}
+}
+void ChatMgr::onGetName(unsigned int roleid , const std::string& name)
+{
+	receive_chat_record::iterator iter = m_receive_Temp.begin();
+	for (;iter != m_receive_Temp.end();)
+	{
+		if (roleid == (iter)->send_role_id)
+		{
+			iter->send_role_name = name;
+			s_receive_chat_info tmpStruct = *iter;
+			switch((ESendChatChannel)(iter->send_channel))
+			{
+			case ESCC_Decree:
+				{
+					//首先需要记录个收到消息的时间
+#if 1 //lzz
+					struct timeval tv;
+					gettimeofday(&tv , 0);
+					tmpStruct.receive_Time = tv.tv_sec*1000;
+#else
+					tmpStruct.receive_Time = clock();
+#endif
+					if (m_receive_chat_array[ERCC_Decree].size() >= MAX_DECREE_RECORD_NUM)
+					{
+						receive_chat_record::iterator iter1 = m_receive_chat_array[ERCC_Decree].begin();
+						//TODO:删除
+						GET_UI(ChatUi, WCT_ChatUi)->deleteDecree(*iter1);
+						iter1 = m_receive_chat_array[ERCC_Decree].erase(iter1);
+						m_receive_chat_array[ERCC_Decree].push_back(tmpStruct);
+						//TODO:增加
+						GET_UI(ChatUi, WCT_ChatUi)->appendDecree(tmpStruct);
+					}
+					else
+					{
+						m_receive_chat_array[ERCC_Decree].push_back(tmpStruct);
+						//TODO:增加
+						GET_UI(ChatUi, WCT_ChatUi)->appendDecree(tmpStruct);
+					}
+				}
+				break;
+			case ESCC_Qianli://最多保存20条
+				if (m_receive_chat_array[ERCC_Qianli].size() >= MAX_RECEIVE_CHAT_RECORD_SPECIAL)
+				{
+					//receive_chat_record::iterator iter1 = m_receive_chat_array[ERCC_Qianli].begin();
+					//iter1 = m_receive_chat_array[ERCC_Qianli].erase(iter1);
+					receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_Qianli].begin();
+					//TODO:删除
+					GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+					iter2 = m_receive_chat_array[ERCC_Qianli].erase(iter2);
+					//m_receive_chat_array[ERCC_Qianli].push_back(tmpStruct);
+					m_receive_chat_array[ERCC_Qianli].push_back(tmpStruct);
+					//TODO:增加
+					GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+				}
+				else
+				{
+					//m_receive_chat_array[ERCC_Qianli].push_back(tmpStruct);
+					m_receive_chat_array[ERCC_Qianli].push_back(tmpStruct);
+					//TODO:增加
+					GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+				}
+				break;
+			case ESCC_World:
+				{
+					if (m_receive_chat_array[ERCC_World].size() >= MAX_RECEIVE_CHAT_RECORD_WORLD)
+					{
+						//receive_chat_record::iterator iter1 = m_receive_chat_array[ERCC_World].begin();
+						//iter1 = m_receive_chat_array[ERCC_World].erase(iter1);
+						receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_World].begin();
+						//TODO:删除
+						GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+						iter2 = m_receive_chat_array[ERCC_World].erase(iter2);
+						//m_receive_chat_array[ERCC_World].push_back(tmpStruct);
+						m_receive_chat_array[ERCC_World].push_back(tmpStruct);
+						//TODO:增加
+						GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+					}
+					else
+					{
+						//m_receive_chat_array[ERCC_World].push_back(tmpStruct);
+						m_receive_chat_array[ERCC_World].push_back(tmpStruct);
+						//TODO:增加
+						GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+					}
+					//#if 1 //lzz
+					//					struct timeval tv;
+					//					gettimeofday(&tv , 0);
+					//					m_last_world_chat_time = tv.tv_sec*1000;
+					//#else
+					//					m_last_world_chat_time = clock();
+					//#endif
+				}
+				break;
+			case ESCC_Guild:
+				if (m_receive_chat_array[ERCC_Guild].size() >= MAX_RECEIVE_CHAT_RECORD_GUILD)
+				{
+					//receive_chat_record::iterator iter1 = m_receive_chat_array[ERCC_Guild].begin();
+					//iter1 = m_receive_chat_array[ERCC_Guild].erase(iter1);
+					receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_Guild].begin();
+					//TODO:删除
+					GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+					iter2 = m_receive_chat_array[ERCC_Guild].erase(iter2);
+					//m_receive_chat_array[ERCC_Guild].push_back(tmpStruct);
+					m_receive_chat_array[ERCC_Guild].push_back(tmpStruct);
+					//TODO:增加
+					GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+				}
+				else
+				{
+					//m_receive_chat_array[ERCC_Guild].push_back(tmpStruct);
+					m_receive_chat_array[ERCC_Guild].push_back(tmpStruct);
+					//TODO:增加
+					GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+				}
+				break;
+			case ESCC_Team:
+				if (m_receive_chat_array[ERCC_Team].size() >= MAX_RECEIVE_CHAT_RECORD_TEAM)
+				{
+					//receive_chat_record::iterator iter1 = m_receive_chat_array[ERCC_Team].begin();
+					//iter1 = m_receive_chat_array[ERCC_Team].erase(iter1);
+					receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_Team].begin();
+					//TODO:删除
+					GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+					iter2 = m_receive_chat_array[ERCC_Team].erase(iter2);
+					//m_receive_chat_array[ERCC_Team].push_back(tmpStruct);
+					m_receive_chat_array[ERCC_Team].push_back(tmpStruct);
+					//TODO:增加
+					GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+				}
+				else
+				{
+					//m_receive_chat_array[ERCC_Team].push_back(tmpStruct);
+					m_receive_chat_array[ERCC_Team].push_back(tmpStruct);
+					//TODO:增加
+					GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+				}
+				break;
+			case ESCC_Map:
+				if (m_receive_chat_array[ERCC_Map].size() >= MAX_RECEIVE_CHAT_RECORD_MAP)
+				{
+					//receive_chat_record::iterator iter1 = m_receive_chat_array[ERCC_Map].begin();
+					//iter1 = m_receive_chat_array[ERCC_Map].erase(iter1);
+					receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_Map].begin();
+					//TODO:删除
+					GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+					iter2 = m_receive_chat_array[ERCC_Map].erase(iter2);
+					//m_receive_chat_array[ERCC_Map].push_back(tmpStruct);
+					m_receive_chat_array[ERCC_Map].push_back(tmpStruct);
+					//TODO:增加
+					GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+				}
+				else
+				{
+					//m_receive_chat_array[ERCC_Map].push_back(tmpStruct);
+					m_receive_chat_array[ERCC_Map].push_back(tmpStruct);
+					//TODO:增加
+					GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+				}
+				//#if 1 //lzz
+				//				struct timeval tv;
+				//				gettimeofday(&tv , 0);
+				//				m_last_map_chat_time = tv.tv_sec*1000;
+				//#else
+				//				m_last_map_chat_time = clock();
+				//#endif
+				break;
+			case ESCC_SiLiao:
+				if (m_receive_chat_array[ERCC_SiLiao].size() >= MAX_RECEIVE_CHAT_RECORD_SILIAO)
+				{
+					iter->send_role_name = name;
+					//receive_chat_record::iterator iter1 = m_receive_chat_array[ERCC_SiLiao].begin();
+					//iter1 = m_receive_chat_array[ERCC_SiLiao].erase(iter1);
+					receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_SiLiao].begin();
+					//TODO:删除
+					GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+					iter2 = m_receive_chat_array[ERCC_SiLiao].erase(iter2);
+					//m_receive_chat_array[ERCC_SiLiao].push_back(tmpStruct);
+					m_receive_chat_array[ERCC_SiLiao].push_back(tmpStruct);
+					//TODO:增加
+					GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+				}
+				else
+				{
+					iter->send_role_name = name;
+					//m_receive_chat_array[ERCC_SiLiao].push_back(tmpStruct);
+					m_receive_chat_array[ERCC_SiLiao].push_back(tmpStruct);
+					//TODO:增加
+					GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+				}
+			}
+			iter = m_receive_Temp.erase(iter);
+		}
+		else if (roleid == (iter)->receive_role_id)
+		{
+			if (iter->send_channel == ESCC_SiLiao)
+			{
+				iter->receive_role_name = name;
+				s_receive_chat_info tmpStruct = *iter;
+				if (m_receive_chat_array[ERCC_SiLiao].size() >= MAX_RECEIVE_CHAT_RECORD_SILIAO)
+				{
+					//receive_chat_record::iterator iter1 = m_receive_chat_array[ERCC_SiLiao].begin();
+					//iter1 = m_receive_chat_array[ERCC_SiLiao].erase(iter1);
+					receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_SiLiao].begin();
+					//TODO:删除
+					GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+					iter2 = m_receive_chat_array[ERCC_SiLiao].erase(iter2);
+					//m_receive_chat_array[ERCC_SiLiao].push_back(tmpStruct);
+					m_receive_chat_array[ERCC_SiLiao].push_back(tmpStruct);
+					//TODO:增加
+					GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+				}
+				else
+				{
+					//m_receive_chat_array[ERCC_SiLiao].push_back(tmpStruct);
+					m_receive_chat_array[ERCC_SiLiao].push_back(tmpStruct);
+					//TODO:增加
+					GET_UI(ChatUi, WCT_ChatUi)->appendMsg(tmpStruct);
+				}
+				iter = m_receive_Temp.erase(iter);
+			}
+			else
+			{
+				++iter;	
+			}
+		}
+		else
+		{
+			++iter;	
+		}
+	}
+	return;
+}
+
+vector<s_receive_chat_info>* ChatMgr::GetChatInfoByChannel(EReceiveChatChannel eChannel)
+{
+	if (eChannel < ERCC_All || eChannel >= ERCC_END)
+	{
+		return NULL;
+	}
+	return &m_receive_chat_array[eChannel];
+}
+void ChatMgr::Update()
+{
+	static profile_util::cc_timer _timer;
+	if (_timer.get_milliseconds() > 200)
+	{
+		_timer.reset();
+		std::vector<char*>::iterator it = m_chatList.begin();
+		int num = 0;
+		for (; it != m_chatList.end();)
+		{
+			pushReceiveInfo2Channel((NET_SIS_role_char*)(*it));
+			delete[] (*it);
+			it = m_chatList.erase(it++);
+			num++;
+			if (num >= 1)
+				break;
+		}
+	}
+
+
+	unsigned int curtime(0);
+#if 1 //lzz
+	struct timeval tv;
+	gettimeofday(&tv , 0);
+	curtime = tv.tv_sec*1000;
+#else
+	curtime = clock();
+#endif
+
+	if (m_receive_chat_array[ERCC_Decree].empty())
+	{
+		return;
+	}
+
+	unsigned int timeRef(0);
+	const s_receive_chat_info& info =  m_receive_chat_array[ERCC_Decree].back();
+	timeRef = curtime - info.receive_Time;
+	GET_UI(ChatUi, WCT_ChatUi)->setDecreeRemainTime(timeRef,true);
+
+	unsigned int timeDif(0);
+	receive_chat_record::iterator iter = m_receive_chat_array[ERCC_Decree].begin();
+	for (;iter != m_receive_chat_array[ERCC_Decree].end();++iter)
+	{
+		timeDif = curtime - iter->receive_Time;
+		//超过30秒，则删除
+		if (timeDif >= DECREE_DISAPPER_TIME)
+		{
+			GET_UI(ChatUi, WCT_ChatUi)->deleteDecree(*iter);
+			iter = m_receive_chat_array[ERCC_Decree].erase(iter);
+			break;
+		}
+	}
+	return;
+}
+void ChatMgr::ShowInfoByChatChannel(const s_receive_chat_info &info)
+{
+	switch (info.send_channel)
+	{
+	case ESCC_System:
+		{
+			if (m_receive_chat_array[ERCC_All].size() >= MAX_RECEIVE_CHAT_RECORD_SYSTEM)
+			{
+				receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_All].begin();
+				//TODO:删除
+				GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+				iter2 = m_receive_chat_array[ERCC_All].erase(iter2);
+				m_receive_chat_array[ERCC_All].push_back(info);
+				//TODO:增加
+				GET_UI(ChatUi, WCT_ChatUi)->appendMsg(info);
+			}
+			else
+			{
+				m_receive_chat_array[ERCC_All].push_back(info);
+				//TODO:增加
+				GET_UI(ChatUi, WCT_ChatUi)->appendMsg(info);
+			}
+		}
+		break;
+	case ESCC_SiLiao:
+		{
+			if (m_receive_chat_array[ERCC_SiLiao].size() >= MAX_RECEIVE_CHAT_RECORD_SILIAO)
+			{
+				receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_SiLiao].begin();
+				//TODO:删除
+				GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+				iter2 = m_receive_chat_array[ERCC_SiLiao].erase(iter2);
+				m_receive_chat_array[ERCC_SiLiao].push_back(info);
+				//TODO:增加
+				GET_UI(ChatUi, WCT_ChatUi)->appendMsg(info);
+			}
+			else
+			{
+				m_receive_chat_array[ERCC_SiLiao].push_back(info);
+				//TODO:增加
+				GET_UI(ChatUi, WCT_ChatUi)->appendMsg(info);
+			}
+		}
+		break;
+	case ESCC_Guild:
+		if (m_receive_chat_array[ERCC_Guild].size() >= MAX_RECEIVE_CHAT_RECORD_GUILD)
+		{
+			receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_Guild].begin();
+			//TODO:删除
+			GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+			iter2 = m_receive_chat_array[ERCC_Guild].erase(iter2);
+			m_receive_chat_array[ERCC_Guild].push_back(info);
+			//TODO:增加
+			GET_UI(ChatUi, WCT_ChatUi)->appendMsg(info);
+		}
+		else
+		{
+			m_receive_chat_array[ERCC_Guild].push_back(info);
+			//TODO:增加
+			GET_UI(ChatUi, WCT_ChatUi)->appendMsg(info);
+		}
+		break;
+
+	case ESCC_Affiche:
+	case ESCC_Map:
+		{
+			if (m_receive_chat_array[ERCC_Map].size() >= MAX_RECEIVE_CHAT_RECORD_MAP)
+			{
+				receive_chat_record::iterator iter2 = m_receive_chat_array[ERCC_Map].begin();
+				//TODO:删除
+				GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+				iter2 = m_receive_chat_array[ERCC_Map].erase(iter2);
+				m_receive_chat_array[ERCC_Map].push_back(info);
+				//TODO:增加
+				GET_UI(ChatUi, WCT_ChatUi)->appendMsg(info);
+			}
+			else
+			{
+				m_receive_chat_array[ERCC_Map].push_back(info);
+				//TODO:增加
+				GET_UI(ChatUi, WCT_ChatUi)->appendMsg(info);
+			}
+		}
+		break;
+	case ESCC_World:
+		{
+			if (m_receive_chat_array[ESCC_World].size() >= MAX_RECEIVE_CHAT_RECORD_WORLD)
+			{
+				receive_chat_record::iterator iter2 = m_receive_chat_array[ESCC_World].begin();
+				//TODO:删除
+				GET_UI(ChatUi, WCT_ChatUi)->deleteMsg(*iter2);
+				iter2 = m_receive_chat_array[ESCC_World].erase(iter2);
+				m_receive_chat_array[ESCC_World].push_back(info);
+				//TODO:增加
+				GET_UI(ChatUi, WCT_ChatUi)->appendMsg(info);
+			}
+			else
+			{
+				m_receive_chat_array[ESCC_World].push_back(info);
+				//TODO:增加
+				GET_UI(ChatUi, WCT_ChatUi)->appendMsg(info);
+			}
+		}
+		break;
+	default:
+		break;
+	}
+	return;
+}
+
+void ChatMgr::OpenMall()
+{
+	//GET_UI(StoreUi, WCT_STOREUI)->openUi();
+	//add 2015.6.24
+	StoreUiLayer::m_willShowTag = StoreUiLayer::SUT_TabChangyong;
+	//
+	GET_UI(ChatUi,WCT_ChatUi)->hideChatUi(false);
+	OPEN_UI(WCT_STOREUI);
+}
+
+void ChatMgr::HLTXItemGet()
+{
+	const ItemTypeData& typeData = PackageManager::getInstance()->getItemTypeData((unsigned int)DECREE_NEED_ITEM);
+	int m_yuanbao = PackageManager::getInstance()->getYuanBao();
+	if ( m_yuanbao < typeData.recommendedPrice )
+	{
+		OpenMall();
+		return;
+	}
+	int m_PackageBlankCount = PackageManager::getInstance()->getBlankCount();
+	if ( m_PackageBlankCount <= 0 )
+	{
+		ToolTip::getInstance()->push(GET_STR(2027));
+		return;
+	}
+	const Tag_MallItemInfo* tag_mall = MallMgr::getInstance()->get_mall_item_info_ptr_by_itemid(DECREE_NEED_ITEM);
+	NET_SIC_mall_buy_item cmd;
+	cmd.dw_data_id = tag_mall->dwID;
+	cmd.n16BuyNum = 1;
+	cmd.nPrice = tag_mall->nPrice;
+	cmd.byIndexInServer = tag_mall->byIndexInServer;
+
+	tstring message = m_Message;
+	ESendChatChannel t_channel = channel;
+	std::function<void(bool)> func = [cmd,message,t_channel](bool isSuccess){
+		if (isSuccess)
+		{
+			TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+			ChatMgr::getInstance()->Send_ChatMsg2Server(message,t_channel);
+		}
+
+	};
+	SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+
+
+	//GET_UI(ChatUi,WCT_ChatUi)->hideChatUi(false);
+	/*	Send_ChatMsg2Server(m_Message,channel);*/
+}
+
+void ChatMgr::QLCYItemGet()
+{
+	const ItemTypeData& typeData = PackageManager::getInstance()->getItemTypeData((unsigned int)QIANLI_NEED_ITEM);
+	int m_yuanbao = PackageManager::getInstance()->getYuanBao();
+	if ( m_yuanbao < typeData.recommendedPrice )
+	{
+		OpenMall();
+		return;
+	}
+	int m_PackageBlankCount = PackageManager::getInstance()->getBlankCount();
+	if ( m_PackageBlankCount <= 0 )
+	{
+		ToolTip::getInstance()->push(GET_STR(2027));
+		return;
+	}
+	const Tag_MallItemInfo* tag_mall = MallMgr::getInstance()->get_mall_item_info_ptr_by_itemid(QIANLI_NEED_ITEM);
+	NET_SIC_mall_buy_item cmd;
+	cmd.dw_data_id = tag_mall->dwID;
+	cmd.n16BuyNum = 1;
+	cmd.nPrice = tag_mall->nPrice;
+	cmd.byIndexInServer = tag_mall->byIndexInServer;
+	//TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+	//GET_UI(ChatUi,WCT_ChatUi)->hideChatUi(false);
+
+	tstring message = m_Message;
+	ESendChatChannel t_channel = channel;
+	std::function<void(bool)> func = [cmd,message,t_channel](bool isSuccess){
+		if (isSuccess)
+		{
+			TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+			ChatMgr::getInstance()->Send_ChatMsg2Server(message,t_channel);
+		}
+
+	};
+	SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+
+	//Send_ChatMsg2Server(m_Message,channel);
+}
+
+//获取物品信息
+void* ChatMgr::getItemInfo( long long nSerialId , bool& bIsEquip )
+{
+	std::map<unsigned INT64, tagItem>::iterator ItemIt = m_mapChatItem.find(nSerialId);
+	if(ItemIt == m_mapChatItem.end())
+	{
+		std::map<unsigned INT64, tagEquip>::iterator EquipIt = m_mapChatEquip.find(nSerialId);
+		if(EquipIt != m_mapChatEquip.end())
+		{
+			bIsEquip = 1;
+			return (void*)(&EquipIt->second);
+		}
+	}
+	else
+	{
+		bIsEquip = 0;
+		return (void*)(&ItemIt->second);
+	}
+
+	return NULL;
+}
+
+//加入物品容器
+// void ChatMgr::InputItemId( unsigned long long nSerialId )
+// {
+// 	for(size_t i = 0; i < m_vecItemId.size(); ++i)
+// 	{
+// 		if( m_vecItemId[i] == nSerialId )
+// 			return;
+// 	}
+// 
+// 	m_vecItemId.push_back( nSerialId );
+// }
+// 
+// //清空物品容器
+// void ChatMgr::ErseBackItemId()
+// {
+// 	m_vecItemId.pop_back();
+// }
+
+//移除物品信息
+void ChatMgr::EraseItemInfo( UINT64 n64id )
+{
+	m_mapChatItem.erase( n64id );
+}
+
+std::string ChatMgr::getRandMessage(int n)
+{
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM SenceTips WHERE ID = ?1");
+	cmd->set_integer32(1,n);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	std::string message;
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("Msg");
+		message = table->get_text(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	return message;
+}
+
+void ChatMgr::updateRandMessgae()
+{
+	srand((int)time(0));
+	int randNums = World::getInstance()->getRandMsgNums();
+	int n = rand() % randNums + 1;
+	std::string randMessage = getRandMessage(n);
+
+	s_receive_chat_info info;
+	info.send_channel = ESCC_Affiche;
+	std::stringstream inPuter;
+	inPuter << randMessage;
+	info.chat_text = inPuter.str();
+	ShowInfoByChatChannel(info);
+}
+
+void ChatMgr::updateBossMassage()
+{
+	unsigned int curMapId = MapManager::getInstance()->getCurMapId();
+	int informationId = 0;
+
+	std::map<unsigned int, int> const& bossMap = CreatureCacheData::get_singleton().getBossMap();
+	std::map<unsigned int, int>::const_iterator finder = bossMap.find(curMapId);
+	if (finder != bossMap.end())
+	{
+		informationId = finder->second;
+	}
+	// 	for (std::map<unsigned int, int>::iterator enter_iter = bossMap.begin(); enter_iter != bossMap.end(); ++enter_iter)
+	// 	{
+	// 		if (enter_iter->first == curMapId)
+	// 		{
+	// 			informationId = enter_iter->second;
+	// 			break;
+	// 		}
+	// 	}
+
+	if (informationId != 0)
+	{
+		s_receive_chat_info info;
+		info.send_channel = ESCC_Affiche;
+		std::stringstream inPuter;
+		inPuter << GET_STR(informationId);
+		info.chat_text = inPuter.str();
+		ShowInfoByChatChannel(info);
+	}
+}
+
+// void ChatMgr::getBossInMap()
+// {
+// 	RoleManager::CreatureInfoMap infomap = RoleManager::getInstance()->GetCreatureMap();
+// 	if(0 >= infomap.size())
+// 		return;
+// 
+// 	 RoleManager::CreatureInfoMap::iterator iter_m = infomap.begin();
+// 	 RoleManager::CreatureInfoMap::iterator iterend_m = infomap.end();
+// 
+// 	for(; iter_m != iterend_m;iter_m++)
+// 	{
+// 		RoleManager::CreatureInfo info = iter_m->second;
+// 		if(info.bodyRatio > 0)
+// 		{
+// 			unsigned int id = name_crc32(convertWName(info.mapid));
+// 			m_bossInMap[id] = info.monsterId;
+// 		}
+// 	}
+// }
+
+
+void tryToPrivateTalk( unsigned int targetID ) 
+{
+	unsigned int roleId = targetID;
+	Role *role = RoleManager::getInstance()->findRole(roleId);
+	if(role != NULL)
+	{
+		LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+		if(!ploc)
+			return;
+		if (ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))//摆摊交易中禁止操作
+		{
+			ToolTip::getInstance()->push(GET_STR(7209));
+			return;
+		}
+		GET_UI(ChatUi, WCT_ChatUi)->sendMessageTo(role->getId(), convertName(role->getName()));
+		//showBtnGroup(NT_BtnGroupJiaohu,false);
+		//CLOSE_UI(WCT_ROLEEQUIPUI);
+	}
+}
+
+void ChatMgr::sendChatEmotcion( int emotcion )
+{
+	NET_SIC_chat_emotcion cmd;
+	cmd.emotcion = emotcion;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+}
+
+unsigned int ChatMgr::onServerChatEmotcion( s_net_cmd *cmd )
+{
+	NET_SIS_chat_emotcion* msg = (NET_SIS_chat_emotcion*)cmd;
+	if (msg == NULL)
+		return 0;
+	Player* player = dynamic_cast<Player*>(RoleManager::getInstance()->findRole(msg->roleId));
+	if (player == NULL)
+		return 0;
+	player->removeBrow();
+	switch(msg->emotcion){
+	case BT_BIGLAUGH:
+		player->addBrow("brow_happy.plist","happy_");
+		break;
+	case BT_LAUGHAT:
+		player->addBrow("brow_laugh.plist","laugh_");
+		break;
+	case BT_ACTINGCUT:
+		player->addBrow("brow_cute.plist","cute_");
+		break;
+	case BT_COLDSWEAT:
+		player->addBrow("brow_sweat.plist","sweat_");
+		break;
+	case BT_CURSE:
+		player->addBrow("brow_curse.plist","curse_");
+		break;
+	case BT_ANGRY:
+		player->addBrow("brow_anger.plist","anger_");
+		break;
+	case BT_COOL:
+		player->addBrow("brow_handsome.plist","handsome_");
+		break;
+	case BT_DEFY:
+		player->addBrow("brow_provoke.plist","provoke_");
+		break;
+	case BT_LOVE:
+		player->addBrow("brow_love.plist","love_");
+		break;
+	case BT_PRAISE:
+		player->addBrow("brow_admire.plist","admire_");
+		break;
+	case BT_SHY:
+		player->addBrow("brow_shame.plist","shame_");
+		break;
+	case BT_CRY:
+		player->addBrow("brow_cry.plist","cry_");
+		break;
+	}
+	return 0;
+}
+
+unsigned int ChatMgr::getYYIntervalTimeByChannel( eFrameTag yyChannel )
+{
+	unsigned int yyTime = 99999999;
+	switch(yyChannel)
+	{
+	case FT_btnWorld:
+		yyTime = m_last_yyWorld_chat_time;
+		break;
+	default:
+		break;
+	}
+	return yyTime;
+}
+
+void ChatMgr::setNeedPrivate( bool isNeed )
+{
+	m_bIsNeedSetPrivateId = isNeed;
+}
+
+bool ChatMgr::isNeedPrivate()
+{
+	return m_bIsNeedSetPrivateId;
+}
+

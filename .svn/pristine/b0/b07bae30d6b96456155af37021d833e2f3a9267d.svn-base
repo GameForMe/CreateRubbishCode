@@ -1,0 +1,620 @@
+/**
+ *	@file		WingFlyUpUi.cpp
+ *	@author		guantiejun
+ *	@date		2016/04/18
+ *	@version	
+ *	@brief		翅膀飞升界面
+ */
+
+#include "WingFlyUpUi.h"
+#include "WingManager.h"
+#include "UiLoader.h"
+#include "UiManager.h"
+#include "CheckButton.h"
+#include "UiTools.h"
+#include "CommonClient.h"
+#include "client_common_define.h"
+#include "PackageManager.h"
+#include "UsefulFunction.h"
+#include "f_string_table.h"
+#include "World.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ProgressBar.h"
+#include "StringMgr.h"
+#include "PlacardManager.h"
+#include "LabelEx.h"
+#include "EquipTipUi.h"
+
+WingFlyUpUi::WingFlyUpUi()
+{
+
+}
+
+WingFlyUpUi::~WingFlyUpUi()
+{
+
+}
+
+CCNode * WingFlyUpUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["WingFlyUpUiLayer"] = UiLayerLoader<WingFlyUpUiLayer>::loader();
+	nodeLoaders["CheckButton"] = CheckButtonLoader::loader();
+	nodeLoaders["LabelEx"] = LabelExLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("chibangfeisheng", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+WingFlyUpUiLayer * WingFlyUpUi::getUiLayer()
+{
+	return getUiNodeByTag<WingFlyUpUiLayer>(WCT_WING_FLY_UP_UI);
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+WingFlyUpUiLayer::WingFlyUpUiLayer()
+: m_percent(NULL)
+, m_use_gold(NULL)
+, m_fly_button(NULL)
+, m_left_node(NULL)
+, m_right_node(NULL)
+, m_effect_node_1(NULL)
+, m_effect_node_2(NULL)
+, m_wing_name(NULL)
+, m_add_area(NULL)
+, m_bottom_area(NULL)
+, m_label_ex(NULL)
+, m_fly_level(NULL)
+, m_percent_show(NULL)
+, m_percent_pic(NULL)
+, m_percent_pic_back(NULL)
+, m_base_att_total(NULL)
+, m_base_att_add_total(NULL)
+//, m_buff_add_point_1(NULL)
+//, m_buff_add_point_2(NULL)
+//, m_buff_time(NULL)
+, m_item_node(NULL)
+, m_item_num(NULL)
+, m_item_name(NULL)
+, m_gold_num(NULL)
+, m_fly_num_label(NULL)
+, m_wing_id(INVALID)
+, m_is_auto_send(false)
+, m_fly_num(1)
+, m_fly_show_num(1)
+, m_wing_cur_level(0)
+, m_wing_last_level(0)
+{
+	for(int i = 0; i < total_role_base_att; ++i)
+	{
+		m_base_name[i] = NULL;
+		m_base_value[i] = NULL;
+		m_add_base_value[i] = NULL;
+	}
+}
+
+WingFlyUpUiLayer::~WingFlyUpUiLayer()
+{
+	CC_SAFE_DELETE(m_percent);
+}
+
+cocos2d::extension::SEL_CCControlHandler WingFlyUpUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(WingFlyUpUiLayer,onFly);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(WingFlyUpUiLayer,onClose);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(WingFlyUpUiLayer,onCue);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(WingFlyUpUiLayer,onAdd);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(WingFlyUpUiLayer,onSub);
+
+	return NULL;
+}
+
+cocos2d::SEL_MenuHandler WingFlyUpUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+
+	return NULL;
+}
+
+bool WingFlyUpUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(LabelEx*, m_label_ex);
+	return false;
+}
+
+void WingFlyUpUiLayer::onEnter()
+{
+	REGISTER_EVENT(fly_up_back_event,WingFlyUpUiLayer,fly_up_back);
+	NormalLayer::onEnter();
+}
+
+void WingFlyUpUiLayer::onExit()
+{
+	UNREGISTER_EVENT(fly_up_back_event,WingFlyUpUiLayer,fly_up_back);
+	NormalLayer::onExit();
+}
+
+void WingFlyUpUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_left_node = getChildByTag(0)->getChildByTag(1)->getChildByTag(1);
+	m_right_node = getChildByTag(0)->getChildByTag(1)->getChildByTag(2);
+	m_effect_node_1 = m_left_node->getChildByTag(3)->getChildByTag(1);
+	m_effect_node_2 = m_left_node->getChildByTag(3)->getChildByTag(2);
+	m_wing_name = Helper::getLabelFTByParentAndTag(m_left_node, 1);
+	Helper::getLabelFTByParentAndTag(m_left_node, 2);
+	m_add_area = m_right_node->getChildByTag(1);
+	m_bottom_area = m_right_node->getChildByTag(2);
+	Helper::getLabelFTByParentAndTag(m_right_node, 31);
+	m_fly_level = Helper::getLabelFTByParentAndTag(m_right_node, 32);
+	m_percent_show = Helper::getLabelFTByParentAndTag(m_right_node, 33);
+	m_percent_show->setVisible(false);
+
+	m_percent_pic = dynamic_cast<CCSprite*>(m_right_node->getChildByTag(34));
+	m_percent_pic_back = m_right_node->getChildByTag(35);
+
+	m_percent = new ProgressBar;
+	m_percent->initBarWithSprite(m_percent_pic);
+	m_percent->addToParent(m_right_node);
+
+	Helper::getLabelFTByParentAndTag(m_right_node, 16);
+	m_base_att_total = Helper::getLabelFTByParentAndTag(m_right_node, 26);
+	m_base_att_add_total = Helper::getLabelFTByParentAndTag(m_add_area, 6);
+
+	for(int i = 0; i < total_role_base_att; ++i)
+	{
+		m_base_name[i] = Helper::getLabelFTByParentAndTag(m_right_node, i + 11);
+		m_base_value[i] = Helper::getLabelFTByParentAndTag(m_right_node, i + 21);
+		m_add_base_value[i] = Helper::getLabelFTByParentAndTag(m_add_area, i + 1);
+	}
+
+	Helper::getLabelFTByParentAndTag(m_add_area, 11);
+	//m_buff_add_point_1 = Helper::getLabelFTByParentAndTag(m_add_area, 12);
+	//m_buff_add_point_2 = Helper::getLabelFTByParentAndTag(m_add_area, 13);
+	Helper::getLabelFTByParentAndTag(m_add_area, 14);
+	Helper::getLabelFTByParentAndTag(m_add_area, 15);
+	//m_buff_time = Helper::getLabelFTByParentAndTag(m_add_area, 16);
+	Helper::getLabelFTByParentAndTag(m_add_area, 17);
+
+	// --------------------------------------------------
+
+	m_item_node = m_bottom_area->getChildByTag(1);
+	m_item_num = Helper::getLabelFTByParentAndTag(m_bottom_area, 2);
+	m_item_name = Helper::getLabelFTByParentAndTag(m_bottom_area, 3);
+	Helper::getLabelFTByParentAndTag(m_bottom_area, 4);
+	m_gold_num = Helper::getLabelFTByParentAndTag(m_bottom_area, 5);
+	Helper::getLabelFTByParentAndTag(m_bottom_area, 6);
+	m_use_gold = dynamic_cast<CheckButton*>(m_bottom_area->getChildByTag(7));
+	m_fly_num_label = Helper::getLabelFTByParentAndTag(m_bottom_area, 8);
+	m_fly_button = dynamic_cast<CCControlButton*>(m_bottom_area->getChildByTag(999));
+
+	m_use_gold->setCheck(false);
+}
+
+void WingFlyUpUiLayer::onFly(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	m_fly_num = m_fly_show_num;
+	send_fly_up_to_server();
+}
+
+void WingFlyUpUiLayer::onClose(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	CLOSE_UI(WCT_WING_FLY_UP_UI);
+}
+
+void WingFlyUpUiLayer::onCue(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	PlacardManager::getInstance()->open_placard_node(2);
+}
+
+void WingFlyUpUiLayer::onAdd(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	refresh_num(m_fly_show_num + 1);
+}
+
+void WingFlyUpUiLayer::onSub(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	refresh_num(m_fly_show_num - 1);
+}
+
+void WingFlyUpUiLayer::fly_up_back(fly_up_back_event* event)
+{
+	if(event->is_success)
+	{
+		m_fly_num = m_fly_num - 1;
+		if(m_fly_num <= 0)
+		{
+			m_fly_num = 1;
+			m_is_auto_send = false;
+		}
+
+		refresh_node();
+		play_success_effect(event->crit, event->exp);
+	}
+	else
+	{
+		m_is_auto_send = false;
+		set_button_enable(true);
+	}
+}
+
+void WingFlyUpUiLayer::on_sure_open_recharge()
+{
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+}
+
+void WingFlyUpUiLayer::refresh_num(int num)
+{
+	if(num < 1){num = 1;}
+	if(num > 10){num = 10;}
+
+	m_fly_show_num = num;
+
+	string text;
+	safe_sprintf(text, "%d", m_fly_show_num);
+	m_fly_num_label->setString(text.c_str());
+
+	f_equipment* equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(m_wing_id));
+	if(!IS_VALID_PTR(equip))
+		return;
+
+	const WingFlyUp& data = WingManager::getInstance()->get_one_wing_fly_up_data(equip->get_equip()->nLevel);
+
+	const ItemTypeData& item_data  = PackageManager::getInstance()->getItemTypeData(data.need_item_id);
+	m_item_name->setString(item_data.name);
+
+	int need_num = data.need_item_num;
+	int cur_num = PackageManager::getInstance()->getItemNumber(EICT_Bag, item_data.typeId);
+	stringstream ss;
+	ss<<cur_num<<"/"<<need_num;
+	m_item_num->setString(ss.str().c_str());
+	m_item_num->setColor((need_num <= cur_num) ? ccGREEN : ccRED);
+
+	m_item_node->removeAllChildrenWithCleanup(true);
+	ItemNode* temp_item = ItemNode::create();
+	if(!IS_VALID_PTR(temp_item))
+	{
+		return;
+	}
+
+	temp_item->hideItemOpBtn();
+	temp_item->setAnchorPoint(ccp(0.5,0.5));
+	temp_item->setPosition(ccp(m_item_node->getContentSize().width/2 ,m_item_node->getContentSize().height/2));
+	m_item_node->addChild(temp_item);
+	temp_item->setDataId(item_data.typeId);
+	temp_item->setNum(1);
+	temp_item->setClickable(true);
+
+	string text_gold;
+	safe_sprintf(text_gold, "%d", data.need_gold);
+	m_gold_num->setString(text_gold.c_str());
+}
+
+void WingFlyUpUiLayer::refresh_node()
+{
+	refresh_num(m_fly_show_num);
+	
+	// ----------------------------------------------------
+	f_equipment* equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(m_wing_id));
+	if(!IS_VALID_PTR(equip))
+		return;
+
+	create_wing_effetc(equip);
+
+	m_wing_cur_level = equip->get_equip()->nLevel;
+	const WingFlyUp& data = WingManager::getInstance()->get_one_wing_fly_up_data(m_wing_cur_level);
+
+	//string text1;
+	//safe_sprintf(text1, "%d", data.agile);
+	//m_buff_add_point_1->setString(text1.c_str());
+
+	//string text2;
+	//safe_sprintf(text2, "%d", data.add_agile);
+	//m_buff_add_point_2->setString(text2.c_str());
+
+	//float time = WingManager::getInstance()->get_buff_time_by_type_id(equip->get_item_type_id());
+	//string text3;
+	//safe_sprintf(text3, "%ld", time);
+	//m_buff_time->setString(text3.c_str());
+
+	string text4;
+	safe_sprintf(text4, "%d", m_wing_cur_level);
+	m_fly_level->setString(text4.c_str());
+	m_percent->setProgress(equip->get_equip()->nCurLevelExp, data.need_exp);
+
+	// 角色基础属性---------------------------------------------
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if(!IS_VALID_PTR(player))
+		return;
+
+	EClassType class_type = EClassType(player->GetRoleData(RA_ROLETYPE));
+
+	int add_level = 0;
+	if(class_type == EV_Warrior)
+		add_level = 1000;
+	else if(class_type == EV_Mage)
+	{
+		add_level = 2000;
+	}
+	else if(class_type == EV_Taoist)
+	{
+		add_level = 3000;
+	}
+
+	const RoleBaseAtt& l_a_b_d = WingManager::getInstance()->get_att_base_value_level(player->getLevel() + add_level);
+
+	float base_att_total = (data.amplification / 100);
+	stringstream ss1;
+	ss1<<"+"<<base_att_total<<"%";
+	m_base_att_total->setString(ss1.str().c_str());
+
+	float base_att_total_add = (data.add_amplification / 100);
+	stringstream ss2;
+	ss2<<base_att_total_add<<"%";
+	m_base_att_add_total->setString(ss2.str().c_str());
+
+	float base_att_total_percent_param = ((float)data.amplification) / 10000;
+	float base_att_total_add_percent = ((float)data.add_amplification / 10000);
+
+	m_base_name[0]->setString(STRING_TABLE["wing_att_1"]);
+	m_base_name[1]->setString(STRING_TABLE["wing_att_2"]);
+	m_base_name[2]->setString(STRING_TABLE["wing_att_3"]);
+	m_base_name[3]->setString(STRING_TABLE["wing_att_4"]);
+
+	string text_value_1;
+	safe_sprintf(text_value_1, "%d", l_a_b_d.hp + int(base_att_total_percent_param * l_a_b_d.hp));
+	m_base_value[0]->setString(text_value_1.c_str());
+
+	string text_value_2;
+	safe_sprintf(text_value_2, "%d", l_a_b_d.mp + int(base_att_total_percent_param * l_a_b_d.mp));
+	m_base_value[1]->setString(text_value_2.c_str());
+
+	string text_value_3;
+	safe_sprintf(text_value_3, "%d - %d", l_a_b_d.wufang_min + int(base_att_total_percent_param * l_a_b_d.wufang_min), l_a_b_d.wufang_max + int(base_att_total_percent_param * l_a_b_d.wufang_max));
+	m_base_value[2]->setString(text_value_3.c_str());
+
+	string text_value_4;
+	safe_sprintf(text_value_4, "%d - %d", l_a_b_d.mofang_min + int(base_att_total_percent_param * l_a_b_d.mofang_min), l_a_b_d.mofang_max + int(base_att_total_percent_param * l_a_b_d.mofang_max));
+	m_base_value[3]->setString(text_value_4.c_str());
+
+	string att_string = "";
+	string text_value_string;
+	string add_base_value_string;
+	if(class_type == EV_Warrior)
+	{
+		att_string = STRING_TABLE["wing_att_5_1"];
+		safe_sprintf(text_value_string, "%d - %d", l_a_b_d.wuli_min + int(base_att_total_percent_param * l_a_b_d.wuli_min), l_a_b_d.wuli_max + int(base_att_total_percent_param * l_a_b_d.wuli_max));
+		safe_sprintf(add_base_value_string, "%d - %d", int(l_a_b_d.wuli_min * base_att_total_add_percent), int(l_a_b_d.wuli_max * base_att_total_add_percent));
+	}
+	else if(class_type == EV_Mage)
+	{
+		att_string = STRING_TABLE["wing_att_5_2"];
+		safe_sprintf(text_value_string, "%d - %d", l_a_b_d.mofa_min + int(base_att_total_percent_param * l_a_b_d.mofa_min), l_a_b_d.mofa_max + int(base_att_total_percent_param * l_a_b_d.mofa_max));
+		safe_sprintf(add_base_value_string, "%d - %d", int(l_a_b_d.mofa_min * base_att_total_add_percent), int(l_a_b_d.mofa_max * base_att_total_add_percent));
+	}
+	else if(class_type == EV_Taoist)
+	{
+		att_string = STRING_TABLE["wing_att_5_3"];
+		safe_sprintf(text_value_string, "%d - %d", l_a_b_d.daoshu_min + int(base_att_total_percent_param * l_a_b_d.daoshu_min), l_a_b_d.daoshu_max + int(base_att_total_percent_param * l_a_b_d.daoshu_max));
+		safe_sprintf(add_base_value_string, "%d - %d", int(l_a_b_d.daoshu_min * base_att_total_add_percent), int(l_a_b_d.daoshu_max * base_att_total_add_percent));
+	}
+	m_base_name[4]->setString(att_string.c_str());
+	m_base_value[4]->setString(text_value_string.c_str());
+	m_add_base_value[4]->setString(add_base_value_string.c_str());
+
+
+	string add_base_value_1;
+	safe_sprintf(add_base_value_1, "%d", int(l_a_b_d.hp * base_att_total_add_percent));
+	m_add_base_value[0]->setString(add_base_value_1.c_str());
+
+	string add_base_value_2;
+	safe_sprintf(add_base_value_2, "%d", int(l_a_b_d.mp * base_att_total_add_percent));
+	m_add_base_value[1]->setString(add_base_value_2.c_str());
+
+	string add_base_value_3;
+	safe_sprintf(add_base_value_3, "%d - %d", int(l_a_b_d.wufang_min * base_att_total_add_percent), int(l_a_b_d.wufang_max * base_att_total_add_percent));
+	m_add_base_value[2]->setString(add_base_value_3.c_str());
+
+	string add_base_value_4;
+	safe_sprintf(add_base_value_4, "%d - %d", int(l_a_b_d.mofang_min * base_att_total_add_percent), int(l_a_b_d.mofang_max * base_att_total_add_percent));
+	m_add_base_value[3]->setString(add_base_value_4.c_str());
+
+	int max_fly_level = CFG(int,"max_fly_level",50);
+
+	if(m_wing_cur_level >= max_fly_level)
+	{
+		m_add_area->setVisible(false);
+		m_bottom_area->setVisible(false);
+		//m_label_ex->setVisible(true);
+		//m_right_node->getChildByTag(3)->setVisible(true);
+
+		//string text10;
+		//safe_sprintf(text10, STRING_TABLE["wing_fly_cue_1"], STRING_TABLE["wing_evolve_add_cue1"], data.agile, time);
+		//m_label_ex->set_text(text10);
+		//m_label_ex->set_top_down(false);
+
+		float wing_spec_att_stren_pct =0;
+		stBuffStrenEffect stren_effect;
+		EquipTipUiLayer::get_wing_equip_stren(equip->get_item_type_id(),max_fly_level,wing_spec_att_stren_pct,stren_effect);
+		if (stren_effect.is_valid())
+		{
+			std::string tmp;
+
+			std::string buff_key;
+			safe_sprintf(buff_key,"equip_buff_text_fly_%d",stren_effect.buff_id);
+			safe_sprintf(tmp,STRING_TABLE[buff_key.c_str()],stren_effect.effect_val,stren_effect.persist_time);
+			m_label_ex->set_text(tmp);
+		}
+
+		m_percent->setString(STRING_TABLE["wing_level_full"]);
+
+		if(m_item_node)
+		{
+			m_item_node->removeAllChildrenWithCleanup(true);
+		}
+	}
+	else
+	{
+		float wing_spec_att_stren_pct =0;
+		stBuffStrenEffect stren_effect;
+		EquipTipUiLayer::get_wing_equip_stren(equip->get_item_type_id(),m_wing_cur_level,wing_spec_att_stren_pct,stren_effect);
+		if (stren_effect.is_valid())
+		{
+			std::string tmp;
+
+			std::string buff_key;
+			safe_sprintf(buff_key,"equip_buff_text_add_%d",stren_effect.buff_id);
+			safe_sprintf(tmp,STRING_TABLE[buff_key.c_str()],stren_effect.effect_val,data.add_agile,stren_effect.persist_time);
+			m_label_ex->set_text(tmp);
+		}
+	}
+}
+
+void WingFlyUpUiLayer::create_wing_effetc(f_equipment* equip)
+{
+	if(!IS_VALID_PTR(equip))
+		return;
+
+	if(!IS_VALID_PTR(m_effect_node_1))
+		return;
+
+	if(!IS_VALID_PTR(m_effect_node_2))
+		return;
+
+	const WingEvolve& wing_data = WingManager::getInstance()->get_one_wing_evolve_data(equip->get_item_type_id());
+
+	m_effect_node_1->removeAllChildrenWithCleanup(true);
+	stringstream ss;
+	ss<<wing_data.effect_name<<".plist";
+	std::string effect_name1 = CFGReader::instance()->get_profile_string("Art", "Effect", "") + ss.str();
+	GameActionNode* effect1 = GameActionNode::create();
+	effect1->InitWithPList(effect_name1.c_str(), wing_data.effect_name.c_str());
+	CCSize size1 = m_effect_node_1->getContentSize();
+	effect1->setPosition(ccp(size1.width / 2.0f, (size1.height / 2.0f) - 40));
+	m_effect_node_1->addChild(effect1);
+	effect1->BeginAction(0.1f, true);
+
+	m_effect_node_2->removeAllChildrenWithCleanup(true);
+	std::string effect_name2 = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_157.plist";
+	GameActionNode* effect2 = GameActionNode::create();
+	effect2->InitWithPList(effect_name2.c_str(), "E1_157");
+	CCSize size2 = m_effect_node_2->getContentSize();
+	effect2->setPosition(ccp(size2.width / 2.0f, size2.height / 2.0f));
+	m_effect_node_2->addChild(effect2);
+	effect2->BeginAction(0.1f, true);
+}
+
+void WingFlyUpUiLayer::play_success_effect(int times, int exp)
+{
+	std::string str;
+	float font_size = 1.0f;
+	if(times > 1)
+	{ 
+		string str1;
+		safe_sprintf(str1, STRING_TABLE["wing_effect_cue_2"], times);
+
+		string str2;
+		safe_sprintf(str2, STRING_TABLE["wing_effect_cue_1"], exp);
+
+		str = str1 + "\n" + str2;
+
+		font_size = 1.3f;
+	}
+	else
+	{
+		safe_sprintf(str, STRING_TABLE["wing_effect_cue_1"], exp);
+	}
+
+	CCLabelBMFont *label = CCLabelBMFont::create();
+	label->setFntFile("Art/Scene/fontNum3.fnt");
+	label->setPosition(ccp(this->getContentSize().width / 2, this->getContentSize().height / 2));
+	label->setString(str.c_str());
+	label->setColor(ccc3(255, 243, 48));
+	label->setAnchorPoint(ccp(0.5f, 0.5f));
+	label->setAlignment(kCCTextAlignmentCenter);
+	addChild(label);
+
+	CCScaleTo *scaleTo = CCScaleTo::create(0.2f, font_size, font_size);
+	CCFadeOut *fadeOut = CCFadeOut::create(0.8f);
+	CCSequence *s = CCSequence::createWithTwoActions(scaleTo, fadeOut);
+	CCSequence *action = CCSequence::createWithTwoActions(s, CCCallFuncN::create(HideAnimationCallback::getInstance(), SEL_CallFuncN(&HideAnimationCallback::animationCallback)));
+	CCSequence *action_end = CCSequence::createWithTwoActions(action, CCCallFuncN::create(this, SEL_CallFuncN(&WingFlyUpUiLayer::play_success_end)));
+	label->runAction(action_end);
+
+	// 如果等级提升 则提示
+	if(m_wing_last_level < m_wing_cur_level)
+	{
+		CCLabelBMFont* level_label = CCLabelBMFont::create();
+		level_label->setFntFile("Art/Scene/fontNum3.fnt");
+
+		CCPoint now_point = ccp(this->getContentSize().width / 2, (this->getContentSize().height / 2));
+		level_label->setPosition(now_point);
+		level_label->setString(STRING_TABLE["wing_effect_cue_3"]);
+		level_label->setColor(ccGREEN);
+		level_label->setAnchorPoint(ccp(0.5f, 0.5f));
+		level_label->setAlignment(kCCTextAlignmentCenter);
+		addChild(level_label);
+
+		CCMoveTo* move_up = CCMoveTo::create(1.5, ccp(now_point.x, now_point.y + 200));
+		CCSequence *action = CCSequence::createWithTwoActions(move_up, CCCallFuncN::create(HideAnimationCallback::getInstance(), SEL_CallFuncN(&HideAnimationCallback::animationCallback)));
+		level_label->runAction(action);
+	}
+}
+
+void WingFlyUpUiLayer::play_success_end(CCNode* node)
+{
+	if(m_is_auto_send)
+	{
+		send_fly_up_to_server();
+	}
+	else
+	{
+		set_button_enable(true);
+	}
+}
+
+void WingFlyUpUiLayer::send_fly_up_to_server()
+{
+	f_equipment* equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(m_wing_id));
+	if(!IS_VALID_PTR(equip))
+		return;
+
+	const WingFlyUp& data = WingManager::getInstance()->get_one_wing_fly_up_data(equip->get_equip()->nLevel);
+
+	bool is_use_gold = m_use_gold->isCheckd();
+	if(is_use_gold)
+	{
+		if(!PackageManager::getInstance()->have_enough_yuanbao(data.need_gold))
+		{
+			string text = STRING_TABLE["yuanbao_not_enough"];
+			MessageBoxUi* ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, text.c_str(), TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+			World::getInstance()->getScene()->addChild(ui, WZ_MESSAGEBOX);
+			ui->signalOkBtnPressed.connect(this,&WingFlyUpUiLayer::on_sure_open_recharge);
+			set_button_enable(true);
+			return;
+		}
+	}
+
+	int cur_num = PackageManager::getInstance()->getItemNumber(EICT_Bag, data.need_item_id);
+	if(cur_num < data.need_item_num)
+	{
+		UsefulFunction::show_string_cur("wing_fly_item_not_enough");
+		set_button_enable(true);
+		return;
+	}
+
+	m_is_auto_send = true;
+	m_wing_last_level = m_wing_cur_level;
+
+	set_button_enable(false);
+	WingManager::getInstance()->send_fly_up(m_wing_id, is_use_gold);
+}
+
+void WingFlyUpUiLayer::set_button_enable(bool is_enable)
+{
+	if(IS_VALID_PTR(m_fly_button))
+	{
+		m_fly_button->setEnabled(is_enable);
+	}
+}

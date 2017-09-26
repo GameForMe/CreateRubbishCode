@@ -1,0 +1,439 @@
+#ifndef QUESTMGR_H_INCLUDE
+#define QUESTMGR_H_INCLUDE
+#include <map>
+#include <set>
+#include <vector>
+#include <string>
+#include "CmdAdapter.h"
+#include "Signals.h"
+#include "BaseDefine.h"
+#include "UiTools.h"
+
+enum eQuestState
+{
+	QS_GET = 1 , 
+	QS_CAN_GET = 2 , 
+	QS_READY_FINISH = 3 , 
+	QS_INVALID = 4
+};
+
+enum eAutoQuest
+{
+	AQ_NOT_EXIST = 1 , 
+	AQ_READY_FINISH = 2 , 
+	AQ_GET = 3 , 
+};
+
+enum eQuestFubenType
+{
+	EQFT_Null,		//不需要进副本
+	EQFT_Kill,		//进副本杀怪
+	EQFT_Into,		//进副本即可
+};
+
+struct s_kill_counter
+{
+	int curkill;
+	int total;
+};
+struct s_quest_trace_cache //任务的精简数据结构
+{
+	unsigned short qid;
+	std::string title;
+	std::string beforeText;
+	std::string afterText;
+	int needlevel;
+	unsigned int roleid;
+};
+
+struct s_quest_detail  //任务数据结构
+{
+	unsigned short qid;
+	std::string title;
+	std::string desc;
+	std::string beforeText;
+	std::string afterText;
+	std::string target;
+	unsigned int accept_id;
+	unsigned int complete_id;
+	int autoc;
+	unsigned short preQuest_qid;
+	unsigned short next_qid;
+	int attack_id;
+	std::string complete_talk;
+	int needItem;
+	int itemNum;
+	int type;
+	int reward_exp;
+	int reward_gold;
+	int reward_class1;
+	int reward_class2;
+	int reward_class3;
+	int reward_item1;
+	int reward_item2;
+	int reward_item3;
+	int level;
+	int autoInterface;
+	int robotTask;//任务类型，是否进剧情副本
+	int popup; //是否弹出完成任务
+	int autofind; //autofind为0表示接受任务后不能自动寻路，为1表示正常自动寻路，为2表示完成任务后不能自动寻路
+	int lvmax;//可接此任务的级别上限
+	int loop_quest_step;//比奇任务的第几个和军需任务的最后一个
+	bool repeatable;//能否重复完成
+	int contributions;//行会贡献
+	int fund; //行会资金
+	int yuanBao;//获得元宝
+	s_quest_detail():qid(0),accept_id(0),complete_id(0),autoc(0),
+		preQuest_qid(0),next_qid(0),attack_id(0),needItem(0),itemNum(0),type(0),reward_exp(0),reward_gold(0),
+		reward_class1(0),reward_class2(0),reward_class3(0),reward_item1(0),reward_item2(0),reward_item3(0),level(0),autoInterface(0),robotTask(0),
+		popup(0),autofind(0),contributions(0),fund(0),yuanBao(0)
+	{
+	}
+};
+
+#define QUESTA_NUM_LVL0 3
+#define QUESTA_NUM_LVL1 4
+#define QUESTA_NUM_LVL2 5
+#define QUESTA_NUM_LVL3 6
+
+#define QUESTB_NUM_LVL0 5
+#define QUESTB_NUM_LVL1 6
+#define QUESTB_NUM_LVL2 7
+#define QUESTB_NUM_LVL3 8
+
+#define MAX_GUILD_TASK_ID 4000
+#define MIN_GUILD_TASK_ID 3000
+
+#define TASK_IS_GUILD(n)  (((n>MIN_GUILD_TASK_ID)&&(n<MAX_GUILD_TASK_ID)))
+
+enum QuestNumber
+{
+	Number1 = 1,
+	Number2 = 2,
+	Number3 = 3,
+	Number4 = 4,
+	Number5 = 5,
+	Number6 = 6,
+	Number7 = 7,
+	Number8 = 8,
+	Number9 = 9,
+	Number10 = 10,
+};
+enum QuestTypeEnum
+{
+	Type_Main = 1,//主线
+	Type_Sub = 2,//支线
+	Type_Daily = 4,//日常
+	Type_Huan = 5,//环任务
+	Type_BiQi = 6,//比奇任务
+	Type_Guild = 7,//行会任务
+};
+
+struct tagIncompleteQuestMsgInfo;
+
+class QuestMgr
+{
+private:
+	std::map<unsigned short,s_quest_detail>_quest;
+	unsigned short _curMainQuestID;//!当前接取的主线任务
+	unsigned short _curSubQuestID;//!当前接取的支线任务
+	unsigned short _curEveryQuestID;//!当前接取的每日任务
+	unsigned short _curBiQiQuestID; //当前接取的比奇任务
+	unsigned short _curHuanQuestID;//当前接取的环任务
+	unsigned short _curGuildQuestID;//当前接取的行会任务
+	std::map<unsigned short , eQuestState> _questState;
+	std::map<unsigned short , s_kill_counter> _killCount;
+	std::set<unsigned short> _finishedQuestList;
+	std::vector<s_quest_trace_cache> _questCache;//等级不够的主线任务缓存
+	unsigned int _activeNPCid;//!npc服务器id
+	unsigned int _lasttime;
+	s_quest_detail _mainQDetail;//主线任务
+	std::map<unsigned short , s_quest_detail> _subQDetails;//支线任务列表
+	//s_quest_detail _everyDetail; //日常任务
+
+	unsigned int _wantOpenRoleidMain;
+	unsigned int _wantOpenRoleidSub;
+	unsigned int _wantOpenRoleidEvery;
+	unsigned int _wantOpenRoleidBiQi; //想要打开的比奇任务
+	unsigned int _wantOpenRoleidHuan;//想要打开的环任务
+	unsigned int _wantOpenRoleidEveryNPC;
+	//!每日任务：
+	//!首先拿到A与B的总次数
+	//!当前完成次数，每完成一次-1
+	//!时间到重置
+	//!在query下面，屏蔽该功能
+	//!在每次完成任务后，检查是否需要重置任务
+	int _everyQuestANum;
+	int _everyQuestBNum;
+
+	unsigned short autoQID;
+	int tempx , tempy;
+
+	std::string maptag;
+
+	bool _isInit;
+	//bool _isOneAccept;
+	bool canOpenNpcUi; //判断是否打开NPCTalk页面
+
+	bool _isAutoAttackMonster;
+	bool _isBiqiOver;
+	bool _isCloseBaoDianEffect;
+
+	typedef std::map<unsigned short , std::pair<int ,int> >	junxu_reward_map;
+	junxu_reward_map			m_junxu_rewards;
+	void init_junxu_reward();
+SIGNALS:
+	c_signal<void , unsigned short> _sigAcceptQuest;
+	c_signal<void , unsigned short> _sigFinishQuest;
+	c_signal<void, unsigned short> _sigQuestPathFindEnd;
+private:
+	QuestMgr();
+	~QuestMgr();
+public:
+	void init();
+	void destroy();//gx add
+	void delayDestroy();//延迟重连需要销毁
+
+	void get_junxu_reward(unsigned short qid,int& item_id,int& item_num);
+
+	void reSetData();//gx add
+	void loadQuestProto();
+	void clearCurQuestMessage()//清空当前的任务信息
+	{ 
+		_curMainQuestID = 0xFFFF;
+		_curSubQuestID = 0xFFFF;
+		_curEveryQuestID = 0xFFFF;
+		_curBiQiQuestID = 0xFFFF;
+		_curHuanQuestID = 0xFFFF;
+		_curGuildQuestID = 0xFFFF;
+	}
+	void setCanOpenNpcUi(bool flag)
+	{
+		canOpenNpcUi = flag;
+	}
+	inline const s_quest_detail& getDetail() const 
+	{
+		return _mainQDetail;
+	}
+	inline const s_quest_detail* getQuestDetail(unsigned short questId)const 
+	{
+		std::map<unsigned short, s_quest_detail>::const_iterator iter = _quest.find(questId);
+		if(iter != _quest.end())
+		{
+			return &iter->second;
+		}
+		return NULL;
+	}
+	inline void setIsAutoAttackMonster(bool isAutoAttack) 
+	{
+		_isAutoAttackMonster = isAutoAttack;
+	}
+	inline bool getIsAutoAttackMonster() {return _isAutoAttackMonster;}
+
+	s_quest_detail getSubDetail();
+	//s_quest_detail getHuanDetail();
+	inline unsigned short getSubQA() const {return _curSubQuestID;}
+	inline unsigned short getMainQuest() const 
+	{ 
+		return _curMainQuestID;
+	}
+	inline unsigned short getCurHuanQuestID() const
+	{
+		return _curHuanQuestID;
+	}
+	inline unsigned short getCurBiQiQuestID()const{
+		return _curBiQiQuestID;
+	}
+	inline unsigned short getCurEveryQuestID()const
+	{
+		return _curEveryQuestID;
+	}
+	inline unsigned short getCurGuildQuestID() const
+	{
+		return _curGuildQuestID;
+	}
+	inline void setCurGuildQuestID(unsigned short questID)
+	{
+		_curGuildQuestID = questID;
+	}
+
+	inline int getCurTaskKillNumberByID(unsigned short taskID)
+	{
+		std::map<unsigned short,s_kill_counter>::iterator itor = _killCount.find(taskID);
+		if (itor != _killCount.end())
+		{
+			return itor->second.curkill;
+		}
+		return 0;
+	}
+
+	eQuestState getMainQuestState(unsigned short qid , unsigned int npcid);
+	eQuestState getSubQuestState(unsigned short qid  ,unsigned int npcid);
+	//eQuestState getEveryQuestAState(unsigned int npcid);
+	eQuestState getEveryQuestStates(unsigned int npcid);
+	eQuestState getBiQiQuestStates(unsigned int npcid);
+	eQuestState getNowQuestState(unsigned short qid);
+	eQuestState getHuanQuestState(unsigned short qid,unsigned int npcid); //获取环任务的状态
+	eQuestState getGuildQuestState();//获取行会任务的状态
+	//void _fillEveryState(unsigned int npcid , int type,unsigned short Id,s_quest_detail& qd);
+	void initEvery();
+	//gx add vip 使用
+	//	inline void setEveryANum(int num) {_everyQuestANum = QUESTA_NUM_LVL0+num;}				//【Ji：】
+	//	inline void setEveryBNum(int num) {_everyQuestBNum = QUESTB_NUM_LVL0+num;}				//【Ji：】
+	int calculateDifByRoleLevel(int level,bool bAA = true);
+	//end
+	//void tryResetEveryQuest();
+	bool queryQuestIsAccomlished(unsigned short uID)const;
+	void AutoFindPath(int questId, int taskId); //任务相关寻路
+	void SetBiqiOver(bool isOver) { _isBiqiOver = isOver;}
+public:
+	static QuestMgr* getInstance();
+	//std::map<unsigned short,s_quest_detail> getQuestList();//获取任务列表
+	void checkValidMainQuestTrace();
+	//!执行相应的npc脚本
+	void doNPCScript(unsigned int npcid , unsigned int sid , bool reset = true);
+
+	void onSelect(unsigned short qid);
+	void onAccept(unsigned short qid);
+	void onFinish(unsigned short qid);
+	void onQuestTraceSelect(unsigned short qid);
+	//[bing] 借用它 其实跟任务没关系 寻路到NPC附近并自动打开对话框
+	void onSelectRunNpc(unsigned int dwNpcTypeID, bool alwaysRun = false);//第二个参数，在副本中可以寻路
+
+	unsigned int onServerAccept(s_net_cmd *cmd);
+	unsigned int onServerFinish(s_net_cmd* cmd);
+	unsigned int onServerInitFinished(s_net_cmd* cmd);
+	unsigned int onServerInitUnfinished(s_net_cmd* cmd);
+	unsigned int onServerAddQuest(s_net_cmd* cmd);
+	unsigned int onServerUpdateQuest(s_net_cmd* cmd);
+	unsigned int onQuestUpdateItem(s_net_cmd* cmd);
+	unsigned int onServerDelDailyQuest(s_net_cmd* cmd);//0点删除每日任务
+	unsigned int onServerEnterQuestFuben(s_net_cmd* cmd);
+	unsigned int onServerInitCurrentCanGetHuan(s_net_cmd* cmd);//初始化当前可接的环任务
+	void onPathFinished();
+
+	int getQuestType(unsigned short qid);
+
+	void getMainQuestIDFromFinished();
+
+	void onFindTarget();
+
+	void queryValidSubQuest(int level, bool needReset);
+	void queryValidHuanQuest(int level, bool needReset);//查询环任务
+	//void queryValidEveryQuestA(int level); 
+	void queryValidEveryQuest(int level, bool needReset); //查询有效的每日任务B 军需任务
+
+	void queryValidBiQiQuest(int level, bool needReset);//查询有效的比奇任务
+	void queryValidQuest(int level,bool needReset,unsigned short& curQuestId,QuestTypeEnum typeValue);
+
+	void queryValidGuildQuest(int level, bool needReset); //查询行会任务
+	
+	unsigned short getTracableQuestByLevel(int nPlayerLv,QuestTypeEnum questType,int step=1);
+	//[bing] 因为等级达不到而在任务栏内显示不出主线任务
+	void AppendNextMainTask();
+	void ConfirmGotoRiChang(); //确定跳转到日常界面
+
+	INT checkQuestStateByID(UINT qid);
+	void gotoQusetFuben();
+	void updateBiqi();
+	void updateJunXu();
+	unsigned int getComNPCID(unsigned short qid);
+
+	inline unsigned int get_cur_active_npc_id(){return _activeNPCid;}
+	inline std::map<unsigned short , eQuestState>& get_quest_map() {return _questState;}
+
+	void changeMainQuestPopupValue(int qid)
+	{
+		if(_mainQDetail.qid == qid && /*_questState[_mainQDetail.qid]*/getQuestState(_mainQDetail.qid) == QS_READY_FINISH)
+		{
+			if(!_mainQDetail.popup)
+			{
+				_mainQDetail.popup = !_mainQDetail.popup;
+			}
+		}
+	}
+
+	void setQuestState(unsigned short questID,eQuestState state);
+	eQuestState getQuestState(unsigned short qid);
+	bool haveQuestState(unsigned short questID) const;
+
+private:
+	void doSthAfterFinished(s_quest_detail const* qd,bool finish_all);
+	void getNextQuestIfNess(s_quest_detail const* qd,int player_lv);
+
+	void removeQuestState(unsigned short qid);
+
+	bool canTracedByLevel(int playerLv,unsigned short questID)const;
+	void appendTaskToUIView(unsigned short id,unsigned short oldID,std::string text,bool needReset ,int number =-1,bool level_limit=false);
+
+
+	void _fillDetail(unsigned short qid);
+	void autoOpenQuestUI(unsigned short curQid, unsigned int nextNpcid, unsigned short nextQid); //自动开启任务UI
+
+	void updateQuestTraceState(tagIncompleteQuestMsgInfo const& info,bool& bHaveMainQuest);
+	void updateQuestItemIfNess(s_quest_detail const* curQuest);
+
+	bool isBiQiFullCircle()const;
+	bool isDailyFullCircle()const;
+
+	void tryToGetNextQuest();
+
+	bool isRewardQuest(unsigned short id)const;
+
+	std::string getQuestInfoText(unsigned short id);
+
+	inline bool max_fit(int player_lv,int max_lv) const{return max_lv==0?true:player_lv< max_lv;}
+	bool isHuanFullCircle()const;
+public:
+	std::string getItemName(unsigned int id);
+	unsigned int _transform(const std::string& str);
+
+	void FilterQuest(unsigned short questID);
+	void setTargetPosition(float x, float y);
+	void guild_assign();
+};
+void showNPCName(unsigned int npcid);
+
+void showNPCTalk(unsigned int npcid);
+
+int getCurQuestState(unsigned short qid , unsigned int npcid);
+
+int getSubQuestStateA(unsigned int npcid);
+
+int getEveryQuestState(int type , unsigned int npcid );
+
+int getBiQiQuestState(unsigned int npcid );
+
+int getHuanShiQuestState(unsigned short qid , unsigned int npcid);
+
+void addToCompleteQuestList(unsigned short qid);
+
+void addToAcceptQuestList(unsigned short qid);
+
+
+void addToCompleteQuestListSub(int id);
+
+void addToAcceptQuestListSub(int id);
+
+void addToCompleteQuestListEvery(int id);
+
+void addToAcceptQuestListEvery(int id);
+
+void addToCompleteQuestListBiQi();
+
+void addToAcceptQuestListBiQi();
+
+void addToAcceptQuestHuan();
+
+void addToCompleteQuestHuan();
+
+void hideButton();
+
+void stopRunPathTo();
+
+void continueRunPathTo();
+
+void gotoFubenState();
+
+
+#endif

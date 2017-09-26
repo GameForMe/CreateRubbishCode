@@ -1,0 +1,518 @@
+#include "JuhuasuanUi.h"
+#include "World.h"
+#include "CfgReader.h"
+#include "UiResourceMgr.h"
+#include "ChongZhiActivityFarmeUI.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "BaseDefine.h"
+#include "CommonMsgDefine.h"
+#include "TCPClient.h"
+#include "WorldPacket.h"
+#include "StringMgr.h"
+#include "ToolTip.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+JuhuasuanUi * JuhuasuanUi::getInstance()
+{
+	static JuhuasuanUi instance;
+	return &instance;
+}
+
+JuhuasuanUi::JuhuasuanUi()
+{
+
+}
+
+JuhuasuanUi::~JuhuasuanUi()
+{
+
+}
+
+void JuhuasuanUi::open()
+{
+	if(isOpen())
+		return;
+
+	ChongZhiActivityFarmeUILayer *uiLayer = GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer();
+	if(uiLayer != NULL)
+	{
+		CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+		ccNodeLoaderLibrary->registerCCNodeLoader("JuHuaSuanUiLayer", JuhuasuanUiLoader::loader());
+		cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+		CCNode *node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "juhuasuanui.ccbi").c_str());
+		_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+		UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+		ccbReader->release();
+		if(node != NULL) {
+			node->setTag(CZA_JuHuaSuan);
+			uiLayer->getChildByTag(0)->getChildByTag(0)->addChild(node,10);
+		}
+	}
+}
+
+void JuhuasuanUi::close()
+{
+	if(!isOpen())
+		return;
+	ChongZhiActivityFarmeUILayer *uiLayer = GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->getChildByTag(0)->getChildByTag(0)->removeChildByTag(CZA_JuHuaSuan);
+	}
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+}
+
+bool JuhuasuanUi::isOpen()
+{
+	return (getUiLayer() != NULL);
+}
+
+JuhuasuanUiLayer * JuhuasuanUi::getUiLayer()
+{
+	ChongZhiActivityFarmeUILayer *uiLayer = GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer();
+	if(uiLayer != NULL)
+	{
+		JuhuasuanUiLayer *uiNode = dynamic_cast<JuhuasuanUiLayer*>(uiLayer->getChildByTag(0)->getChildByTag(0)->getChildByTag(CZA_JuHuaSuan));
+		if(uiNode != NULL)
+			return uiNode;
+	}
+	return NULL;
+}
+
+void JuhuasuanUi::updateDisplay()
+{
+	JuhuasuanUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateData();
+	}
+}
+
+void JuhuasuanUi::setVisible(bool isVisible)
+{
+	if (isOpen())
+	{
+		getUiLayer()->setVisible(isVisible);
+		getUiLayer()->setTouchEnabled(isVisible);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler JuhuasuanUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler JuhuasuanUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBuyBtnPressed", JuhuasuanUiLayer::onBuyBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRechargeBtnPressed0", JuhuasuanUiLayer::onRechargeBtnPressed0);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRechargeBtnPressed1", JuhuasuanUiLayer::onRechargeBtnPressed1);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRechargeBtnPressed2", JuhuasuanUiLayer::onRechargeBtnPressed2);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRechargeBtnPressed3", JuhuasuanUiLayer::onRechargeBtnPressed3);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRechargeBtnPressed4", JuhuasuanUiLayer::onRechargeBtnPressed4);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRechargeBtnPressed5", JuhuasuanUiLayer::onRechargeBtnPressed5);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRechargeBtnPressed6", JuhuasuanUiLayer::onRechargeBtnPressed6);
+	return NULL;
+}
+
+void JuhuasuanUiLayer::onBuyBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_20);//vv
+	//是否购买聚划算奖励 0=没买，1=买了
+	unsigned int openCount = World::getInstance()->GetRoleScriptDataByIndex(7);
+	if (openCount == 0)
+	{
+		MessageBoxUi *shopUI = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(7106).c_str(), TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+		World::getInstance()->getScene()->addChild(shopUI, WZ_MESSAGEBOX);
+		shopUI->signalOkBtnPressed.connect(this, &JuhuasuanUiLayer::okBtnPressed);
+	}
+	else
+	{
+		ToolTip::getInstance()->push(GET_STR(7101));
+	}
+}
+
+void JuhuasuanUiLayer::setQuicklyBuyeButtonState(bool isRecharge)
+{
+	if (isRecharge)
+	{
+		quicklyBuy->setEnabled(false);
+	}
+}
+
+void JuhuasuanUiLayer::okBtnPressed()
+{
+	WorldPacket C2G_Msg(NET_C2G_REQUEST_BUY_YUANBAO_REWARD);//组装消息头 
+	C2G_Msg << 1;
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);//发送
+}
+
+void JuhuasuanUiLayer::onRechargeBtnPressed0(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_20);//vv
+	//是否购买聚划算奖励 0=没买，1=买了
+	unsigned int openCount = World::getInstance()->GetRoleScriptDataByIndex(7);
+	if (openCount == 1)
+	{
+		unsigned int openCount = World::getInstance()->GetRoleScriptDataByIndex(8);
+		if (openCount < 1)
+		{
+			WorldPacket C2G_Msg(NET_C2G_REQUEST_GET_YUANBAO_REWARD);//组装消息头 
+			C2G_Msg << 1;
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);//发送
+		}
+		else
+		{
+		}
+	}
+	else if (openCount == 0)
+	{
+		ToolTip::getInstance()->push(GET_STR(7248));
+	}	
+}
+
+void JuhuasuanUiLayer::onRechargeBtnPressed1(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_20);//vv
+	//是否购买聚划算奖励 0=没买，1=买了
+	unsigned int openCount = World::getInstance()->GetRoleScriptDataByIndex(7);
+	if (openCount == 1)
+	{
+		unsigned int openCount = World::getInstance()->GetRoleScriptDataByIndex(8);
+		if (openCount < 2)
+		{
+			WorldPacket C2G_Msg(NET_C2G_REQUEST_GET_YUANBAO_REWARD);//组装消息头 
+			C2G_Msg << 2;
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);//发送
+
+		}
+		else
+		{
+
+		}
+	}
+	else if (openCount == 0)
+	{
+		ToolTip::getInstance()->push(GET_STR(7248));
+	}
+}
+
+void JuhuasuanUiLayer::onRechargeBtnPressed2(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_20);//vv
+	//是否购买聚划算奖励 0=没买，1=买了
+	unsigned int openCount = World::getInstance()->GetRoleScriptDataByIndex(7);
+	if (openCount == 1)
+	{
+		unsigned int openCount = World::getInstance()->GetRoleScriptDataByIndex(8);
+		if (openCount < 3)
+		{
+			WorldPacket C2G_Msg(NET_C2G_REQUEST_GET_YUANBAO_REWARD);//组装消息头 
+			C2G_Msg << 3;
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);//发送
+
+		}
+		else
+		{
+
+		}
+	}
+	else if (openCount == 0)
+	{
+		ToolTip::getInstance()->push(GET_STR(7248));
+	}
+}
+
+void JuhuasuanUiLayer::onRechargeBtnPressed3(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_20);//vv
+	//是否购买聚划算奖励 0=没买，1=买了
+	unsigned int openCount = World::getInstance()->GetRoleScriptDataByIndex(7);
+	if (openCount == 1)
+	{
+		unsigned int openCount = World::getInstance()->GetRoleScriptDataByIndex(8);
+		if (openCount < 4)
+		{
+			WorldPacket C2G_Msg(NET_C2G_REQUEST_GET_YUANBAO_REWARD);//组装消息头 
+			C2G_Msg << 4;
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);//发送
+
+		}
+		else
+		{
+
+		}
+	}
+	else if (openCount == 0)
+	{
+		ToolTip::getInstance()->push(GET_STR(7248));
+	}
+}
+
+void JuhuasuanUiLayer::onRechargeBtnPressed4(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_20);//vv
+	//是否购买聚划算奖励 0=没买，1=买了
+	unsigned int openCount = World::getInstance()->GetRoleScriptDataByIndex(7);
+	if (openCount == 1)
+	{
+		unsigned int openCount = World::getInstance()->GetRoleScriptDataByIndex(8);
+		if (openCount < 5)
+		{
+			WorldPacket C2G_Msg(NET_C2G_REQUEST_GET_YUANBAO_REWARD);//组装消息头 
+			C2G_Msg << 5;
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);//发送
+
+		}
+		else
+		{
+
+		}
+	}
+	else if (openCount == 0)
+	{
+		ToolTip::getInstance()->push(GET_STR(7248));
+	}
+}
+
+void JuhuasuanUiLayer::onRechargeBtnPressed5(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_20);//vv
+	//是否购买聚划算奖励 0=没买，1=买了
+	unsigned int openCount = World::getInstance()->GetRoleScriptDataByIndex(7);
+	if (openCount == 1)
+	{
+		unsigned int openCount = World::getInstance()->GetRoleScriptDataByIndex(8);
+		if (openCount < 6)
+		{
+			WorldPacket C2G_Msg(NET_C2G_REQUEST_GET_YUANBAO_REWARD);//组装消息头 
+			C2G_Msg << 6;
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);//发送
+
+		}
+		else
+		{
+
+		}
+	}
+	else if (openCount == 0)
+	{
+		ToolTip::getInstance()->push(GET_STR(7248));
+	}
+}
+
+void JuhuasuanUiLayer::onRechargeBtnPressed6(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_20);//vv
+	//是否购买聚划算奖励 0=没买，1=买了
+	unsigned int openCount = World::getInstance()->GetRoleScriptDataByIndex(7);
+	if (openCount == 1)
+	{
+		unsigned int openCount = World::getInstance()->GetRoleScriptDataByIndex(8);
+		if (openCount < 7)
+		{
+			WorldPacket C2G_Msg(NET_C2G_REQUEST_GET_YUANBAO_REWARD);//组装消息头 
+			C2G_Msg << 7;
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);//发送
+
+		}
+		else
+		{
+
+		}
+	}
+	else if (openCount == 0)
+	{
+		ToolTip::getInstance()->push(GET_STR(7248));
+	}
+}
+
+bool JuhuasuanUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if(isTouchOnNodeContent(_containNode, pTouch))
+	{
+		return true;
+	}
+	else
+	{
+		CLOSE_UI(WCT_ChongZhiActivityFarmeUI);//关闭充值活动界面
+		return false;
+	}
+	return false;
+}
+
+void JuhuasuanUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	unsigned int openCount = World::getInstance()->GetRoleScriptDataByIndex(8);
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(0));
+	lingquBtn0 = dynamic_cast<CCControlButton*>(_frame->getChildByTag(0));
+	lingquBtn1 = dynamic_cast<CCControlButton*>(_frame->getChildByTag(1));
+	lingquBtn2 = dynamic_cast<CCControlButton*>(_frame->getChildByTag(2));
+	lingquBtn3 = dynamic_cast<CCControlButton*>(_frame->getChildByTag(3));
+	lingquBtn4 = dynamic_cast<CCControlButton*>(_frame->getChildByTag(4));
+	lingquBtn5 = dynamic_cast<CCControlButton*>(_frame->getChildByTag(5));
+	lingquBtn6 = dynamic_cast<CCControlButton*>(_frame->getChildByTag(6));
+	quicklyBuy = dynamic_cast<CCControlButton*>(_frame->getChildByTag(8));
+	_containNode = dynamic_cast<CCNode*>(getChildByTag(4));
+	_containNode->setVisible(false);
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+	std::string sSESurround = sSEDir + "E1_34.plist";
+	_plist.insert(sSESurround);
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSESurround.c_str());
+
+	mItemSurround = GameActionNode::create();//add by vvv 2015.01.05
+	mItemSurround->setPosition(ccp(_frame->getChildByTag(7)->getPositionX()+1,_frame->getChildByTag(7)->getPositionY()+4));
+	_frame->addChild(mItemSurround,0);
+
+// 	for(int i = 1; i < 99; ++i)
+// 	{
+// 		CCString* pStr = CCString::createWithFormat("%s%02d","E1_34", i);
+// 		if(!mItemSurround->AddTexture(pStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+	mItemSurround->InitTextureWithSpriteFrame("E1_34");
+	mItemSurround->BeginAction(0.09f, true);
+
+	for (unsigned int i = 0;i < openCount;++i)
+	{
+		switch(i)
+		{
+		case 0:
+			{
+				setButtonSpriteFrame(lingquBtn0,"juhuasuan_receivebtnd","juhuasuan_receivebtnd","juhuasuan_receivebtnd");
+				lingquBtn0->setEnabled(false);
+			}
+			break;
+		case 1:
+			{
+				setButtonSpriteFrame(lingquBtn1,"juhuasuan_receivebtnd","juhuasuan_receivebtnd","juhuasuan_receivebtnd");
+				lingquBtn1->setEnabled(false);
+			}
+			break;
+		case 2:
+			{
+				setButtonSpriteFrame(lingquBtn2,"juhuasuan_receivebtnd","juhuasuan_receivebtnd","juhuasuan_receivebtnd");
+				lingquBtn2->setEnabled(false);
+			}
+			break;
+		case 3:
+			{
+				setButtonSpriteFrame(lingquBtn3,"juhuasuan_receivebtnd","juhuasuan_receivebtnd","juhuasuan_receivebtnd");
+				lingquBtn3->setEnabled(false);
+			}
+			break;
+		case 4:
+			{
+				setButtonSpriteFrame(lingquBtn4,"juhuasuan_receivebtnd","juhuasuan_receivebtnd","juhuasuan_receivebtnd");
+				lingquBtn4->setEnabled(false);
+			}
+			break;
+		case 5:
+			{
+				setButtonSpriteFrame(lingquBtn5,"juhuasuan_receivebtnd","juhuasuan_receivebtnd","juhuasuan_receivebtnd");
+				lingquBtn5->setEnabled(false);
+			}
+			break;
+		case 6:
+			{
+				setButtonSpriteFrame(lingquBtn6,"juhuasuan_receivebtnd","juhuasuan_receivebtnd","juhuasuan_receivebtnd");
+				lingquBtn6->setEnabled(false);
+			}
+			break;
+		}
+	}
+	unsigned int isBuy = World::getInstance()->GetRoleScriptDataByIndex(7);
+	if (isBuy)
+	{
+		setQuicklyBuyeButtonState((bool)isBuy);
+	}
+//	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+	setAllChildernButtonPriority(this,-1);
+}
+
+void JuhuasuanUiLayer::updateData()
+{
+	unsigned int openCount = World::getInstance()->GetRoleScriptDataByIndex(8);
+
+	for (unsigned int i = 0;i < openCount;++i)
+	{
+		switch(i)
+		{
+		case 0:
+			{
+				setButtonSpriteFrame(lingquBtn0,"juhuasuan_receivebtnd","juhuasuan_receivebtnd","juhuasuan_receivebtnd");
+				lingquBtn0->setEnabled(false);
+			}
+			break;
+		case 1:
+			{
+				setButtonSpriteFrame(lingquBtn1,"juhuasuan_receivebtnd","juhuasuan_receivebtnd","juhuasuan_receivebtnd");
+				lingquBtn1->setEnabled(false);
+			}
+			break;
+		case 2:
+			{
+				setButtonSpriteFrame(lingquBtn2,"juhuasuan_receivebtnd","juhuasuan_receivebtnd","juhuasuan_receivebtnd");
+				lingquBtn2->setEnabled(false);
+			}
+			break;
+		case 3:
+			{
+				setButtonSpriteFrame(lingquBtn3,"juhuasuan_receivebtnd","juhuasuan_receivebtnd","juhuasuan_receivebtnd");
+				lingquBtn3->setEnabled(false);
+			}
+			break;
+		case 4:
+			{
+				setButtonSpriteFrame(lingquBtn4,"juhuasuan_receivebtnd","juhuasuan_receivebtnd","juhuasuan_receivebtnd");
+				lingquBtn4->setEnabled(false);
+			}
+			break;
+		case 5:
+			{
+				setButtonSpriteFrame(lingquBtn5,"juhuasuan_receivebtnd","juhuasuan_receivebtnd","juhuasuan_receivebtnd");
+				lingquBtn5->setEnabled(false);
+			}
+			break;
+		case 6:
+			{
+				setButtonSpriteFrame(lingquBtn6,"juhuasuan_receivebtnd","juhuasuan_receivebtnd","juhuasuan_receivebtnd");
+				lingquBtn6->setEnabled(false);
+			}
+			break;
+		}
+	}
+}
+
+void JuhuasuanUiLayer::onEnter()
+{
+	setTouchPriority(0);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+}
+
+void JuhuasuanUiLayer::onExit()
+{
+//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+}
+
+void JuhuasuanUiLayer::setTouchEnabled( bool value )
+{
+	CCLayer::setTouchEnabled(value);
+//	if (value)
+//	{
+//		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this,1,true);
+//	}
+//	else
+//	{
+//		CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+//	}
+}

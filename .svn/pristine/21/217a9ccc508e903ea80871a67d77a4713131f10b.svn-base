@@ -1,0 +1,388 @@
+#include "CheckButton.h"
+#include "UiTools.h"
+#include "BaseDefine.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "UiManager.h"
+#include "QuickSaleUI.h"
+#include "HookSetUi.h"
+#include "GameEventDefine.h"
+
+CheckButton::CheckButton()
+	: _touchPriority(1)
+	, _isCheck(true)
+	,_isenable(true)
+	,_checkPolicy(CheckPolicy())
+{
+}
+
+CheckButton::~CheckButton()
+{
+
+}
+
+bool CheckButton::init()
+{
+	if(!CCSprite::init())
+		return false;
+
+	return true;
+}
+
+void CheckButton::onEnter()
+{
+	CCSprite::onEnter();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, _touchPriority, true);
+}
+
+void CheckButton::onExit()
+{
+	CCSprite::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool CheckButton::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (!isVisible() || !hasVisibleParents() || !isRunning())
+	{
+		return false;
+	}
+
+	if(_isenable){
+		if(isVisible())
+		{
+			if(isTouchOnNodeContent(this, pTouch))
+			{
+				AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_14);
+				_touchPt = convertTouchToNodeSpace(pTouch);
+				return true;
+			}
+		}
+	}
+	
+	return false;
+}
+
+void CheckButton::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(_isenable){
+		if(isVisible())
+		{
+			if(isTouchOnNodeContent(this, pTouch))
+			{
+				CCPoint pt = convertTouchToNodeSpace(pTouch);
+				if(ccpDistance(pt, _touchPt) < TOUCH_MOVE_DIS)
+				{
+					simSelected(!_isCheck);
+					//setCheck(!_isCheck);
+					//signalStateChanged.emit(this, _isCheck);
+// 					if(IS_UI_OPEN(WCT_QuickSale))
+// 					{
+// 						GET_UI(QuickSaleUI,WCT_QuickSale)->getUiLayer()->updateData();
+// 					}
+				}
+			}
+		}
+	}
+}
+
+void CheckButton::SetTouchEnable(bool isenable)
+{
+	_isenable=isenable;
+	if (_isenable)
+		delGray();
+	else
+		setGray();
+}
+
+void CheckButton::setCheck( bool check )
+{
+	if(check == _isCheck)
+		return;
+
+	_isCheck = check;
+
+	CCSprite *sprite = getCheckSignSprite();
+	sprite->setVisible(_isCheck);
+}
+
+void CheckButton::setCheckSignSprite( const std::string &spriteFrameName )
+{
+	CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(spriteFrameName.c_str());
+	CC_ASSERT(spriteFrame != NULL);
+	CCSprite *sprite = getCheckSignSprite();
+	sprite->setDisplayFrame(spriteFrame);
+	CCSize size = getContentSize();
+	sprite->setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+}
+
+CCSprite * CheckButton::getCheckSignSprite()
+{
+	CCSprite *sprite = dynamic_cast<CCSprite*>(getChildByTag(NT_Sign));
+	if(sprite == NULL)
+	{
+		sprite = CCSprite::create();
+		sprite->setTag(NT_Sign);
+		addChild(sprite);
+	}
+
+	CC_ASSERT(sprite != NULL);
+	return sprite;
+}
+
+void CheckButton::simSelected( bool sel,bool sendEvent /*=true*/ )
+{
+	if (sel  && _checkPolicy &&!_checkPolicy(this))
+	{
+		return;
+	}
+
+	setCheck(sel);
+	if(sendEvent)
+		signalStateChanged.emit(this, sel);
+
+	// 	if (_checkPolicy)
+	// 	{
+	// 		if (_checkPolicy())
+	// 		{
+	// 			setCheck(sel);
+	// 			if(sendEvent)
+	// 				signalStateChanged.emit(this, sel);
+	// 		}
+	// 	}
+	// 	else
+	// 	{
+	// 		setCheck(sel);
+	// 		if(sendEvent)
+	// 			signalStateChanged.emit(this, sel);
+	// 	}
+
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+void CheckButtonLoader::onHandlePropTypeInteger( CCNode * pNode, CCNode * pParent, const char* pPropertyName, int pInteger, CCBReader * pCCBReader )
+{
+	if(CCString::create(pPropertyName)->isEqual(CCString::create("touchPriority")))
+	{
+		((CheckButton*)pNode)->_touchPriority = pInteger;
+	}
+	else if(CCString::create(pPropertyName)->isEqual(CCString::create("check")))
+	{
+		((CheckButton*)pNode)->setCheck(pInteger != 0);
+	}
+	else
+	{
+		CCSpriteLoader::onHandlePropTypeInteger(pNode, pParent, pPropertyName, pInteger, pCCBReader);
+	}
+}
+
+void CheckButtonLoader::onHandlePropTypeString( CCNode * pNode, CCNode * pParent, const char* pPropertyName, const char * pString, CCBReader * pCCBReader )
+{
+	if(CCString::create(pPropertyName)->isEqual(CCString::create("signSprite")))
+	{
+		((CheckButton*)pNode)->setCheckSignSprite(pString);
+	}
+	else
+	{
+		CCSpriteLoader::onHandlePropTypeString(pNode, pParent, pPropertyName, pString, pCCBReader);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+MultiSelectButtonGroup::MultiSelectButtonGroup()
+{
+
+}
+MultiSelectButtonGroup::~MultiSelectButtonGroup()
+{
+
+}
+
+void MultiSelectButtonGroup::addCheckButton(CheckButton * checkButton,bool isSelect){
+	if(checkButton==NULL){
+		return;
+	}
+
+	if (std::find(_btns.begin(),_btns.end(),checkButton) != _btns.end())
+	{
+		return;
+	}
+
+	checkButton->retain();
+	_btns.push_back(checkButton);
+	checkButton->signalStateChanged.connect(this,&MultiSelectButtonGroup::onCheckStateChanged);
+
+	if (isSelect )
+	{
+		if (_checkPolicy)
+			checkButton->setCheck(_checkPolicy());
+		else
+			checkButton->setCheck(isSelect);
+		//increaseCheckNum();
+	}
+	else
+		checkButton->setCheck(false);
+
+}
+
+
+void MultiSelectButtonGroup::removeCheckButton(CheckButton * checkbutton){
+	CC_ASSERT(checkbutton);
+	auto end= _btns.end();
+	auto iter = std::find(_btns.begin(),end,checkbutton);
+	if (iter != end)
+	{
+		_btns.erase(iter);
+
+		checkbutton->signalStateChanged.disconnect(this,&MultiSelectButtonGroup::onCheckStateChanged);
+		checkbutton->release();
+// 		if (checkbutton->isCheckd())
+// 		{
+// 			decreaseCheckNum();
+// 		}
+	}
+	else
+	{
+		CC_ASSERT("do not remove not exist");
+	}
+}
+void MultiSelectButtonGroup::onCheckStateChanged(CheckButton* btn,bool select)
+{
+	auto end = _btns.end();
+	CC_ASSERT(std::find(_btns.begin(),_btns.end(),btn) != end);
+	
+	if (select)
+	{
+		if (_checkPolicy && !_checkPolicy())
+		{
+			btn->setCheck(false);
+		}
+	}
+	else
+	{
+
+	}
+// 	MutilGroupRefresh evt;
+// 	evt.max= _max;
+// 	evt.cur=_curr;
+// 	evt.group = this;
+// 	SEND_EVENT(&evt);
+
+}
+void MultiSelectButtonGroup::clear()
+{
+
+	std::for_each(_btns.begin(),_btns.end(),[](CheckButton* one){one->release();});
+
+	_btns.clear();
+}
+
+///////////////////////////////////////////////////////////
+MutexCheckButtonGroup::MutexCheckButtonGroup()
+	: _curSelect(NULL)
+{
+
+}
+
+MutexCheckButtonGroup::~MutexCheckButtonGroup()
+{
+	clear();
+}
+
+void MutexCheckButtonGroup::addCheckButton( CheckButton *checkButton )
+{
+	if(checkButton == NULL || isBtnInGroup(checkButton))
+		return;
+
+	checkButton->retain();
+	_btns.push_back(checkButton);
+	checkButton->signalStateChanged.connect(this, &MutexCheckButtonGroup::onCheckStateChanged);
+
+	if(checkButton->isCheckd())
+	{
+		if(_curSelect != NULL)
+			_curSelect->setCheck(false);
+
+		_curSelect = checkButton;
+	}
+
+	//如果加入的按钮中没有选中的，默认选中第一个
+	if(_curSelect == NULL)
+	{
+		_curSelect = checkButton;
+		_curSelect->setCheck(true);
+	}
+}
+
+void MutexCheckButtonGroup::removeCheckButton( CheckButton *checkButton)
+{
+	for(std::vector<CheckButton*>::iterator iter = _btns.begin(); iter != _btns.end(); ++ iter)
+	{
+		CheckButton *btn = *iter;
+		if(btn == checkButton)
+		{
+			if(btn == _curSelect)
+				_curSelect = NULL;
+			checkButton->signalStateChanged.disconnect(this, &MutexCheckButtonGroup::onCheckStateChanged);
+			checkButton->release();
+			_btns.erase(iter);
+			return;
+		}
+	}
+}
+
+void MutexCheckButtonGroup::clear()
+{
+	for(std::vector<CheckButton*>::iterator iter = _btns.begin(); iter != _btns.end(); ++ iter)
+	{
+		CheckButton *btn = *iter;
+		btn->signalStateChanged.disconnect(this, &MutexCheckButtonGroup::onCheckStateChanged);
+		btn->release();
+	}
+	_btns.clear();
+	_curSelect = NULL;
+}
+
+bool MutexCheckButtonGroup::isBtnInGroup( CheckButton *checkBtn )
+{
+	for(std::vector<CheckButton*>::iterator iter = _btns.begin(); iter != _btns.end(); ++ iter)
+	{
+		CheckButton *btn = *iter;
+		if(btn == checkBtn)
+			return true;
+	}
+
+	return false;
+}
+
+void MutexCheckButtonGroup::onCheckStateChanged( CheckButton *btn, bool check )
+{
+	//不能取消选中，除非选择其他的按钮
+	if(check == false)
+		btn->setCheck(true);
+
+	if(btn == _curSelect)
+		return;
+
+	if(_curSelect != NULL)
+	{
+		HookSetUiLayer::m_LastCheckBtn = _curSelect;
+		_curSelect->setCheck(false);
+		signalBtnCheckChanged.emit(_curSelect, false);
+	}
+
+	_curSelect = btn;
+	HookSetUiLayer::m_CurCheckBtn = btn;
+	signalBtnCheckChanged.emit(_curSelect, true);
+}
+
+void MutexCheckButtonGroup::selectNull()
+{
+	if(_curSelect != NULL)
+	{
+		_curSelect->setCheck(false);
+		_curSelect = NULL;
+	}
+}

@@ -1,0 +1,960 @@
+#include "BossPKUi_new.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "CfgReader.h"
+#include "BossPKMgr.h"
+#include "DBMgr.h"
+#include "InstanceProto.h"
+#include "TCPClient.h"
+#include "ItemTip.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "EquipTipUi.h"
+#include "LocalPlayer.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "PlayerState.h"
+#include "Helper.h"
+#include "GameEventDefine.h"
+
+//=====================BossDropItem_new========================
+BossDropItem_new::BossDropItem_new(int itemID)				//BOSS掉落物品
+{
+	_nItemID = itemID;
+	_itemNode = ItemNode::create();
+	_itemNode->setDataId(_nItemID);
+	_itemNode->retain();
+	_itemNode->setClickable(true);
+	_itemNode->hideItemOpBtn();
+//	this->autorelease();
+}
+
+BossDropItem_new::~BossDropItem_new()
+{
+	_itemNode->removeFromParent();
+	CC_SAFE_RELEASE(_itemNode);
+}
+bool BossDropItem_new::isTouched(CCTouch* touch)
+{
+	return isTouchOnNodeContent(_itemNode, touch);
+}
+
+void BossDropItem_new::setPosition(CCPoint ccpoint)
+{
+	_itemNode->setPosition(ccpoint);
+}
+
+CCPoint BossDropItem_new::getDropItemPos()
+{
+	CCSize size = _itemNode->getContentSize();
+	return _itemNode->convertToWorldSpace(ccp(size.width/2.0f, size.height/2.0f));
+}
+
+void BossDropItem_new::addToParentBg( CCNode* node )
+{
+	CC_ASSERT(node != NULL && _itemNode != NULL);
+	node->addChild(_itemNode);
+}
+
+// ============================BossDieUiItem_new==============================
+BossDieUiItem_new::BossDieUiItem_new( int bossID, int flushTime )
+{
+
+	m_nBossID = 0;
+	m_nFlushTime = 0;
+	m_nBossLevel = 0;
+	m_nHour = 0;
+	m_nMin = 0;
+	_bossBGSP = NULL;
+
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("BossBieUiItemFrame", BossDieUiItemLoader_new::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	_uiFrame = dynamic_cast<BossDieUiItemFrame_new*>(ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "bossdieitem.ccbi").c_str()));
+
+	// _usedPlistFile = ccbReader->getLoadedSpriteSheet();
+	// UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+
+	ccbReader->release();
+	if(_uiFrame != NULL)
+	{
+		_uiFrame->retain();
+		_uiFrame->_item = this;
+		
+
+		m_nBossID = bossID;
+		m_nFlushTime = flushTime;
+
+
+		const sBossProto* t_data = BossPKMgr::getInstance()->getBossDataByBossID(bossID);
+		CC_ASSERT(t_data != NULL);
+
+		std::string portraitName = t_data->m_sPortraitNew;
+		std::string bossName = t_data->name;
+		m_nBossLevel = t_data->bossLevel;
+// 		c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM BossChallenge WHERE id = ?1");
+// 		cmd->set_integer32(1, m_nBossID);
+// 		c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 		while(table->retrieve_row())
+// 		{
+// 			unsigned int idx = table->get_index("portraitNew");
+// 			portraitName = table->get_text(idx);
+// 			idx = table->get_index("lv");
+// 			m_nBossLevel = table->get_integer32(idx);
+// 			idx = table->get_index("name");
+// 			bossName = table->get_text(idx);
+// 		}
+// 		c_db_manager::getSingleton()->destroy_table(table);
+// 		c_db_manager::getSingleton()->end_operation(cmd);
+
+		//boss图片
+		_bossBGSP = dynamic_cast<CCSprite*>(_uiFrame->getChildByTag(BCT_Portrait));
+		portraitName = portraitName + ".png";
+		std::string bossPortrait = CFGReader::instance()->get_profile_string("Art", "Portrait", "") + portraitName;
+		_bossBGSP->initWithFile(bossPortrait.c_str());
+
+		//boss name
+		LabelFT * nameLabel = Helper::getLabelFTByParentAndTag(_uiFrame, BCT_BossName);
+		if (nameLabel )
+			nameLabel->setString(bossName);
+
+		//复活时间文字
+		LabelFT * reviveLabel = Helper::getLabelFTByParentAndTag(_uiFrame, 4 );
+		if (reviveLabel )
+			reviveLabel->setString("\xE5\xA4\x8D\xE6\xB4\xBB\xE6\x97\xB6\xE9\x97\xB4\xEF\xBC\x9A");			// 复活时间
+
+
+		//复活时间计数
+		_flushTimeLabel = Helper::getLabelFTByParentAndTag(_uiFrame, BCT_BossTime);
+		CC_ASSERT(_flushTimeLabel);
+		m_nHour = m_nFlushTime / 3600;
+		m_nMin = m_nFlushTime / 60;
+		while(m_nMin >= 60)
+			m_nMin -= 60;
+		m_nSec = m_nFlushTime % 60;
+		CCString* tmStr = CCString::createWithFormat("%02d:%02d:%02d", m_nHour, m_nMin, m_nSec);
+		if (_flushTimeLabel)
+			_flushTimeLabel->setString(tmStr->getCString());
+		
+
+		// boss等级
+		CCString* lvStr = CCString::createWithFormat("Lv.%d", m_nBossLevel);
+		_levelLabel = Helper::getLabelFTByParentAndTag(_uiFrame, BCT_BossLevel);
+		CC_ASSERT(_levelLabel);
+		if (_levelLabel)
+			_levelLabel->setString(lvStr->getCString());
+
+		// plist
+		std::string sSEDir01= CFGReader::instance()->get_profile_string("Art", "Effect", "");
+		std::string sSEPlist = sSEDir01 + "E1_95.plist";
+		_Plist = GameActionNode::create();
+		_Plist->InitWithPList(sSEPlist.c_str(),"E1_95");
+		_uiFrame->addChild( _Plist );
+		_Plist->setPosition( _uiFrame->getChildByTag( BCT_Portrait )->getPosition());
+		_Plist->BeginAction(0.1, true);
+		_Plist->setVisible(false);
+		_uiFrame->getChildByTag( BCT_Select )->setVisible(false);
+
+	}
+
+}
+
+
+BossDieUiItem_new::~BossDieUiItem_new()
+{
+	if(_uiFrame != NULL)
+	{
+		_uiFrame->release();
+		_uiFrame = NULL;
+	}
+	//this->unschedule(schedule_selector(BossDieUiItem_new::updateFlushTime));
+	//UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	//_usedPlistFile.clear();
+}
+
+void BossDieUiItem_new::setBossID( unsigned int BossID )
+{
+	m_nBossID = BossID;
+}
+
+bool BossDieUiItem_new::updateFlushTime( float dt )
+{
+	bool bNeedUpdatePos = false;
+	LocalPlayer * pLp = RoleManager::getInstance()->getLocalPlayer();
+	if ( (m_nFlushTime == 0) && pLp && pLp->getLevel() >= m_nBossLevel )
+	{
+		if ( !_Plist->isVisible() )
+		{
+			_Plist->setVisible(true);
+			bNeedUpdatePos = true;
+		}
+
+	}
+	else
+	{	
+		if ( _Plist->isVisible() )
+		{
+			_Plist->setVisible(false);
+			bNeedUpdatePos = true;
+		}
+	}
+
+	--m_nFlushTime;
+	if (0 > m_nFlushTime)
+	{
+		m_nFlushTime = 0;
+		return bNeedUpdatePos;
+	}
+	m_nHour = m_nFlushTime / 3600;
+	m_nMin = m_nFlushTime / 60;
+	while(m_nMin >= 60)
+		m_nMin -= 60;
+	m_nSec = m_nFlushTime % 60;
+	CCString* tmStr = CCString::createWithFormat("%02d:%02d:%02d", m_nHour, m_nMin,m_nSec);
+	_flushTimeLabel->setString(tmStr->getCString());
+
+	return bNeedUpdatePos;
+}
+
+
+//=====================BossDieUiItem_newFrame=====================
+
+cocos2d::SEL_MenuHandler BossDieUiItemFrame_new::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler BossDieUiItemFrame_new::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onViewBtnPressed", BossDieUiItemFrame_new::onBtnPressed);
+	return NULL;
+}
+
+void BossDieUiItemFrame_new::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	//setAllChildernButtonPriority(this,1);
+}
+
+void BossDieUiItemFrame_new::onEnter()
+{
+	CCSprite::onEnter();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	setAllChildernButtonEnable(this,false);
+	setAllChildernButtonEnable(this,true);
+}
+
+void BossDieUiItemFrame_new::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCSprite::onExit();
+}
+
+bool BossDieUiItemFrame_new::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (!isVisible() || !isRunning() || !hasVisibleParents())
+	{
+		return false;
+	}
+	// 为了关闭界面淡出时不再判断点选所以加此判断
+	if ( !BossPKMgr::getInstance()->isOpenBossUi() )
+		return false;
+
+	if( isTouchOnNodeContent( GET_UI(BossPKUi_new, WCT_BOSSPKUI_NEW)->getUiLayer()->getScrollViewNode() , pTouch) )
+	{
+		if(isTouchOnNodeContent(this,pTouch))
+		{
+			return true;
+
+
+		}
+	}
+
+	return false;
+}
+
+void BossDieUiItemFrame_new::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	// 如果当前显示的是此类boss
+	if(isTouchOnNodeContent(this,pTouch) && ! pTouch->cancel_in_scrollview())
+	{
+		if ( (*BossPKMgr::getInstance()->getBossDatamap( BPK_BOSSTYPE )).at( _item->getBossID() )
+			== GET_UI(BossPKUi_new, WCT_BOSSPKUI_NEW)->getUiLayer()->getCurrentPageTag() )
+		{
+			GET_UI(BossPKUi_new, WCT_BOSSPKUI_NEW)->getUiLayer()->setBossDes( _item->getBossID() );
+		}
+	}
+
+}
+
+void BossDieUiItemFrame_new::onBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+
+	// 判断按钮在scrollView区域以外就不响应
+	float posY_view = GET_UI(BossPKUi_new, WCT_BOSSPKUI_NEW)->getUiLayer()->getScrollViewNode()->getParent()->convertToWorldSpace( 
+		GET_UI(BossPKUi_new, WCT_BOSSPKUI_NEW)->getUiLayer()->getScrollViewNode()->getPosition()).y;
+	float posY_btn = _item->getUiFrame()->convertToWorldSpace( _item->getUiFrame()->getChildByTag(BossDieUiItem_new::BCT_TransferBtn)->getPosition()).y;
+	float btn_Height = _item->getUiFrame()->getChildByTag(BossDieUiItem_new::BCT_TransferBtn)->getContentSize().height;
+	if ( posY_btn + btn_Height / 2 < posY_view )		//按钮上沿在srollview之下
+		return;
+
+
+	int bossID = _item->getBossID();
+	unsigned int stageID = 0;
+	DWORD	mapId = 0;
+	int level = 0;
+
+
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM BossChallenge WHERE id = ?1");
+// 	cmd->set_integer32(1, bossID);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("relayID");
+// 		stageID = table->get_integer64(idx);
+// 		idx = table->get_index("map_id");
+// 		mapId = table->get_integer64(idx);
+// 		idx = table->get_index("lv");
+// 		level = table->get_integer32(idx);
+// 	}
+// 
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	const sBossProto* t_data = BossPKMgr::getInstance()->getBossDataByBossID(bossID);
+	CC_ASSERT(t_data != NULL);
+
+	stageID = t_data->m_nRelayID;
+	mapId = t_data->m_nMapID;
+	level = t_data->bossLevel;
+
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if (player)
+	{
+
+		//取消等级限制
+		//if (player->getLevel() < level)
+		// {
+		// 		ToolTip::getInstance()->push(GET_STR(2392));
+		// 		return;
+		// }
+		int id = MapManager::getInstance()->getCurMapId();
+		if (mapId == id)
+		{
+			ToolTip::getInstance()->push(GET_STR(9032));
+			AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+			CLOSE_UI(WCT_BOSSPKUI_NEW);
+			BossPKMgr::getInstance()->setOpenBossUi(false);
+			return;
+		}
+		if (player->isRoleInStaticState())//摆摊交易双修中禁止操作
+		{
+			ToolTip::getInstance()->push(GET_STR(7209));
+			return;
+		}
+	}
+
+	//取消自动寻路
+	MapManager::getInstance()->resetCrossMapping();
+	RoleManager::getInstance()->getLocalPlayer()->stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+	if (RoleManager::getInstance()->getLocalPlayer()->getAutoRunState())
+	{
+		RoleManager::getInstance()->getLocalPlayer()->setAutoRunState(false);
+	}				
+
+	NET_SIC_posthouse cmdN;
+	cmdN.dwPosID = stageID;
+	TCP_CLIENT->send_net_cmd(&cmdN,NP_NORMAL,false);
+
+}
+
+
+// ========================BossPKUi_new=======================
+BossPKUi_new::BossPKUi_new()
+{
+
+}
+
+BossPKUi_new::~BossPKUi_new()
+{
+	
+}
+
+CCNode* BossPKUi_new::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["BossBieUiLayer"] = UiLayerLoader<BossPKUiLayer_new>::loader();
+	//nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+	CCNode* pNode = readUiFromCCBI("bossdie", nodeLoaders, _loadSpriteSheet);
+	_pLayer = dynamic_cast<BossPKUiLayer_new *>(pNode);
+	
+	return pNode;
+}
+
+//=============================BossPKUiLayer_new======================
+BossPKUiLayer_new::~BossPKUiLayer_new()
+{
+}
+
+cocos2d::SEL_MenuHandler BossPKUiLayer_new::onResolveCCBCCMenuItemSelector( CCObject* pTarget, const char* pSelectorName )			//CCMenu事件绑定
+{
+	return NULL;
+}
+
+
+cocos2d::extension::SEL_CCControlHandler BossPKUiLayer_new::onResolveCCBCCControlSelector( CCObject* pTarget, const char* pSelectorName )		//CCControlBtton事件绑定
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", BossPKUiLayer_new::onCloseBtnPressed);				//关闭按钮
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onShiJieBtnPressed", BossPKUiLayer_new::onShiJieBtnPressed);				//世界Boss按钮
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onYeWaiBtnPressed", BossPKUiLayer_new::onYeWaiBtnPressed);				//野外Boss按钮
+	return NULL;
+}
+
+void BossPKUiLayer_new::onNodeLoaded( cocos2d::CCNode* pNode, cocos2d::extension::CCNodeLoader* pNodeLoader )			//界面载入
+{
+	//初始化数据
+	_bgSprite = NULL;
+	_CurrentSelectItem = NULL;
+	_LastSelectItem = NULL;
+	_bgSprite = dynamic_cast<CCSprite*>(this->getChildByTag(BPK_CHALLENGEBG));
+	_bossIDMap = BossPKMgr::getInstance()->getBossDatamap(BPK_BOSSIDMAP);
+	_itemInterval = 5.0f;
+
+	// scrollView
+	_scrollViewNode = this->getChildByTag( 1 )->getChildByTag( 1 );
+	CC_ASSERT(_scrollViewNode != NULL);
+	_scrollView = CCScrollView::create(_scrollViewNode->getContentSize());
+	_scrollViewNode->addChild(_scrollView);
+
+	// 创建container
+	_containerMap[PAGE_SHIJIE] = CCNode::create();
+	_containerMap[PAGE_SHIJIE]->retain();
+	_containerMap[PAGE_YEWAI] = CCNode::create();
+	_containerMap[PAGE_YEWAI]->retain();
+
+
+	initBossUiItem();
+	updateItemPos(PAGE_SHIJIE);			// 先对各page中item进行排序，使用默认的PAGE_SHIJIE
+	if (BossPKMgr::getInstance()->isNeedSortBossUI())
+	{
+		_currentPageTag = getDefaultDisplayPageTag();
+		updateItemPos(_currentPageTag);		// 再调用此函数，用来更新item显示的位置
+	}
+	else
+		_currentPageTag = PAGE_SHIJIE;
+
+	setBossDes((_BossItems[_currentPageTag]).front()->getBossID());
+	UpdateHighLight();
+	
+
+	_scrollView->setContainer(_containerMap[_currentPageTag]);
+	_scrollView->setTouchEnabled(true);
+	//_scrollView->setBounceable(false);
+	_scrollView->setViewSize( _scrollViewNode->getContentSize() );
+	_scrollView->setContentSize(_containerMap[_currentPageTag]->getContentSize());
+	_scrollView->setDirection(kCCScrollViewDirectionVertical);
+	_scrollView->setContentOffset(_scrollView->minContainerOffset());
+
+	this->schedule(schedule_selector(BossPKUiLayer_new::update), 1.0f);
+	update(0.0f);
+
+}
+
+bool BossPKUiLayer_new::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )			//点击事件began
+{
+	if (!isVisible() || !isRunning() || !hasVisibleParents())
+	{
+		return false;
+	}
+	//是否点击在界面内，点击到外部则关闭界面
+	CCPoint framePoint = _bgSprite->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _bgSprite->getContentSize();
+	CCRect frameRect(0.0f,0.0f,frameSize.width,frameSize.height);
+	if (frameRect.containsPoint(framePoint))
+	{
+		return true;
+	}
+	else
+	{
+		CLOSE_UI(WCT_BOSSPKUI_NEW);
+		BossPKMgr::getInstance()->setOpenBossUi(false);
+		return true;
+	}
+	
+}
+
+void BossPKUiLayer_new::onExit()				//界面退出
+{
+
+	BossPKMgr::getInstance()->setOpenBossUi(false);
+//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+
+
+	if(!_dropItemVec.empty())
+		for (std::vector<BossDropItem_new*>::iterator iter = _dropItemVec.begin(); iter != _dropItemVec.end(); ++iter)
+		{
+	//		dynamic_cast<BossDropItem_new*>(*iter)->removeFromParentAndCleanup(true);
+			CC_SAFE_RELEASE(dynamic_cast<BossDropItem_new *>(*iter));
+		}
+	_dropItemVec.clear();
+
+	for (std::map< EPageTag , std::list<BossDieUiItem_new *> >::iterator iter = _BossItems.begin();
+		iter != _BossItems.end(); ++iter)
+	{
+		EPageTag page = iter->first;
+		for(std::list<BossDieUiItem_new*>::iterator it = _BossItems[page].begin(); it != _BossItems[page].end(); ++it)
+		{
+			BossDieUiItem_new *item = *it;
+			_containerMap[page]->removeChild(item->getUiFrame());
+			delete item;
+		}
+		
+	}
+	_BossItems.clear();
+
+
+	for ( std::map< EPageTag , CCNode * >::iterator iter = _containerMap.begin();
+		iter != _containerMap.end(); ++iter )
+	{
+		iter->second->release();
+	}
+	UNREGISTER_EVENT(SELECTPAGE,BossPKUiLayer_new,setSelectPage);
+}
+
+void BossPKUiLayer_new::onCloseBtnPressed( cocos2d::CCObject* pSender, cocos2d::extension::CCControlEvent pCCControlEvent )			//关闭界面按钮
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_BOSSPKUI_NEW);
+	BossPKMgr::getInstance()->setOpenBossUi(false);
+}
+
+void BossPKUiLayer_new::initBossUiItem()		//更新BOSS资料显示
+{
+
+	BossPKMgr::BossFlushMap bossFlushTimeMap = BossPKMgr::getInstance()->getBossFlushMap();
+	for(unsigned int j = 0; j < (*_bossIDMap).size() ; ++j)
+	{
+		unsigned int bossID = (*_bossIDMap)[ j ];
+		BossPKMgr::BossFlushMap::iterator flushIter = bossFlushTimeMap.find(bossID);
+		if (flushIter != bossFlushTimeMap.end())
+		{
+			BossDieUiItem_new *item = new BossDieUiItem_new( bossID , flushIter->second.oddTime );
+			item->setBossID( (*_bossIDMap)[ j ] );
+
+			EPageTag page = EPageTag((*BossPKMgr::getInstance()->getBossDatamap(BPK_BOSSTYPE)).at( bossID ));
+
+			_containerMap[page]->addChild( item->getUiFrame() );
+			_BossItems[page].push_back( item );
+		}
+	}
+
+	for ( std::map< EPageTag , CCNode * >::iterator iter = _containerMap.begin();
+		iter != _containerMap.end(); ++iter )
+	{
+		EPageTag page = iter->first;
+		//CCNode * pContainer = iter->second;
+		int nRow = std::ceil(_BossItems[page].size() / 2.0);
+		float hSize = nRow * _scrollViewNode->getContentSize().height * 0.333f + nRow * _itemInterval;
+		iter->second->setContentSize(CCSize(_scrollViewNode->getContentSize().width , hSize));
+	}
+
+}
+
+void BossPKUiLayer_new::updateItemPos(EPageTag PageTag)
+{
+
+	for (std::map< EPageTag , std::list<BossDieUiItem_new *> >::iterator iter = _BossItems.begin();
+		iter != _BossItems.end(); ++iter)
+	{
+		iter->second.sort(sortBoss);
+	}
+
+	if(_containerMap[PageTag] == NULL)
+		return;
+
+	if (_BossItems[PageTag].empty())
+		return;
+
+	int index = 0;
+	for ( std::list<BossDieUiItem_new*>::iterator it = _BossItems[PageTag].begin(); it != _BossItems[PageTag].end(); ++it )
+	{
+		BossDieUiItem_new *item = *it;
+		int diff = (_scrollViewNode->getContentSize().width - item->getUiFrame()->getContentSize().width * 2) / 4;
+		int posX;
+		if ( (index % 2) == 0 )
+			posX = diff * 2;
+		else
+			posX = ( item->getUiFrame()->getContentSize().width + diff * 2 );
+
+		int posY = _containerMap[PageTag]->getContentSize().height
+			- (index / 2) * (item->getUiFrame()->getContentSize().height + _itemInterval);
+		item->getUiFrame()->setPosition(ccp(posX, posY));
+		++index;
+	}
+
+	
+	if(_scrollView != NULL)
+	{
+		_scrollView->setContentOffset(_scrollView->minContainerOffset());
+	}
+		
+
+}
+
+void BossPKUiLayer_new::setBossDes( int bossID )								
+{
+
+	const sBossProto* t_data = BossPKMgr::getInstance()->getBossDataByBossID(bossID);
+	CC_ASSERT(t_data != NULL);
+	//设置BOSS描述
+	std::string bossDes = t_data->m_sDesc;
+	int bossDroped1 = t_data->m_nItem1ID;							//掉落物品
+	int bossDroped2 = t_data->m_nItem2ID;
+	int bossDroped3 = t_data->m_nItem3ID;
+	int bossDroped4 = t_data->m_nItem4ID;
+	int bossDroped5 = t_data->m_nItem5ID;
+	int bossDroped6 = t_data->m_nItem6ID;
+
+
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM BossChallenge WHERE id = ?1");
+// 	cmd->set_integer32(1, bossID);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("desc");
+// 		bossDes = table->get_text(idx);
+// 		idx = table->get_index("item1");
+// 		bossDroped1 = table->get_integer32(idx);
+// 		setBossDropItemName(bossDroped1,1);
+// 
+// 		idx = table->get_index("item2");
+// 		bossDroped2 = table->get_integer32(idx);
+// 		setBossDropItemName(bossDroped2,2);
+// 
+// 		idx = table->get_index("item3");
+// 		bossDroped3 = table->get_integer32(idx);
+// 		setBossDropItemName(bossDroped3,3);
+// 
+// 		idx = table->get_index("item4");
+// 		bossDroped4 = table->get_integer32(idx);
+// 		setBossDropItemName(bossDroped4,4);
+// 
+// 		idx = table->get_index("item5");
+// 		bossDroped5 = table->get_integer32(idx);
+// 		setBossDropItemName(bossDroped5,5);
+// 
+// 		idx = table->get_index("item6");
+// 		bossDroped6 = table->get_integer32(idx);
+// 		setBossDropItemName(bossDroped6,6);
+// 	}
+// 
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	//CCLabelTTF* bossDesLabel = dynamic_cast<CCLabelTTF*>(_bgSprite->getChildByTag(BPK_BOSSDES));
+	LabelFT* bossDesLabel = Helper::getLabelFTByParentAndTag(_bgSprite, BPK_BOSSDES);
+	CC_ASSERT(bossDesLabel != NULL);
+	if (bossDesLabel)
+	{
+		bossDesLabel->setString(bossDes.c_str());
+		//bossDesLabel->setDimensions(CCSize(_bgSprite->getChildByTag(BPK_BOSSDESCONTENT)->getContentSize().width,0.0f));
+		bossDesLabel->setDimensions(_bgSprite->getChildByTag(BPK_BOSSDESCONTENT)->getContentSize().width,0.0f);
+	}
+	if(!_dropItemVec.empty())
+		for (std::vector<BossDropItem_new*>::iterator iter = _dropItemVec.begin(); iter != _dropItemVec.end(); ++iter)
+		{
+	//		dynamic_cast<BossDropItem_new*>(*iter)->removeFromParentAndCleanup(true);
+			CC_SAFE_RELEASE(dynamic_cast<BossDropItem_new*>(*iter));
+		}
+	_dropItemVec.clear();
+	this->createDropItem(1,bossDroped1);
+	this->createDropItem(2,bossDroped2);
+	this->createDropItem(3,bossDroped3);
+	this->createDropItem(4,bossDroped4);
+	this->createDropItem(5,bossDroped5);
+	this->createDropItem(6,bossDroped6);
+
+	// 世界归属or队伍归属
+	if ((*BossPKMgr::getInstance()->getBossDatamap(BPK_BOSSTYPE)).at(bossID) == PAGE_SHIJIE)
+	{
+		_bgSprite->getChildByTag( 31 )->setVisible( true );
+		LabelFT * Label = Helper::getLabelFTByParentAndTag(_bgSprite, 31 );
+		if (Label )
+			Label->setString("\xE4\xB8\x96\xE7\x95\x8C\xE5\xBD\x92\xE5\xB1\x9E");			// 世界归属
+
+		_bgSprite->getChildByTag( 32 )->setVisible( false );
+	}
+	else if ((*BossPKMgr::getInstance()->getBossDatamap(BPK_BOSSTYPE)).at(bossID) == PAGE_YEWAI)
+	{
+		_bgSprite->getChildByTag( 32 )->setVisible( true );
+		LabelFT * Label = Helper::getLabelFTByParentAndTag(_bgSprite, 32 );
+		if (Label )
+			Label->setString("\xE9\x98\x9F\xE4\xBC\x8D\xE5\xBD\x92\xE5\xB1\x9E");			// 队伍归属
+
+		_bgSprite->getChildByTag( 31 )->setVisible( false );
+	}
+
+	//----------设置选中特效
+	BossDieUiItem_new * pItem = getItemFromBossID( bossID );
+	if ( pItem == NULL )
+		return;
+
+	if ( _CurrentSelectItem != NULL )
+	{
+		_CurrentSelectItem->getUiFrame()->getChildByTag( BossDieUiItem_new::BCT_Select )->setVisible( false );
+	}
+	pItem->getUiFrame()->getChildByTag( BossDieUiItem_new::BCT_Select )->setVisible( true );
+
+
+	// 更新选中记录
+	_LastSelectItem = _CurrentSelectItem;
+	_CurrentSelectItem = pItem;
+
+}
+
+void BossPKUiLayer_new::setBossDropItemName( int itemId ,int index)			//设置BOSS描述
+{
+
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM PackageData WHERE TypeId = ?1");
+	cmd->set_integer32(1, itemId);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	std::string itemName;
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("Name");
+		itemName = table->get_text(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	//CCLabelTTF* itemNameLabel = (CCLabelTTF*)_bgSprite->getChildByTag(20 + index);
+	LabelFT* itemNameLabel = Helper::getLabelFTByParentAndTag(_bgSprite, 20 + index);
+	CC_ASSERT(itemNameLabel != NULL);
+	if (itemNameLabel)
+		itemNameLabel->setString(itemName.c_str());
+}
+
+void BossPKUiLayer_new::createDropItem( int dropIndex,int dropID )			//创建BOSS掉落ItemNode
+{
+	CCPoint nodePoint = _bgSprite->getChildByTag(dropIndex+10)->getPosition();
+	BossDropItem_new* pBossDropItem = new BossDropItem_new(dropID);
+	pBossDropItem->addToParentBg(_bgSprite);
+	pBossDropItem->setPosition(nodePoint);
+	_dropItemVec.push_back(pBossDropItem);
+}
+
+void BossPKUiLayer_new::onEnter()
+{
+	setTouchPriority(1);
+//	setTouchMode(kCCTouchesOneByOne);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+	REGISTER_EVENT(SELECTPAGE,BossPKUiLayer_new,setSelectPage);
+}
+
+void BossPKUiLayer_new::onShiJieBtnPressed( cocos2d::CCObject* pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+
+	if(_currentPageTag!=PAGE_SHIJIE)
+	{
+		_currentPageTag=PAGE_SHIJIE;
+		_scrollView->setContainer(_containerMap[ _currentPageTag ]);
+		_scrollView->setContentSize(_containerMap[ _currentPageTag ]->getContentSize());
+		if(_scrollView != NULL)
+		{
+			_scrollView->setContentOffset(_scrollView->minContainerOffset());
+		}
+		
+		updateItemPos(_currentPageTag);
+
+		if ( _BossItems[_currentPageTag].size() )
+			this->setBossDes( _BossItems[_currentPageTag].front()->getBossID() );
+
+
+		for ( std::list<BossDieUiItem_new*>::iterator iter = _BossItems[_currentPageTag].begin(); iter != _BossItems[_currentPageTag].end(); ++iter )
+		{
+			(*iter)->getPlistNode()->BeginAction(0.1, true);
+		}
+		
+	}
+	UpdateHighLight();
+}
+
+void BossPKUiLayer_new::onYeWaiBtnPressed( cocos2d::CCObject* pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+
+	if(_currentPageTag!=PAGE_YEWAI)
+	{
+		_currentPageTag=PAGE_YEWAI;
+		_scrollView->setContainer(_containerMap[ _currentPageTag ]);
+		_scrollView->setContentSize(_containerMap[ _currentPageTag ]->getContentSize());
+		if(_scrollView != NULL)
+		{
+			_scrollView->setContentOffset(_scrollView->minContainerOffset());
+		}
+		
+		updateItemPos(_currentPageTag);
+
+		if ( _BossItems[_currentPageTag].size() )
+			this->setBossDes(_BossItems[_currentPageTag].front()->getBossID());
+
+		for ( std::list<BossDieUiItem_new*>::iterator iter = _BossItems[_currentPageTag].begin(); iter != _BossItems[_currentPageTag].end(); ++iter )
+		{
+			(*iter)->getPlistNode()->BeginAction(0.1, true);
+		}	
+	}
+	UpdateHighLight();
+}
+
+void BossPKUiLayer_new::update( float dt )
+{
+
+	bool bNeedUpdatePos = false;
+	for (std::map< EPageTag , std::list<BossDieUiItem_new *> >::iterator iter = _BossItems.begin();
+		iter != _BossItems.end(); ++iter)
+	{
+		EPageTag page = iter->first;
+		for(std::list<BossDieUiItem_new*>::iterator it = _BossItems[page].begin(); it != _BossItems[page].end(); ++it)
+		{
+			BossDieUiItem_new *item = *it;
+			if (item->updateFlushTime( dt ))
+				bNeedUpdatePos = true;
+		}
+	}
+
+	if ( bNeedUpdatePos )
+		updateItemPos(_currentPageTag);
+
+}
+
+BossDieUiItem_new * BossPKUiLayer_new::getItemFromBossID( int BossID )
+{
+	
+
+	for (std::map< EPageTag , std::list<BossDieUiItem_new *> >::iterator iter = _BossItems.begin();
+		iter != _BossItems.end(); ++iter)
+	{
+		EPageTag page = iter->first;
+		for(std::list<BossDieUiItem_new*>::iterator it = _BossItems[page].begin(); it != _BossItems[page].end(); ++it)
+		{
+			if ( (*it)->getBossID() == BossID )
+				return (*it);
+		}
+	}
+
+	return NULL;
+}
+
+void BossPKUiLayer_new::UpdateHighLight()
+{
+	if ( _currentPageTag == PAGE_SHIJIE )
+	{
+		dynamic_cast<CCControlButton*>(_bgSprite->getChildByTag( 2 ))->setHighlighted( true );
+		dynamic_cast<CCControlButton*>(_bgSprite->getChildByTag(3 ))->setHighlighted( false );
+	}
+	else if ( _currentPageTag == PAGE_YEWAI )
+	{
+		dynamic_cast<CCControlButton*>(_bgSprite->getChildByTag( 3 ))->setHighlighted( true );
+		dynamic_cast<CCControlButton*>(_bgSprite->getChildByTag( 2 ))->setHighlighted( false );
+	}
+}
+
+BossPKUiLayer_new::EPageTag BossPKUiLayer_new::getDefaultDisplayPageTag()
+{
+	// 找到所有非空page,并存储它们的第一个item
+	std::list< std::pair<EPageTag , BossDieUiItem_new *> > pages;
+	std::map< EPageTag , std::list<BossDieUiItem_new *> >::iterator iter = _BossItems.begin();
+	for ( ; iter != _BossItems.end(); ++iter )
+	{
+		if ( (iter->second).size() )
+		{
+			BossDieUiItem_new * pItem = (iter->second).front();
+			pages.push_back(std::make_pair(iter->first, pItem));
+		}
+	}
+
+	if ( pages.empty() )
+		return PAGE_SHIJIE;
+
+	pages.sort(sortPage);
+
+	return pages.front().first;
+
+}
+
+bool BossPKUiLayer_new::sortBoss(BossDieUiItem_new *infofirst, BossDieUiItem_new *infosecond )
+{
+
+	//刷新时间短的在前，然后是等级低的
+	int first_time = infofirst->getFlushTime();
+	int second_time = infosecond->getFlushTime();
+
+	if ( first_time != second_time )
+		return first_time < second_time;
+
+	return infofirst->getBossLevel() < infosecond->getBossLevel();
+
+}
+
+bool BossPKUiLayer_new::sortPage( const pair<EPageTag , BossDieUiItem_new *> & infofirst,const pair<EPageTag , BossDieUiItem_new *> & infosecond )
+{
+
+	int ReviveTime1 = infofirst.second->getFlushTime();
+	int ReviveTime2 = infosecond.second->getFlushTime();
+
+	if ( ReviveTime1 != ReviveTime2 )			
+		return ReviveTime1 < ReviveTime2;		// 复活时间近的在前
+
+	else
+	{
+		LocalPlayer * lp = RoleManager::getInstance()->getLocalPlayer();
+		if (NULL == lp)
+			return true;
+
+		int BossLevel1 = infofirst.second->getBossLevel(); 
+		int BossLevel2 = infosecond.second->getBossLevel();
+
+		if ((lp->getLevel() - BossLevel1) * (lp->getLevel() - BossLevel2) > 0)  //如果都比玩家等级高或都比玩家等级低
+			return std::abs(lp->getLevel() - BossLevel1) < std::abs(lp->getLevel() - BossLevel2);    // 离玩家等级近的在前
+		else
+			return lp->getLevel() - BossLevel1 > 0;		// 否则的话，比玩家等级低的在前
+
+	}
+
+}
+
+void BossPKUiLayer_new::setSelectPage(SELECTPAGE* sel)
+{
+	if (3==sel->num)
+	{
+		if(_currentPageTag!=PAGE_SHIJIE)
+		{
+			_currentPageTag=PAGE_SHIJIE;
+		}
+	}
+	else
+	{
+		if(_currentPageTag!=PAGE_YEWAI)
+		{
+			_currentPageTag=PAGE_YEWAI;
+		}
+	}
+	_scrollView->setContainer(_containerMap[ _currentPageTag ]);
+	_scrollView->setContentSize(_containerMap[ _currentPageTag ]->getContentSize());
+	if(_scrollView != NULL)
+	{
+		_scrollView->setContentOffset(_scrollView->minContainerOffset());
+	}
+
+	updateItemPos(_currentPageTag);
+
+	if ( _BossItems[_currentPageTag].size() )
+		this->setBossDes( _BossItems[_currentPageTag].front()->getBossID() );
+
+
+	for ( std::list<BossDieUiItem_new*>::iterator iter = _BossItems[_currentPageTag].begin(); iter != _BossItems[_currentPageTag].end(); ++iter )
+	{
+		(*iter)->getPlistNode()->BeginAction(0.1, true);
+	}
+			
+	UpdateHighLight();
+}

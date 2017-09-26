@@ -1,0 +1,196 @@
+#include "AlignComponent.h"
+//#include "QuickConfig.h"
+#include "NewPlayerGuide.h"
+
+AlignComponent::AlignComponent()
+	:mfGap(0.0f)
+	,mptOriStart(0,0)
+	,meDir(ead_horizontal)
+{
+
+}
+
+AlignComponent::~AlignComponent()
+{
+
+}
+
+void AlignComponent::setupNodes( std::vector<CCNode*> const& input,eAlignDirection ed )
+{
+	CC_ASSERT(!input.empty());
+	mvecNodes = input;
+	meDir = ed;
+
+	mptOriStart = mvecNodes[0]->getPosition();
+	if (input.size() >1)
+	{
+		if (isHorz())//横向
+		{
+			mfGap =  input.size() > 1?mvecNodes[1]->getPositionX() - mvecNodes[0]->getPositionX():0.0f; 
+			
+		}
+		if (isVertical())//纵向
+		{
+			mfGap =  input.size() > 1?mvecNodes[1]->getPositionY() - mvecNodes[0]->getPositionY():0.0f; 
+		}
+	}
+	arrange();
+}
+
+void AlignComponent::arrange()
+{
+	size_t pos = 0;
+	for (size_t i = 0; i <  mvecNodes.size(); ++i)
+	{
+		CCNode* node = mvecNodes[i];
+		if (node->isVisible())//可见的按顺序排
+		{
+			CCPoint newPos  = mptOriStart;
+			if (isVertical())
+			{
+				newPos.y = mptOriStart.y + pos*mfGap;
+			}
+			else
+			{
+				newPos.x = mptOriStart.x + pos* mfGap;
+			}
+			++pos;
+			node->setPosition(newPos);
+		}
+		else//不可见的排在原位
+		{
+			CCPoint newPos  = mptOriStart;
+			newPos.x = mptOriStart.x + i* mfGap;
+			node->setPosition(newPos);
+		}
+	}
+}
+
+void AlignComponent::playShift( size_t index)
+{
+	CC_ASSERT(index < mvecNodes.size());
+	
+	if (mvecNodes[index]->isVisible())
+	{
+		return;
+	}
+
+	size_t posFind = findInsertPos(index);
+	CCPoint ptNew;
+	if (isVertical())
+	{
+		ptNew = ccp(mptOriStart.x , mptOriStart.y + mfGap * posFind );
+	}
+	else
+	{
+		ptNew=ccp(mptOriStart.x + mfGap * posFind , mptOriStart.y);
+
+	}
+	mvecNodes[index]->setPosition(ptNew);
+
+	float fFlyingTime = CFG(float,"shift_time",0.5f);
+	for (size_t i = index+1; i <mvecNodes.size()  ; i++)
+	{
+		CCNode* node = mvecNodes[i];
+		if (node->isVisible())//只移动可见的
+		{
+			CCPoint ptTo  = node->getPosition();
+			ptTo.x  += mfGap;
+			CCMoveTo* actionMoveTo =  CCMoveTo::create(fFlyingTime,ptTo);
+			mvecNodes[i]->runAction(actionMoveTo);
+		}
+	}
+	if (index == 3)
+	{
+		NewPlayerGuider::getInstance()->RunNewPlayerGuilde();
+	}
+}
+
+void AlignComponent::showImme( size_t index )
+{
+	CC_ASSERT(index < mvecNodes.size());
+
+	if (mvecNodes[index]->isVisible())
+	{
+		return;
+	}
+
+	mvecNodes[index]->setVisible(true);
+
+	arrange();
+}
+
+size_t AlignComponent::findInsertPos( size_t index )
+{
+	size_t pos  = 0;
+	for (size_t i = 0; i < mvecNodes.size() ; i++)
+	{
+		if (mvecNodes[i]->isVisible() && i < index)
+		{
+			++pos;
+		}
+	}
+
+	return pos;
+}
+
+CCNode* AlignComponent::getAlignNode( size_t index )
+{
+	CC_ASSERT(index < mvecNodes.size());
+	return mvecNodes[index];
+}
+
+void AlignComponent::sortNodePos( std::vector<CCNode*> const input,eAlignDirection edir )
+{
+	CC_ASSERT(!input.empty());
+	if (input.empty())
+		return;
+	CCPoint startPos = ccp(0.0f,0.0f);
+	CCNode* startNode = input[0];
+	if (startNode)
+	{
+		startPos = startNode->getPosition();//起始位置
+	}
+	float distance = 0.0f;//间距
+	if (input.size() >1)
+	{
+		if (ead_horizontal == edir)//横向
+		{
+			distance =  input.size() > 1?input[1]->getPositionX() - input[0]->getPositionX():0.0f; 
+		}
+		if (ead_vertical == edir)//纵向
+		{
+			distance =  input.size() > 1?input[1]->getPositionY() - input[0]->getPositionY():0.0f; 
+		}
+	}
+
+	//排序
+	size_t pos = 0;
+	size_t i = 0;
+	for (std::vector<CCNode*>::const_iterator iter = input.begin();iter != input.end();++iter,++i)
+	{
+		CCNode* node = *iter;
+		if (node == NULL)
+			continue;
+		if (node->isVisible())//可见的按顺序排
+		{
+			CCPoint newPos  = startPos;
+			if (ead_vertical == edir)
+			{
+				newPos.y = startPos.y + pos * distance;
+			}
+			else
+			{
+				newPos.x = startPos.x + pos * distance;
+			}
+			++pos;
+			node->setPosition(newPos);
+		}
+		else//不可见的排在原位
+		{
+			CCPoint newPos  = startPos;
+			newPos.x = startPos.x + i* distance;
+			node->setPosition(newPos);
+		}
+	}
+}

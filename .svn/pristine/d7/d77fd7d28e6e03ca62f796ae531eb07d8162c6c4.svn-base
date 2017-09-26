@@ -1,0 +1,102 @@
+#include "MaskRenderNode.h"
+
+MaskRenderNode::MaskRenderNode()
+	: _mask(NULL)
+	, _sprite(NULL)
+	, _renderTexture(NULL)
+{
+
+}
+
+MaskRenderNode::~MaskRenderNode()
+{
+	if(_mask != NULL)
+		_mask->release();
+		//delete _mask;
+	
+	if(_sprite != NULL)
+		_sprite->release();
+		//delete _sprite;
+
+	if(_renderTexture != NULL)
+		_renderTexture->release();
+		//delete _renderTexture;
+}
+
+bool MaskRenderNode::init()
+{
+	scheduleUpdate();
+	return true;
+}
+
+MaskRenderNode * MaskRenderNode::createWithSpriteFrameName( const char *mask, const char *sprite )
+{
+	MaskRenderNode *renderNode = MaskRenderNode::create();
+	renderNode->initWithSpriteFrameName(mask, sprite);
+	return renderNode;
+}
+
+void MaskRenderNode::initWithSpriteFrameName( const char *mask, const char *sprite )
+{
+	CC_ASSERT(mask != NULL);
+	CC_ASSERT(sprite != NULL);
+	
+	//_mask = new CCSprite;
+	//_mask->initWithSpriteFrameName(mask);
+	_mask = CCSprite::createWithSpriteFrameName(mask);
+	_mask->retain();
+
+	//_sprite = new CCSprite;
+	//_sprite->initWithSpriteFrameName(sprite);
+	_sprite = CCSprite::createWithSpriteFrameName(sprite);
+	_sprite->retain();
+
+	_renderSprite = CCSprite::create();
+	addChild(_renderSprite);
+	_renderSprite->setScaleY(-1.0f);
+
+	const CCSize &size = _mask->getContentSize();
+	//_renderTexture = new CCRenderTexture;
+	_renderTexture = CCRenderTexture::create(size.width, size.height, kCCTexture2DPixelFormat_RGBA8888);
+	_renderTexture->retain();
+	//_renderTexture->initWithWidthAndHeight(size.width, size.height, kCCTexture2DPixelFormat_RGBA8888);
+
+	CCSize winSize = CCDirector::sharedDirector()->getWinSizeInPixels();
+	_renderTexture->setPosition(ccp(winSize.width / 2, winSize.height / 2));
+
+	_renderSprite->setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+	_mask->setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+	_sprite->setPosition(ccp(0.0f, 0.0f));
+}
+
+void MaskRenderNode::setSpriteSpriteFrameName( const char *sprite )
+{
+	CC_ASSERT(_sprite != NULL);
+	_sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(sprite));
+	_sprite->setPosition(ccp(0.0, 0.0));
+}
+
+void MaskRenderNode::setSpriteOffset( const CCPoint &offset )
+{
+	const CCSize &size = _mask->getContentSize();
+	_sprite->setPosition(ccpAdd(offset, ccp(size.width / 2.0f, size.height / 2.0f)));
+}
+
+void MaskRenderNode::update( float dt )
+{
+	ccBlendFunc blendFunc;
+	blendFunc.src = GL_ONE;
+	blendFunc.dst = GL_ZERO;
+	_mask->setBlendFunc(blendFunc);
+	blendFunc.src = GL_DST_ALPHA;
+	blendFunc.dst = GL_ZERO;
+	_sprite->setBlendFunc(blendFunc);
+
+	_renderTexture->beginWithClear(0.0, 0.0, 0.0, 0.0, 0.0);
+	_mask->visit();
+	_sprite->visit();
+	_renderTexture->end();
+
+	//CCSprite *sprite = _renderTexture->getSprite();
+	_renderSprite->setDisplayFrame(_renderTexture->getSprite()->displayFrame());
+}

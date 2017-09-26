@@ -1,0 +1,145 @@
+#include "WelcomeUi.h"
+#include "CfgReader.h"
+#include "UiTools.h"
+#include "NewPlayerGuide.h"
+#include "MapManager.h"
+#include "UiResourceMgr.h"
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+#include "wzolJni.h"
+#endif
+
+bool WelcomeUi::init()
+{
+	if(!CCLayer::init())
+		return false;
+
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("WelcomeUiLayer", WelcomeUiLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode * node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "welcomeui.ccbi").c_str());
+	_loadSpriteSheet = ccbReader->getLoadedSpriteSheet();
+	UiResourceMgr::getInstance()->retainPlistFile(_loadSpriteSheet);
+	ccbReader->release();
+	if(node != NULL) {
+		addChild(node);
+
+		_frame = (CCSprite*)node->getChildByTag(1);
+		m_pOKBtn = (CCControlButton*)_frame->getChildByTag(100);
+
+		setAllChildernButtonPriority(_frame, -4);
+
+		return true;
+	}
+	return false;
+}
+
+void WelcomeUi::setHead( CCSprite *sprite )
+{
+	CC_ASSERT(sprite != NULL);
+	sprite->setTag(WUT_HeadSprite);
+	CCNode *node = _frame->getChildByTag(WUT_HeadNode);
+	CC_ASSERT(node != NULL);
+	node->addChild(sprite);
+	sprite->setAnchorPoint(ccp(0.5f, 0.0f));
+}
+
+void WelcomeUi::onExit()
+{
+	//this->setTouchEnabled(false);
+#ifdef _USE_SDK
+	WzolJni *jni = WzolJni::getInstance();
+	if (jni->getIsFirstCreate())
+	{
+		string params;
+		jni->logToServer(LOG_WELCOMEND, params);
+		jni->setFirstCreateState(false);
+	}
+#endif
+	UiResourceMgr::getInstance()->releasePlistFile(_loadSpriteSheet);
+	CCLayer::onExit();
+	//CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool WelcomeUi::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	return true;
+}
+
+cocos2d::CCRect WelcomeUi::GetOKBtnPos()
+{
+	CCPoint cp = m_pOKBtn->convertToWorldSpace(ccp(0.0f, 0.0f));
+	CCSize cs = m_pOKBtn->getContentSize();
+	return CCRect(cp.x, cp.y, cs.width, cs.height);
+}
+
+void WelcomeUi::onEnter()
+{
+	CCLayer::onEnter();
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -3, true);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler WelcomeUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler WelcomeUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", WelcomeUiLayer::onOkBtnPressed);
+	return NULL;
+}
+
+bool WelcomeUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+
+void WelcomeUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	setVisible(false);
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&WelcomeUiLayer::CanVisible), this, 0.5f, false);
+}
+
+void WelcomeUiLayer::onOkBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	WelcomeUi *ui = dynamic_cast<WelcomeUi*>(getParent());
+	CC_ASSERT(ui != NULL);
+	ui->removeFromParent();
+	NewPlayerGuider::getInstance()->onWelcomeUiOkBtnPressed();
+}
+
+void WelcomeUiLayer::CanVisible( float dt )
+{
+	//[bing] 如果在d101地图不要显示
+	if(MapManager::getInstance()->getCurMapId() == 2904548812)
+		return;
+
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&WelcomeUiLayer::CanVisible), this);
+	setVisible(true);
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -3, true);
+	CCLOG("WelcomeUiLayer Show");
+	NewPlayerGuider::getInstance()->RunNewPlayerGuilde();
+}
+
+void WelcomeUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	onOkBtnPressed(NULL, NULL);
+}
+
+void WelcomeUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+}
+
+void WelcomeUiLayer::onExit()
+{
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool WelcomeUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	return true;
+}

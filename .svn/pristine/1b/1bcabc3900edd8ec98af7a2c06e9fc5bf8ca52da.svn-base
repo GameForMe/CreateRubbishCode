@@ -1,0 +1,213 @@
+#include "SonghuaUi.h"
+#include "World.h"
+#include "UiTools.h"
+#include "UiLoader.h"
+#include "StringMgr.h"
+#include "PackageManager.h"
+#include "SocialMgr.h"
+#include "NameMgr2.h"
+#include "CfgReader.h"
+CCNode * SonghuaUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["SonghuaUiLayer"] = UiLayerLoader<SonghuaUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("SonghuaUI", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+SonghuaUiLayer * SonghuaUi::getUiLayer()
+{
+	return getUiNodeByTag<SonghuaUiLayer>(WCT_SonghuaUi);
+}
+
+void SonghuaUi::setRoleId( unsigned int roleId )
+{
+	SonghuaUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setRoleId(roleId);
+	}
+}
+
+void SonghuaUi::setUserName(const std::string &name)
+{
+	SonghuaUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setUserName(name);
+	}
+}
+
+void SonghuaUi::setRoleName( std::string& roleName )
+{
+	SonghuaUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setRoleName(roleName);
+	}
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler SonghuaUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler SonghuaUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", SonghuaUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSendBtnPressed", SonghuaUiLayer::onSendBtnPressed);
+	return NULL;
+}
+
+void SonghuaUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_seleceIndex = -1;
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(NT_Frame));
+	CC_ASSERT(_frame != NULL);
+
+	for(int i = NT_NodeBegin ; i < NT_NodeBegin + NT_NodeNum; i ++)
+	{
+		CCNode *node = _frame->getChildByTag(i);
+		CC_ASSERT(node != NULL);
+		ItemNode *itemNode = ItemNode::create();
+		itemNode->setBlank();
+		itemNode->setPosition(node->getPosition());
+		itemNode->setTag(i + NT_ItemNodeBegin - NT_NodeBegin);
+		_frame->addChild(itemNode, 1);
+		_pos[i - NT_NodeBegin] = node->getPosition();
+	}
+
+	getItemNode(0)->setDataId(SEND_GIFT_NEED_ITEM);
+	getItemNode(0)->setNum(1);
+
+	getItemNode(1)->setDataId(SEND_GIFT_NEED_ITEM);
+	getItemNode(1)->setNum(9);
+
+	getItemNode(2)->setDataId(SEND_GIFT_NEED_ITEM);
+	getItemNode(2)->setNum(99);
+	//
+	std::string fileName = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "songhua_selecticon.png";
+	//pSprite = CCSprite::create(fileName.c_str());
+	_selectSprite = CCSprite::create(fileName.c_str());
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(_selectSprite->displayFrame(), "songhua_selecticon");
+	//CCSpriteFrame *frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(
+	//	PackageManager::getInstance()->getSelectFrameName().c_str());
+	//_selectSprite->setDisplayFrame(frame);
+	_selectSprite->setVisible(true);
+	_frame->addChild(_selectSprite, 0);
+
+	setSelectIndex(0);
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -1, true);
+	setAllChildernButtonPriority(this, -1);
+}
+
+void SonghuaUiLayer::onExit()
+{
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool SonghuaUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_frame, pTouch))
+	{
+		CCPoint pt = _frame->convertTouchToNodeSpace(pTouch);
+		int index = getIndexUnderPoint(pt);
+		setSelectIndex(index);
+	}
+	return true;
+}
+
+void SonghuaUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_SonghuaUi);
+}
+
+void SonghuaUiLayer::onSendBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_SonghuaUi);
+	if(_seleceIndex >=0 && _seleceIndex < 3)
+	{
+		SocialMgr::getInstance()->SendFlowers(_roleId, _shName, _seleceIndex + 1);
+	}
+}
+
+void SonghuaUiLayer::setUserName( const std::string &name )
+{
+	_shName = name;
+	CC_ASSERT(_frame != NULL);
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_UserName));
+	CC_ASSERT(label != NULL);
+	label->setString(name.c_str());
+}
+
+ItemNode * SonghuaUiLayer::getItemNode( int index )
+{
+	ItemNode *node = dynamic_cast<ItemNode*>(_frame->getChildByTag(index + NT_ItemNodeBegin));
+	return node;
+}
+
+void SonghuaUiLayer::setDesc( int num )
+{
+	CC_ASSERT(_frame != NULL);
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_Desc));
+	CC_ASSERT(label != NULL);
+	std::string str = GET_STR(49);
+	std::ostringstream ostr;
+	ostr << num;
+	str = replaceStr(str, "***", ostr.str());
+	label->setString(str.c_str());
+}
+
+void SonghuaUiLayer::setRoleId( unsigned int roleId )
+{
+	_roleId = roleId;
+
+	std::string roleName;
+	NameMgr2::getInstance()->queryName(_roleId,roleName);
+	setUserName(roleName);
+	//gx modify 
+	int num = PackageManager::getInstance()->getItemNumber(EICT_Bag, (unsigned int)SEND_GIFT_NEED_ITEM);
+	//
+	setDesc(num);
+}
+
+int SonghuaUiLayer::getIndexUnderPoint(const CCPoint &pt)
+{
+	CCRect rect(pt.x - ITEMNODE_CONTENTWIDTH / 2.0f, pt.y - ITEMNODE_CONTENTHEIGHT / 2.0f, 
+		ITEMNODE_CONTENTWIDTH, ITEMNODE_CONTENTHEIGHT);
+
+	for(int i = 0; i < NT_NodeNum; i ++)
+	{
+		if(rect.containsPoint(_pos[i]))
+			return i;
+	}
+
+	return -1;
+}
+
+void SonghuaUiLayer::setSelectIndex( int index )
+{
+	if(index <0 || index >= 3)
+		return;
+
+	_seleceIndex = index;
+	_selectSprite->setPosition(_pos[index]);
+	_selectSprite->setVisible(true);
+}
+
+void SonghuaUiLayer::setRoleName( std::string& roleName )
+{
+	_roleId = 0;
+
+	setUserName(roleName);
+	//gx modify 
+	int num = PackageManager::getInstance()->getItemNumber(EICT_Bag, (unsigned int)SEND_GIFT_NEED_ITEM);
+	//
+	setDesc(num);
+}
+

@@ -1,0 +1,551 @@
+#ifndef LOCALPLAYER_H
+#define LOCALPLAYER_H
+
+#include "Player.h"
+#include "Signals.h"
+#include "RoleDefine.h"
+#include "GuildProto.h"
+#include "role_title_protocol.h"
+#include "activeProto.h"
+#include "MapManager.h"
+#include "GameActionNode.h"
+#include "RoleHeadUi.h"
+#include "World.h"
+#include "PackageManager.h"
+
+struct MapPathNode
+{
+	int mapName;
+	CCPoint pos;
+};
+
+struct buffDestInfo;//移动到Player下
+//{
+//	int		buffId;
+//	UINT	roleId;
+//	int		rating;
+//	short	level;
+//	short	profession;
+//	std::string name;
+//};
+struct SBKEquipEffectUpdate;
+struct sync_display_flag_to_server;
+
+class LocalPlayer : public Player
+{
+	friend class LocalPlayerStateRunPath;
+	friend class LocalPlayerStatePreAttack;
+public:
+	//用于自动寻路过程中判断寻路结束后进入哪种状态
+
+	LocalPlayer();
+	virtual ~LocalPlayer();
+	unsigned int getCurrentSkillId();
+	virtual void update( float dt );
+	virtual void initFsm();
+	virtual void destroyFsm();
+	virtual CCPoint getHeadPos() const;
+	virtual bool changeState(unsigned int mask, const Telegram& telegram);
+	virtual void stopAni();
+	virtual void setAttribute(eRoleAttribute attr, int val);
+
+	virtual bool loadAnimate(unsigned int id = 0);
+	virtual void runStandAni();
+	virtual void runRunAni();
+
+	virtual void runLevelUpEffect();
+
+	virtual void setRideLv(int lv);
+
+	virtual void setSelectRideLv(unsigned int selectLv);
+	virtual unsigned int getSelectRideLv();
+	virtual void saveSelectRideLv();
+	virtual void initSelectRideLv();
+	virtual void setGuild(unsigned int gid);
+
+	void attackTo(unsigned int roleId);
+	void runPathTo(const CCPoint &pos, int mapId = -1);
+	unsigned int getTargetMapId() const { return _targetPathMapId; }//跨地图寻路用;
+	void setTargetMapId(unsigned int mapId);
+	//void addBufferId(int bufferId,UINT srcRoleId);
+	void removeBufferId(int bufferId);
+	const std::vector<buffDestInfo> &getBuffersId();
+	bool hasBuff(int buffId);
+	bool hasHighBuff(int buffId);
+
+	void setCurLevelExp(INT64 exp) 
+	{
+		_curLevelExp = exp;
+	}
+	INT64 getCurLevelExp() const { return _curLevelExp; }
+	INT64 getMaxLevelExp() const { return _curMaxExp; }
+	void setGuildPos(EGuildMemberPos pos) {_guildPos = pos;}
+	EGuildMemberPos getGuildPos() const {return _guildPos;}
+	void updateCurMaxExp();
+	virtual std::string getHeadFrameName();
+	
+	virtual void updateTeammateState(){}
+
+	virtual void removeFromMap();
+	//查询当前的动作是否结束
+	//bool isAnimationFinished() const;
+	//每日清零数据相关 gx add
+	void setRoleDayClearInfo(const int _index,const unsigned char _num);
+	void setRoleDayClearInfoTwo(int _index,unsigned char _num);
+	const unsigned char getRoleDayClearInfo(const int _index);
+	const unsigned char getRoleDayClearInfoTwo(const int _index);
+	//
+	// 称号相关
+	void clearTitle();
+	void insterTitle(const tagTitleData& titleData);
+	void removeTitle(unsigned int dwID);
+	bool isSetTitle(unsigned int dwID);
+	int getWearTitleNum();
+	bool isExist(unsigned int dwID);
+	bool getWearTitleShowState(unsigned int dwID);
+	int getWearTitleShowIndex(unsigned int dwID);
+	void sendSetTitle( int nIndex, unsigned int dwID,bool isWear);
+	unsigned int getWearTitleIdByIndex(int pIndex);
+	//当获取一个称号的时候根据条件，自动设置当前称号
+	void autoSetCurTitle(unsigned int dwID);
+	const std::map<unsigned int, tagTitleData>& getAllTitle() const;
+	unsigned int getTitleGetTimeByID(unsigned int pId);
+	// 请求所有获得称号
+	void sendInitTitle();
+	// 请求修改当前称号
+	void sendSetTitle(int nIndex, unsigned int dwID);
+
+	//签到等级;
+	void setSignLevel(int nLevel) { m_nSignLevel = nLevel; }
+	int getSignLevel() { return m_nSignLevel; }
+
+	//开服活动期间等级排名;
+	void setLevelSelf(unsigned int level[7]){ memcpy(m_selfLevel, level, sizeof(unsigned int)* 7);}
+	int getLevelSelf(int day)const {return m_selfLevel[day];}
+
+	// 活跃度
+	void sendInitActiveData();
+	void setActiveData(const tagActiveData& data);
+	void set_fmb_active_open(bool is_open){m_is_fmb_active_open = is_open;}
+	const bool get_fmb_active_open(){return m_is_fmb_active_open;}
+
+	const tagActiveData& getActiveData();
+	void sendReceiveActive(int nIndex);
+	void sendActivedone(int nIndex,int nBeishu);
+	void sendActivedone(int nIndex,int nBeishu,unsigned short currentQuestID,unsigned int npcid);//一键完成
+	//副本通关信息
+	void setInstanceData(int nData) {m_InstanceData = nData;}
+	bool isInstancePassByIndex(int index);//判断第*个副本是否打通
+	//自动战斗状态
+	void setEnterAutoAttack();
+	void setExitAutoAttack();
+	//VIP相关
+	void setVIPExp(unsigned int Experience);//	{m_VIPExp = Experience;}	//【Ji：】
+	inline unsigned int getVIPExp() {return m_VIPExp;}						//【Ji：】
+    inline void setLocVIPLevel(int level)	{m_nLocVIPLevel = level;}		//【Ji：】
+	inline int getLocVIPLevel()	{return m_nLocVIPLevel;}					//【Ji：】
+	//神秘宝箱相关				【Ji：】add
+	inline void setSilverBoxTime(unsigned int silverTime) {m_dwSilverBoxTime = silverTime;}	
+	inline void setGoldBoxTime(unsigned int goldTime) {m_dwGoldBoxTime = goldTime;}	
+	inline void setFusion_Exp(int exp) {m_Fusion_Exp = exp;}	
+	inline unsigned int getSilverBoxTime() {return m_dwSilverBoxTime;}
+	inline unsigned int getGoldBoxTime() {return m_dwGoldBoxTime;}
+	inline unsigned int getFusion_Exp() {return m_Fusion_Exp;}
+	//end
+	//攻击状态
+	bool getAttackState() { return _attackState; }
+	void setEnterAttackState() { _attackState = true; }
+	void setExitAttackState(); 
+
+	void setIsGotoFuben(){isGotoFuben = true;}
+	void setIsOutFuben(){isGotoFuben = false;}
+	bool getPlayerState(){return isGotoFuben;}
+
+	//发送走路消息
+	void sendRunMsg(const CCPoint &oldPos, const CCPoint &newPos);
+
+	void sendStandMsg(const CCPoint &Pos);
+	//特定的等级给特定的提示指引 gx add
+	void showLevelUpGuideInfo(int nLevel);
+
+	std::string getManualAttackBtnFrame();
+
+	//坐骑相关
+	void setCurRideExp(unsigned int curExp) { _rideCurExp = curExp; }
+	void setMaPaiLevel(int nMaPai) { _nMaPai = nMaPai; }
+	int getMaPaiLevel() { return _nMaPai; }
+	void setMaPaiInc(float fMaPaiInc) { _fMaPaiInc = fMaPaiInc; }
+	float getMaPaiInc() { return _fMaPaiInc; } 
+	unsigned int getCurRideExp() { return _rideCurExp; }
+	void setCanRide(bool canRide) { _canRide = canRide; }
+	bool canRide() { return _canRide; }
+	void checkToRide(float dt);//检查是否可以骑乘
+	//人物初始化需要优先获得称号显示保存情况 gx add 2013.10.31
+	void loadLocalPlayerTitleData();
+	inline void setRideInit() {_bRideInit = true;}//gx add
+	inline bool getRideInit() {return _bRideInit;}
+
+	inline void setRideButtonFlag(bool bFlag) {_bRideButton = bFlag;}//gx add
+	inline bool getRideButtonFlag() {return _bRideButton;}
+	void setEnemyId(unsigned int roleId){_enemyId = roleId;}
+	unsigned int getEnemyId(){return _enemyId;}
+	
+	//判断玩家是否在摆摊，双修，交易状态下，这些状态下要限制大多数的UI点击
+	//gx add 2013.11.12
+	bool isRoleInStaticState()
+	{
+		if (isInRoleStateAny(RA_ShuangXiu) || isInRoleStateAny(RA_Stall) || isInRoleStateAny(RA_Exchange))
+		{
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	}
+	bool isAcceptShuangXiu(){return m_bIsAcceptShuangXiuState;}
+	void setAcceptShuangXiu(bool state){m_bIsAcceptShuangXiuState = state;} 
+	void VisibleSelf(bool bSet);	//显示，隐藏自己
+
+	void FreeRes();
+
+	virtual void on_Attracked();
+	bool isMyPet(unsigned int petId);
+	void ClearPath(){_path.clear(); _oldPathNum = 0;}
+	GameActionNode *GetRunNode(){return _autoRunAcNode;}
+
+	void runPathCallback();
+
+	void setQuestId(unsigned short questId){_questId = questId;}
+	const unsigned short getQuestId(){return _questId;}
+
+	void setAttackMonsterId(unsigned int monsterId)
+	{
+		_attackMonsterId = monsterId;
+	}
+	unsigned int getAttackMonsterId(){return _attackMonsterId;}
+
+	void setAttackQuestId(unsigned short attackquestId){_attackQuestId = attackquestId;};
+	const unsigned short getAttackQuestId(){return _attackQuestId;}
+
+
+	void setTargetPosition(CCPoint position)
+	{
+		_targetPosition = position;
+	};
+	CCPoint getTargetPosition(){return _targetPosition;};
+	void SetisMouseClick(bool click){_isMouseClick = click;}
+
+	virtual void addToMap(bool repetLogin = false);
+	void SetClip(const CCRect& rc);
+
+	void runTransmitEffect();
+	//void SetPath(std::vector<pathNode> path){_path = path; _oldPathNum = 0;}
+	int GetPathNodeCount() { return (int)_path.size();}
+	bool getNextPathPoint(CCPoint& pos,bool force =false);
+	void repetSetCurrentState();
+	void resetData();
+	virtual bool needShowGuildColor(ccColor3B &color);
+	virtual void updateGuildNameColor();
+
+	void do_sth_before_close_map_in_world();
+	void do_sth_when_reenter_map_in_world();
+
+	bool can_guild_assign();
+
+	virtual void revertToPreviousState();
+protected:
+	virtual void playRunSound();
+
+private:
+	void onUpdateSBKEquipEffect(SBKEquipEffectUpdate* evt);
+	void on_event_sync_display_flag_to_server(sync_display_flag_to_server* evt);
+
+	bool needShowShadowOps(unsigned int mapID)const;
+	void preloadLaunchEffect();
+	void releaseLauchEffect();
+	//根据地表素材播放不同的音效
+	void playSoundByMap(MAP_MATERIAL material);
+	void playSoundByRiding();
+	void changeRunSound();
+
+	virtual void update_player_buff(tagBuffMsgInfo const& buff_info);
+
+	void update_hp_warning();
+	bool m_low_hp_warning;
+
+	void update_skill_state();
+
+	void first_update_if_ness();
+protected:
+	bool runPath(bool runBodyAnim = false);
+	class LocalPlayerActionCallBack : public CCObject
+	{
+	public:
+		static LocalPlayerActionCallBack *getInstance()
+		{
+			static LocalPlayerActionCallBack instance;
+			//CC_ASSERT(instance.realRefCount() > 0);
+			return &instance;
+		}
+		void runPathCallBack(CCNode *node, void *data)
+		{
+			LocalPlayer *lp = (LocalPlayer*)data;
+			CC_ASSERT(lp != NULL);
+			lp->runPathCallback();
+		}
+	};
+
+SIGNALS:
+	c_signal<void> _sigPathFinished;
+
+protected:
+	CCSprite* _blackSp;//遮罩圆圈
+	CCNode* pClip;//遮罩
+
+	std::vector<pathNode> _path;
+	unsigned int _targetPathMapId;
+	//std::vector<buffDestInfo> _buffersId;
+	INT64 _curLevelExp;
+	INT64 _curMaxExp;
+	EGuildMemberPos _guildPos;
+	unsigned char m_byDayClear[ROLE_DAY_CLEAR_NUM];// 每天清零数据 gx add
+	unsigned char m_byDayClearTwo[ROLE_DAY_CLEAR_TWO_NUM];// 每天清零数据 gx add
+	std::map<unsigned int, tagTitleData> _mapTitle;//获得的所有称号
+	std::set<std::string> _plist;				//保存特效plist(自动寻路)
+	std::vector<CCPoint> _posList;
+	int	m_nSignLevel;
+	bool _isMouseClick;
+
+	//开服七天排名 
+	unsigned int m_selfLevel[7];
+
+	unsigned short _questId;  //当前所接任务的ID
+	CCPoint _targetPosition;  //寻路的目标位置
+	unsigned int _attackMonsterId;   //攻击的怪物的ID
+	unsigned short _attackQuestId;  //当前所接攻击任务的ID
+
+	tagActiveData	m_activeData;
+	int	m_InstanceData;//记录每个副本是否打通，gx add
+	int m_nLocVIPLevel;					//VIP等级    【Ji：】
+	unsigned int m_VIPExp;				//VIP经验    【Ji：】
+	
+	//上一次开启免费宝箱的时间		【Ji：】
+	unsigned int m_dwSilverBoxTime;			//白银宝箱时间
+	unsigned int m_dwGoldBoxTime;				//黄金宝箱时间
+	INT m_Fusion_Exp;
+	//是否处于攻击状态
+	bool _attackState;
+
+	//自动战斗特效
+	GameActionNode* _autoAttackAcNode;
+
+	//自动寻路			【Ji：】
+	bool m_bIsAutoRun;
+	bool m_bIsRunSEStay;			//跨地图时候自动寻路特效是否显示
+	bool m_bIsReachDes;				//处于停止状态时候是否检测特效的显示（用于小地图选择目标时控制特效显示）
+	GameActionNode* _autoRunAcNode;
+
+	//GameActionNode* fireSEAcNode;  //表情动画
+	std::set<std::string> _pBrowlist;	
+
+	CCControlButton* _usebutton; //使用按钮
+
+	bool isGotoFuben;  //判断是否进入过剧情副本
+
+	//上次检测时人物所处的区域
+	MapManager::MapArea::eAreaType _lastArea;
+
+	//坐骑的当前经验值、等级
+	unsigned int _rideCurExp;
+	bool _canRide;//当前状态是否可以骑乘，暂时只和地图相关
+	float _rideTimer;//骑乘倒计时
+	bool _bRideInit;//坐骑数据是否初始化 gx add
+	bool _bRideButton;//是否是点击骑乘按钮，用于给提示处理
+	bool m_bIsAcceptShuangXiuState;
+	bool _initSelectRideLv;
+	unsigned int _nSelectRideLv;//选择的坐骑等级
+	int _nMaPai;           //是否装备马牌（后期肯能是马牌等级）
+	float _fMaPaiInc;      //马牌属性的增益
+
+	int	_issueNum;				// 本日发布次数
+	int	_getNum;				// 本日接取次数
+	int _issueCost;             // 本次发布任务花费元宝数
+	bool _guildAssign;			// 今日是否已在帮派签到
+
+	int _shenDianEnterCounts;    //沙巴克神殿今日进入次数
+
+	void onDelayCalback( float dt );
+	//void onDelayCalbackImpl();
+private://离线经验相关 gx add 2013.12.17
+	int _LeaveExp;//离线经验值
+	unsigned  int	_LeaveTime;//本次离线时间
+	unsigned  int	_nLeaveExpType;//选择找回离线经验的倍数
+	unsigned  int	_nOneKeyBeishu;//任务一键完成，一倍还是两倍
+	unsigned  int	_nOfflineFlower;
+	unsigned  int	_nOffLineDouble;
+	unsigned  int	_nOffLineRedEnvelope;
+	unsigned  int	_nOffLineSelf;
+	unsigned  int	_nAddOffLineSelf;
+	unsigned  int	_nOffLineMaxExp;
+	unsigned  int	_nOfflineCoin;
+	tagDWORDTime   _startTime;
+	unsigned  int	_nDice1;
+	unsigned  int	_nDice2;
+	float			_nMulriple;   //骰子倍数
+	bool			_bOfflineIsGet;
+	long			_dwOfflineLeaveTime;
+	int				_tempLeaveExp;
+	unsigned int	_enemyId;//最近一次死亡时，击杀自己的玩家Id
+
+	CCAction* m_pRunMoveAction;	//[bing] _node移动动作
+	CCNode* _delayNode;
+	CCPoint _delayPos;
+	float _predistance;
+	int _oldPathNum;
+
+	bool bSkillPreloaded;
+	tagDWORDTime  _MonthCardStartTime;//月卡开始时间
+
+	tagDWORDTime _cardActiveTime; //点卡激活日期
+	tagDWORDTime _cardDeadLine; //点卡截止日期
+	tagDWORDTime _LoginTime; //玩家登录时间
+	tagDWORDTime _JoinTime; //角色进入游戏的时间
+	DWORD	_showFightTime;//上次显示战斗力提升按钮的时间
+public:
+	inline void SetMonthCardStartTime(tagDWORDTime dwTime)
+	{
+		_MonthCardStartTime = dwTime;
+	}
+	inline tagDWORDTime getMonthCardStartTime()
+	{
+		return _MonthCardStartTime;
+	}
+	inline void SetCardActiveTime(tagDWORDTime dwTime)
+	{
+		_cardActiveTime = dwTime;
+	}
+	inline tagDWORDTime getCardActiveTime()
+	{
+		return _cardActiveTime;
+	}
+	inline void SetCardDeadLine(tagDWORDTime dwTime)
+	{ 
+		_cardDeadLine = dwTime;
+	}
+	inline tagDWORDTime getCardDeadLine()
+	{ 
+		return _cardDeadLine;
+	}
+
+	inline void SetLeaveExp(int exp) {_LeaveExp = exp;}
+	inline int GetLeaveExp() { return _LeaveExp;}
+	inline void SetOfflineTime(unsigned int  time) {_LeaveTime = time;}
+	inline unsigned int GetOfflineTime() {return _LeaveTime;}
+	inline void SetOfflineFlower(unsigned int  exp) {_nOfflineFlower = exp;}
+	inline unsigned int GetOfflineFlower() {return _nOfflineFlower;}
+	inline void SetOffLineDouble(unsigned int  exp) {_nOffLineDouble = exp;}
+	inline unsigned int GetOffLineDouble() {return _nOffLineDouble;}
+	inline void SetOffLineRedEnvelope(unsigned int  exp) {_nOffLineRedEnvelope = exp;}
+	inline unsigned int GetOffLineRedEnvelope() {return _nOffLineRedEnvelope;}
+	inline void SetAddOfflineSelf(unsigned int  exp) {_nAddOffLineSelf = exp;}
+	inline unsigned int GetAddOffLineSelf() {return _nAddOffLineSelf;}
+	inline void SetOffLineMaxExp(unsigned int  exp) {_nOffLineMaxExp = exp;}
+	inline unsigned int GetOffLineMaxExp() {return _nOffLineMaxExp;}
+	inline void SetOfflineCoin(unsigned int  coin) {_nOfflineCoin = coin;}
+	inline unsigned int GetOfflineCoin() {return _nOfflineCoin;}
+	inline float GetOfflineMulriple() {return _nMulriple;}
+	inline void SetOfflineMulriple(float mulriple) {_nMulriple = mulriple;}
+	inline void SetOfflineStartTime(tagDWORDTime  time) {_startTime = time;}
+	inline tagDWORDTime GetOfflineStartTime() {return _startTime;}
+	inline unsigned int GetOfflineDice1() {return _nDice1;}
+	inline void SetOfflineDice1(unsigned int dice) {_nDice1 = dice;}
+	inline unsigned int GetOfflineDice2() {return _nDice2;}
+	inline void SetOfflineDice2(unsigned int dice) {_nDice2 = dice;}
+	inline void SetTempTotalExp(int exp) {_tempLeaveExp = exp;}
+	inline int GetTempTotalExp() { return _tempLeaveExp;}
+	inline void SetOfflineSelf(unsigned int exp) {_nOffLineSelf = exp;}
+	inline unsigned int GetOffLineSelf() {return _nOffLineSelf;}
+
+	inline unsigned int GetOffLineTotalExp()
+	{ 
+		unsigned int offLineTotalExp = _nOfflineFlower + _nOffLineDouble + _nOffLineRedEnvelope + _nOffLineSelf + _LeaveExp + _nAddOffLineSelf;
+		return offLineTotalExp > GetOffLineMaxExp()?GetOffLineMaxExp():offLineTotalExp<0?0:offLineTotalExp;
+	}
+
+	void SendPickupLeaveExp(int nType);
+	void ConfirmPickupLeaveExp();
+	inline void SetOneKeyBeishu(int beishu) {_nOneKeyBeishu = beishu;}
+	inline int GetOneKeyBeishu() { return _nOneKeyBeishu;}
+	void setAutoRunState(bool isAutoRuning);
+	inline bool getAutoRunState()const { return m_bIsAutoRun;}								//获得自动寻路状态
+	inline void setShowAutoRun(bool value){if(NULL != _autoRunAcNode) _autoRunAcNode->setVisible(false);}
+	inline bool getRunSELastState() { return m_bIsRunSEStay;}							//获得自动寻路跨地图显示状态
+	inline bool getReachDesControl() { return m_bIsReachDes;}							//获得是否开启到达目标停止特效的状态
+	inline void setRunSEOutMap(bool isKeeping) { m_bIsRunSEStay = isKeeping;}			//设置自动寻路跨地图显示状态
+	inline void setReachDesControl(bool isEffect) { m_bIsReachDes = isEffect;}			//设置到达目标停止状态影响自动寻路特效的显示
+	void playAutoRunEffectByVisible();									//寻路特效显示
+	void autoSEToNewMap();										//跨地图时寻路特效的显示
+	void activateAutoRunSE();										//创建自动寻路特效
+	void activateAutoFighteSE();									//创建自动战斗特效
+	void setIsPath(bool value){_ispath = value;}
+	bool getIsPath(){return _ispath;}
+	void setIsOnFindPath(bool isOnFindPath) {m_isOnFindPath = isOnFindPath;}
+	bool getIsOnFindPath() {return m_isOnFindPath;}
+	DWORD getShowFightTime();
+	void setShowFightTime(DWORD time);
+	void setLoginTime(tagDWORDTime tagTime)
+	{
+		_LoginTime = tagTime;
+	}
+	void setJoinTime(tagDWORDTime tagTime)
+	{
+		_JoinTime = tagTime;
+	}
+	//获取玩家登录时间
+	tagDWORDTime getLoginTime()
+	{
+		return _LoginTime;
+	}
+	//获取角色进入游戏的时间
+	tagDWORDTime getJoinTime()
+	{
+		return _JoinTime;
+	}
+	//end
+
+	//行会任务接收 发布任务次数相关
+	inline void setIssueNumber(int issue) { _issueNum = issue; }
+	inline int getIssueNumber() { return _issueNum; }
+	inline void setGetNumber(int getNum) { _getNum = getNum; }
+	inline int getGetNumber() { return _getNum; }
+	inline void setGuildAssign(bool isAssign) { _guildAssign = isAssign; }
+	inline bool getGuildAssign(){ return _guildAssign; }
+	inline void setIssueCost(int cost) { _issueCost = cost; }
+	inline int getIssueCost() { return _issueCost; }
+
+	//沙巴克神殿进入次数
+	inline void setShenDianEnterCounts(int counts) { _shenDianEnterCounts = counts; }
+	inline int getShenDianEnterCounts() { return _shenDianEnterCounts; }
+private:
+	void loadLocalPlayerSkillEffect();
+	int m_roleCreateTime; //角色创建时间 UTC时间
+	int m_DayNumFromCreateTime;//当前距离玩家创建角色是第几天
+	bool _ispath;
+	bool m_isOnFindPath;
+	bool m_is_fmb_active_open;
+public:
+	bool m_bIsJock;
+	bool m_bAttBtnClick;
+public:
+	inline void setRoleCreateTime(int utcTime)
+	{
+		m_roleCreateTime = utcTime;
+	}
+	inline int getRoleCreateTime(){ return m_roleCreateTime;}
+	inline void SetRoleDayNum(int nNum) { m_DayNumFromCreateTime = nNum;}
+	inline int GetDayNumFromRoleCrateTime() { return m_DayNumFromCreateTime;}
+	void clear();
+};
+bool isShowLeftTime();//判断当前时间是否处于点卡有效期
+#endif //LOCALPLAYER_H

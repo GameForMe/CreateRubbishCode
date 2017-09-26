@@ -1,0 +1,1227 @@
+#include "DaRongLu.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "TCPClient.h"
+#include "ToolTip.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "ItemMarixLayer.h"
+#include "DBMgr.h"
+#include "CfgReader.h"
+#include "PackageManager.h"
+#include "CommonMsgDefine.h"
+#include "WorldPacket.h"
+#include "EquipFusionManager.h"
+#include "NumericalIniMgr.h"
+#include "StringMgr.h"
+#include "LocalPlayer.h"
+#include "ReceiveRewardUi.h"
+#include "NPCTalkUi.h"
+
+DaRongLuUiMgr::DaRongLuUiMgr():newExp(0),times(0),degree(0)
+{
+	
+}
+DaRongLuUiMgr::~DaRongLuUiMgr()
+{
+
+}
+DaRongLuUiMgr* DaRongLuUiMgr::GetInstance()
+{
+	static DaRongLuUiMgr mgr;
+	return &mgr;
+}
+
+void DaRongLuUiMgr::onSelect( unsigned int idx )
+{
+	OPEN_UI(WCT_DaRongLu);
+	//关闭对话界面
+	World::getInstance()->getNPCDialog()->show(false);
+}
+
+void DaRongLuUiMgr::onNpcTalk( unsigned int dw_data_id, INT64 n64NPCID )
+{
+	if (dw_data_id == 1002009)
+	{		
+		World::getInstance()->getNPCDialog()->appendItem(0 , "\xE4\xBD\xBF\xE7\x94\xA8\xE7\x86\x94\xE7\x82\x89", true , true, NPCTalkUi::TEXTT_DARONGLU);
+	}	
+}
+
+void DaRongLuUiMgr::openFenUi()
+{
+	OPEN_UI(WCT_DaRongLu);
+}
+
+DaRongLuUi::DaRongLuUi()
+{
+	
+}
+
+DaRongLuUi::~DaRongLuUi()
+{
+
+}
+
+CCNode* DaRongLuUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["DarongluUiLayer"] = UiLayerLoader<DarongluUiLayer>::loader();
+	nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+	CCNode* pNode = readUiFromCCBI("daronglu", nodeLoaders, _loadSpriteSheet);
+	return pNode;
+}
+
+void DaRongLuUi::updateFusionQianData()
+{
+	DarongluUiLayer *ui = getUiNodeByTag<DarongluUiLayer>(WCT_DaRongLu);
+	if(ui != NULL)
+	{
+		ui->SetFusionQianData();
+	}
+}
+cocos2d::SEL_MenuHandler DarongluUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler DarongluUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{	
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRongLianPressedBtn", DarongluUiLayer::onRongLianPressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onShowQuliatyPressedBtn", DarongluUiLayer::onShowQuliatyPressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onWuPressedBtn", DarongluUiLayer::onPuTongPressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onZhuoYuePressedBtn", DarongluUiLayer::onZhuoYuePressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onWanMeiPressedBtn", DarongluUiLayer::onWanMeiPressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onYouXiuPressedBtn", DarongluUiLayer::onYouXiuPressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChuanShuoPressedBtn", DarongluUiLayer::onWuPressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onShiShiPressedBtn", DarongluUiLayer::onShiShiPressedBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", DarongluUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHelpBtn", DarongluUiLayer::onHelpBtn);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onKnowBtnPressed", DarongluUiLayer::onOkPressedBtn);
+	return NULL;
+}
+void DarongluUiLayer::onCloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&DarongluUiLayer::requestEquipFusionDegrees), this);
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&DarongluUiLayer::RefreshEquipFusionDegrees), this);
+	if (_items.size() > 0)
+	{
+		_items.clear();
+	}
+	if (_daRongLuIconVec.size() >0)
+	{
+		_daRongLuIconVec.clear();
+	}
+	if (_daRongLuCailiaoVec.size() > 0)
+	{
+		_daRongLuCailiaoVec.clear();
+	}	
+	stopDegreeEffect();
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_DaRongLu);
+}
+void DarongluUiLayer::onHelpBtn(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{	
+	if(_helpSprite->getParent() == NULL)
+	{
+		_helpSprite->setVisible(true);
+		_helpSprite->setTouchPriority(-1);
+		setAllChildernButtonPriority(_helpSprite,-1);
+		_helpSprite->setTouchEnable(true);
+		World::getInstance()->getScene()->addChild(_helpSprite,WZ_POPUI);
+	}
+}
+void DarongluUiLayer::onOkPressedBtn(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	_helpSprite->setTouchEnable(false);
+	_helpSprite->removeFromParent();
+}
+void DarongluUiLayer::onRongLianPressedBtn(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);	
+	std::map<short, f_item*>::iterator iter = _newItems.begin();
+	short nIdx = 0;
+	_darongIndexList.clear();
+	std::vector<tagItemSerial> tmpIdxVecList;
+	while(iter != _newItems.end())
+	{
+		ItemNode* pItemNode = itemFusionLayer->GetItemNode(nIdx);
+		if(pItemNode->getNum() > 0)
+		{
+			tagItemSerial data;
+			DarongluIndexListData listData;
+			data.n16Num = pItemNode->getNum();
+			data.n64ItemID = iter->second->get_item_id();
+			tmpIdxVecList.push_back(data);
+
+			listData.index = nIdx;
+			listData.nItemId = iter->second->get_item_id();
+			listData.num = pItemNode->getTotalNum();
+			_darongIndexList.push_back(listData);
+		}
+		nIdx++;
+		iter++;
+	}
+	if(tmpIdxVecList.size() == 0)
+	{
+		ToolTip::getInstance()->push("\xE6\xB2\xA1\xE6\x9C\x89\xE9\x80\x89\xE5\x8F\x96\xE8\xA2\xAB\xE8\x9E\x8D\xE5\x90\x88\xE7\x9A\x84\xE8\xA3\x85\xE5\xA4\x87");//没有选择被融合的装备
+		return;
+	}
+	//记录一下总的经验值
+	DaRongLuUiMgr::GetInstance()->newExp = dwAddExp;
+	dwAddExp = 0;
+	WorldPacket C2G_Msg(NET_C2G_PROC_EQUIP_FUSION);	//组装消息头
+	C2G_Msg << (int)tmpIdxVecList.size();
+	for(int i = 0; i < (int)tmpIdxVecList.size(); ++i)
+	{
+		C2G_Msg << tmpIdxVecList[i];
+	}	
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);		//发送
+	_btnRongLian = (CCControlButton*)pSender;
+	if (_btnRongLian)
+	{
+		_btnRongLian->setEnabled(false);
+	}
+}
+
+void DarongluUiLayer::onShowQuliatyPressedBtn(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	_spriteMenu->setVisible(true);
+}
+void DarongluUiLayer::onPuTongPressedBtn(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{	
+	std::string name = CCString::createWithFormat("%s","\xE6\x99\xAE\xE9\x80\x9A")->getCString();
+	_labelSelectName->setString(name.c_str());
+	_spriteMenu->setVisible(false);	
+	itemFusionLayer->ClearMap();
+	itemFusionLayer->RefreshData();
+	RefreshFusionCailiaoUi(0);
+	typeIndex = 0;
+}
+void DarongluUiLayer::onZhuoYuePressedBtn(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	std::string name = CCString::createWithFormat("%s","\xE5\x8D\x93\xE8\xB6\x8A")->getCString();
+	_labelSelectName->setString(name.c_str());
+	_spriteMenu->setVisible(false);	
+	itemFusionLayer->ClearMap();
+	itemFusionLayer->RefreshData();
+	RefreshFusionCailiaoUi(2);
+	typeIndex = 2;
+}
+void DarongluUiLayer::onWanMeiPressedBtn(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	std::string name = CCString::createWithFormat("%s","\xE5\xAE\x8C\xE7\xBE\x8E")->getCString();
+	_labelSelectName->setString(name.c_str());
+	_spriteMenu->setVisible(false);
+	itemFusionLayer->ClearMap();
+	itemFusionLayer->RefreshData();
+	RefreshFusionCailiaoUi(3);
+	typeIndex = 3;
+}
+void DarongluUiLayer::onYouXiuPressedBtn(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	std::string name = CCString::createWithFormat("%s","\xE4\xBC\x98\xE7\xA7\x80")->getCString();
+	_labelSelectName->setString(name.c_str());
+	_spriteMenu->setVisible(false);
+	itemFusionLayer->ClearMap();
+	itemFusionLayer->RefreshData();
+	RefreshFusionCailiaoUi(1);
+	typeIndex = 1;
+}
+void DarongluUiLayer::onWuPressedBtn(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	std::string name = CCString::createWithFormat("%s","\xE7\xAD\x9B\xE9\x80\x89")->getCString();
+	_labelSelectName->setString(name.c_str());
+	_spriteMenu->setVisible(false);
+	itemFusionLayer->ClearMap();
+	itemFusionLayer->RefreshData();
+	RefreshFusionCailiaoUi(-1);
+	typeIndex = -1;
+}
+void DarongluUiLayer::onShiShiPressedBtn(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	std::string name = CCString::createWithFormat("%s","\xE5\x8F\xB2\xE8\xAF\x97")->getCString();
+	_labelSelectName->setString(name.c_str());
+	_spriteMenu->setVisible(false);
+	itemFusionLayer->ClearMap();
+	itemFusionLayer->RefreshData();
+	RefreshFusionCailiaoUi(4);
+	typeIndex = 4;
+}
+
+void DarongluUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{	
+	typeIndex = -1;
+	dwAddExp = 0;
+	_frame = (CCNode*)this->getChildByTag(0);
+	_helpSprite =dynamic_cast<FrameSprite*>(_frame->getChildByTag(50));
+	_helpSprite->retain();
+	_helpSprite->removeFromParent();
+	for(int i = 8; i <= 13; i ++)
+	{
+		CCNode* n = (CCNode*)(_frame->getChildByTag(i));
+		CC_ASSERT(n != NULL);	
+
+		ItemNode * node = ItemNode::create();
+		//CCPoint pt = ccp(n->getPositionX(),n->getPositionY());
+		//node->setPosition(pt);
+		node->setTag(i);
+		//node->setBlank();
+		node->setAnchorPoint(ccp(0,0));
+		n->addChild(node,1,1);
+		node->setAnchorPoint(ccp(0.5,0.5));
+		node->setClickable(true);
+		node->hideItemOpBtn();	
+	}	
+	//可能获得的材料名字
+	_label1 = (CCLabelTTF*)(_frame->getChildByTag(1));
+	_label2 = (CCLabelTTF*)(_frame->getChildByTag(2));
+	_label3 = (CCLabelTTF*)(_frame->getChildByTag(3));
+	_label4 = (CCLabelTTF*)(_frame->getChildByTag(4));
+	_label5 = (CCLabelTTF*)(_frame->getChildByTag(5));
+	_label6 = (CCLabelTTF*)(_frame->getChildByTag(6));
+	_label7 = (CCLabelTTF*)(_frame->getChildByTag(7));
+	_labelSelectName = (CCLabelTTF*)(_frame->getChildByTag(18));
+	_spriteJingYanZhi = (CCSprite*)(_frame->getChildByTag(17));	
+	_spriteMenu = (FrameSprite*)(_frame->getChildByTag(30));	
+	_spriteMenu->_setZOrder(100000);
+	_spriteMenu->setVisible(false);
+	//设置帮助文档界面位置
+	CCSize _winSize = CCDirector::sharedDirector()->getWinSize();
+	_helpSprite->setPosition(ccp(_winSize.width/2,_winSize.height/2));
+	_helpSprite->setVisible(false);
+	//获取背包中可熔炼的材料
+	_items = EquipFusionManager::getInstance()->getEquipFusionItemMap();
+	//初始化scrollView
+	_contentLayer = dynamic_cast<CCNode*>(_frame->getChildByTag(19));
+	CC_ASSERT(_contentLayer != NULL);
+	_contentLayer->setContentSize(CCSize(_contentLayer->getContentSize().width + 20,_contentLayer->getContentSize().height));
+	_container = CCNode::create();
+	_container->setContentSize(CCSize(_contentLayer->getContentSize().width + 20,_contentLayer->getContentSize().height));
+	//_container->setContentSize(CCSize(_contentLayer->getContentSize().width + 20,_contentLayer->getContentSize().height));
+	_scrollView = createScrollViewWithContent(_contentLayer);//物品展示滑动框
+	_scrollView->setContainer(_container);
+	//进度条
+	//进度条
+	_expProgress = new ProgressBar;
+	_expProgress->initBarWithSprite((CCSprite*)_frame->getChildByTag(15));
+	_expProgress->addToParent(_frame);
+	_expProgress->setProgress(0,10000);
+	//初始化大熔炉温度
+	_label4->setString(CCString::createWithFormat("%.1f%%",DaRongLuUiMgr::GetInstance()->degree)->getCString());
+	//初始化Node格子
+	itemFusionLayer = ItemMarixLayer::create(_contentLayer->getContentSize().width,_contentLayer->getContentSize().height,7,12);
+	_contentLayer->addChild(itemFusionLayer);
+	//预加载特效
+	AnimationCache::createDefList(1,_anilist,false);
+	AnimationCache::getInstance()->getSinEffect(0,"E1_128",_anilist);
+	//初始化可能获得的道具
+	InitIconDisplay();
+	//读取配置表系数值
+	GetEquipQuality();
+	//刷新界面
+	UpdateDisplay();
+	_time_spase = 1;
+	//温度特效
+	runDegreesEffect();
+	setAllChildernButtonPriority(this,-1);
+	itemFusionLayer->signalClickItem.connect(this,&DarongluUiLayer::onClickDropEndItem);
+	itemFusionLayer->signalDoubleClickItem.connect(this,&DarongluUiLayer::onDoubleClickDropEndItem);	
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&DarongluUiLayer::requestEquipFusionDegrees), this, 5.0f, false);
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&DarongluUiLayer::RefreshEquipFusionDegrees), this, 2.0f, false);
+}
+void DarongluUiLayer::runDegreesEffect()
+{
+	AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0,"E1_122", anims);					//diyici
+	BSAnimate *animste = anims[0];
+	_degreeSpriteEffect = CCSprite::create();
+	_degreeSpriteEffect->setPosition(ccp(_label4->getPositionX() + 2,_label4->getPositionY() - 3));
+	_degreeSpriteEffect->setAnchorPoint(ccp(0.5f,0.5f));
+	_frame->addChild(_degreeSpriteEffect,0,10);	
+	_label4->_setZOrder(1);
+	//CCArray *actionArray = CCArray::create();		
+	//actionArray->addObject(animste);
+	_degreeSpriteEffect->runAction(CCRepeatForever::create(animste));	
+}
+void DarongluUiLayer::stopDegreeEffect()
+{
+	_degreeSpriteEffect->stopAllActions();	
+	_degreeSpriteEffect->removeAllChildrenWithCleanup(true);
+}
+
+void DarongluUiLayer::UpdateDisplay()
+{
+	int _temp = 0;
+	for (std::vector<DaRongLuIconInfo>::iterator iter = _daRongLuIconVec.begin();iter < _daRongLuIconVec.end();++ iter)
+	{
+		
+		ItemNode * node =dynamic_cast<ItemNode *>(_frame->getChildByTag(NT_DARONGLU_NODE_BEGIN_TAG + _temp)->getChildByTag(1));
+		node->setDataId(iter->IconId);	
+		
+		switch (_temp)
+		{
+		case 0:
+				_label1->setString(iter->IconName.c_str());
+			break;
+		case 1:
+			_label2->setString(iter->IconName.c_str());
+			break;
+		case 2:
+			_label3->setString(iter->IconName.c_str());
+			break;
+		case 3:
+			_label5->setString(iter->IconName.c_str());
+			break;
+		case 4:
+			_label6->setString(iter->IconName.c_str());
+			break;
+		case 5:
+			_label7->setString(iter->IconName.c_str());
+			break;		
+		}
+		_temp ++;
+	}
+	//LocalPlayer* pl = RoleManager::getInstance()->getLocalPlayer();
+	/*int exp = pl->getFusion_Exp();
+	if (exp > DaRongLuUiMgr::GetInstance()->newExp)
+	{
+	DaRongLuUiMgr::GetInstance()->newExp = exp;
+	}*/
+	//刷新材料框
+	RefreshFusionCailiaoUi(-1);	
+}
+void DarongluUiLayer::UpdateFusionData()
+{
+	dwAddExp = 0;
+	//EquipFusionManager::getInstance()->removeEndItem();
+	_items = EquipFusionManager::getInstance()->getEquipFusionItemMap();
+	//std::map<short, f_item*>::iterator iterEnd = _items.end();
+	std::map<short, f_item*>::iterator iter =  _items.begin();
+	int index = 0;
+	while(iter != _items.end())
+	{
+		if (iter->second->get_item_type_id() == FUSION_POWDER ||
+			iter->second->get_item_type_id() == SECONDARY_FUSION_POWDER)
+		{
+			itemFusionLayer->SetItemID(index,iter->second->get_item_type_id());
+			ItemNode* pItemNode = itemFusionLayer->GetItemNode(index);
+			pItemNode->setNum(0,iter->second->get_item_number(),false);
+			//pItemNode->SetShowNum(true);
+			pItemNode->SetLessBtn(false);
+		} 
+		else
+		{
+			itemFusionLayer->SetItemID(index,iter->second->get_item_type_id());
+			ItemNode* pItemNode = itemFusionLayer->GetItemNode(index);
+			pItemNode->setNum(0);
+			pItemNode->SetShowNum(true);
+			pItemNode->SetLessBtn(false);
+		}
+		++index;
+		++iter;
+	}
+	//熔炼之后更新一次经验值
+	_expProgress->setProgress(DaRongLuUiMgr::GetInstance()->newExp,MAX_EXP);
+}
+
+void DarongluUiLayer::SetJiangYanZhi(int flag)
+{
+	std::string strNum = CCString::createWithFormat("daronglu_numx%d",flag)->getCString();
+	CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(strNum.c_str());	
+	if (flag < 2)
+	{
+		_spriteJingYanZhi->setVisible(false);
+	}
+	else
+	{
+		_spriteJingYanZhi->setVisible(true);
+		if (frame)
+		{
+			_spriteJingYanZhi->setDisplayFrame(frame);
+		}		
+	}
+}
+
+void DarongluUiLayer::RefreshFusionCailiaoUi(int flag)
+{	
+	_newItems.clear();
+	//进度条
+	int expr = DaRongLuUiMgr::GetInstance()->newExp;
+	_expProgress->setProgress(expr,MAX_EXP);	
+	/*if (_items.size()<= 0)
+	{*/
+		_items = EquipFusionManager::getInstance()->getEquipFusionItemMap();
+	//}
+	std::map<short, f_item*>::iterator iter =  _items.begin();
+	int index = 0;		
+	while(iter != _items.end())
+	{
+		long long itemId = (long long)(iter->second->get_item_id());
+		f_equipment *equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(EICT_Bag,itemId));
+		if(flag != -1)
+		{			
+			if(equip == NULL)
+			{
+				if (flag != EIQ_Quality3)
+				{
+					++iter;	
+					continue;
+				}				
+			}
+			else
+			{
+				EItemQuality quality = (EItemQuality)equip->get_item_quality();
+				if(quality >= EIQ_Quality0 && quality < EIQ_End)
+				{
+					if (flag != quality)
+					{
+						++iter;	
+						continue;
+					}
+				}
+				else
+				{
+					++iter;	
+					continue;
+				}
+			}			
+		}
+		if (iter->second->get_item_type_id() == FUSION_POWDER||
+			iter->second->get_item_type_id() == SECONDARY_FUSION_POWDER)
+		{
+			itemFusionLayer->SetItemID(index,iter->second->get_item_type_id());			
+			ItemNode* pItemNode = itemFusionLayer->GetItemNode(index);			
+			if (pItemNode)
+			{
+				pItemNode->setNum(0,iter->second->get_item_number(),false);				
+				pItemNode->SetLessBtn(false);	
+				pItemNode->setBind(iter->second->is_item_binded());
+				//pItemNode->setEQuality(EIQ_Quality3);
+			}
+		}	
+		else if( MIsEquipment(iter->second->get_item_type_id()))
+		{			
+			if(equip == NULL)
+			{
+				++iter;	
+				continue;
+			}
+			ItemNode* pItemNode = itemFusionLayer->GetItemNode(index);
+			itemFusionLayer->SetItemID(index,iter->second->get_item_type_id());
+			if (pItemNode)
+			{				
+				EItemQuality quality = (EItemQuality)equip->get_item_quality();
+				if(quality >= EIQ_Quality0 && quality < EIQ_End)
+				{
+					setFusionQuality(pItemNode,quality);					
+				}		
+				pItemNode->setNum(0,iter->second->get_item_number(),false);				
+				pItemNode->SetLessBtn(false);
+				pItemNode->SetShowNum(false);
+				pItemNode->showEquipConsolidatedSE(equip->get_equip_consolidate_level());
+				pItemNode->setEquipStarLevel(equip->get_star_num());
+				pItemNode->setBind(equip->is_item_binded());	
+			}
+		}
+		
+		_newItems[index] = iter->second;
+		++index;		
+		++iter;		
+	}
+	//下面代码是智能选中能合成的装备	
+	_spriteJingYanZhi->setVisible(false);	
+	//下面代码是智能选中能合成的装备	
+	if (flag != -1)
+	{
+		CalcEquipJingYanZhi();
+	}	
+	itemFusionLayer->SetItemMap(&_newItems);
+}
+void DarongluUiLayer::GetEquipQuality()
+{
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Dronglupinzhixishu");	
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		int index = 0;
+		float val = 0.0;
+		unsigned int idx = table->get_index("quality");		
+		index = table->get_integer32(idx);		
+
+		idx = table->get_index("ratio");
+		val = table->get_double(idx);
+	
+		_daRongLuQualityVec[index] = val;
+
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+}
+
+void DarongluUiLayer::CalcEquipJingYanZhi()
+{
+	int _dwAddExp = 0;
+	std::map<short, f_item*>::iterator tmpiter = _newItems.begin();
+	short tempnIdx = 0;
+	//int equipExp = 0;
+	while(tmpiter != _newItems.end())
+	{
+		ItemNode* pItemNode = itemFusionLayer->GetItemNode(tempnIdx++);
+		float xishu = 0;
+		//if(pItemNode->getNum() > 0)
+		//{
+		//	
+			long long itemId = tmpiter->second->get_data()->dw_data_id;
+		/*	f_equipment *equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(EICT_Bag,itemId));
+			if (equip != NULL)
+			{
+				EItemQuality quality = (EItemQuality)equip->get_item_quality();
+			}*/
+			//根据Id查找数据			
+			for (std::vector<DaRongLuCailiaoInfo>::iterator iter = _daRongLuCailiaoVec.begin();iter != _daRongLuCailiaoVec.end(); ++ iter)
+			{
+				if (iter->Id != itemId)
+				{
+					continue;
+				}
+				if (itemId == FUSION_POWDER)
+				{					
+					pItemNode->SetLessBtn(true);
+					if (_daRongLuQualityVec.size() > 0)
+					{
+						xishu = _daRongLuQualityVec[3];
+					}	
+					for (int i = 0;i< tmpiter->second->get_item_number();i++)
+					{
+						pItemNode->setNum(pItemNode->getNum() + 1,tmpiter->second->get_item_number(),false);
+						_dwAddExp +=  iter->BaseExp*xishu;
+						int exp = DaRongLuUiMgr::GetInstance()->newExp + _dwAddExp;		
+						_expProgress->setProgress(exp,MAX_EXP);	
+						if(exp >= MAX_EXP)
+						{
+							//ToolTip::getInstance()->push(GET_STR(7214));	
+							dwAddExp = exp;
+							return;
+						}
+					}					
+				}
+				else if (itemId == SECONDARY_FUSION_POWDER)
+				{					
+					pItemNode->SetLessBtn(true);
+					//int dwMaxExp = (int)NumericalIniMgr::getInstance()->GetEquipFusionMaxExp(EquipFusionManager::getInstance()->getEquipLv(),(EItemQuality)EquipFusionManager::getInstance()->getEquipment()->get_item_quality());
+					if (_daRongLuQualityVec.size() > 0)
+					{
+						xishu = _daRongLuQualityVec[3];
+					}	
+					for (int i = 0;i< tmpiter->second->get_item_number();i++)
+					{						
+						pItemNode->setNum(pItemNode->getNum() + 1,tmpiter->second->get_item_number(),false);
+						_dwAddExp +=  iter->BaseExp*xishu;
+						int exp = DaRongLuUiMgr::GetInstance()->newExp + _dwAddExp;		
+						_expProgress->setProgress(exp,MAX_EXP);	
+						if(exp >= MAX_EXP)
+						{
+							//ToolTip::getInstance()->push(GET_STR(7214));
+							dwAddExp = exp;
+							return;
+						}
+					}					
+				}
+				else
+				{
+					f_equipment* equip = dynamic_cast<f_equipment*>(tmpiter->second);
+					float xishu = 0;
+					if (equip != NULL)
+					{
+						EItemQuality quality = (EItemQuality)equip->get_item_quality();
+						if (quality < 0 || quality > 4)
+						{
+							continue;
+						}
+						if (_daRongLuQualityVec.size() > 0)
+						{
+							xishu = _daRongLuQualityVec[quality];
+						}						
+						if(pItemNode->getNum() < tmpiter->second->get_item_number())
+						{
+							pItemNode->setNum(pItemNode->getNum() + 1);
+							pItemNode->SetLessBtn(true);
+						}
+						_dwAddExp += (int)(iter->BaseExp*xishu)*(pItemNode->getNum());												
+					}						
+				}					
+			}			
+		//}
+		int exp = DaRongLuUiMgr::GetInstance()->newExp + _dwAddExp;		
+		dwAddExp = exp;
+		_expProgress->setProgress(exp,MAX_EXP);	
+		if(exp >= MAX_EXP)
+		{
+			//ToolTip::getInstance()->push(GET_STR(7214));
+			return;
+		}
+		tmpiter++;		
+	}		
+	return;
+}
+
+void DarongluUiLayer::CalcAllJingYanZhi(int nIdx)
+{
+	//经验条倍数
+	if (dwAddExp > MAX_OUT_EXP2 && dwAddExp < MAX_OUT_EXP3)
+	{
+		SetJiangYanZhi(2);
+	}
+	else if (dwAddExp > MAX_OUT_EXP3)
+	{
+		SetJiangYanZhi(3);
+		_expProgress->setProgress(dwAddExp,MAX_EXP);
+		return;
+	}
+	else
+	{
+		SetJiangYanZhi(0);
+	}	
+	//先检查一下如果经验值累加超过30000就不在累加
+	//检查一下数量上限
+	std::map<short, f_item*>::iterator iter = _newItems.find(nIdx);
+	if(iter == _newItems.end())
+		return;
+
+	ItemNode* pItemNode = itemFusionLayer->GetItemNode(nIdx);
+	f_item* pItem = iter->second;
+	if (pItemNode->GetDataId() == FUSION_POWDER ||
+		pItemNode->GetDataId() == SECONDARY_FUSION_POWDER)
+	{
+		if(pItemNode->getNum() < pItem->get_item_number())
+		{
+			//int tempCount = PackageManager::getInstance()->getItemNumber(EICT_Bag,iter->second->get_item_type_id());
+			pItemNode->setNum(pItemNode->getNum() + 1,pItem->get_item_number(),false);
+			pItemNode->SetLessBtn(true);
+		}
+	} 
+	else
+	{
+		if(pItemNode->getNum() < pItem->get_item_number())
+		{
+			pItemNode->setNum(pItemNode->getNum() + 1);
+			pItemNode->SetLessBtn(true);
+		}
+	}	
+	//----------------------------------------------------------------
+	//[bing] 改为检查所有node 若发现全是0 则说明没有选择要融合的物品
+	std::vector<tagItemSerial> tmpIdxVec;
+	std::map<short, f_item*>::iterator tmpiter = _newItems.begin();
+	short tempnIdx = 0;
+	//int equipExp = 0;	
+	dwAddExp = 0;
+	while(tmpiter != _newItems.end())
+	{
+		ItemNode* pItemNode = itemFusionLayer->GetItemNode(tempnIdx++);
+		float xishu = 0;
+		if(pItemNode->getNum() > 0)
+		{
+			
+			long long itemId = tmpiter->second->get_data()->dw_data_id;
+		/*	f_equipment *equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(EICT_Bag,itemId));
+			if (equip != NULL)
+			{
+				EItemQuality quality = (EItemQuality)equip->get_item_quality();
+			}*/
+			//根据Id查找数据			
+			for (std::vector<DaRongLuCailiaoInfo>::iterator iter = _daRongLuCailiaoVec.begin();iter != _daRongLuCailiaoVec.end(); ++ iter)
+			{
+				if (iter->Id != itemId)
+				{
+					continue;
+				}
+				if (itemId == FUSION_POWDER)
+				{
+					if (_daRongLuQualityVec.size() > 0)
+					{
+						xishu = _daRongLuQualityVec[3];
+					}	
+					dwAddExp +=  (int)(iter->BaseExp*xishu)*(pItemNode->getNum());
+				}
+				else if (itemId == SECONDARY_FUSION_POWDER)
+				{
+					//int dwMaxExp = (int)NumericalIniMgr::getInstance()->GetEquipFusionMaxExp(EquipFusionManager::getInstance()->getEquipLv(),(EItemQuality)EquipFusionManager::getInstance()->getEquipment()->get_item_quality());
+
+					if (_daRongLuQualityVec.size() > 0)
+					{
+						xishu = _daRongLuQualityVec[3];
+					}	
+					dwAddExp +=  (int)(iter->BaseExp*xishu)*(pItemNode->getNum());
+				}
+				else
+				{
+					f_equipment* equip = dynamic_cast<f_equipment*>(tmpiter->second);					
+					if (equip != NULL)
+					{
+						EItemQuality quality = (EItemQuality)equip->get_item_quality();
+						if (quality < 0 || quality > 4)
+						{
+							continue;
+						}
+						if (_daRongLuQualityVec.size() > 0)
+						{
+							xishu = _daRongLuQualityVec[quality];
+						}						
+						dwAddExp +=  (int)(iter->BaseExp*xishu)*(pItemNode->getNum());											
+					}					
+				}
+				tagItemSerial data;
+				data.n16Num = pItemNode->getNum();
+				data.n64ItemID = iter->Id;
+				tmpIdxVec.push_back(data);
+			}			
+		}
+		tmpiter++;		
+	}	
+		
+	int exp = DaRongLuUiMgr::GetInstance()->newExp + dwAddExp;
+	dwAddExp = exp;
+	_expProgress->setProgress(exp,MAX_EXP);	
+	if(exp >= MAX_EXP)
+	{
+		ToolTip::getInstance()->push(GET_STR(7214));
+		return;
+	}
+}
+
+void DarongluUiLayer::onClickDropEndItem( short nIdx )
+{	
+	CalcAllJingYanZhi(nIdx);
+}
+
+void DarongluUiLayer::onDoubleClickDropEndItem( short nIdx )
+{	
+	CalcAllJingYanZhi(nIdx);
+}
+void DarongluUiLayer::SetFusionQianData()
+{
+	dwAddExp = 0;
+	//int equipExp = 0;
+	std::vector<tagItemSerial> tmpIdxVec;
+	std::map<short, f_item*>::iterator tmpiter = _newItems.begin();
+	short tempnIdx = 0;
+
+	while(tmpiter != _newItems.end())
+	{
+		ItemNode* pItemNode = itemFusionLayer->GetItemNode(tempnIdx++);
+		float xishu = 0;
+		if(pItemNode->getNum() > 0)
+		{
+
+			long long itemId = tmpiter->second->get_data()->dw_data_id;
+			/*f_equipment *equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(EICT_Bag,itemId));
+			if (equip != NULL)
+			{
+				EItemQuality quality = (EItemQuality)equip->get_item_quality();
+			}*/
+			//根据Id查找数据			
+			for (std::vector<DaRongLuCailiaoInfo>::iterator iter = _daRongLuCailiaoVec.begin();iter != _daRongLuCailiaoVec.end(); ++ iter)
+			{
+				if (iter->Id != itemId)
+				{
+					continue;
+				}
+				if (itemId == FUSION_POWDER)
+				{
+					if (_daRongLuQualityVec.size() > 0)
+					{
+						xishu = _daRongLuQualityVec[3];
+					}	
+					dwAddExp +=  (int)(iter->BaseExp*xishu)*(pItemNode->getNum());
+				}
+				else if (itemId == SECONDARY_FUSION_POWDER)
+				{
+					//int dwMaxExp = (int)NumericalIniMgr::getInstance()->GetEquipFusionMaxExp(EquipFusionManager::getInstance()->getEquipLv(),(EItemQuality)EquipFusionManager::getInstance()->getEquipment()->get_item_quality());
+					if (_daRongLuQualityVec.size() > 0)
+					{
+						xishu = _daRongLuQualityVec[3];
+					}	
+					dwAddExp += (int)(iter->BaseExp*xishu)*(pItemNode->getNum());
+				}
+				else
+				{
+					f_equipment* equip = dynamic_cast<f_equipment*>(tmpiter->second);
+					float xishu = 0;
+					if (equip != NULL)
+					{
+						EItemQuality quality = (EItemQuality)equip->get_item_quality();
+						if (quality < 0 || quality > 4)
+						{
+							continue;
+						}
+						if (_daRongLuQualityVec.size() > 0)
+						{
+							xishu = _daRongLuQualityVec[quality];
+						}						
+						dwAddExp += (int)(iter->BaseExp*xishu)*(pItemNode->getNum());						
+					}					
+				}
+				tagItemSerial data;
+				data.n16Num = pItemNode->getNum();
+				data.n64ItemID = iter->Id;
+				tmpIdxVec.push_back(data);
+			}			
+		}		
+		tmpiter++;		
+	}
+	int exp = DaRongLuUiMgr::GetInstance()->newExp + dwAddExp;
+	dwAddExp = exp;
+	_expProgress->setProgress(exp,MAX_EXP);
+	//经验条倍数
+	if (dwAddExp > MAX_OUT_EXP2 && dwAddExp < MAX_OUT_EXP3)
+	{
+		SetJiangYanZhi(2);
+	}
+	else if (dwAddExp > MAX_OUT_EXP3)
+	{
+		//先检查一下如果经验值累加超过30000就不在累加
+		SetJiangYanZhi(3);
+		return;
+	}
+	else
+	{
+		SetJiangYanZhi(0);
+	}	
+	if(dwAddExp >= MAX_EXP)
+	{
+		ToolTip::getInstance()->push(GET_STR(7214));
+		return;
+	}
+	
+}
+
+void DarongluUiLayer::InitIconDisplay()
+{
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM daronglu WHERE display = ?1");
+	cmd->set_integer32(1 , 1);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		DaRongLuIconInfo _daronglu;
+		unsigned int idx = table->get_index("id");		
+		_daronglu.Id = table->get_integer32(idx);		
+
+		idx = table->get_index("itemid");
+		_daronglu.IconId = table->get_integer32(idx);
+
+		idx = table->get_index("name");
+		_daronglu.IconName = table->get_text(idx);
+
+		idx = table->get_index("display");
+		_daronglu.IconVisible = table->get_integer32(idx);
+		
+		_daRongLuIconVec.push_back(_daronglu);
+
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	//获取大熔炉经验表
+	cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Daronglujingyan");
+	table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		DaRongLuCailiaoInfo _cailiaoInfo;
+		unsigned int idx = table->get_index("id");
+		_cailiaoInfo.Id = table->get_integer32(idx);
+
+		idx = table->get_index("Base_Exp");
+		_cailiaoInfo.BaseExp = table->get_integer32(idx);
+
+		idx = table->get_index("mainExp_Max");
+		_cailiaoInfo.MaxExp = table->get_integer32(idx);
+
+		idx = table->get_index("EquipQuality");
+		_cailiaoInfo.Quality = table->get_integer32(idx);
+		_daRongLuCailiaoVec.push_back(_cailiaoInfo);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);	
+}
+void DarongluUiLayer::SetData(CCSprite* _spriteIcon,CCLabelTTF* _labelName,int dw_id,int num)
+{
+	
+}
+bool DarongluUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if ( !isVisible() || !isRunning() || !hasVisibleParents() )
+	{
+		return false;
+	}
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		CCPoint framePoint2 = _contentLayer->convertTouchToNodeSpace(pTouch);
+		const CCSize &frameSize2 = _contentLayer->getContentSize();
+		CCRect frameRect2(0.0f, 0.0f, frameSize2.width, frameSize2.height);
+		if (frameRect2.containsPoint(framePoint2))
+		{
+			return false;
+		}
+		return true;
+	}
+	return true;
+}
+
+void DarongluUiLayer::runFusionEffect()
+{
+	//CCSprite* effectSprite = (CCSprite*)node->getChildByTag(20);
+	//if (effectSprite)
+	//{
+	//	return;
+	//}
+	//AnimationCache::AnimateList anims;
+	//AnimationCache::createDefList(1, anims);
+	//AnimationCache::getInstance()->getSinEffect(0,"E1_128", anims);					//diyici
+	//BSAnimate *animste = anims[0];
+	//CCSprite* sprite = CCSprite::create();
+	//sprite->setPosition(ccp(0,0));
+	//sprite->setAnchorPoint(ccp(0.24f,0.24f));
+	//node->addChild(sprite,0,20);	
+	//sprite->runAction(CCRepeatForever::create(animste));	
+	size_t index = 0;
+	for (size_t i = 0 ;i< 7*12; i++)
+	{
+		ItemNode* pItem = itemFusionLayer->GetItemNode(i);
+		if (pItem == NULL || index >= _darongIndexList.size())
+		{
+			return;
+		}		
+		if (i == _darongIndexList[index].index)
+		{
+			CCString* qualityBGStr = CCString::createWithFormat("icon_block%d", 0);
+			CCSpriteFrame* qualityFram = PackageManager::getInstance()->getIconFrameByName(qualityBGStr->getCString());
+			if (!qualityFram)
+			{
+				return;
+			}
+			
+			AnimationCache::AnimateList anims;
+			AnimationCache::createDefList(1, anims);
+			AnimationCache::getInstance()->getSinEffect(0,"E1_128", anims);					//diyici
+			BSAnimate *animste = anims[0];
+			CCSprite* sprite = CCSprite::create();
+			sprite->setPosition(ccp(0,0));			
+			sprite->setAnchorPoint(ccp(0.20f,0.20f));
+			/*pItem->setDataId(-1);
+			pItem->setClickable(false);
+			pItem->setNum(0);
+			pItem->SetLessBtn(false);*/
+			pItem->addChild(sprite,30,10);
+			if (_darongIndexList[index].num <=1)
+			{
+				CCSprite *spr = static_cast<CCSprite*>(pItem->getChildByTag(0));
+				spr->setDisplayFrame(qualityFram);		
+			}					
+			sprite->runAction(animste);	
+			index++;			
+		}
+	}	
+}
+void DarongluUiLayer::stopFusionEffect(ItemNode* node)
+{
+	CCSprite* sprite = (CCSprite*)node->getChildByTag(20);
+	if (sprite)
+	{
+		sprite->stopAllActions();
+		node->removeChild(sprite);
+	}
+}
+void DarongluUiLayer::setFusionQuality(ItemNode* node,int quality)
+{	
+	CCString* qualityBGStr = CCString::createWithFormat("icon_block%d", quality);
+	CCSpriteFrame* qualityFram = PackageManager::getInstance()->getIconFrameByName(qualityBGStr->getCString());
+	CCSprite* mainSprite = dynamic_cast<CCSprite*>(node->getChildByTag(0));
+	if (qualityFram)
+	{
+		mainSprite->setDisplayFrame(qualityFram);	
+	}	
+}
+void DarongluUiLayer::RefreshItemLayer(float dt)
+{	
+	itemFusionLayer->ClearMap();
+	itemFusionLayer->RefreshData();
+	RefreshFusionCailiaoUi(typeIndex);	
+	if (itemIdLists.size() > 0)
+	{
+		for (size_t i= 0;i<itemIdLists.size();i++)
+		{
+			DarongluGetData data = itemIdLists[i];
+			ReceiveRewardUiMgr::GetInstance()->setItemData(data.dataId,data.num);			
+		}
+		ReceiveRewardUiMgr::GetInstance()->openRewardUi();		
+	}	
+	if (_btnRongLian)
+	{
+		_btnRongLian->setEnabled(true);
+	}
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&DarongluUiLayer::RefreshItemLayer), this);
+}
+void DarongluUiLayer::RefreshExproBar(float dt)
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&DarongluUiLayer::RefreshExproBar), this);
+	_expProgress->setProgress(0,MAX_EXP);
+}
+void DarongluUiLayer::RefreshItemNodeLayer(float dt)
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&DarongluUiLayer::RefreshItemNodeLayer), this);
+	size_t index = 0;
+	for (size_t i = 0 ;i< 7*12; i++)
+	{
+		ItemNode* pItem = itemFusionLayer->GetItemNode(i);
+		if (pItem == NULL || index >= _darongIndexList.size())
+		{			
+			CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&DarongluUiLayer::RefreshItemLayer), this, 1.0f, false);		
+			return;
+		}		
+		if (i == _darongIndexList[index].index)
+		{
+			CCString* qualityBGStr = CCString::createWithFormat("icon_block%d", 0);
+			CCSpriteFrame* qualityFram = PackageManager::getInstance()->getIconFrameByName(qualityBGStr->getCString());
+			if (!qualityFram)
+			{
+				return;
+			}		
+			if (_darongIndexList[index].num <= 1)
+			{
+				pItem->setDataId(-1);
+				pItem->setClickable(false);
+				pItem->setNum(0);
+				pItem->SetLessBtn(false);			
+				CCSprite *spr = static_cast<CCSprite*>(pItem->getChildByTag(0));
+				spr->setDisplayFrame(qualityFram);		
+			} 			
+			index++;			
+		}
+	}		
+}
+void DarongluUiLayer::onEnter()
+{
+	TCP_CLIENT->register_net_cmd(NET_G2C_PROC_EQUIP_FUSION_RESULT,this,&DarongluUiLayer::setEquipFusionResultDate);
+	//TCP_CLIENT->register_net_cmd(NET_G2C_PROC_FUSION_DEGREES_RESULT,this,&DarongluUiLayer::setEquipFusionDegreesResultData);
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+}
+void DarongluUiLayer::onExit()
+{
+	TCP_CLIENT->unregister_net_cmd(NET_G2C_PROC_EQUIP_FUSION_RESULT,this,&DarongluUiLayer::setEquipFusionResultDate);
+	//TCP_CLIENT->unregister_net_cmd(NET_G2C_PROC_FUSION_DEGREES_RESULT,this,&DarongluUiLayer::setEquipFusionDegreesResultData);	
+//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+
+//融合结果
+unsigned int DarongluUiLayer::setEquipFusionResultDate(s_net_cmd* cmd)
+{//结果(DWORD)[0=成功,非0=错误编号] + 类型(INT)[1=普通融合,2=加速融合 + 暴击数(INT),3=高级融合] + 当前融合经验(DWORD)
+	WorldPacket Msg((const void*)cmd);
+	INT resultId;
+//	int type;
+//	int crit;
+	INT size;
+	INT times;
+	INT dwExp;
+	//unsigned int equipExp;
+	Msg >> resultId;
+	Msg >> size;
+	Msg >> times;
+	Msg >> dwExp;
+	if (resultId == 0)
+	{		
+		itemIdLists.clear();
+		for (int i = 0; i < size; ++i)
+		{
+			INT64 id;
+			int num;
+			Msg >> id;
+			Msg >> num;
+			DarongluGetData data;
+			data.dataId = id;
+			data.num = num;
+			itemIdLists.push_back(data);
+		}
+		if (dwExp < 0)
+		{
+			dwExp = 0;
+		}
+		int exp = DaRongLuUiMgr::GetInstance()->newExp;	
+		if(exp >= MAX_EXP)
+		{
+			CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&DarongluUiLayer::RefreshExproBar), this, 0.6f, false);
+		}
+		DaRongLuUiMgr::GetInstance()->newExp = dwExp;
+		DaRongLuUiMgr::GetInstance()->times = times;
+		runFusionEffect();			
+		CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&DarongluUiLayer::RefreshItemNodeLayer), this, 0.2f, false);
+		
+	}
+	else
+	{
+		switch(resultId)
+		{	
+			//错误的返回结果
+		case E_Fuion_Need_Bag_Size_Not_Enough: //背包空间不足
+				{					
+					ToolTip::getInstance()->push("\xE8\x83\x8C\xE5\x8C\x85\xE7\xA9\xBA\xE9\x97\xB4\xE4\xB8\x8D\xE8\xB6\xB3");
+					break;
+				}		
+		
+		case E_Item_CreateFailed://元宝不足
+				{
+					ToolTip::getInstance()->push("\xE5\x88\x9B\xE5\xBB\xBA\xE7\x89\xA9\xE5\x93\x81\xE5\xA4\xB1\xE8\xB4\xA5\x0D\x0A");			
+					break;
+				}						
+			default:
+				{
+					break;
+				}						
+		}
+		DaRongLuUiMgr::GetInstance()->newExp = dwExp;
+		RefreshFusionCailiaoUi(typeIndex);		
+		if (_btnRongLian)
+		{
+			_btnRongLian->setEnabled(true);
+		}
+	}
+	return 0;
+}
+void DarongluUiLayer::requestEquipFusionDegrees(float dt)
+{	
+	
+	WorldPacket C2G_Msg(NET_C2G_PROC_FUSION_DEGREES);	//组装消息头
+	C2G_Msg << 1;	
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_INSIGNIFICANT, false);		//发送
+}
+void DarongluUiLayer::RefreshEquipFusionDegrees(float dt)
+{
+	_label4->setString(CCString::createWithFormat("%.1f%%",DaRongLuUiMgr::GetInstance()->degree)->getCString());
+}
+unsigned int DarongluUiLayer::setEquipFusionDegreesResultData(s_net_cmd* cmd)
+{
+	//WorldPacket Msg((const void*)cmd);
+	//int dw_result;
+	//int dw_degrees;
+	////unsigned int equipExp;
+	//Msg >> dw_result;
+	//if (dw_result == 0)
+	//{
+	//	Msg >> dw_degrees;		
+	//	_label4->setString(CCString::createWithFormat("%f%%",dw_degrees/10.0)->getCString());
+	//}
+	return 0;
+}
+
+void DarongluUiLayer::noticeRecharge()
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+}

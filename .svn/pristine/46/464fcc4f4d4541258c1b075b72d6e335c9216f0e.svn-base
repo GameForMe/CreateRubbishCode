@@ -1,0 +1,219 @@
+#ifndef ARENAMAINMGR_H
+#define ARENAMAINMGR_H
+
+
+#include "cocos2d.h"
+#include "cocos-ext.h"
+#include "UiTools.h"
+#include "BaseDefine.h"
+#include "RoleDefine.h"
+
+using namespace cocos2d;
+using namespace cocos2d::extension;
+
+#pragma pack(push, 1)
+
+const int MAX_JJC_RECORD_COUNT = 5; //保存对战记录最大数
+const int MAX_JJC_RANDOM_ROLE_INFO = 3; //竞技场送给客户端其他角色最大数
+
+const int MAX_BUY_CHALLENGE_CNT = 10;
+struct tagJJCBlob
+{
+	int nTargetRankList[MAX_JJC_RANDOM_ROLE_INFO]; //对手排名列表
+	unsigned int nLastPKTime; //最后一次挑战时间
+	tagJJCBlob() { memset(this,0,sizeof(*this)); };
+};
+//战斗记录
+struct tagJJCRecord
+{
+	unsigned int dwTargetRoleID; //对手角色ID
+	wchar_t szRoleName[X_SHORT_NAME]; //对手角色名称
+	unsigned char byPowerCount; //对手觉醒次数
+	int nRank; //排名
+	int bIsAttack; //true = 挑战, false = 被挑战
+	int bWinLose; //胜负true = 胜, false = 负
+	tagJJCRecord() { memset(this,0,sizeof(*this)); };
+};
+
+struct tagJJCRoleInfo
+{
+	unsigned int dwRoleID; //角色ID
+	wchar_t szRoleName[X_SHORT_NAME]; //角色名称
+	int nLevel; //角色等级
+	unsigned char bySex;	// 性别
+	int	nRank; //排名
+	int	nHighestRank; //最高排名
+	int nWinnerCount; //连胜次数
+	signed int n32Rating; //战斗力
+	int nPowerCount; //觉醒次数
+	EClassType eClassType; // 职业
+	tagJJCRecord fightRecord[MAX_JJC_RECORD_COUNT];
+	tagJJCBlob JJCBlob; //二进制存档
+	tagJJCRoleInfo() { memset(this,0,sizeof(*this)); };
+};
+
+struct ArenaRankAttr
+{
+	std::string roleName;
+	int roleHeadType;
+	int roleLv;
+	int rolePower;
+	int roleWinStreak;
+	int awardIcon[5];//奖励图标Id
+	ArenaRankAttr() { memset(this,0,sizeof(*this)); };
+};
+
+//竞技场对手角色信息
+struct tagJJCTargetRoleInfo 
+{
+	unsigned int dwRoleID; //角色ID
+	wchar_t szRoleName[X_SHORT_NAME]; //角色名称
+	int nLevel; //角色等级
+	EClassType eClassType; // 职业
+	unsigned char bySex;	// 性别
+	int	nRank; //排名
+	signed int n32Rating; //战斗力
+	int nWinnerCount;//连胜
+	tagJJCTargetRoleInfo() { memset(this,0,sizeof(*this)); }
+};
+
+struct tagjjcAccessoryInfo
+{
+	INT64 rewardCoin;//奖励金币
+	int rewardExp;//经验
+	int challengeTimes;//挑战次数
+	int challengeCDTime;//挑战cd时间
+	tagjjcAccessoryInfo() { memset(this,0,sizeof(*this)); }
+};
+
+#pragma pack(pop)
+
+class ArenaMainMgr :public CCObject
+{
+public:
+	ArenaMainMgr();
+	~ArenaMainMgr();
+	static ArenaMainMgr* getInstance();
+private:
+	bool register_schedule;
+
+	void safe_register_schedule()
+	{
+		if (!register_schedule)
+		{
+			register_schedule = true;
+			CCDirector::sharedDirector()->getScheduler()->
+				scheduleSelector(SEL_SCHEDULE(&ArenaMainMgr::decrease_time), this,1.0f,false);
+
+		}
+	}
+	void safe_unregister_schedule()
+	{
+		if (register_schedule)
+		{
+			register_schedule = false;
+			CCDirector::sharedDirector()->getScheduler()->
+				unscheduleSelector(SEL_SCHEDULE(&ArenaMainMgr::decrease_time), this);
+		}
+	}
+public:
+	void reSet_countDownTime();
+	int getcountDownTime()const{return _countDownTime;};
+	void decrease_time(float);
+	void set_countDownTime(int time);
+	int GetResetCDNeedYuanBao()const; //根据剩余时间获取重置挑战cd所需元宝数
+	//------------------------------------------------------------------------------------------------
+	tagJJCRoleInfo const& getLocalPlayerAttr() const{return localPlayerAttr;};//获取玩家的jjc数据
+	void setLocalPlayerAttr(tagJJCRoleInfo attr){localPlayerAttr = attr;};//设置玩家的jjc数据
+	tagJJCTargetRoleInfo const& getChallengePlayerAttr(int index){return challengePlayerAttr[index];};
+	void setChallengePlayerAttr(tagJJCTargetRoleInfo attr,int index){challengePlayerAttr[index] = attr;};
+	void setCheckedRankIndex(int index){checkedRankIndex = index;};
+	int getCheckedRankIndex()const{return checkedRankIndex;};
+	tagjjcAccessoryInfo const& getLocaljjcAccessoryInfo()const{return localjjcAccessoryInfo;};
+	tagJJCTargetRoleInfo const& getChallengePlayerRankAttr(int index) const{return challengePlayerRankAttr[index];}
+	void setChallengePlayerRankAttr(int index,tagJJCTargetRoleInfo roleInfo);
+	void setCheckedChallengeIndex(int index){checkedChallengeIndex = index;};//设置选择的挑战者序号
+	int getCheckedChallengeIndex()const{return checkedChallengeIndex;};//获取选择的挑战者序号
+	void setjjcRankCount(int count){jjcRankCount = count;};//设置排名榜的数量
+	int getjjcRankCount()const{return jjcRankCount;};//获取排名榜的数量
+	void setIsJJCResult(bool flag){isJJCResult = flag;};
+	bool getIsJJCResult()const{return isJJCResult;};
+	void setIsCheckJJC(bool flag){isCheckJJC = flag;};
+	bool getIsCheckJJC()const{return isCheckJJC;};
+	void setPowerUpCount(int count){localPlayerAttr.nPowerCount = count;};
+	void setCheckjjcRankIndex(int index){checkjjcRankIndex = index;};
+	int getCheckjjcRankIndex()const{return checkjjcRankIndex;};
+	void clearjjcData();
+	void updateArenaTimes(int index);
+	void setWuyejjcTimes(int conut);//午夜12点清空挑战次数
+	bool getIsJJCWin()const{return isJJCWin;};
+	void setIsJJCWin(bool flag){isJJCWin = flag;};
+	void setShowRoleState( int nState ) { m_ShowRoleState = nState; }
+	int	getShowRoleState()const { return m_ShowRoleState; }
+
+	void setAddSilver( int nAddSilver ) { m_AddSilver = nAddSilver; }
+	int getAddSilver()const { return m_AddSilver; } //奖励金钱
+
+	void setAddExp( int nAddExp ) { m_AddExp = nAddExp; }
+	int getAddExp() const{ return m_AddExp; } //奖励经验
+
+	void setAddDiamond( int nAddDiamond ) { m_AddDiamond = nAddDiamond; }
+	int getAddDiamod() { return m_AddDiamond; } //奖励钻石
+
+	void setHighestRank( int nHighestRank ) { m_HighestRank = nHighestRank; }
+	int getHighestRank() const{ return m_HighestRank; }
+
+	//std::string getChallengePlayerName(wchar_t* roleName);
+
+	//-----------------------------------------------------------------------------------------------
+	unsigned int onUpdatejjcRankData( s_net_cmd *cmd );
+	unsigned int onUpdatejjcData( s_net_cmd *cmd );
+	unsigned int onUpdateLosejjcData( s_net_cmd *cmd );
+
+	bool try_to_challenge(size_t index);
+
+private:
+	bool have_enough_challenge_cnt()const;
+	bool is_in_challenge_cd()const;
+
+	bool have_enough_yuanbao_to_clear_cd(int& cost)const;
+	bool have_enough_yuanbao_to_buy_challenge_ctn(int but_cnt);
+
+	void show_clear_cd_msgbox(int cost);
+	void show_buy_challenge_cnt_msgbox(int already_but_cnt,int cost_yuanbao);
+
+	void show_recharge_msgbox();
+
+	bool get_add_challenge_cost(int& cost_yuanbao);
+	int get_already_buy_cnt()const;
+	int get_add_challenge_max_cnt()const{return MAX_BUY_CHALLENGE_CNT;}
+
+	void on_msgbox_buy_challenge_cnt_ok();
+	void on_msgbox_cd_confirm();
+public:
+	bool try_to_clear_challenge_cd();
+	void try_to_add_challenge_cnt();
+private:
+	int _cache_cost;
+
+	int _countDownTime;
+	tagJJCTargetRoleInfo challengePlayerAttr[3];//三个挑战者
+	tagJJCTargetRoleInfo challengePlayerRankAttr[30];//三十个排名
+	tagJJCRoleInfo localPlayerAttr;//玩家
+	int checkedRankIndex;//选中的排名index
+	int checkedChallengeIndex;//选中要挑战的index
+	tagjjcAccessoryInfo localjjcAccessoryInfo;
+	int jjcRankCount;//排名榜的数量
+	bool isJJCResult;//是否返回信息
+	bool isCheckJJC;//是否可以进入jjc
+	int checkjjcRankIndex;//竞技场排名界面点中的名次
+	bool isJJCWin;//是否jjc胜利
+	int m_ShowRoleState; //是否显示角色 用于避免屏蔽人物时进入竞技场看不到对手
+	int m_AddSilver; //奖励金钱
+	int m_AddExp; //奖励经验
+	int m_AddDiamond; //奖励钻石
+	int m_HighestRank; //最高排名
+};
+
+
+#endif //FUBENRANKUI_H

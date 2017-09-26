@@ -1,0 +1,257 @@
+#include "AutoSelfProtect.h"
+#include "BaseDefine.h"
+#include "PackageManager.h"
+#include <time.h>
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "UiManager.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "Auto_ActionMgr.h"
+
+AutoSelfProtectMgr::AutoSelfProtectMgr()
+{
+	unsigned int curTime(0);
+#if 1 //lzz
+	struct timeval tv;
+	gettimeofday(&tv , 0);
+	curTime = tv.tv_sec*1000;
+#else
+	curTime = clock();
+#endif
+	int i;
+	for (i = 0;i<EAD_End;i++)
+	{
+		m_DrugsUseTime[i] = curTime;
+	}
+	m_NotDangerDrugTime = curTime;
+	m_NotHpDrugTime = curTime;
+	m_NotMpDrugTime = curTime;
+	m_pIsOpenHpCheck = true;
+}
+AutoSelfProtectMgr::~AutoSelfProtectMgr()
+{
+
+}
+AutoSelfProtectMgr* AutoSelfProtectMgr::getInstance()
+{
+	static AutoSelfProtectMgr mgr;
+	return &mgr;
+}
+void AutoSelfProtectMgr::SetDrugsID(unsigned int &typeID1,unsigned int &typeID2,unsigned int &typeID3)
+{
+	return;
+}
+void AutoSelfProtectMgr::SetStatePercent(short &rate1,short &rate2,short &rate3)
+{
+	return;
+}
+void AutoSelfProtectMgr::SelfProtect_Check()
+{
+	LocalPlayer *pLoc = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(pLoc))
+		return;
+	if (pLoc->isInRoleStateAny(RA_DEAD))
+		return;
+	//bug 6271 竞技场不应该保护
+	if(MapManager::getInstance()->getCurMapId()==2887771852)
+		return;
+	unsigned int curTime(0);
+#if 1 //lzz
+	struct timeval tv;
+	gettimeofday(&tv , 0);
+	curTime = tv.tv_sec*1000;
+#else
+	curTime = clock();
+#endif
+
+	HP_Check(pLoc,curTime);
+	MP_Check(pLoc,curTime);
+	return;
+}
+void AutoSelfProtectMgr::HP_Check(LocalPlayer *pLoc,unsigned int &curTime)
+{
+	if (pLoc == NULL || !m_pIsOpenHpCheck)
+		return;
+	f_item* pItem_Danger = NULL;
+	f_item* pItem_HP = NULL;
+	const int max_hp = pLoc->getAttribute(RA_MaxHP);
+	const int hp = pLoc->getAttribute(RA_HP);
+	float hp_rate = (float)hp/max_hp;
+	unsigned int timeDif = (unsigned int)INVALID;
+	//获取UI保存的数据
+	const HookSetData &tmpData = GET_UI(HookSetUi, WCT_HookSetUi)->getHookSetData();
+	int state_Danger = tmpData.dangerValue;
+	unsigned int drug_Danger = tmpData.dangerId;
+	int state_HP = tmpData.hpValue;
+	unsigned int drug_HP = tmpData.hpId;
+	//end
+	//判断玩家当前状态,优先判断是否处于生命垂危中
+	if (hp_rate*100 < state_Danger)
+	{
+		//物品检查
+		if (IS_VALID(drug_Danger))
+		{
+			pItem_Danger = PackageManager::getInstance()->getItem(EICT_Bag,drug_Danger,true);
+			if (pItem_Danger != NULL)
+			{
+				timeDif = curTime - m_DrugsUseTime[EAD_Instant];
+				const ItemTypeData & itemData = PackageManager::getInstance()->getItemTypeData(drug_Danger);
+				//时间间隔检查
+				//if (timeDif <= INSTANT_DRUG_USE_INTERVAL)
+				//使用时间间隔未到，不能使用
+				if(timeDif > (unsigned int)itemData.cdTime)
+				{
+					PackageManager::getInstance()->useDrugItem_AutoProtece(pItem_Danger);
+					AudioPlayer::getSigletonPtr()->playerSoundUIEffect(Medicine);
+					m_DrugsUseTime[EAD_Instant] = curTime;
+				}
+			}
+			else
+			{
+				timeDif = curTime - m_NotDangerDrugTime;
+				if (timeDif >= NOT_DRUG_PROMPT_INTERVAL)
+				{
+					const ItemTypeData & itemData = PackageManager::getInstance()->getItemTypeData(drug_Danger);
+					std::string strBasic = GET_STR(9110);
+					std::string str = replaceStr(strBasic,"**",itemData.name); //替换
+					ToolTip::getInstance()->push(str);
+					m_NotDangerDrugTime = curTime;
+				}
+			}
+		}
+	}
+	if (hp_rate*100 < state_HP)
+	{
+		//物品检查
+		if (IS_VALID(drug_HP))
+		{
+			pItem_HP = PackageManager::getInstance()->getItem(EICT_Bag,drug_HP,true);
+			if (pItem_HP != NULL)
+			{
+				timeDif = curTime - m_DrugsUseTime[EAD_HP];
+				const ItemTypeData & itemData = PackageManager::getInstance()->getItemTypeData(drug_HP);
+				//时间间隔检查
+				//if (timeDif <= NORMAL_DRUG_USE_INTERVAL)
+				//使用时间间隔未到，不能使用
+				if(timeDif > (unsigned int)itemData.cdTime)
+				{
+					PackageManager::getInstance()->useDrugItem_AutoProtece(pItem_HP);
+					AudioPlayer::getSigletonPtr()->playerSoundUIEffect(Medicine);
+					m_DrugsUseTime[EAD_HP] = curTime;
+				}
+			}
+			else
+			{
+				timeDif = curTime - m_NotHpDrugTime;
+				if (timeDif >= NOT_DRUG_PROMPT_INTERVAL)
+				{
+					const ItemTypeData & itemData = PackageManager::getInstance()->getItemTypeData(drug_HP);
+					std::string strBasic = GET_STR(9110);
+					std::string str = replaceStr(strBasic,"**",itemData.name); //替换
+					ToolTip::getInstance()->push(str);
+					m_NotHpDrugTime = curTime;
+				}
+				//勾选的药品没有了则找优先列表里的药，自动使用
+				timeDif = curTime - m_DrugsUseTime[EAD_HP];
+				for (int i = NORMAL2_DRUG_NUM - 1;i >= 0; --i)
+				{
+					if (g_NormalHPDrug_Array[i] == drug_HP)
+						continue;
+					pItem_HP = PackageManager::getInstance()->getItem(EICT_Bag,g_NormalHPDrug_Array[i],true);
+					if (pItem_HP == NULL)
+						continue;
+					const ItemTypeData & itemData = PackageManager::getInstance()->getItemTypeData(g_NormalHPDrug_Array[i]);
+					if (pLoc->getLevel() < itemData.level)
+						continue;
+					//时间间隔检查
+					if(timeDif > (unsigned int)itemData.cdTime)
+					{
+						PackageManager::getInstance()->useDrugItem_AutoProtece(pItem_HP);
+						AudioPlayer::getSigletonPtr()->playerSoundUIEffect(Medicine);
+						m_DrugsUseTime[EAD_HP] = curTime;
+					}
+				}
+			}
+		}
+	}
+	return;
+}
+void AutoSelfProtectMgr::MP_Check(LocalPlayer *pLoc,unsigned int &curTime)
+{
+	if (pLoc == NULL)
+		return;
+	f_item* pItem = NULL;
+	const int max_mp = pLoc->getAttribute(RA_MaxMP);
+	const int mp = pLoc->getAttribute(RA_MP);
+	float mp_rate = (float)mp/max_mp;
+	unsigned int timeDif = INVALID;
+	//获取UI保存的数据
+	const HookSetData &tmpData = GET_UI(HookSetUi, WCT_HookSetUi)->getHookSetData();
+	int state_MP = tmpData.mpValue;
+	unsigned int drug_MP = tmpData.mpId;
+	//end
+	//判断玩家当前状态,优先判断是否处于生命垂危中
+	if (mp_rate*100 < state_MP)
+	{
+		//物品检查
+		if (IS_VALID(drug_MP))
+		{
+			pItem = PackageManager::getInstance()->getItem(EICT_Bag,drug_MP,true);
+			if (pItem != NULL)
+			{
+				timeDif = curTime - m_DrugsUseTime[EAD_MP];
+				const ItemTypeData & itemData = PackageManager::getInstance()->getItemTypeData(drug_MP);
+				//时间间隔检查
+				//if (timeDif <= NORMAL_DRUG_USE_INTERVAL)
+				//使用时间间隔未到，不能使用
+				if(timeDif > (unsigned int)itemData.cdTime)
+				{
+					PackageManager::getInstance()->useDrugItem_AutoProtece(pItem);
+					AudioPlayer::getSigletonPtr()->playerSoundUIEffect(Medicine);
+					m_DrugsUseTime[EAD_MP] = curTime;
+				}
+			}
+			else
+			{
+				timeDif = curTime - m_NotMpDrugTime;
+				if (timeDif >= NOT_DRUG_PROMPT_INTERVAL)
+				{
+					const ItemTypeData & itemData = PackageManager::getInstance()->getItemTypeData(drug_MP);
+					std::string strBasic = GET_STR(9110);
+					std::string str = replaceStr(strBasic,"**",itemData.name); //替换
+					ToolTip::getInstance()->push(str);
+					m_NotMpDrugTime = curTime;
+				}
+				//勾选的药品没有了则找优先列表里的药，自动使用
+				timeDif = curTime - m_DrugsUseTime[EAD_MP];
+				for (int i = NORMAL_DRUG_NUM - 1;i >= 0; --i)
+				{
+					if (g_NormalHPDrug_Array[i] == drug_MP)
+						continue;
+					pItem = PackageManager::getInstance()->getItem(EICT_Bag,g_NormalMPDrug_Array[i],true);
+					if (pItem == NULL)
+						continue;
+					const ItemTypeData & itemData = PackageManager::getInstance()->getItemTypeData(g_NormalMPDrug_Array[i]);
+					if (pLoc->getLevel() < itemData.level)
+						continue;
+					//时间间隔检查
+					if(timeDif > (unsigned int)itemData.cdTime)
+					{
+						PackageManager::getInstance()->useDrugItem_AutoProtece(pItem);
+						AudioPlayer::getSigletonPtr()->playerSoundUIEffect(Medicine);
+						m_DrugsUseTime[EAD_MP] = curTime;
+					}
+				}
+			}
+		}
+	}
+	return;
+}
+
+void AutoSelfProtectMgr::SwitchHpCheck(bool bIsOpen)
+{
+	m_pIsOpenHpCheck = bIsOpen;
+}

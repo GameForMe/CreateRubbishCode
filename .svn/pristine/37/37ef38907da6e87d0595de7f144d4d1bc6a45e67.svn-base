@@ -1,0 +1,442 @@
+#include "item.h"
+#include "BaseDefine.h"
+#include <math.h>
+#include "DBMgr.h"
+#include "PackageManager.h"
+
+#define MIsLock(item)		false
+//#define MIsBind(item)		(((tagItem*)item)->byBind == EBS_Bind)
+
+#define MIsBind(item)		(((tagItem*)item)->IsBind())
+
+
+f_item::f_item() :
+	//m_pProto(NULL),
+    m_item_state(0),
+    b_locked(false),
+    m_last_item_state(0)
+{
+}
+
+f_item::~f_item()
+{
+
+}
+
+/** \构造函数
+	\param 物品基本结构
+*/
+f_item::f_item(const tagItem &Data) :
+//m_pProto(NULL),
+m_item_state(0),
+b_locked(false),
+m_last_item_state(0)
+{
+	//!拷贝数据
+	memcpy(&m_data, &Data, sizeof(tagItem));
+	
+	//!物品状态赋值
+	m_item_state = 0x0;
+	//!任务物品不能移动
+	//if(EICT_Quest == m_data.eConType)   //delete by hejiang 2011.4.7
+	//	SetMovable(false);
+
+	//!只有装备才可以穿
+	if(!MIsEquipment(m_data.dw_data_id))
+		set_wearable(false);
+	
+
+	//!锁定的物品不能丢弃
+	if(MIsLock(&m_data))
+		set_droppable(false);	
+	
+
+	//!已绑定或已锁定的物品无法交易
+	if(MIsBind(&m_data) || MIsLock(&m_data))
+		set_tradeable(false);
+}
+
+/** \拷贝构造函数
+*/
+f_item::f_item( const f_item& Data)
+{
+	f_item* pData = const_cast<f_item*>(&Data);
+	memcpy(&m_data, pData->get_data(), sizeof(tagItem));
+
+	//!物品状态赋值
+	m_item_state = 0x0;
+	//!任务物品不能移动
+	//if(EICT_Quest == m_data.eConType)
+	//	SetMovable(false);				//delete by hejiang 2011.4.7
+
+	//!只有装备才可以穿
+	if(!MIsEquipment(m_data.dw_data_id))
+		set_wearable(false);
+
+	//!锁定的物品不能丢弃
+	if(MIsLock(&m_data))
+		set_droppable(false);	
+
+	//!已绑定或已锁定的物品无法交易
+	if(MIsBind(&m_data) || MIsLock(&m_data))
+		set_tradeable(false);
+}
+
+//---------------------------------------------------
+// 状态判断
+//--------------------------------------------------- 
+void f_item::set_operable(bool operable_)
+{
+	if (operable_)//!设置是否可操作
+	{
+		m_item_state &= ~eis_inoperable; 
+	}
+	else
+	{
+		m_item_state |= eis_inoperable;
+	}
+}
+
+bool f_item::is_operable()
+{
+	bool bRet = !(m_item_state & eis_inoperable);
+	return bRet;
+}
+
+void f_item::set_movable(bool movable_)
+{
+	if (movable_)//!设置是否可移动
+	{
+		m_item_state &= ~eis_unmovable;
+	} 
+	else
+	{
+		m_item_state |= eis_unmovable;
+	}
+}
+
+bool f_item::is_movable()
+{
+	//!判断是否可移动先要判断是否可操作
+	bool bRet = !(m_item_state & eis_unmovable);
+	return is_operable() && bRet;
+}
+
+void f_item::set_wearable(bool wearable_)
+{
+	if (wearable_)//!设置是否可装备
+	{
+		m_item_state &= ~eis_unwearable;
+	} 
+	else
+	{
+		m_item_state |= eis_unwearable;
+	}
+}
+
+bool f_item::is_wearable()
+{
+	//!判断是否可装备先要判断是否可操作和可移动
+	bool bRet = !(m_item_state & eis_unwearable);
+	return is_operable() && is_movable() && bRet;
+}
+
+void f_item::set_useable(bool useable_)
+{
+	if (useable_)//!设置是否可使用
+	{
+		m_item_state &= ~eis_unuseable;
+	} 
+	else
+	{
+		m_item_state |= eis_unuseable;
+	}
+}
+
+bool f_item::is_useable()
+{
+	//!判断是否可使用先要判断是否可操作
+	bool bRet = !(m_item_state & eis_unuseable);
+	return is_operable() && bRet;
+}
+
+void f_item::set_droppable(bool droppable_)
+{
+	if (droppable_)//!设置是否可丢弃
+	{
+		m_item_state &= ~eis_undroppable;
+	} 
+	else
+	{
+		m_item_state |= eis_undroppable;
+	}
+}
+
+void f_item::set_vendible(bool vendible_)
+{
+	if (vendible_)//!设置是否可出售
+	{
+		m_item_state &= ~eis_unvendible;
+	} 
+	else
+	{
+		m_item_state |= eis_unvendible;
+	}
+}
+
+bool f_item::is_vendible()
+{
+	//!判断是否可丢弃先要判断是否可操作和可移动
+	bool bRet = !(m_item_state & eis_unvendible);
+	return is_operable() && is_movable() && bRet && !item_is_active_binded();
+}
+
+void f_item::set_tradeable(bool tradeable_)
+{
+	if (tradeable_)//!设置是否可交易
+	{
+		m_item_state &= ~eis_untradeable;
+	} 
+	else
+	{
+		m_item_state |= eis_untradeable;
+	}
+}
+
+bool f_item::is_tradeable()
+{
+	//!判断是否可丢弃先要判断是否可操作和可移动
+	bool bRet = !(m_item_state & eis_untradeable);
+	return is_operable() && is_movable() && bRet;
+}
+
+void f_item::set_stackable(bool stackable_)
+{
+	if (stackable_)//!设置是否可堆叠
+	{
+		m_item_state &= ~eis_unstackable;
+	}
+	else
+	{
+		m_item_state |= eis_unstackable;
+	}
+}
+
+bool f_item::is_stackable(short &quantity_)
+{
+	bool bRet = !(m_item_state & eis_unstackable);
+	quantity_ = get_item_number();
+	return bRet;
+}
+
+void f_item::lock()
+{
+    // if has been locked, return, to avoid write last status
+    if (b_locked)
+        return;
+
+    // save current item status
+    m_last_item_state = m_item_state;
+
+    // set all status disable
+    m_item_state = -1;
+
+    b_locked = true;
+}
+
+void f_item::unlock()
+{
+    // if is unlocked, return
+    if (!b_locked)
+        return;
+
+    // load last status
+    m_item_state = m_last_item_state;
+
+    b_locked = false;
+}
+
+std::string f_item::GetItemName()const
+{
+	ItemTypeData const* data = PackageManager::getInstance()->get_item_proto_ptr(m_data.dw_data_id);
+	CC_ASSERT(data);
+
+	return data->name;
+// 	std::string strname = "";
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT Name FROM PackageData WHERE TypeId = ?1");
+// 	cmd->set_integer32(1 , m_data.dw_data_id);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		strname = table->get_text(0);
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+// 
+// 	return strname;
+}
+
+
+//----------------------------------------------------------
+// 装备
+//----------------------------------------------------------
+f_equipment::f_equipment()
+{
+
+}
+
+f_equipment::~f_equipment()
+{
+
+}
+
+f_equipment& f_equipment::update(const tagEquip& Data)
+{
+	memcpy(&m_data, &Data, sizeof(tagItem));
+	int pos = sizeof(tagItem);
+	memcpy(&m_equipex, (unsigned char*)(&Data)+pos, sizeof(tagEquipSpec));
+	return *this;
+}
+
+f_equipment::f_equipment(const tagEquip &Data)
+{
+	//!拷贝数据
+	memcpy(&m_data, &Data, sizeof(tagItem));
+	int pos = sizeof(tagItem);
+	memcpy(&m_equipex, (unsigned char*)(&Data)+pos, sizeof(tagEquipSpec));
+
+	//!装备状态赋值
+	m_item_state = 0x0;
+
+	//!锁定的物品不能丢弃
+	if(MIsLock(&m_data))
+		set_droppable(false);	
+
+	//!已绑定或已锁定的物品无法交易
+	if(MIsBind(&m_data) || MIsLock(&m_data))
+		set_tradeable(false);
+
+	//装备物品不可堆叠
+	set_stackable(false);
+}
+
+f_equipment::f_equipment( const f_equipment& Data)
+{
+	f_equipment* pData = const_cast<f_equipment*>(&Data);
+	memcpy(&m_data, pData->get_data(), sizeof(tagItem));
+	memcpy(&m_equipex, pData->get_equip(), sizeof(tagEquipSpec));
+
+	//!装备状态赋值
+	m_item_state = 0x0;
+	//!锁定的物品不能丢弃
+	if(MIsLock(&m_data))
+		set_droppable(false);	
+
+	//!已绑定或已锁定的物品无法交易
+	if(MIsBind(&m_data) || MIsLock(&m_data))
+		set_tradeable(false);
+
+	//!装备不可堆叠
+	set_stackable(false);
+}
+
+void f_equipment::update_equipment( tagEquipSpec Data )
+{
+	//!拷贝数据
+	memcpy(&m_equipex, (unsigned char*)(&Data), sizeof(tagEquipSpec));
+	
+}
+
+int f_equipment::calculate_consolidate(short base_value_, unsigned char consolidate_level_, float param_)
+{
+	if (base_value_ == 0)
+		return 0;
+
+	float result = base_value_ * pow(param_, consolidate_level_);
+
+	//for (unsigned char i = 0; i < consolidate_level_; ++i)
+	//{
+	//	result = result + (result * param_);
+	//}
+
+	//result += byConLevel;
+
+	return (int)result;
+}
+
+
+//获取打孔成功率
+short	f_equipment::get_chise_prop(short yuanbao_num_)
+{
+	///const tagFormulaParam* pFormula = f_produce_data::get_singleton_ptr()->get_formula_param();
+	//if (!IS_VALID_PTR(pFormula))
+	//	return 0;
+
+	short fProp = 100;
+	//fProp = pFormula->n16HoleBase - pFormula->n16HolePro * m_equipex.byHoleNum + n16YuanBaoNum * pFormula->n16HoleYuanBaoPro;
+
+	if (fProp > 100)
+		fProp = 100;
+	return fProp;
+}
+//获取升品成功率
+int f_equipment::get_shengxing_prop(unsigned int number_)
+{
+	int fProp = 0;
+	fProp = ItemHelper::GetUpstarsPro(m_equipex.byConsolidateLevel) + ItemHelper::GetUpstarsAddPro(number_);
+
+	if (fProp > 10000)
+		fProp = 10000;
+
+	return fProp;
+}
+// 是否强化
+bool f_equipment::is_upstar()
+{
+	return (get_equip_consolidate_level() > 0);
+}
+
+bool f_equipment::is_posy()const
+{
+	return (get_equip_gem_num() > 0);
+}
+
+int f_equipment::get_indentify_att_num() const
+{
+	int cnt = 0;
+	for (INT32 i = MAX_BASE_ATT; i < MAX_ADDITIONAL_EFFECT ; i++)
+	{
+		tagRoleAttEffect const& tempTagRoleAttEffect = get_equip()->EquipAttitionalAtt[i];
+
+		if (tempTagRoleAttEffect.eRoleAtt != NULL && tempTagRoleAttEffect.nValue > 0)
+		{
+			++cnt;
+		}
+	}
+
+	return cnt;
+}
+
+unsigned char f_equipment::get_equip_max_hole_num()
+{
+	//return m_equipex.byHoleNum;
+	EquipTypeData const* data = PackageManager::getInstance()->getEquipTypeData(get_item_type_id());
+	if (data)
+	{
+		return data->gemHole==1?m_equipex.byHoleNum:0;
+	}
+
+	return m_equipex.byHoleNum;
+}
+
+int f_equipment::get_modified_quanlity()const
+{
+	EquipTypeData const* data = PackageManager::getInstance()->getEquipTypeData(get_item_type_id());
+	if (data)
+	{
+		return (int)get_item_quality()+ data->quality_modify;
+	}
+
+	return get_item_quality();
+}
+

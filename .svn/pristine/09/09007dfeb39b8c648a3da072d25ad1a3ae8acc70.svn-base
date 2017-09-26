@@ -1,0 +1,870 @@
+#include "RewardMgr.h"
+#include "TCPClient.h"
+#include "World.h"
+#include "CrossSceneUI.h"
+#include "MiniMapUi.h"
+#include "RewardProto.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "StringMgr.h"
+#include "ToolTip.h"
+#include "Base.h"
+#include "PackageManager.h"
+#include "activeProto.h"
+#include "ServerActivityUi.h"
+#include "SynthesisServerUi.h"
+#include "UiManager.h"
+#include "ConsumptionUi.h"
+#include "DBMgr.h"
+#include "SQLTable.h"
+#include "SQLCommand.h"
+#include "SocialProto.h"
+#include "SignInUi.h"
+#include "ServerTime.h"
+#include "ChongZhiActivityFarmeUI.h"
+#include "OnLineReward.h"
+#include "ReceiveRewardUi.h"
+#include "NewSignUi.h"
+
+RewardMgr::RewardMgr()
+	: _onlineAnim(true)
+	,m_nLastTime(1000000000)
+	,m_nDestTime(1000000000)
+	,_isBagEmpty(false)
+	,isGoToChongZhiHaoLi(false)
+{
+	
+}
+
+RewardMgr::~RewardMgr()
+{
+	/*	TCP_CLIENT->unregister_net_cmd("NET_SIS_update_reward_data" , this , &RewardMgr::onFretchReward);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_receive_reward" , this , &RewardMgr::onGetSubReward);	
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_new_role_gift" , this , &RewardMgr::onGetNewBeeReward);		
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_reward_data" , this , &RewardMgr::onRewardItems);			
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_sign_reward" , this , &RewardMgr::onSignReward);	
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_new_role_gift" , this , &RewardMgr::onNewRoleGift);		
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_new_role_gift" , this , &RewardMgr::onOnlineReward);		*/	
+}
+void RewardMgr::init()
+{
+	TCP_CLIENT->register_net_cmd("NET_SIS_update_reward_data" , this , &RewardMgr::onFretchReward);
+	TCP_CLIENT->register_net_cmd("NET_SIS_receive_reward" , this , &RewardMgr::onGetSubReward);	
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_reward_data" , this , &RewardMgr::onGetRewardItems);			
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_sign_reward" , this , &RewardMgr::onSignReward);			
+	TCP_CLIENT->register_net_cmd("NET_SIS_new_role_gift" , this , &RewardMgr::onNewRoleGift);		
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_new_role_gift" , this , &RewardMgr::onOnlineReward);			
+
+	TCP_CLIENT->register_net_cmd("NET_SIS_receive_serial_reward" , this , &RewardMgr::onGetSerialReward);
+	TCP_CLIENT->register_net_cmd("NET_SIS_role_active_receive" , this , &RewardMgr::onGetActivityReward);
+	TCP_CLIENT->register_net_cmd("NET_SIS_active_done" , this , &RewardMgr::onGetActivityDone);
+	TCP_CLIENT->register_net_cmd("NET_SIS_update_sign_level" , this , &RewardMgr::onUpdateSigneLevel);
+
+	//开服七天活动;
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_server_acitvity", this, &RewardMgr::onUpdateServerActivityDay);
+//	TCP_CLIENT->register_net_cmd("NET_SIS_get_server_acitvity", this, &RewardMgr::onLevelServerActivity);
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_server_acitvity_receive", this, &RewardMgr::onGetServerActivityReward);
+	//消费返利
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_totalyuanbao_consume_reward", this, &RewardMgr::onGetYBConsumeReplyReward);
+	sendRewardItems();
+	_bRewardScriptInited = false;
+	_bNeedRefreshServerActivity = false;
+	_bNeedRefreshSign = false;
+}
+void RewardMgr::destroy()
+{
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_update_reward_data" , this , &RewardMgr::onFretchReward);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_receive_reward" , this , &RewardMgr::onGetSubReward);	
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_reward_data" , this , &RewardMgr::onGetRewardItems);			
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_sign_reward" , this , &RewardMgr::onSignReward);			
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_new_role_gift" , this , &RewardMgr::onNewRoleGift);		
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_new_role_gift" , this , &RewardMgr::onOnlineReward);			
+
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_receive_serial_reward" , this , &RewardMgr::onGetSerialReward);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_role_active_receive" , this , &RewardMgr::onGetActivityReward);;
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_active_done" , this , &RewardMgr::onGetActivityDone);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_update_sign_level" , this , &RewardMgr::onUpdateSigneLevel);
+
+	//开服七天活动;
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_server_acitvity", this, &RewardMgr::onUpdateServerActivityDay);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_get_server_acitvity", this, &RewardMgr::onLevelServerActivity);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_server_acitvity_receive", this, &RewardMgr::onGetServerActivityReward);
+	//消费返利
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_totalyuanbao_consume_reward", this, &RewardMgr::onGetYBConsumeReplyReward);
+}
+RewardMgr* RewardMgr::getInstance()
+{
+	static RewardMgr mgr;
+	return &mgr;
+}
+
+void RewardMgr::sendRewardItems()
+{
+	NET_SIC_get_reward_data cmd;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_IDLE , false);
+}
+
+//签到奖励
+void RewardMgr::sendSignReward()
+{
+	//玩家是否已经领取当日签到奖励
+	LocalPlayer *pLoc = RoleManager::getInstance()->getLocalPlayer();
+	if (!IS_VALID_PTR(pLoc))
+		return;
+	if (pLoc->getRoleDayClearInfo(ERDCT_Sign_Nubmer) >= 1)
+	{
+		ToolTip::getInstance()->push(GET_STR(2052));
+		return;
+	}
+	NET_SIC_get_sign_reward cmd;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_IDLE , false);
+}
+
+void RewardMgr::getSubReward(E_REWARDFROM rew_)
+{
+	NET_SIC_receive_reward cmd;
+	cmd.byType = rew_;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_IDLE , false);
+	//const tagRewardData *data = getRewardData(rew_);
+	//for(int i = 0; i < MAX_REWARD_NUMBER; i ++)
+	//{
+	//	if(data[i].dwItemDataID != 0)
+	//	{
+	//		cmd.byIndex = i;
+	//		
+	//	}
+	//}
+}
+
+void RewardMgr::getNewbeeReward()
+{
+	NET_SIC_get_new_role_gift cmd;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_IDLE , false);
+}
+
+unsigned int RewardMgr::onFretchReward( s_net_cmd* cmd )
+{
+	NET_SIS_update_reward_data* msg = (NET_SIS_update_reward_data*)cmd;	
+	_rewardData[msg->byType][msg->byIndex] = msg->st_data;
+	if (!(World::getInstance()->getMiniMapUi()))
+		return 0;//防止掉线再上线UI未初始化
+	World::getInstance()->getMiniMapUi()->updateAnimation();
+	return 0;
+}
+
+unsigned int RewardMgr::onGetSubReward( s_net_cmd* cmd )
+{
+	//NET_SIS_receive_reward* msg = (NET_SIS_receive_reward*)cmd;
+	return 0;
+}
+
+unsigned int RewardMgr::onGetRewardItems( s_net_cmd* cmd )
+{
+	NET_SIS_get_reward_data* msg = (NET_SIS_get_reward_data*)cmd;
+	memcpy(_rewardData, msg->st_data, sizeof(_rewardData));
+	if (!(World::getInstance()->getMiniMapUi()))
+		return 0;//防止掉线再上线UI未初始化
+	World::getInstance()->getMiniMapUi()->updateAnimation();
+	return 0;
+}
+
+unsigned int RewardMgr::onSignReward( s_net_cmd* cmd )
+{
+	NET_SIS_get_sign_reward* msg = (NET_SIS_get_sign_reward*)cmd;
+	if (!(World::getInstance()->getMiniMapUi()))
+		return 0;//防止掉线再上线UI未初始化
+	ReceiveRewardUiMgr::GetInstance()->setUiTag(WCT_NewSignUi);
+	World::getInstance()->getMiniMapUi()->updateAnimation();
+	if (0 == msg->dw_error)
+	{
+		NewSignUi *newSignUi = GET_UI(NewSignUi,WCT_NewSignUi);
+		if (newSignUi && newSignUi->getUiLayer())
+			newSignUi->getUiLayer()->setSignInFlogBySprite();
+		ReceiveRewardUiMgr::GetInstance()->openRewardUi();
+	}
+	else
+		ReceiveRewardUiMgr::GetInstance()->clearItemBowl();
+	return 0;
+}
+
+unsigned int RewardMgr::onNewRoleGift( s_net_cmd* cmd )
+{
+	NET_SIS_new_role_gift* msg = (NET_SIS_new_role_gift*)cmd;
+	_giftID = msg->dwGiftID;
+	_num = msg->dwNumber;
+	m_nLastTime = msg->dwLeavingTime;
+	m_nDestTime = IncreaseTime(ServerTime::getInstance()->cal_current_server_dword_time(),msg->dwLeavingTime);
+	_bCal = msg->bCal;
+	_step = msg->step;
+	NET_SIC_begin_role_gift_time rgt;
+	TCP_CLIENT->send_net_cmd(&rgt , NP_IDLE , false);
+	OnlineUiMgr::GetInstance()->updateDisplay();
+
+	return 0;
+}
+//在线奖励
+bool RewardMgr::sendOnlineReward()
+{
+	if(isTimeArrivalOfOnlineReward())
+	{
+		//首先判断背包是否已满
+		if (PackageManager::getInstance()->getBlankCount() <= 0)
+		{
+			ToolTip::getInstance()->push(GET_STR(2043));
+			_isBagEmpty = true;
+			return false;
+		}
+		_isBagEmpty = false;
+		NET_SIC_get_new_role_gift cmd;
+		TCP_CLIENT->send_net_cmd(&cmd , NP_IDLE , false);
+		return true;
+	}
+	return false;
+}
+
+void RewardMgr::update(float dt)
+{
+	m_nLastTime = CalcTimeDiff(m_nDestTime,ServerTime::getInstance()->cal_current_server_dword_time());
+	if( m_nLastTime > 0.f)
+	{
+		_onlineAnim = true;
+		//!更新剩余时间
+		unsigned int minutes = (m_nLastTime / 60) % 60;
+		unsigned int secondes = m_nLastTime % 60;
+		if (!(World::getInstance()->getMiniMapUi()))
+			return;//防止掉线再上线UI未初始化
+		World::getInstance()->getMiniMapUi()->setOnlineTime(CCString::createWithFormat("%02d:%02d", minutes, secondes)->getCString());
+	}
+	else
+	{
+		if(_onlineAnim)
+		{
+			if (!(World::getInstance()->getMiniMapUi()))
+				return;//防止掉线再上线UI未初始化
+			World::getInstance()->getMiniMapUi()->setOnlineTime("");
+			World::getInstance()->getMiniMapUi()->updateAnimation();
+			_onlineAnim = false;
+		}
+	}
+}
+ SendRewardMgrInfo RewardMgr::GetReceiveRewardInfo()
+ {
+	 SendRewardMgrInfo info;
+	 info._receiveGiftID = _giftID;
+	 info._receiveLastTime = m_nLastTime;
+	 info._receivebCal = _bCal;
+	 info._receiveStep = _step;
+	 return info;
+ }
+
+unsigned int RewardMgr::onOnlineReward( s_net_cmd* cmd )
+{
+	NET_SIS_get_new_role_gift* msg = (NET_SIS_get_new_role_gift*)cmd;
+	if(msg->dwError == E_Success)
+	{
+		if(m_nLastTime <= 0.f)
+		{
+			_giftID = 0;
+		}
+		ReceiveRewardUiMgr::GetInstance()->openRewardUi();
+	}
+	else if(msg->dwError == 18)
+	{
+		ToolTip::getInstance()->push(GET_STR(161));	//背包空间不足
+		ReceiveRewardUiMgr::GetInstance()->clearItemBowl();
+	}
+
+	else if(msg->dwError == 19)
+	{
+		ToolTip::getInstance()->push(GET_STR(6009));	//奖励时间未到，不能获取
+		ReceiveRewardUiMgr::GetInstance()->clearItemBowl();
+	}
+	else
+	{
+		ToolTip::getInstance()->push(GET_STR(6010));	//出现异常，不可领取
+		ReceiveRewardUiMgr::GetInstance()->clearItemBowl();
+	}
+	if (!(World::getInstance()->getMiniMapUi()))
+		return 0;//防止掉线再上线UI未初始化
+	World::getInstance()->getMiniMapUi()->updateAnimation();
+	return 0;
+}
+
+int RewardMgr::getRewardCount( E_REWARDFROM rf )
+{
+	int count = 0;
+	const tagRewardData *data = getRewardData(rf);
+	for(int i = 0; i < MAX_REWARD_NUMBER; i ++)
+	{
+		if(data[i].dwItemDataID != 0)
+			count ++;
+	}
+	return count;
+}
+
+bool RewardMgr::isTimeArrivalOfOnlineReward()
+{
+	return (PackageManager::getInstance()->isValidItem(_giftID) && m_nLastTime <= 0.f);
+}
+
+bool RewardMgr::isHasOnlineReward()
+{
+	return _bCal;
+}
+
+void RewardMgr::resetBCal()
+{
+	_bCal = false;
+}
+
+void RewardMgr::sendSerialReward( std::string strInput )
+{
+	if (strInput.empty())
+		return;
+
+	NET_SIC_receive_serial_reward cmd;
+	strncpy(cmd.sz_serial,strInput.c_str(),X_SHORT_NAME-1);
+	CCLOG("Serial no:%s", strInput.c_str());
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+}
+
+void RewardMgr::sendServerActivityNotice(bool bInstant /* = true */)
+{
+	NET_SIC_get_server_acitvity cmd;
+	if (bInstant)
+	{
+		TCP_CLIENT->send_net_cmd(&cmd, NP_IDLE, false);
+	}
+	else
+	{
+		TCP_CLIENT->send_net_cmd(&cmd, NP_IDLE, false);
+	}
+}
+
+void RewardMgr::getServerActivityReward( int day )
+{
+	NET_SIC_get_server_acitvity_receive cmd;
+	cmd.nDay = day;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_IDLE , false);
+}
+
+unsigned int RewardMgr::onGetSerialReward( s_net_cmd* cmd )
+{
+	NET_SIS_receive_serial_reward* msg = (NET_SIS_receive_serial_reward*)cmd;
+	if (0 != msg->dw_error)//仅考虑错误信息
+	{
+		if (133 == msg->dw_error)//已领取同类礼包
+		{
+			ToolTip::getInstance()->push(GET_STR(2157));
+		}
+		else if (131 == msg->dw_error)//不存在的序列号
+		{
+			ToolTip::getInstance()->push(GET_STR(2158));
+		}
+		else
+		{
+			//do nothing
+		}
+	}
+	return 0;
+}
+
+unsigned int RewardMgr::onGetActivityReward( s_net_cmd* cmd )
+{
+	NET_SIS_role_active_receive* msg = (NET_SIS_role_active_receive*)cmd;
+	//给错误提示
+	if (1 == msg->dw_error)//活跃度不足，无法领取
+	{
+		ToolTip::getInstance()->push(GET_STR(2160));
+	}
+	else if (2 == msg->dw_error)//相应的活跃度奖励已经领取
+	{
+		ToolTip::getInstance()->push(GET_STR(2161));
+	}
+	else if (0 == msg->dw_error)//领取奖励成功
+	{
+		ReceiveRewardUiMgr::GetInstance()->openRewardUi();
+	}
+	else
+	{
+		//do nothing
+	}
+	ReceiveRewardUiMgr::GetInstance()->clearItemBowl();
+	return 0;
+}
+
+unsigned int RewardMgr::onGetActivityDone( s_net_cmd* cmd )
+{
+	//NET_SIS_active_done* msg = (NET_SIS_active_done*)cmd;
+	return 0;
+}
+
+unsigned int RewardMgr::onUpdateSigneLevel( s_net_cmd* cmd )
+{
+	NET_SIS_update_sign_level* msg = (NET_SIS_update_sign_level*)cmd;
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return 0;
+	ploc->setSignLevel(msg->nSignLevel);
+	return 0;
+}
+
+//更新开服活动天数
+unsigned int RewardMgr::onUpdateServerActivityDay( s_net_cmd* cmd )
+{
+	NET_SIS_get_server_acitvity* msg = (NET_SIS_get_server_acitvity*)cmd;
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+	 	return 0;
+	ploc->setLevelSelf(msg->dwSelf);
+	if (!(World::getInstance()->getMiniMapUi()))
+		return 0;//防止掉线再上线UI未初始化
+	World::getInstance()->setServerActivityDay(msg->nDay);
+	World::getInstance()->setOpenStage(msg->nOpenStage);
+	if (1 == msg->nOpenStage)
+	{
+		if (msg->nDay < 9)
+		{
+			MiniMapUi* pUI = World::getInstance()->getMiniMapUi();
+			if (!pUI)
+				return 0;
+			MiniMapUiLoaderLayer* pMiniMapLayer = (MiniMapUiLoaderLayer*)pUI->getChildByTag(0);
+			if(pMiniMapLayer)
+				//pMiniMapLayer->SetBtnVisible(0, true, true);      一测隐藏  
+			GET_UI(ServerActivityUi,WCT_ServerActivityUi)->updateData();
+		}
+	}
+	else
+	{
+		//[bing] 7天乐取消
+		//GET_UI(SynthesisServerUi,WCT_SynthesisServerUi)->updateData();
+	}
+
+	return 0;
+}
+
+// unsigned int RewardMgr::onLevelServerActivity( s_net_cmd* cmd )
+// {
+// 	NET_SIS_get_server_acitvity* msg = (NET_SIS_get_server_acitvity*) cmd;
+// 	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+// 	if (!ploc)
+// 		return 0;
+// 	ploc->setLevelSelf(msg->dwSelf);
+// 	World::getInstance()->setOpenStage(msg->nOpenStage);
+// 	if (1 == msg->nOpenStage)
+// 	{
+// 		GET_UI(ServerActivityUi,WCT_ServerActivityUi)->updateData();
+// 	}
+// 	else
+// 	{
+// 		GET_UI(SynthesisServerUi,WCT_SynthesisServerUi)->updateData();
+// 	}
+// 
+// 	return 0;
+// }
+
+unsigned int RewardMgr::onGetServerActivityReward( s_net_cmd* cmd )
+{
+	NET_SIS_get_server_acitvity_receive* msg = (NET_SIS_get_server_acitvity_receive*)cmd;
+	if (0 == msg->dw_error_code)
+	{
+		ToolTip::getInstance()->push(GET_STR(6011));
+	}
+	if (1 == msg->dw_error_code)
+	{
+		ToolTip::getInstance()->push(GET_STR(6007));
+	} 
+	else if( 2 == msg->dw_error_code)
+	{
+		ToolTip::getInstance()->push(GET_STR(6008));
+	}
+	else if ( 3 == msg->dw_error_code)
+	{
+		ToolTip::getInstance()->push(GET_STR(6009));
+	}
+	else if ( 4 == msg->dw_error_code)
+	{
+		ToolTip::getInstance()->push(GET_STR(6010));
+	}
+	else
+	{
+		//do nothing;
+	}
+	return 0;
+}
+
+void RewardMgr::getYBConsumeReplyReward( unsigned char byState )
+{
+	if (byState < 0 || byState > MAX_CONSUME_REPLY_NUM)
+		return;
+	NET_SIC_get_totalyuanbao_consume_reward send;
+	send.byState = byState;
+	TCP_CLIENT->send_net_cmd(&send , NP_IDLE , false);
+}
+
+unsigned int RewardMgr::onGetYBConsumeReplyReward( s_net_cmd* cmd )
+{
+	NET_SIS_get_totalyuanbao_consume_reward* msg = (NET_SIS_get_totalyuanbao_consume_reward*)cmd;
+	if (0 == msg->dw_error_code)//奖励领取成功
+	{
+ 		ToolTip::getInstance()->push(GET_STR(2175));
+		GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->updateRebateUi();
+// 		GET_UI(ConsumptionUi,WCT_ConsumptionUi)->updateData();
+// 
+// 		//消费返利领奖特效更新;
+// 		MiniMapUi *mUi = World::getInstance()->getMiniMapUi();
+// 		if (mUi)
+// 		{
+// 			mUi->updateActivityAnimation();
+// 		}
+	}
+	else if (E_Open_Server_Has_Recv == msg->dw_error_code)//已经领取过啦
+	{
+		ToolTip::getInstance()->push(GET_STR(6007));
+		GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->updateRebateUi();
+	}
+	else if (E_Open_Server_Cant == msg->dw_error_code)//消费元宝不足领取条件
+	{
+		//int yuanbaoNum=PackageManager::getInstance()->getTotalChargeYuanBao();
+		//if (yuanbaoNum<=0)
+		//{
+		//	OPEN_UI(WCT_ShouChongUi);
+		//}
+		//else
+		//{
+		//	OPEN_UI(WCT_StoreRechargeUi);
+		//}
+		OPEN_UI(WCT_STOREUI);
+		//ToolTip::getInstance()->push(GET_STR(2313));
+		GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->updateRebateUi();
+	}
+	else if (E_Open_Server_Not_Free_Bag == msg->dw_error_code)//背包空间不足
+	{
+		ToolTip::getInstance()->push(GET_STR(7117));
+		GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->updateRebateUi();
+	}
+	else
+	{
+		GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->updateRebateUi();
+		//do nothing
+	}
+
+	return 0;
+}
+
+AwardInfo RewardMgr::getAwardInfoByIndex(int index)
+{
+	AwardInfo awardInfo;
+	c_sql_command *cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM DailySigninData WHERE Id = ?1");
+	cmd->set_integer32(1,index);
+	c_sql_table * table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("Day");
+		awardInfo._day = table->get_integer32(idx);
+		idx = table->get_index("Item1");
+		awardInfo.ItemId[0] = table->get_integer32(idx);
+		idx = table->get_index("Num1");
+		awardInfo.ItemNum[0] = table->get_integer32(idx);
+		idx = table->get_index("Item2");
+		awardInfo.ItemId[1] = table->get_integer32(idx);
+		idx = table->get_index("Num2");
+		awardInfo.ItemNum[1] = table->get_integer32(idx);
+		idx = table->get_index("Item3");
+		awardInfo.ItemId[2] = table->get_integer32(idx);
+		idx = table->get_index("Num3");
+		awardInfo.ItemNum[2] = table->get_integer32(idx);
+		idx = table->get_index("Item4");
+		awardInfo.ItemId[3] = table->get_integer32(idx);
+		idx = table->get_index("Num4");
+		awardInfo.ItemNum[3] = table->get_integer32(idx);
+		idx = table->get_index("Item5");
+		awardInfo.ItemId[4] = table->get_integer32(idx);
+		idx = table->get_index("Num5");
+		awardInfo.ItemNum[4] = table->get_integer32(idx);
+		idx = table->get_index("Award");
+		awardInfo.ItemId[5] = table->get_integer32(idx);
+		idx = table->get_index("Num");
+		awardInfo.ItemNum[5] = table->get_integer32(idx);
+		idx = table->get_index("vipDouble");
+		awardInfo._vipReward = table->get_integer32(idx);
+		idx = table->get_index("vipLevel");
+		awardInfo._vipLevel = table->get_integer32(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	return awardInfo;
+}
+//选中的那天是否可以签到，包含正常签到和补签
+bool RewardMgr::canSign(int nSelectDay)
+{
+	//int nCurDay = World::getInstance()->getServerActivityDay();//当前是开服第几天
+	//nCurDay--;//开服天数要从0开始
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return false;
+	int nCurDay = ploc->GetDayNumFromRoleCrateTime();//从0开始的
+	if(nCurDay < 0)
+		nCurDay = 0;
+	if (nCurDay >= MAX_SIGN_DAY_NUM-1)//第28天以及以后
+	{
+		if (isSignedCurDay(nSelectDay))
+			return false;
+	}
+	else
+	{
+		if (isSignedCurDay(nSelectDay))//若已经签到了
+			return false;
+		if (nSelectDay > nCurDay)//选中的当前天的后来的日子，不能签到
+			return false;
+	}
+	return true;
+}
+
+bool RewardMgr::canNormalSign(int nSelectDay)
+{
+	//int nCurDay = World::getInstance()->getServerActivityDay();//当前是开服第几天
+	//nCurDay--;//开服天数要从0开始
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return false;
+	int nCurDay = ploc->GetDayNumFromRoleCrateTime();//从0开始的
+	if(nCurDay < 0)
+		nCurDay = 0;
+	if (nCurDay >= MAX_SIGN_DAY_NUM-1)
+	{
+		if (nSelectDay == MAX_SIGN_DAY_NUM-1)
+			return true;
+	}
+	else
+	{
+		if (nCurDay == nSelectDay)
+			return true;
+	}
+	return false;
+}
+//选中当天是否已经签到 true代表已经签到
+bool RewardMgr::isSignedCurDay( int nDay )
+{
+	if (nDay < 0 || nDay > MAX_SIGN_DAY_NUM-1)
+		return false;
+	unsigned int dwSigneData = World::getInstance()->GetRoleScriptDataByIndex(SIGN_SCRIPT_DATA_FLAG);
+	if ((MAX_SIGN_DAY_NUM-1) == nDay)//28天特殊处理
+	{
+		//通过每日清零数据来判断该天是否签到过
+		LocalPlayer* pLocPlayer = RoleManager::getInstance()->getLocalPlayer();
+		if (!pLocPlayer)
+			return false;
+		if (!pLocPlayer->getRoleDayClearInfo(ERDCT_Sign_Nubmer))
+			return false;
+		else
+			return true;
+	}
+	else
+	{
+		return (dwSigneData & (1 << nDay));
+	}
+}
+//是否漏签
+bool RewardMgr::isLeakSign(int nDay)
+{
+	if (nDay < 0 || nDay > MAX_SIGN_DAY_NUM-1)
+		return false;
+	if (6 == nDay || 14 == nDay || 24 == nDay)
+	{
+		unsigned int dwSigneData = World::getInstance()->GetRoleScriptDataByIndex(SIGN_SCRIPT_DATA_FLAG);
+		for (int i = 0; i < nDay; i++)
+		{
+			if (!(dwSigneData & (1 << i)))//gx modify
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+//向服务器发消息
+void RewardMgr::sendSign2Server( int nSelectDay,unsigned char byType )
+{
+	int bagCount = PackageManager::getInstance()->getBlankCount();//获取玩家背包空格数
+	if (bagCount < 1)
+	{
+		ToolTip::getInstance()->push(GET_STR(161));
+		return;
+	}
+
+/*
+	if (!canGetRewardFromChannel(RF_SHANCI,7))
+	{
+		ToolTip::getInstance()->push(GET_STR(2336));
+		return;
+	}*/
+
+	NET_SIC_get_sign_reward cmd;
+	cmd.byDay = nSelectDay;
+	cmd.byType = byType;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_IDLE , false);
+	AwardInfo awardInfo = RewardMgr::getInstance()->getAwardInfoByIndex(nSelectDay);
+	int bei = 1;
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if (!player)
+	{
+		return;
+	}
+	//if (awardInfo._vipReward == 2)暂时屏蔽签到vip的双倍奖励(2015.09.12版本_测)
+	//{
+	//	int vipLevel = player->getVIPLevel();
+	//	if (vipLevel >= awardInfo._vipLevel)
+	//	{
+	//		bei = 2;
+	//	}
+	//}
+	int today = player->GetDayNumFromRoleCrateTime();
+	int rewardIndex = 0;
+	if (today > 28 && today <= 56)
+	{
+		rewardIndex = 1;
+	}
+	else if (today > 56)
+	{
+		rewardIndex = 2;
+	}
+
+	ReceiveRewardUiMgr::GetInstance()->setItemData(awardInfo.ItemId[rewardIndex],awardInfo.ItemNum[rewardIndex] * bei,awardInfo._vipLevel);
+}
+
+
+//判断是否需要播放签到的特效 true代表需要
+bool RewardMgr::isNeedShowSign()
+{
+	if(!_bRewardScriptInited)
+		return false;//若还没有初始化，则不需要闪烁特效
+	LocalPlayer* pLocPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if (!pLocPlayer)
+		return false;
+	//int nCurDay = World::getInstance()->getServerActivityDay();//当前是开服第几天，从0开始
+	//nCurDay--;//开服天数要从0开始
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return false;
+	int nCurDay = ploc->GetDayNumFromRoleCrateTime();//从0开始的
+	if(nCurDay < 0)
+		nCurDay = 0;
+	if ((MAX_SIGN_DAY_NUM-1) <= nCurDay)//判断28天以及以后的情况
+	{
+		if (!pLocPlayer->getRoleDayClearInfo(ERDCT_Sign_Nubmer))
+			return true;
+	}
+	
+	unsigned int dwSigneData = World::getInstance()->GetRoleScriptDataByIndex(SIGN_SCRIPT_DATA_FLAG);
+	int minDay = nCurDay;
+	if (minDay>MAX_SIGN_DAY_NUM-1)
+		minDay = MAX_SIGN_DAY_NUM-1;
+	for (int i = 0;i <= minDay;++i)
+	{
+		if (!(dwSigneData & (1 << i)))//若某天未签到
+			return true;
+	}
+	return false;
+}
+
+void RewardMgr::refreshServerActivity()
+{
+	tagDWORDTime ti = ServerTime::getInstance()->cal_current_server_dword_time();
+	if(ti.hour < 1 && ti.min < 2)
+	 	_bNeedRefreshServerActivity = true;
+	
+	if(ti.hour < 1 && ti.min >= 2 && _bNeedRefreshServerActivity)
+	{
+		_bNeedRefreshServerActivity = false;
+		//向服务器请求最新的七天乐信息
+		sendServerActivityNotice(false);
+	}
+
+	//0点重置签到效果
+	if(ti.hour == 23 && ti.min == 59)
+		_bNeedRefreshSign = true;
+	if(ti.hour < 1 && ti.min == 0 && _bNeedRefreshSign)
+	{
+		_bNeedRefreshSign = false;
+		//World::getInstance()->getMiniMapUi()->updateAnimation();//刷新一遍领奖特效。
+		//World::getInstance()->setSignBtnUpdate();
+		//ToolTip::getInstance()->push(GET_STR(2337));
+	}
+}
+//判断某个奖励通道是否够放nNum个奖品
+bool RewardMgr::canGetRewardFromChannel( E_REWARDFROM eType,int nNum )
+{
+	if (eType < RF_CHONGZHI || eType >= RF_NUM)
+		return false;
+	int nBlank = 0;//空格数
+	for (int i = 0;i < MAX_REWARD_NUMBER;++i)
+	{
+		const tagRewardData& data = _rewardData[eType][i];
+		if (0 == data.dwItemDataID || (unsigned int)INVALID == data.dwItemDataID || data.dwNumber <= 0)
+		{
+			nBlank++;
+		}
+	}
+	if (nNum <= nBlank)
+		return true;//空格子数够用
+	return false;
+}
+
+bool RewardMgr::isGetBigSignReward( int nSelectDay )
+{
+	if (6 != nSelectDay && 14 != nSelectDay && 24 != nSelectDay)
+		return false;
+	unsigned int dwRewardData = World::getInstance()->GetRoleScriptDataByIndex(4);
+	if ((dwRewardData & (1 << nSelectDay)))
+		return true;
+	return false;
+}
+
+bool RewardMgr::deleteActivitySignList( eWroldChildTag tag )
+{
+	int size = activitySignList.size();
+	eWroldChildTag tempTag;
+	for (int i = 0;i < size;++i)
+	{
+		if (activitySignList.front() == tag)
+		{
+			activitySignList.pop_front();
+			return true;
+		}
+		else
+		{
+			tempTag = activitySignList.front();
+			activitySignList.pop_front();
+			activitySignList.push_back(tempTag);
+		}
+	}
+	return false;
+}
+
+void RewardMgr::setActivitySignList( eWroldChildTag tag )
+{
+	int size = activitySignList.size();
+	eWroldChildTag tempTag;
+	for (int i = 0;i < size;++i)
+	{
+		if (activitySignList.front() == tag)
+		{
+			return;
+		}
+		else
+		{
+			tempTag = activitySignList.front();
+			activitySignList.pop_front();
+			activitySignList.push_back(tempTag);
+		}
+	}
+	activitySignList.push_back(tag);
+}
+
+void RewardMgr::clearActivitySignList()
+{
+	activitySignList.clear();
+}
+

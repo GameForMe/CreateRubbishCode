@@ -1,0 +1,96 @@
+#include "NpcChatLuaMgr.h"
+#include "cocos2d.h"
+#include "NPCChatMgr.h"
+//#include "FileInputStream.h"
+#include "CfgReader.h"
+#include "ToolTip.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "NameMgr2.h"
+#include "CCLuaEngine.h"
+#include "SkillAnimManager.h"
+using namespace cocos2d;
+NpcChatLuaMgr::NpcChatLuaMgr()
+	//: _isInit(false)
+{	
+	std::string filename = CFGReader::instance()->get_profile_string("Scheme" , "Script" , "Script/");
+	std::stringstream ss;
+	ss<<filename<<"npcchat.lua"<<'\0';
+
+	CCString* file_content = CCString::createWithContentsOfFile(ss.str().c_str(),true);
+// 	FileInputStream script(ss.str().c_str(),EM_SMALL,true);
+// 	size_t sz = script.getSize();
+// 	char* mem = (char*)malloc(sz + 1);
+// 	script.readBlock(mem , sz);
+// 	mem[sz]  = 0;
+	CCLuaEngine* pEngine = CCLuaEngine::defaultEngine();
+	pEngine->executeString(file_content->getCString());
+//	free(mem);
+	
+	//reSetData();
+}
+
+void NpcChatLuaMgr::doNPCScript(int index)
+{
+	CCLuaEngine* pEngine = CCLuaEngine::defaultEngine();
+	CCLuaStack * stack = pEngine->getLuaStack();
+	lua_State* state = stack->getLuaState();
+	lua_getglobal(state, "NPCChatDialog");
+
+	SkillAnimManager::getInstance()->clearAll();
+
+	stack->pushInt(index);
+	stack->executeFunction(1);
+	stack->clean();
+	//pEngine->executeGlobalFunction(strFuncName.c_str());
+}
+
+NpcChatLuaMgr* NpcChatLuaMgr::getInstance()
+{
+	static NpcChatLuaMgr mgr;
+	return &mgr;
+}
+
+//////////////////////////////////////////////////////////////////////////
+NpcChatLuaMgr::~NpcChatLuaMgr(){}
+//////////////////////////////////////////////////////////////////////////
+void updataNPCChatUi(unsigned int liftRoleId,unsigned int rightRoleId,const char* name,const char* talk,int show_skip)
+{
+	NPCChatData *temp = new NPCChatData;
+	temp->liftRolePicPath = liftRoleId;
+	temp->rightRolePicPath = rightRoleId;
+	temp->roleChatData = talk;
+	std::string tmpqian = "";
+	std::string tmphou = "";
+	
+	char vStr[128];
+	memset(vStr, 0, sizeof(char) * 128);
+	Utf16ToUtf8(RoleManager::getInstance()->getLocalPlayer()->getName(), vStr, 128, 0);
+	std::string s = vStr;
+	while(true)
+	{
+		int i = temp->roleChatData.find("aaa");
+		if (i != -1)
+		{
+			tmpqian = temp->roleChatData.substr(0,i).c_str();
+			tmphou = temp->roleChatData.substr(i + 3,temp->roleChatData.size());
+			temp->roleChatData = "";
+			temp->roleChatData = tmpqian + s + tmphou;
+			//i = -1;
+		}else{
+			break;
+		}
+	}
+
+	//-------------------------------------------------------------------------------------
+	temp->roleName = name;
+	int j = temp->roleName.find("aaa");
+	if (j != -1)
+	{
+		temp->roleName = s;
+	}
+
+	temp->bShowSkip = show_skip==1;
+	//-------------------------------------------------------------------------------------
+	NPCChatMgr::getInstance()->setNpcAllChatData(temp);
+}

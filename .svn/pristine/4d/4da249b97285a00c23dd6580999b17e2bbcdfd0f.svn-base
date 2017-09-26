@@ -1,0 +1,85 @@
+#include "UiManagerEffect.h"
+#include "LandNode.h"
+
+UiManagerEffect * UiManagerEffect::getInstance()
+{
+	static UiManagerEffect instance;
+	return &instance;
+}
+
+UiManagerEffect::UiManagerEffect()
+{
+}
+
+void UiManagerEffect::createEffect(std::string effectName,int positionX,int positionY)
+{
+	LandNode* landNode = LandNode::create();
+	//landNode->setAnchorPoint(ccp(0.5f,0.5f));
+	landNode->setPosition(ccp(positionX, positionY));
+
+	AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0, effectName, anims);
+	_usedAnims.push_back(AnimsUsed(AT_Sin, effectName));
+	BSAnimate *animate = anims[0];
+	CCSprite *sprite = CCSprite::create();
+	//float offestX = 0.0f;
+	//float offestY = 0.0f;
+	//getModelOffest(effectName, offestX, offestY);
+	//sprite->setPosition(ccp(positionX, positionY));
+	landNode->addChild(sprite);
+	CCTMXTiledMap *map = MapManager::getInstance()->getMap();
+	map->addChild(landNode, 1, 1);
+	sprite->runAction(CCRepeatForever::create(animate));
+}
+
+void UiManagerEffect::runCurrentEffect()
+{
+	std::string currentMapId=MapManager::getInstance()->getCurCopyMapName();
+	int s = currentMapId.find_last_of('/');
+	int e = currentMapId.find_last_of('.');
+	std::string tmp = currentMapId.substr(s+1 , e -s - 1);
+	selectTable(tmp);
+	std::map<unsigned int , EffectData>::iterator iter2 = _effectData.begin();
+	for(;iter2!=_effectData.end() ; ++iter2)
+	{
+		EffectData _data=iter2->second;
+		createEffect(_data.effectName,_data.postionX,_data.PostionY);
+	}
+}
+
+void UiManagerEffect::destory()
+{
+	AnimationCache::getInstance()->releaseAnims(_usedAnims);
+	_usedAnims.clear();
+}
+
+void UiManagerEffect::selectTable( std::string mapId )
+{
+	 _effectData.clear();
+	std::string str = "SELECT * FROM Sceneeffectdata WHERE mapid = ?1";
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation(str);
+	cmd->set_text(1 , mapId);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		EffectData data;
+		int currentID;
+		int idx=table->get_index("ID");
+		currentID = table->get_integer32(idx);
+		idx=table->get_index("effectname");
+		data.effectName=table->get_text(idx);
+		idx=table->get_index("X");
+		data.postionX=table->get_integer32(idx);
+		idx=table->get_index("Y");
+		data.PostionY=table->get_integer32(idx);
+		idx=table->get_index("mapid");
+		data.mapId=table->get_integer32(idx);
+		_effectData.insert(std::make_pair(currentID, data));
+	}
+
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+}
+

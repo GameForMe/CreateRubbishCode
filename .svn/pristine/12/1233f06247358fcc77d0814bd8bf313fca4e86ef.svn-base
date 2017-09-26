@@ -1,0 +1,1259 @@
+#include "RankUi.h"
+#include "World.h"
+#include "UiTools.h"
+#include "UiLoader.h"
+#include "StringMgr.h"
+#include "Loading.h"
+#include "LocalPlayer.h"
+#include "GuildMgr.h"
+#include "RoleEquipUi.h"
+#include "NameMgr2.h"
+#include "SocialMgr.h"
+#include "RemoteRoleStateMgr.h"
+#include "ChatUi.h"
+#include "SystemUi.h"
+#include "SonghuaUi.h"
+#include "VIPMgr.h"
+#include "Helper.h"
+RankUi::RankUi()
+{
+
+}
+
+RankUi::~RankUi()
+{
+
+}
+
+CCNode * RankUi::openUi()
+{
+#ifdef _DEBUG
+	clock_t t[10];
+	memset(t,0,10*sizeof(t[0]));
+	clock_t t_begin = clock();
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	t[0] = clock();
+	nodeLoaders["RankUiLayer"] = UiNodeLoader<RankUiLayer>::loader();
+	t[1] = clock();
+	nodeLoaders["TouchSprite"] = TouchSpriteLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("rankui", nodeLoaders, _loadSpriteSheet);
+	t[2] = clock();
+	clock_t t_end = clock();
+	//if (t_end>t_begin && t_end-t_begin>=50)
+	{
+		CCLOG("RankUi::openUi:-------totoal:%d, ",t_end-t_begin);
+		for (int i=0; i<2; i++)
+		{
+			CCLOG("t%d:%d",i+1,t[i+1]-t[i]);
+		}
+		CCLOG("RankUi::openUi:-------totoal:%d, -------------------------------",t_end-t_begin);
+	}
+#else
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["RankUiLayer"] = UiNodeLoader<RankUiLayer>::loader();
+	nodeLoaders["TouchSprite"] = TouchSpriteLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("rankui", nodeLoaders, _loadSpriteSheet);
+#endif
+
+	return uiNode;
+}
+
+RankUiLayer * RankUi::getUiLayer()
+{
+	return getUiNodeByTag<RankUiLayer>(WCT_RankUi);
+}
+
+void RankUi::updateData()
+{
+	RankUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateDataBySelectTab();
+	}
+}
+void RankUi::updategraduates(int num)
+{
+	RankUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateDataBySelectTabGraduates(num);
+	}
+}
+//////////////////////////////////////////////////////////////////////////
+
+RankUiLayer::RankUiLayer()
+	: _verticalList(NULL)
+	, _verticalList2(NULL)
+	, _selectTab(T_Null)
+	,_descLab(NULL)
+	,_mineLab(NULL)
+	,_warriorTopten(0)
+	,_mageTopten(0)
+	,_taoistTopten(0)
+	,_manTopten(0)
+	,_womanTopten(0)
+	,_mingshiTopten(0)
+	,_fuhaoTopten(0)
+{
+
+}
+
+RankUiLayer::~RankUiLayer()
+{
+	if(_verticalList != NULL)
+	{
+		delete _verticalList;
+		_verticalList = NULL;
+	}
+
+	if(_verticalList2 != NULL)
+	{
+		delete _verticalList2;
+		_verticalList2 = NULL;
+	}
+
+}
+
+cocos2d::SEL_MenuHandler RankUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler RankUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", RankUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLookupBtnPressed", RankUiLayer::onLookupBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChatBtnPressed",RankUiLayer::onChatBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGuanzhuBtnPressed",RankUiLayer::onGuanzhuBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSonghuaBtnPressed",RankUiLayer::onSonghuaBtnPressd);
+	//规则
+	return NULL;
+}
+
+void RankUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_tabFrameName.push_back("rankui_leveln");
+	_tabFrameName.push_back("rankui_zhanlin");
+	_tabFrameName.push_back("rankui_meilin");
+	_tabFrameName.push_back("rankui_guildn");
+	_tabFrameName.push_back("rankui_mingshin");
+	_tabFrameName.push_back("rankui_richn");
+	_tabFrameName.push_back("rankui_levelh");
+	_tabFrameName.push_back("rankui_zhanlih");
+	_tabFrameName.push_back("rankui_meilih");
+	_tabFrameName.push_back("rankui_guildh");
+	_tabFrameName.push_back("rankui_mingshih");
+	_tabFrameName.push_back("rankui_richh");
+
+	_normalFilterFrameName[T_Dengjibang].push_back("rankui_alltabn");//全部
+	_normalFilterFrameName[T_Dengjibang].push_back("rankui_warriortabn");//战士
+	_normalFilterFrameName[T_Dengjibang].push_back("rankui_magetabn");//法师
+	_normalFilterFrameName[T_Dengjibang].push_back("rankui_taoisttabn");//道士
+
+	_highFilterFrameName[T_Dengjibang].push_back("rankui_alltabh");
+	_highFilterFrameName[T_Dengjibang].push_back("rankui_warriortabh");
+	_highFilterFrameName[T_Dengjibang].push_back("rankui_magetabh");
+	_highFilterFrameName[T_Dengjibang].push_back("rankui_taoisttabh");
+ 
+	_normalFilterFrameName[T_Zhanlibang].push_back("rankui_alltabn");
+	_normalFilterFrameName[T_Zhanlibang].push_back("rankui_warriortabn");
+	_normalFilterFrameName[T_Zhanlibang].push_back("rankui_magetabn");
+	_normalFilterFrameName[T_Zhanlibang].push_back("rankui_taoisttabn");
+	_highFilterFrameName[T_Zhanlibang].push_back("rankui_alltabh");
+	_highFilterFrameName[T_Zhanlibang].push_back("rankui_warriortabh");
+	_highFilterFrameName[T_Zhanlibang].push_back("rankui_magetabh");
+	_highFilterFrameName[T_Zhanlibang].push_back("rankui_taoisttabh");
+
+	_normalFilterFrameName[T_Meilibang].push_back("rankui_alltabn");
+	_normalFilterFrameName[T_Meilibang].push_back("rankui_maletabn");
+	_normalFilterFrameName[T_Meilibang].push_back("rankui_femaletabn");
+	_highFilterFrameName[T_Meilibang].push_back("rankui_alltabh");
+	_highFilterFrameName[T_Meilibang].push_back("rankui_maletabh");
+	_highFilterFrameName[T_Meilibang].push_back("rankui_femaletabh");
+
+	_normalFilterFrameName[T_Hanghuibang].push_back("rankui_alltabn");
+	_highFilterFrameName[T_Hanghuibang].push_back("rankui_alltabh");
+
+	_normalFilterFrameName[T_MingShibang].push_back("rankui_alltabn");
+	_highFilterFrameName[T_MingShibang].push_back("rankui_alltabh");
+
+	_normalFilterFrameName[T_FuHaobang].push_back("rankui_alltabn");
+	_highFilterFrameName[T_FuHaobang].push_back("rankui_alltabh");
+
+	//title name
+	_titleName[T_Dengjibang].push_back(GET_STR(46));
+	_titleName[T_Dengjibang].push_back(GET_STR(35));
+	_titleName[T_Dengjibang].push_back(GET_STR(36));
+	_titleName[T_Dengjibang].push_back(GET_STR(37));
+	_titleName[T_Dengjibang].push_back(GET_STR(39));
+
+	_titleName[T_Zhanlibang].push_back(GET_STR(46));
+	_titleName[T_Zhanlibang].push_back(GET_STR(35));
+	_titleName[T_Zhanlibang].push_back(GET_STR(36));
+	_titleName[T_Zhanlibang].push_back(GET_STR(40));
+	_titleName[T_Zhanlibang].push_back(GET_STR(39));
+
+	_titleName[T_Meilibang].push_back(GET_STR(46));
+	_titleName[T_Meilibang].push_back(GET_STR(35));
+	_titleName[T_Meilibang].push_back(GET_STR(36));
+	_titleName[T_Meilibang].push_back(GET_STR(42));
+	_titleName[T_Meilibang].push_back(GET_STR(39));
+
+	_titleName[T_Hanghuibang].push_back(GET_STR(46));
+	_titleName[T_Hanghuibang].push_back(GET_STR(44));
+	_titleName[T_Hanghuibang].push_back(GET_STR(3));
+	_titleName[T_Hanghuibang].push_back(GET_STR(47));
+	_titleName[T_Hanghuibang].push_back(GET_STR(45));
+	 
+	_titleName[T_MingShibang].push_back(GET_STR(46));
+	_titleName[T_MingShibang].push_back(GET_STR(35));
+	_titleName[T_MingShibang].push_back(GET_STR(36));
+	_titleName[T_MingShibang].push_back(GET_STR(2277));
+	_titleName[T_MingShibang].push_back(GET_STR(39));
+
+	_titleName[T_FuHaobang].push_back(GET_STR(46));
+	_titleName[T_FuHaobang].push_back(GET_STR(35));
+	_titleName[T_FuHaobang].push_back(GET_STR(36));
+	_titleName[T_FuHaobang].push_back(GET_STR(37));
+	_titleName[T_FuHaobang].push_back(GET_STR(39));
+	
+
+
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(NT_Frame));
+	CC_ASSERT(_frame != NULL);
+ 	_btnFrame = dynamic_cast<CCSprite*>(_frame->getChildByTag(NT_btnFrame));
+ 	CC_ASSERT(_btnFrame != NULL);
+	_btnFrame->setVisible(false);
+	_content = _frame->getChildByTag(NT_Content);
+	CC_ASSERT(_content != NULL);
+	_scrollView = createScrollViewWithContent(_content);
+	_content->addChild(_scrollView);
+
+	_verticalList = new VerticalList<RankListIItem>;
+	_verticalList->addToScrollView(_scrollView);
+	_verticalList->setMinSize(_content->getContentSize());
+	_verticalList->setEnableSelect(true);
+	_verticalList->setSelectSpriteFrame("rankui_select");//
+
+	_content2 = _frame->getChildByTag(NT_Content2);
+	_verticalList2 = new VerticalList<RankLabItem>;
+	_verticalList2->addToParent(_content2);
+	//_verticalList2->setAnchorPoint(ccp(0.f, 1.0f));
+	_verticalList2->setPosition(ccp(0, _content2->getContentSize().height-20));
+	_verticalList2->setMinSize(_content2->getContentSize());
+	_verticalList2->setEnableSelect(true);
+	_verticalList2->setSelectSpriteFrame("rankui_selectract");
+
+	_descLab =  Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_DescLab)));
+	_mineLab = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_MineLab)));
+	_mineName = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_MineName)));
+	_mineVal = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_MineVal)));
+	_promptTitle=Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_Prompt)));
+	_mineNameStartPos = _mineName->getPosition();
+	_mineValStartPos = _mineVal->getPosition();
+	CC_ASSERT(_descLab != NULL && _mineLab != NULL);
+	
+	
+
+	
+
+	getTouchSprite(T_Dengjibang)->signalTouched.connect(this, &RankUiLayer::onTabDengjibangTouch);
+	getTouchSprite(T_Zhanlibang)->signalTouched.connect(this, &RankUiLayer::onTabZhanlibangTouch);
+	getTouchSprite(T_Meilibang)->signalTouched.connect(this, &RankUiLayer::onTabMeilibangTouch);
+	getTouchSprite(T_Hanghuibang)->signalTouched.connect(this, &RankUiLayer::onTabHanghuibangTouch);
+	getTouchSprite(T_MingShibang)->signalTouched.connect(this, &RankUiLayer::onTabMingShiTouch);
+	getTouchSprite(T_FuHaobang)->signalTouched.connect(this, &RankUiLayer::onTabFuHaoTouch);
+	for(int i = NT_Column1Name; i < NT_Column1Name + NT_ColumnNum; i ++)
+	{
+		LabelFT *label = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(i)));
+		CC_ASSERT(label != NULL);
+		label->setTag(i);
+	}
+	setSelectTab(T_Dengjibang);
+	//showBtnFrame(false);
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void RankUiLayer::onExit()
+{
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	WaitLoading::getInstance()->stop();
+}
+
+bool RankUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_frame, pTouch))
+	{
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);//vv
+		_starTouchPoint = _content2->convertTouchToNodeSpace(pTouch);
+		showBtnGroundFrame(false);
+		return true;
+	}
+
+	return false;
+}
+
+void RankUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_content2, pTouch))
+	{
+		CCPoint pt = _content2->convertTouchToNodeSpace(pTouch);
+		if(ccpDistance(pt, _starTouchPoint) < TOUCH_MOVE_DIS)
+		{
+		//	showBtnFrame(false);
+			RankLabItem *preSel = _verticalList2->getSelectItem();
+			_verticalList2->onTouch(pTouch);
+			RankLabItem *curSel = _verticalList2->getSelectItem();
+			if(preSel != curSel)
+			{
+				if(curSel == NULL)
+				{
+					CCPoint pt = preSel->getPosition();
+					preSel->setPosition(ccp(pt.x - 8,pt.y));
+					_verticalList2->setSelectItem(preSel);
+					preSel->setPosition(pt);
+				}
+				else
+				{
+					if(preSel != NULL)
+						preSel->setSelect(false);
+					curSel->setSelect(true);
+
+					CCPoint pt = curSel->getPosition();
+					curSel->setPosition(ccp(pt.x - 8,pt.y));
+					_verticalList2->setSelectItem(curSel);
+					curSel->setPosition(pt);
+
+					_verticalList->unselected();
+
+					_selectFileterIndex = curSel->getIndex();
+					updateDataBySelectFilter();
+				}
+			}
+		}
+	}
+
+	if (isTouchOnNodeContent(_content,pTouch))
+	{
+		CCPoint pt = _content2->convertTouchToNodeSpace(pTouch);
+		if(ccpDistance(pt, _starTouchPoint) < TOUCH_MOVE_DIS)
+		{
+			RankListIItem *lastSelectItem = _verticalList->getSelectItem();
+			RankListIItem *item = _verticalList->onTouch(pTouch);
+			if (lastSelectItem != item)
+			{
+				if (item != NULL && _selectTab != T_Hanghuibang)
+				{
+					showBtnGroundFrame(true);
+				}
+				else
+				{
+					showBtnGroundFrame(false);
+				}
+			}
+		}
+	}
+}
+
+void RankUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);//vv
+	CLOSE_UI(WCT_RankUi);
+}
+
+void RankUiLayer::onLookupBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if (_verticalList->getSelectItem())
+	{
+		//只能查看在线玩家的信息;
+		RemoteRoleStateMgr::getInstance()->RefreshRemoteRoleAllInfo(_verticalList->getSelectItem()->getRoleId());
+	}
+}
+
+void RankUiLayer::onChatBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if (_verticalList->getSelectItem())
+	{
+		unsigned int roleId = _verticalList->getSelectItem()->getRoleId();
+		std::string roleName("");
+		if (NameMgr2::getInstance()->queryName(roleId,roleName))
+		{
+			GET_UI(ChatUi, WCT_ChatUi)->sendMessageTo(roleId, roleName);
+			//点击私聊,下方功能按钮隐藏;
+			GET_UI(SystemUi,WCT_SystemUi)->showUi(false);
+			//关闭当前界面;
+			CLOSE_UI(WCT_RankUi);
+		}
+	}
+}
+
+void RankUiLayer::onGuanzhuBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	unsigned int roleId = _verticalList->getSelectItem()->getRoleId();
+	SocialMgr::getInstance()->onAddFriend(roleId);
+	
+}
+
+void RankUiLayer::onSonghuaBtnPressd( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if (_verticalList->getSelectItem())
+	{
+		//送花;
+		LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+		if(!ploc)
+			return;
+		OPEN_UI(WCT_SonghuaUi);
+		GET_UI(SonghuaUi, WCT_SonghuaUi)->setRoleId(_verticalList->getSelectItem()->getRoleId());
+	}
+}
+
+void RankUiLayer::setSelectTab( eTab tab )
+{
+	showBtnGroundFrame(false);
+
+	const char *str[] = {
+		"\xE6\x88\x91\xE7\x9A\x84\xE7\xAD\x89\xE7\xBA\xA7\x3A",       //我的等级：;
+		"\xE6\x88\x91\xE7\x9A\x84\xE6\x88\x98\xE5\x8A\x9B\x3A",     //我的战力：;
+		"\xE6\x88\x91\xE7\x9A\x84\xE9\xAD\x85\xE5\x8A\x9B\x3A",		//我的魅力：;
+		"\xE6\x88\x91\xE7\x9A\x84\xE8\xA1\x8C\xE4\xBC\x9A\x3A",	    //我的行会：;
+		"\xE6\x88\x91\xE7\x9A\x84\xE6\x8E\x92\xE8\xA1\x8C\xEF\xBC\x9A", //我的排行：;
+	};
+	LocalPlayer *player = RoleManager::getInstance()->getLocalPlayer();
+	const sGuildDesc& guildDesc = GuildMgr::getInstance()->getGuildDesc();
+	CC_ASSERT(player != NULL);
+	if(tab != _selectTab)
+	{
+		_descLab->setString("");
+		_mineLab->setString("");
+		switch(tab)
+		{
+		case T_Dengjibang:
+			{
+				RankMgr::getInstance()->sendLvlTopten();
+				_descLab->setVisible(true);
+				_mineLab->setVisible(true);
+				_descLab->setString(str[0]);
+				CCString *strLevel = CCString::createWithFormat("%d",player->getLevel());
+				_mineLab->setString(strLevel->getCString());
+				break;
+			}
+		case T_Zhanlibang:
+			{
+				RankMgr::getInstance()->sendBattleTopten();
+				_descLab->setVisible(true);
+				_mineLab->setVisible(true);
+				_descLab->setString(str[1]);
+				CCString *strZhanli = CCString::createWithFormat("%d",player->getAttribute(RA_BATTLE_POINT));
+				_mineLab->setString(strZhanli->getCString());
+				break;
+			}
+		case T_Meilibang:
+			{
+				RankMgr::getInstance()->sendBeautifulTopten();
+				_descLab->setVisible(true);
+				_mineLab->setVisible(true);
+				_descLab->setString(str[2]);
+				CCString *strMeili = CCString::createWithFormat("%d",player->getAttribute(RA_MEILI_POINT));
+				_mineLab->setString(strMeili->getCString());
+				break;
+			}
+		case T_Hanghuibang:
+			{    
+
+				RankMgr::getInstance()->sendGuildTopten();
+				_descLab->setVisible(true);
+				_mineLab->setVisible(true);
+				_descLab->setString(str[3]);
+				if (guildDesc.guild_name.size() > 0)
+				{
+					_mineLab->setString(guildDesc.guild_name.c_str());
+				}
+				else
+				{
+					_mineLab->setString(CCString::createWithFormat("%s","\xE6\x97\xA0")->getCString());
+				}				
+				break;
+			}
+		case T_MingShibang:
+			{
+				//发送师徒消息				
+				RankMgr::getInstance()->sendMasterTopten();
+				_descLab->setVisible(true);
+				_mineLab->setVisible(true);
+				std::string str = CCString::createWithFormat("%s:","\xE5\x87\xBA\xE5\xB8\x88\xE5\xBE\x92\xE5\xBC\x9F")->getCString();
+				std::string val = CCString::createWithFormat("%d",0)->getCString();
+				_descLab->setString(str.c_str());
+				_mineLab->setString(val.c_str());
+				break;
+			}
+		case T_FuHaobang:
+			{
+				//发送富豪榜消息;
+				RankMgr::getInstance()->sendReachTopten();
+				_descLab->setVisible(true);
+				_mineLab->setVisible(true);
+				//int viplevel = VIPMgr::getInstance()->getVIPLv();
+				//std::string str = CCString::createWithFormat("VIP%s:","\xE7\xAD\x89\xE7\xBA\xA7")->getCString();
+				//std::string val = CCString::createWithFormat("%d",viplevel)->getCString();
+				//_descLab->setString(str.c_str());
+				//_mineLab->setString(val.c_str());
+				_descLab->setVisible(false);
+				_mineLab->setVisible(false);
+				break;
+			}
+		}
+
+		TouchSprite *curSprite = getTouchSprite(_selectTab);
+		TouchSprite *destSprite = getTouchSprite(tab);
+		if(curSprite != NULL)
+			curSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(_tabFrameName[_selectTab].c_str()));
+		if(destSprite != NULL)
+			destSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(_tabFrameName[tab + T_TabNum].c_str()));
+		_selectTab = tab;
+
+		clock_t t[10];
+		memset(t,0,10*sizeof(t[0]));
+		clock_t t_begin = clock();
+
+		t[0] = clock();
+		updateFilterBySelectTab();
+		t[1] = clock();
+		updateTitleBySelectTab();
+		t[2] = clock();
+		updateDataBySelectTab();
+		t[3] = clock();
+
+		clock_t t_end = clock();
+		//if (t_end>t_begin && t_end-t_begin>=50)
+		{
+			CCLOG("RankUiLayer::setSelectTab:-------totoal:%d, ",t_end-t_begin);
+			for (int i=0; i<3; i++)
+			{
+				CCLOG("t%d:%d",i+1,t[i+1]-t[i]);
+			}
+			CCLOG("RankUiLayer::setSelectTab:-------totoal:%d, -------------------------------",t_end-t_begin);
+		}
+	}
+}
+
+TouchSprite * RankUiLayer::getTouchSprite( eTab tab )
+{
+	switch(tab)
+	{
+	case T_Dengjibang:
+		return dynamic_cast<TouchSprite*>(_frame->getChildByTag(NT_LevelTab));
+	case T_Zhanlibang:
+		return dynamic_cast<TouchSprite*>(_frame->getChildByTag(NT_ZhanliTab));
+	case T_Meilibang:
+		return dynamic_cast<TouchSprite*>(_frame->getChildByTag(NT_MeiliTab));
+	case T_Hanghuibang:
+		return dynamic_cast<TouchSprite*>(_frame->getChildByTag(NT_GuildTab));
+	case T_MingShibang:
+		return dynamic_cast<TouchSprite*>(_frame->getChildByTag(NT_MingShiTab));
+	case T_FuHaobang:
+		return dynamic_cast<TouchSprite*>(_frame->getChildByTag(NT_RichTab));
+	}
+	return NULL;
+}
+
+void RankUiLayer::updateFilterBySelectTab()
+{
+	if(_selectTab > T_Null && _selectTab < T_TabNum)
+	{
+		int index = 0;
+		_verticalList2->clear();
+		for(StrList::iterator iter = _normalFilterFrameName[_selectTab].begin() ,iter2 = _highFilterFrameName[_selectTab].begin(); 
+			iter != _normalFilterFrameName[_selectTab].end(); ++ iter, ++ iter2)
+		{
+			RankLabItem *item = new RankLabItem;
+			item->setData(*iter, *iter2, index++);
+			_verticalList2->addItem(item);
+		}
+		RankLabItem *selItem = _verticalList2->getItem(0);
+		_selectFileterIndex = 0;
+		selItem->setSelect(true);
+		_verticalList2->updateDisplay();
+		RankLabItem *item = _verticalList2->getItem(0);
+		CCPoint pt = item->getPosition();
+		item->setPosition(ccp(pt.x - 8,pt.y));
+		_verticalList2->setSelectItem(item);
+		item->setPosition(pt);
+	}
+}
+
+void RankUiLayer::updateTitleBySelectTab()
+{
+	if(_selectTab > T_Null && _selectTab < T_TabNum)
+	{
+		for(int i = NT_Column1Name; i < NT_Column1Name + NT_ColumnNum; i ++)
+		{
+			LabelFT *label = dynamic_cast<LabelFT*>(_frame->getChildByTag(i));
+			CC_ASSERT(label != NULL);
+			label->setTextColor(Helper::converColor3B_2_4B(ccc3(0xff, 0xe8, 0x80)));
+			label->setString(_titleName[_selectTab][i - NT_Column1Name].c_str());
+		}
+	}
+}
+void RankUiLayer::updateCurrentRoleRank(unsigned int roleId,int rank,eTab tab)
+{
+	if (tab == T_Hanghuibang)
+	{
+		std::string str = CCString::createWithFormat("%s:","\xE8\xA1\x8C\xE4\xBC\x9A\xE6\x8E\x92\xE5\x90\x8D")->getCString();
+		std::string val = CCString::createWithFormat("%d",rank)->getCString();
+		_mineName->setString(str.c_str());
+		_mineVal->setString(val.c_str());
+		_mineName->setPosition(ccp(_mineNameStartPos.x - 5,_mineNameStartPos.y));
+		_mineVal->setPosition(ccp(_mineValStartPos.x - 5,_mineValStartPos.y));
+		if (roleId == 0 || rank == 0)
+		{
+			_mineName->setVisible(false);
+			_mineVal->setVisible(false);
+		}
+		return;
+	}	
+	std::string str = "";
+	std::string val = "";
+	CCPoint pos = ccp(_frame->getContentSize().width - 180,_mineName->getPositionY());
+	CCPoint pos1 = ccp(_frame->getContentSize().width - 90,_mineName->getPositionY());		
+	if (tab == T_Null || roleId == 0 || rank == 0)
+	{
+		str = CCString::createWithFormat("%s","\xE6\x9C\xAA\xE4\xB8\x8A\xE6\xA6\x9C")->getCString();		
+		_mineName->setString(str.c_str());	
+		_mineVal->setString("");
+		_mineName->setPosition(pos);
+		return;
+	}
+	if (rank < 50)
+	{		
+		str = CCString::createWithFormat("%s:","\xE6\x88\x91\xE7\x9A\x84\xE6\x8E\x92\xE5\x90\x8D")->getCString(); 				
+		_mineName->setString(str.c_str());	
+		val = CCString::createWithFormat("%d",rank)->getCString();
+		_mineVal->setString(val.c_str());
+		_mineName->setPosition(pos);
+		_mineVal->setPosition(pos1);			
+	}
+	else
+	{
+		str = CCString::createWithFormat("%s","\xE6\x9C\xAA\xE4\xB8\x8A\xE6\xA6\x9C")->getCString();		
+		_mineName->setString(str.c_str());	
+		_mineVal->setString("");
+		_mineName->setPosition(pos);
+	}		
+}
+
+void RankUiLayer::updateDataBySelectTabGraduates(int num)
+{
+	_mineLab->setString(CCString::createWithFormat("%d",num)->getCString());
+}
+void RankUiLayer::updateDataBySelectTab()
+{
+	_verticalList->clear();
+	_mineName->setString("");	
+	_mineVal->setString("");
+	_mineName->setVisible(true);
+	_mineVal->setVisible(true);
+	//临时变量
+	unsigned int localPlayerID = RoleManager::getInstance()->getLocalPlayer()->getId();
+	unsigned int dw_role_id = 0; //玩家ID
+	int rank_index = 0;				// 玩家名次
+	eTab tab = T_Null;
+	switch(_selectTab)
+	{
+	case T_Dengjibang:
+		{
+			if(RankMgr::getInstance()->isInit(TT_LEVEL))
+				WaitLoading::getInstance()->stop();
+			else
+				WaitLoading::getInstance()->start(true);
+			int index = 1;
+			//const guildSBKAttackData* SBKowner = GuildMgr::getInstance()->getSBKOwnerInfo();
+			const std::vector<LevelTopten> &levelTopten = RankMgr::getInstance()->getLevelTopten();
+			for(std::vector<LevelTopten>::const_iterator iter = levelTopten.begin(); iter != levelTopten.end(); ++ iter)
+			{
+				const LevelTopten &lt = *iter;
+				RankListIItem *item = new RankListIItem;
+				RankLevelData data;
+				data.level = lt.level;
+				data.name = lt.name;
+				data.profession = (RoleType)lt.pro;
+				data.levelRank = index;
+				data.roleId = lt.id;
+				if (localPlayerID == data.roleId)
+				{
+					dw_role_id = data.roleId;
+					rank_index = index;					
+				}	
+				//if (data.levelRank == 1) //排行榜第一
+				//{
+				//	data.title = "\xE5\xA4\xA9\xE4\xB8\x8B\xE6\x97\xA0\xE5\x8F\x8C"; //天下无双
+				//}
+				//if (lt.id == SBKowner->dwData[1]) //沙城霸主
+				//{
+				//	data.title = "\xE4\xB8\x80\xE4\xBB\xA3\xE5\xA4\xA9\xE9\xAA\x84"; //一代天骄
+				//}
+				if (lt.ntitle_id == FIRSTLEVLETITLE)
+				{
+					data.title = "\xE5\xA4\xA9\xE4\xB8\x8B\xE6\x97\xA0\xE5\x8F\x8C"; //天下无双
+				}
+				if (lt.ntitle_id == SECONDLEVLETITLE)
+				{
+					data.title = "\xE7\x8E\x8B\xE8\x80\x85\xE9\xA3\x8E\xE8\x8C\x83"; //王者风范
+				}
+				if (lt.ntitle_id == THIRDLEVLETITLE)
+				{				
+					data.title = "\xE5\x82\xB2\xE8\xA7\x86\xE7\xBE\xA4\xE9\x9B\x84"; //傲视群雄
+				}
+
+				item->setData(data, index - 1);
+				item->setRank(data.levelRank);
+				_verticalList->addItem(item);
+				index ++;
+			}	
+			tab = T_Dengjibang;
+			_verticalList->updateDisplay();			
+			updateCurrentRoleRank(dw_role_id,rank_index,tab);						
+		}
+		break;
+	case T_Zhanlibang:
+		{
+			if(RankMgr::getInstance()->isInit(TT_BATTLE))
+				WaitLoading::getInstance()->stop();
+			else
+				WaitLoading::getInstance()->start(true);
+			int index = 1;
+			const std::vector<sBattleTopten> &levelTopten = RankMgr::getInstance()->getBattleTopten();
+			for(std::vector<sBattleTopten>::const_iterator iter = levelTopten.begin(); iter != levelTopten.end(); ++ iter)
+			{
+				const sBattleTopten &lt = *iter;
+				RankListIItem *item = new RankListIItem;
+				RankZhanliData data;
+				data.zhanli = lt.battleval;
+				data.name = lt.name;
+				data.profession = (RoleType)lt.pro;
+				data.zhanliRank = index;
+				data.roleId = lt.id;
+				if (localPlayerID == data.roleId)
+				{
+					dw_role_id = data.roleId;
+					rank_index = index;					
+				}	
+				//switch(data.profession)
+				//{
+				//case RT_Warrior:
+				//	{
+				//		_warriorTopten++;
+				//		if (_warriorTopten == 1)
+				//		{
+				//			data.title = "\xE6\x88\x98\xE7\xA5\x9E";  //战神称号;
+				//		}
+				//		else if ( _warriorTopten >= 2 && _warriorTopten <= 10)
+				//		{
+				//			data.title = "\xE5\x8D\x81\xE5\xA4\xA7\xE6\x88\x98\xE5\xA3\xAB"; //十大战士称号;
+				//		}
+				//	};break;
+				//case RT_Taoist:
+				//	{
+				//		_taoistTopten++;
+				//		if (_taoistTopten == 1)
+				//		{
+				//			data.title = "\xE5\xA4\xA9\xE5\xB0\x8A";  //天尊称号;
+				//		}
+				//		else if ( _taoistTopten >= 2 && _taoistTopten <= 10)
+				//		{
+				//			data.title = "\xE5\x8D\x81\xE5\xA4\xA7\xE9\x81\x93\xE5\xA3\xAB"; //十大道士称号;
+				//		}
+				//	};break;
+				//case RT_Mage:
+				//	{
+				//		_mageTopten++;
+				//		if (_mageTopten == 1)
+				//		{
+				//			data.title = "\xE6\xB3\x95\xE7\xA5\x9E";  //法圣称号;
+				//		}
+				//		else if ( _mageTopten >= 2 && _mageTopten<= 10)
+				//		{
+				//			data.title = "\xE5\x8D\x81\xE5\xA4\xA7\xE6\xB3\x95\xE5\xB8\x88"; //十大法师称号;
+				//		}
+				//	};break;
+				//}
+				switch(lt.ntitle_id)
+				{
+				case FIRSTZHANSHI:
+					{
+						data.title = "\xE6\x88\x98\xE7\xA5\x9E";  //战神称号;
+					};break;
+				case  FIRSTFASHI:
+					{
+						data.title = "\xE6\xB3\x95\xE7\xA5\x9E";  //法圣称号;
+					};break;
+				case FIRSTDAOSHI:
+					{
+						data.title = "\xE5\xA4\xA9\xE5\xB0\x8A";  //天尊称号;
+					};break;
+				case OTHERZHANSHI:
+					{
+						data.title = "\xE5\x8D\x81\xE5\xA4\xA7\xE6\x88\x98\xE5\xA3\xAB"; //十大战士称号;
+					};break;
+				case OTHERFASHI:
+					{
+						data.title = "\xE5\x8D\x81\xE5\xA4\xA7\xE6\xB3\x95\xE5\xB8\x88"; //十大法师称号;
+					};break;
+				case OTHERDAOSHI:
+					{
+						data.title = "\xE5\x8D\x81\xE5\xA4\xA7\xE9\x81\x93\xE5\xA3\xAB"; //十大道士称号;
+					};break;
+				}
+				item->setData(data, index - 1);
+				item->setRank(data.zhanliRank);
+				_verticalList->addItem(item);
+				index ++;
+			}		
+			tab = T_Zhanlibang;
+			_verticalList->updateDisplay();
+			updateCurrentRoleRank(dw_role_id,rank_index,tab);		
+		}
+		break;
+	case T_Meilibang:
+		{
+			if(RankMgr::getInstance()->isInit(TT_BEAUTIFUL))
+				WaitLoading::getInstance()->stop();
+			else
+				WaitLoading::getInstance()->start(true);
+			int index = 1;
+			const std::vector<sBeauTopten> &levelTopten = RankMgr::getInstance()->getBeauTopten();
+			for(std::vector<sBeauTopten>::const_iterator iter = levelTopten.begin(); iter != levelTopten.end(); ++ iter)
+			{
+				const sBeauTopten &lt = *iter;
+				RankListIItem *item = new RankListIItem;
+				RankMeiliData data;
+				data.meili = lt.meili;
+				data.name = lt.name;
+				data.profession = (RoleType)lt.pro;
+				data.meiliRank = index;
+				data.roleId = lt.id;
+				if (localPlayerID == data.roleId)
+				{
+					dw_role_id = data.roleId;
+					rank_index = index;					
+				}	
+				//if (lt.sex == 1)
+				//{
+				//	_manTopten++;
+				//	if (_manTopten == 1)
+				//	{
+				//		data.title = "\xE9\xA3\x8E\xE6\xB5\x81\xE6\xB5\xAA\xE5\xAD\x90"; //风流浪子
+				//	}
+				//}
+				//if (lt.sex == 0)
+				//{
+				//	_womanTopten++;
+				//	if (_womanTopten == 1)
+				//	{
+				//		data.title = "\xE5\x80\xBE\xE5\x9B\xBD\xE5\x80\xBE\xE5\x9F\x8E"; //倾国倾城
+				//	}
+				//}
+				if (lt.ntitle == FIRSTNAN)
+				{
+					data.title = "\xE9\xA3\x8E\xE6\xB5\x81\xE6\xB5\xAA\xE5\xAD\x90"; //风流浪子
+				} 
+				else if (lt.ntitle == FIRSTNV)
+				{
+					data.title = "\xE5\x80\xBE\xE5\x9B\xBD\xE5\x80\xBE\xE5\x9F\x8E"; //倾国倾城
+				}
+				item->setData(data, index - 1);
+				item->setRank(data.meiliRank);
+				_verticalList->addItem(item);
+				index ++;
+			}	
+			tab = T_Meilibang;
+			_verticalList->updateDisplay();
+			updateCurrentRoleRank(dw_role_id,rank_index,tab);	
+		}
+		break;
+	case T_Hanghuibang:
+		{
+			//getChildByTag(NT_LevelUpBtn)->setVisible(false);
+			if(RankMgr::getInstance()->isInit(TT_GUILD))
+				WaitLoading::getInstance()->stop();
+			else
+				WaitLoading::getInstance()->start(true);
+			int index = 1;
+			const guildSBKAttackData* SBKowner = GuildMgr::getInstance()->getSBKOwnerInfo();
+			const std::vector<GuildTopten> &guildTopten = RankMgr::getInstance()->getGuildTopten();
+			for(std::vector<GuildTopten>::const_iterator iter = guildTopten.begin(); iter != guildTopten.end(); ++ iter)
+			{
+				const GuildTopten &lt = *iter;
+				RankListIItem *item = new RankListIItem;
+				RankGuildData data;
+				data.leaderName = lt.leaderName;
+				data.name = lt.guildName;
+				data.memCount = lt.nProsperity;
+				data.guildRank = index;
+				data.gid = lt.gid;
+				data.nlevel = lt.lvl;
+				item->setData(data, index - 1);
+				item->setRank(data.guildRank,data.gid == SBKowner->dwData[0]);				
+				if (RoleManager::getInstance()->getLocalPlayer()->getGuildID() == data.gid)
+				{
+					dw_role_id = data.gid;
+					rank_index = index;					
+				}	
+				//if (data.guildRank == 1)
+				//{
+				//	CCNode* node = item->getNode();
+				//	CCSpriteFrame* firstGuildFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("ectypeui_qizi");
+				//	CCSprite* firstGuild = CCSprite::createWithSpriteFrame(firstGuildFrame);
+				//	firstGuild->setPosition(ccp(80,-10));
+				//	node->addChild(firstGuild);
+				//	CCSprite* oneRank = CCSprite::createWithSpriteFrameName("rankui_one");
+				//	oneRank->setPosition(ccp(40,-10));
+				//}
+				//else if (data.guildRank == 2)
+				//{
+				//
+				//}
+				_verticalList->addItem(item);
+				index ++;
+			}		
+			tab = T_Hanghuibang;
+			_verticalList->updateDisplay();
+			updateCurrentRoleRank(dw_role_id,rank_index,tab);	
+		}
+		break;
+	case T_MingShibang:
+		{
+			//名师榜UI更新
+			if(RankMgr::getInstance()->isInit(TT_MASTER))
+				WaitLoading::getInstance()->stop();
+			else
+				WaitLoading::getInstance()->start(true);
+			int index = 1;
+			const std::vector<sMasterTopten> &masterTopten = RankMgr::getInstance()->getMasterTopten();
+			for(std::vector<sMasterTopten>::const_iterator iter = masterTopten.begin(); iter != masterTopten.end(); ++ iter)
+			{
+				const sMasterTopten &lt = *iter;
+				RankListIItem *item = new RankListIItem;
+				RankMasterData data;
+				data.name = lt.name;
+				data.profession = (RoleType)lt.e_class;
+				data.masterRank = index;
+				data.chushiCount = lt.n_Graduates;
+				data.roleId = lt.id;
+				_mingshiTopten++;
+				if (localPlayerID == data.roleId)
+				{
+					dw_role_id = data.roleId;
+					rank_index = index;					
+					_mineLab->setString(CCString::createWithFormat("%d",data.chushiCount)->getCString());
+				}					
+				//if (_mingshiTopten == 1)
+				//{
+				//	data.title = "\xE4\xB8\x80\xE4\xBB\xA3\xE5\xAE\x97\xE5\xB8\x88"; //一代宗师
+				//}
+				//else if (_mingshiTopten == 2)
+				//{
+				//	data.title = "\xE4\xB8\xBE\xE4\xB8\x96\xE7\x9A\x86\xE7\x9F\xA5"; //举世皆知
+				//}
+				//else if (_mingshiTopten == 3)
+				//{
+				//	data.title = "\xE5\xA3\xB0\xE5\x90\x8D\xE8\xBF\x9C\xE6\x89\xAC"; //声名远扬
+				//}
+				if (lt.ntitle_id == MASTERRANK1)
+				{
+					data.title = "\xE4\xB8\x80\xE4\xBB\xA3\xE5\xAE\x97\xE5\xB8\x88"; //一代宗师
+				}
+				else if (lt.ntitle_id == MASTERRANK2)
+				{
+					data.title = "\xE4\xB8\xBE\xE4\xB8\x96\xE7\x9A\x86\xE7\x9F\xA5"; //举世皆知
+				}
+				else if (lt.ntitle_id == MASTERRANK3)
+				{
+					data.title = "\xE5\xA3\xB0\xE5\x90\x8D\xE8\xBF\x9C\xE6\x89\xAC"; //声名远扬
+				}
+				item->setData(data, index - 1);
+				item->setRank(data.masterRank);
+				_verticalList->addItem(item);
+				index ++;
+			}
+			tab = T_MingShibang;
+			_verticalList->updateDisplay();
+			updateCurrentRoleRank(dw_role_id,rank_index,tab);	
+		}
+		break;
+	case T_FuHaobang:
+		{
+			//富豪榜UI更新
+			if(RankMgr::getInstance()->isInit(TT_MASTER))
+				WaitLoading::getInstance()->stop();
+			else
+				WaitLoading::getInstance()->start(true);
+			int index = 1;
+			//得到富豪排行榜数据;
+			const std::vector<sReachTopten> &reachTopten = RankMgr::getInstance()->getReachTopten();
+			for(std::vector<sReachTopten>::const_iterator iter = reachTopten.begin(); iter != reachTopten.end(); ++ iter)
+			{
+				const sReachTopten &lt = *iter;
+				RankListIItem *item = new RankListIItem;
+				RankRichData data;
+				data.name = lt.name;
+				data.profession = (RoleType)lt.e_class;
+				data.level = lt.n_level_;
+				data.richRank = index;
+				data.roleId = lt.dw_role_id_true;
+				_fuhaoTopten++;
+				if (localPlayerID == data.roleId)
+				{
+					dw_role_id = data.roleId;
+					rank_index = index;					
+				}	
+				//if (_fuhaoTopten == 1)
+				//{
+				//	data.title = "\xE7\x9C\x9F\xE9\xBE\x99\xE5\xA4\xA9\xE5\xAD\x90"; //真龙天子
+				//}
+				if (lt.ntitle_id == XUANHUANG_ZHAN || lt.ntitle_id == XUANHUANG_FA ||lt.ntitle_id == XUANHUANG_DAO )
+				{
+					
+					data.title = "\xE5\xAF\x8C\xE5\x8F\xAF\xE6\x95\x8C\xE5\x9B\xBD"; //炎帝玄黄--》更名为：富可敌国
+				}
+				if (lt.ntitle_id == REACHRANK_ZHAN || lt.ntitle_id == REACHRANK_FA ||lt.ntitle_id == REACHRANK_DAO )
+				{
+					data.title = "\xE9\x87\x91\xE7\x8E\x89\xE6\xBB\xA1\xE5\xA0\x82"; //真龙天子--》更名为：金玉满堂
+				}
+				if (lt.ntitle_id == BAWANG_ZHAN || lt.ntitle_id == BAWANG_FA ||lt.ntitle_id == BAWANG_DAO )
+				{					
+					data.title = "\xE8\xB4\xA2\xE5\xA4\xA7\xE6\xB0\x94\xE7\xB2\x97"; //西楚霸王--》更名为：财大气粗
+				}
+				item->setData(data, index - 1);
+				item->setRank(data.richRank);
+				_verticalList->addItem(item);
+				index ++;
+			}	
+			tab = T_FuHaobang;
+			_verticalList->updateDisplay();
+			updateCurrentRoleRank(dw_role_id,rank_index,tab);	
+		}
+		break;
+	default:
+		CC_ASSERT("can not reach here!!!");
+	}
+
+	updateDataBySelectFilter();
+}
+
+void RankUiLayer::onTabDengjibangTouch( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);//vv
+	setSelectTab(T_Dengjibang);
+}
+
+void RankUiLayer::onTabZhanlibangTouch( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);//vv
+	setSelectTab(T_Zhanlibang);
+}
+
+void RankUiLayer::onTabMeilibangTouch( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);//vv
+	setSelectTab(T_Meilibang);
+}
+
+void RankUiLayer::onTabHanghuibangTouch( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);//vv
+	setSelectTab(T_Hanghuibang);
+}
+
+void RankUiLayer::onTabFuHaoTouch( TouchSprite*, bool )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);//vv
+	setSelectTab(T_FuHaobang);
+}
+
+void RankUiLayer::onTabMingShiTouch( TouchSprite*, bool )
+{
+   AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);//vv
+	setSelectTab(T_MingShibang);
+}
+
+void RankUiLayer::updateDataBySelectFilter()
+{
+	switch(_selectTab)
+	{
+	case T_Dengjibang:
+		updateLevelByFilter();
+		break;
+	case T_Zhanlibang:
+		updateZhanliByFilter();
+		break;
+	case T_Meilibang:
+		updateMeiliByFilter();
+		break;
+	case T_Hanghuibang:
+		updateGuildByFilter();
+		break;
+	case T_MingShibang:
+		updateMingShiByFilter();
+		break;
+	case T_FuHaobang:
+		updateFuHaoByFilter();
+		break;
+	}
+}
+
+void RankUiLayer::updateLevelByFilter()
+{
+	int count = _verticalList->getItemCount();
+	const std::vector<LevelTopten> &levelTopten = RankMgr::getInstance()->getLevelTopten();
+	CC_ASSERT(count == levelTopten.size());
+	for(int i = 0; i < count; i ++)
+	{
+		RankListIItem *listItem = _verticalList->getItem(i);
+		const LevelTopten &data = levelTopten[i];
+		if(_selectFileterIndex == 0 ||
+			(_selectFileterIndex == 1 && data.pro == EV_Warrior) ||
+			(_selectFileterIndex == 2 && data.pro == EV_Mage) ||
+			(_selectFileterIndex == 3 && data.pro == EV_Taoist))
+		{
+			listItem->setVisible(true);
+		}
+		else
+			listItem->setVisible(false);
+	}
+	_verticalList->updateDisplay();
+}
+
+void RankUiLayer::updateZhanliByFilter()
+{
+	int count = _verticalList->getItemCount();
+	const std::vector<sBattleTopten> &battleTopten = RankMgr::getInstance()->getBattleTopten();
+	CC_ASSERT(count == battleTopten.size());
+	for(int i = 0; i < count; i ++)
+	{
+		RankListIItem *listItem = _verticalList->getItem(i);
+		const sBattleTopten &data = battleTopten[i];
+		if(_selectFileterIndex == 0 ||
+			(_selectFileterIndex == 1 && data.pro == EV_Warrior) ||
+			(_selectFileterIndex == 2 && data.pro == EV_Mage) ||
+			(_selectFileterIndex == 3 && data.pro == EV_Taoist))
+		{
+			_warriorTopten = 0;
+			_taoistTopten = 0;
+			_mageTopten = 0;
+			listItem->setVisible(true);
+		}
+		else
+			listItem->setVisible(false);
+	}
+	_verticalList->updateDisplay();
+}
+
+void RankUiLayer::updateMeiliByFilter()
+{
+	int count = _verticalList->getItemCount();
+	const std::vector<sBeauTopten> &beauTopten = RankMgr::getInstance()->getBeauTopten();
+	CC_ASSERT(count == beauTopten.size());
+	for(int i = 0; i < count; i ++)
+	{
+		RankListIItem *listItem = _verticalList->getItem(i);
+		const sBeauTopten &data = beauTopten[i];
+		if(_selectFileterIndex == 0 ||
+			(_selectFileterIndex == 1 && data.sex == 1) ||
+			(_selectFileterIndex == 2 && data.sex == 0))
+		{
+			_womanTopten = 0;
+			_manTopten = 0;
+			listItem->setVisible(true);
+		}
+		else
+			listItem->setVisible(false);
+	}
+	_verticalList->updateDisplay();
+}
+
+void RankUiLayer::updateGuildByFilter()
+{
+
+}
+
+void RankUiLayer::updateMingShiByFilter()
+{
+	int count = _verticalList->getItemCount();
+	const std::vector<sMasterTopten> &masterTopten = RankMgr::getInstance()->getMasterTopten();
+	CC_ASSERT(count == masterTopten.size());
+	for(int i = 0; i < count; i ++)
+	{
+		RankListIItem *listItem = _verticalList->getItem(i);
+		//const sMasterTopten &data = masterTopten[i];
+		if(_selectFileterIndex == 0)
+		{
+			_mingshiTopten = 0;
+			listItem->setVisible(true);
+		}
+		else
+			listItem->setVisible(false);
+	}
+	_verticalList->updateDisplay();
+}
+
+void RankUiLayer::updateFuHaoByFilter()
+{
+	//富豪排行榜具体显示;
+	int count = _verticalList->getItemCount();
+	const std::vector<sReachTopten> &reachTopten = RankMgr::getInstance()->getReachTopten();
+	CC_ASSERT(count == reachTopten.size());
+	for(int i = 0; i < count; i ++)
+	{
+		RankListIItem *listItem = _verticalList->getItem(i);
+		//const sReachTopten &data = reachTopten[i];
+		if(_selectFileterIndex == 0)
+		{
+			_fuhaoTopten = 0;
+			listItem->setVisible(true);
+		}
+		else
+			listItem->setVisible(false);
+	}
+	_verticalList->updateDisplay();
+}
+
+// void RankUiLayer::showBtnFrame(bool visible)
+// {
+// 	CCSprite *sprite = NULL;
+//     sprite = _btnFrame;
+// 	if(sprite != NULL)
+// 	{
+// 		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+// 		CCSize spriteSize = sprite->getContentSize();
+// 		CCPoint curPos = sprite->getPosition();
+// 		float destX = 0.f;
+// 		if(visible)
+// 			destX = winSize.width - spriteSize.width - 25.0f;
+// 		else
+// 			destX = winSize.width ;
+// 
+// 		float dis = fabs(curPos.x - destX);
+// 		if(dis > 0.5f)
+// 		{
+// 			float dt = dis / 1000.0f;
+// 			CCMoveTo *moveTo = CCMoveTo::create(dt, ccp(destX, curPos.y));
+// 			sprite->stopAllActions();
+// 			sprite->runAction(moveTo);
+// 		}
+// 	}
+// }
+
+ void RankUiLayer::showBtnGroundFrame( bool visible )
+ {
+	 if (_btnFrame)
+	 {
+		 _btnFrame->setVisible(visible);
+	 }
+ }
+
+
+
+
+

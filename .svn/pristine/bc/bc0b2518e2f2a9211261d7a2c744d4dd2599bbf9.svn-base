@@ -1,0 +1,4050 @@
+#include "EquipTipUi.h"
+#include "UiLoader.h"
+#include "CfgReader.h"
+#include "PackageManager.h"
+#include "ChatUi.h"
+#include "RoleHeadUi.h"
+#include "SystemUi.h"
+#include "World.h"
+#include "TaskTraceUi.h"
+#include "MiniMapUi.h"
+#include "ShortCutUi.h"
+#include "JoyStick.h"
+#include "tagDWORDTime.h"
+#include "PackageManager.h"
+#include "DBMgr.h"
+#include "ItemTip.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "tools.h"
+#include "Stall_define.h"
+#include <algorithm>
+#include "ItemNode.h"
+#include "CmdAdapter.h"
+#include "ToolTip.h"
+#include "UiResourceMgr.h"
+#include "EquipLevelUpUi.h"
+#include "EquipLevelUpUiMgr.h"
+#include "UiTools.h"
+#include "EquipFusionManager.h"
+#include "EquipUpStarUIMgr.h"
+#include "TCPClient.h"
+#include "CommonMsgDefine.h"
+#include "RemoteRoleStateMgr.h"
+#include "WorldPacket.h"
+#include "NewPlayerGuide.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "EquipShowUi.h"
+#include "ShopMgr.h"
+#include "PackageProto.h"
+#include "Helper.h"
+#include "LabelEx.h"
+#include "CommonClient.h"
+#include "f_string_table.h"
+#include "f_string_util.h"
+#include "WingManager.h"
+#include "WingEvolveUi.h"
+#include "WingFlyUpUi.h"
+#include "SecondVerifyMgr.h"
+
+static std::map<ERoleAttribute, std::string> BaseAttrNameStr;
+static std::map<ERoleAttribute, std::string> IndentifyAttrNameStr;
+
+const int gap_right = 6;
+const string cutline_pic = "cutline";
+
+const int cutline_down = 6;
+const int height_one_line = 20;
+const int height_one_title_height = 16;
+
+EquipTipUiAttrItem::EquipTipUiAttrItem()
+	: _label(NULL)
+{
+
+}
+
+EquipTipUiAttrItem::~EquipTipUiAttrItem()
+{
+	//_label->removeFromParent();
+	if(_label->getParent())
+	{
+		_label->removeFromParentAndCleanup(true);
+	}
+	else
+	{
+		CC_SAFE_RELEASE(_label);
+	}
+	_label = NULL;
+}
+
+cocos2d::CCSize EquipTipUiAttrItem::getContentSize()
+{
+	CC_ASSERT(_label != NULL);
+	return _label->getContentSize();
+}
+
+float EquipTipUiAttrItem::getContentHieght()
+{
+	return _label->getContentSize().height;
+}
+
+void EquipTipUiAttrItem::addToParent( CCNode *parent )
+{
+	parent->addChild(_label);
+}
+
+void EquipTipUiAttrItem::setString( const char *str )
+{
+	if(_label == NULL)
+	{
+		TTFConfig config;
+		config.fontFilePath=  FT_FONTFACE;
+		config.fontSize = 14;
+		config.outlineSize = 1;
+
+		_label = LabelFT::createWithTTF(config,"");
+		_label->retain();
+		_label->setColor(ccc3(0xfe, 0xf8, 0xd8));
+		_label->setAnchorPoint(ccp(0.0f, 1.0f));
+	}
+	_label->setString(str);
+}
+
+void EquipTipUiAttrItem::setPosition( const CCPoint &pos )
+{
+	CC_ASSERT(_label != NULL);
+	_label->setPosition(pos);
+}
+
+void EquipTipUiAttrItem::setLabelVisible( bool isVisibl )
+{
+	_label->setVisible(isVisibl);
+}
+
+const char* EquipTipUiAttrItem::getAttrString()
+{
+	return _label->getString();
+}
+void EquipTipUiAttrItem::addChildByTag(CCNode* node, int tag){
+	node->setTag(tag);
+	CC_ASSERT(_label);
+	_label->addChild(node);
+}
+CCNode* EquipTipUiAttrItem::getChildByTag(int tag){
+	return _label->getChildByTag(tag);
+}
+CCPoint EquipTipUiAttrItem::getPosition(){
+	return _label->getPosition();
+}
+//////////////////////////////////////////////////////////////////////////
+
+EquipTipUi::EquipTipUi()
+{
+	
+}
+
+EquipTipUi::~EquipTipUi()
+{
+
+}
+
+CCNode * EquipTipUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["EquipTipUiLayer"] = UiLayerLoader<EquipTipUiLayer>::loader();
+	CCNode* pNode = readUiFromCCBI("equiptipui", nodeLoaders, _loadSpriteSheet);
+	if(pNode)
+	{
+		//[bing] 挂到world上
+		World::getInstance()->getScene()->addChild(pNode, WZ_POPUI, WCT_EQUIP_TIPS_UI_TAG);
+	}
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+	std::string sSEFightFire = sSEDir + "E1_50.plist";
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEFightFire.c_str());
+
+	_loadSpriteSheet.insert(sSEFightFire);
+	std::string strqualityFightFire = "Art/UI/ccbResources/pinzhiwenzi.plist";
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(strqualityFightFire.c_str());
+	_loadSpriteSheet.insert(strqualityFightFire);
+
+	return pNode;
+}
+
+EquipTipUiLayer* EquipTipUi::create()
+{
+	static EquipTipUi EquipTipInterFace;
+
+	return (EquipTipUiLayer*)EquipTipInterFace.openUi();
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+EquipTipUiLayer::EquipTipUiLayer()
+: fPct(0.0f)
+, m_list_1(NULL)
+, m_list_2(NULL)
+, m_list_3(NULL)
+, m_up_1(NULL)
+, m_up_2(NULL)
+, m_up_3(NULL)
+, m_down_1(NULL)
+, m_down_2(NULL)
+, m_down_3(NULL)
+, m_list_width(0)
+, m_is_remote_player(false)
+{
+
+}
+
+EquipTipUiLayer::~EquipTipUiLayer()
+{
+}
+
+cocos2d::SEL_MenuHandler EquipTipUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler EquipTipUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed",EquipTipUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onEquipBtnPressed", EquipTipUiLayer::onEquipBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onUnloadBtnPressed", EquipTipUiLayer::onUnloadBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onFusionBtnPressed", EquipTipUiLayer::onFusionBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onStarupBtnPressed", EquipTipUiLayer::onStarupBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onInlayBtnPressed", EquipTipUiLayer::onInlayBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onStrengthenBtnPressed", EquipTipUiLayer::onStrengthenBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLevelupBtnPressed", EquipTipUiLayer::onLevelupBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onmaichuBtnPressed", EquipTipUiLayer::onmaichuBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onzhanshiBtnPressed", EquipTipUiLayer::onzhanshiBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onfenjieBtnPressed", EquipTipUiLayer::onfenjieBtnPressed);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "on_evolution", EquipTipUiLayer::on_evolution);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "on_fly", EquipTipUiLayer::on_fly);
+	return NULL;
+}
+
+bool EquipTipUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCScrollView*, m_list_1);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCScrollView*, m_list_2);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCScrollView*, m_list_3);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*, m_up_1);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*, m_up_2);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*, m_up_3);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*, m_down_1);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*, m_down_2);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*, m_down_3);
+
+	return false;
+}
+
+void EquipTipUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_bEquiped = false;
+	m_bCanInlay = true;
+	m_bComparison = true;
+	m_bCanUplevel = true;
+	m_bCanFusion = true;
+	m_nBtnIndex = 0;
+	m_nSuitID = 0;
+	_headHeight = 0;
+	_luckAttrItem = NULL;
+	_selfEquipPosIndex = EEP_Null;
+	_headHeight = 0;
+	_fightNumBLabel1 = NULL;
+	_fightNumBLabel2 = NULL;
+	_fightNumBLabelCurrent = NULL;
+	_showType = WCT_Null;
+	_isShowMoreBtn = false;
+	initAttrNameStr();
+	
+
+	_Select_From = "SELECT * FROM EquipData WHERE typeId = ?1";
+	_layer=dynamic_cast<CCLayer*>(getChildByTag(0));
+	init_wing_label_item(_layer);
+
+ 	_comparisonBg = dynamic_cast<CCSprite*>(_layer->getChildByTag(ETT_ComparisonIn));
+	_singleBg = dynamic_cast<CCSprite*>(_layer->getChildByTag(ETT_SingleIn));
+	_buttonBg = dynamic_cast<CCSprite*>(_layer->getChildByTag(ETT_ButtonBg));
+ 	_contentLayerSelf = dynamic_cast<CCLayer*>(_comparisonBg->getChildByTag(ETT_ContentLayerSelf));
+	_contentLayerDest = dynamic_cast<CCLayer*>(_comparisonBg->getChildByTag(ETT_ContentLayerDes));
+	_contentLayerSingle = dynamic_cast<CCLayer*>(_singleBg->getChildByTag(ETT_ContentLayerSingle));
+
+	_contentLayerSelf->getChildByTag(ETT_StoneModel)->setVisible(false);
+	_contentLayerDest->getChildByTag(ETT_StoneModel)->setVisible(false);
+	_contentLayerSingle->getChildByTag(ETT_StoneModel)->setVisible(false);
+
+	_currentBg = NULL;
+	_currentLayer = NULL;
+	CC_ASSERT(_comparisonBg != NULL &&  _singleBg != NULL && _buttonBg != NULL && _contentLayerSelf != NULL && _contentLayerDest != NULL && _contentLayerSingle != NULL );
+
+ 	_equipBtn = dynamic_cast<CCControlButton*>(_layer->getChildByTag(ETT_EquipBtn));
+ 	CC_ASSERT(_equipBtn != NULL);
+ 	_unloadBtn = dynamic_cast<CCControlButton*>(_layer->getChildByTag(ETT_UnloadBtn));
+ 	CC_ASSERT(_unloadBtn != NULL);
+	_fusionBtn = dynamic_cast<CCControlButton*>(_layer->getChildByTag(ETT_FusionBtn));
+	CC_ASSERT(_fusionBtn != NULL);
+	_starupBtn = dynamic_cast<CCControlButton*>(_layer->getChildByTag(ETT_StarupBtn));
+	CC_ASSERT(_starupBtn != NULL);
+	_inlayBtn = dynamic_cast<CCControlButton*>(_layer->getChildByTag(ETT_InlayBtn));
+	CC_ASSERT(_inlayBtn != NULL);
+	_strengthenBtn = dynamic_cast<CCControlButton*>(_layer->getChildByTag(ETT_StrengthenBtn));
+	CC_ASSERT(_strengthenBtn != NULL);
+	_levelupBtn = dynamic_cast<CCControlButton*>(_layer->getChildByTag(ETT_LevelupBtn));
+	CC_ASSERT(_levelupBtn != NULL);
+	_maichuBtn = dynamic_cast<CCControlButton*>(_layer->getChildByTag(ETT_MaiChuBtn));
+	CC_ASSERT(_maichuBtn != NULL);
+	_zhanshiBtn = dynamic_cast<CCControlButton*>(_layer->getChildByTag(ETT_ZhanShiBtn));
+	CC_ASSERT(_zhanshiBtn != NULL);
+	_fenjieBtn = dynamic_cast<CCControlButton*>(_layer->getChildByTag(ETT_FenJieBtn));
+	CC_ASSERT(_fenjieBtn != NULL);
+	_evo_btn = dynamic_cast<CCControlButton*>(_layer->getChildByTag(ETT_Evolution));
+	CC_ASSERT(_evo_btn);
+	_fly_btn = dynamic_cast<CCControlButton*>(_layer->getChildByTag(ETT_FlyBtn));
+	CC_ASSERT(_fly_btn);
+
+	_buttonCoordsMap[0] = _equipBtn->getPosition();
+	_buttonCoordsMap[1] = _fusionBtn->getPosition();
+	_buttonCoordsMap[2] = _starupBtn->getPosition();
+	_buttonCoordsMap[3] = _inlayBtn->getPosition();
+	_buttonCoordsMap[4] = _strengthenBtn->getPosition();
+	_buttonCoordsMap[5] = _levelupBtn->getPosition();
+
+	_buttonCoordsMap[6] = _evo_btn->getPosition();
+	_buttonCoordsMap[7] = _fly_btn->getPosition();
+
+	_fightNumBLabel1 = CCLabelBMFont::create();
+	_fightNumBLabel1->setFntFile("Art/Scene/fontNum.fnt");
+	_fightNumBLabel1->setAnchorPoint(ccp(0.f, 0.5f));
+	_fightNumBLabel1->setScale(0.5f);
+	_fightNumBLabel2 = CCLabelBMFont::create();
+	_fightNumBLabel2->setFntFile("Art/Scene/fontNum.fnt");
+	_fightNumBLabel2->setAnchorPoint(ccp(0.f, 0.5f));
+	_fightNumBLabel2->setScale(0.5f);
+
+	m_list_1->setContentSize(m_list_1->getViewSize());
+	m_list_1->setDirection(kCCScrollViewDirectionVertical);
+	m_list_1->setTouchPriority(-199);
+	m_list_1->setDelegate(this);
+	m_list_1->getContainer()->set_enable_rect(false);
+	m_list_width = m_list_1->getViewSize().width;
+
+	m_list_2->setContentSize(m_list_2->getViewSize());
+	m_list_2->setDirection(kCCScrollViewDirectionVertical);
+	m_list_2->setTouchPriority(-199);
+	m_list_2->setDelegate(this);
+	m_list_2->getContainer()->set_enable_rect(false);
+
+	m_list_3->setContentSize(m_list_3->getViewSize());
+	m_list_3->setDirection(kCCScrollViewDirectionVertical);
+	m_list_3->setTouchPriority(-199);
+	m_list_3->setDelegate(this);
+	m_list_3->getContainer()->set_enable_rect(false);
+
+	changLabel();
+	clear_ui_info();
+
+	setAllChildernButtonPriority(this, -1);
+}
+
+void EquipTipUiLayer::onEnter()
+{
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -1, true);			//itemnode同级，防止击穿到itemnode上	【J】2014.12.1
+	setTouchPriority(-1);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+}
+
+void EquipTipUiLayer::onExit()
+{
+//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	SecondVerifyMgr::getInstance()->destroyRequsetVerityData();
+	CCLayer::onExit();
+
+	for(AttrItemList::iterator iter = _baseAttr.begin(); iter != _baseAttr.end(); ++ iter)
+	{
+		delete *iter;
+	}
+	_baseAttr.clear();
+
+	for(AttrItemList::iterator iter = _indentifyAttr.begin(); iter != _indentifyAttr.end(); ++ iter)
+	{
+		delete *iter;
+	}
+	_indentifyAttr.clear();
+
+	for (std::vector<EquipTipUiStoneItem*>::iterator iter = _stoneList.begin(); iter != _stoneList.end(); ++iter )
+	{
+		EquipTipUiStoneItem *item = *iter;
+		delete item;
+	}
+	_attrImageMap.clear();
+	_attrValueLabelMap.clear();
+
+	clear_ui_info();
+
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+}
+
+
+bool EquipTipUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if ( !isVisible() || !isRunning() || !hasVisibleParents() )
+	{
+		return false;
+	}
+	if(isTouchOnNodeContent(m_list_1 ,pTouch))
+	{
+		if(m_list_1->getParent()->getParent()->isVisible() && m_list_1->isVisible())
+		{
+			return true;
+		}
+	}
+	if(isTouchOnNodeContent(m_list_2 ,pTouch))
+	{
+		if(m_list_2->getParent()->getParent()->isVisible() && m_list_2->isVisible())
+		{
+			return true;
+		}
+	}
+	if(isTouchOnNodeContent(m_list_3 ,pTouch))
+	{
+		if(m_list_3->getParent()->getParent()->isVisible() && m_list_3->isVisible())
+		{
+			return true;
+		}
+	}
+	if (isTouchOnNodeContent(_singleBg,pTouch))
+	{
+		if ( _singleBg->isVisible())
+		{
+			close();
+			return true;
+		}
+	}
+	if (isTouchOnNodeContent(_comparisonBg,pTouch))
+	{
+		if ( _comparisonBg->isVisible())
+		{
+			close();
+			return true;
+		}
+	}
+	if (isTouchOnNodeContent(_contentLayerDest,pTouch))
+	{
+		if ( _contentLayerDest->isVisible())
+		{
+			close();
+			return true;
+		}
+	}
+	//[bing] 否则点出去了关闭该界面并自动销毁
+	close();
+	return false;
+}
+
+void EquipTipUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	close(); 
+}
+
+void EquipTipUiLayer::onEquipBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_13);
+	//点击装备事件;
+	useSelectEquip();
+	close();
+}
+
+void EquipTipUiLayer::onUnloadBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_13);
+	unloadEquip();
+	close();
+}
+
+void EquipTipUiLayer::onFusionBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_17);
+	//ToolTip::getInstance()->push("\xE6\xAD\xA4\xE5\x8A\x9F\xE8\x83\xBD\xE6\xAD\xA3\xE5\x9C\xA8\xE4\xBF\xAE\xE6\x94\xB9\xE4\xB8\xAD");
+
+	EquipFusionManager::getInstance()->setEquipment(_desEquip);
+	OPEN_UI(WCT_EquipFusionUi);
+	close();
+}
+
+void EquipTipUiLayer::onStarupBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_17);
+	//add by XSea 2014.07.21
+ 	if( !_desEquip )
+ 		return;
+
+	//点击的装备添加到融合管理中[yu]
+	EquipUpStarUIMgr::getInstance()->setEquipment(_desEquip);
+
+	EquipUpStarUIMgr::getInstance()->setEquipSuitId(m_nSuitID); //将原装备套装id保存
+	EquipUpStarUIMgr::getInstance()->setEquipPos(_selfEquipPosIndex);		 //将原装备部位保存
+
+	//发送获取下一级装备数据的请求
+	EquipUpStarUIMgr::getInstance()->removeEquipNext();
+	WorldPacket C2G_Msg(NET_C2G_REQUEST_EQUIP_STAR_LEVEL_UP);//组装消息头
+	C2G_Msg << _desEquip->get_item_id();
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);//发送
+
+	OPEN_UI(WCT_EQUIPUPSTARUI);
+	close();
+}
+
+void EquipTipUiLayer::onInlayBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_17);
+	CC_ASSERT(_desEquip != NULL);
+	EquipFusionManager::getInstance()->setEquipment(_desEquip);
+	OPEN_UI(WCT_InlayUi);
+
+	close();
+}
+
+void EquipTipUiLayer::onStrengthenBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_17);
+	if( !_desEquip )
+		return;
+	//装备强化等级已满则给提示，然后跳出
+
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if( !ploc ) return;
+
+	const EquipTypeData* roleEquip = PackageManager::getInstance()->getEquipTypeData(_desEquip->get_item_type_id());
+	
+	if( roleEquip->minUseLevel > ploc->getLevel() )
+ 	{
+ 		ToolTip::getInstance()->push(GET_STR(9512));
+ 		return;
+ 	}
+	EquipFusionManager::getInstance()->setEquipment(_desEquip);
+	OPEN_UI(WCT_STRENGTHENUI);
+	close();
+}
+
+void EquipTipUiLayer::onLevelupBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_17);
+	CC_ASSERT(_desEquip != NULL);
+	//客户端请求装备升级->移到装备升级界面
+
+	EquipLevelUpUiMgr::getInstance()->setEquipment(_desEquip);
+	OPEN_UI(WCT_EquipLevelUpUi);
+	
+	close();
+}
+
+void EquipTipUiLayer::onmaichuBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_17);
+	CC_ASSERT(_desEquip != NULL);
+	if(WCT_SHOPUI == _showType)
+	{
+		ShopMgr::getInstance()->onSellItem(0,_desEquip->get_item_id());
+	}
+	else if (WCT_StorageUi == _showType)
+	{
+		int pos = PackageManager::getInstance()->getFitIndex(EICT_RoleWare);
+		if (-1 == pos)
+		{
+			ToolTip::getInstance()->push("\xE4\xBB\x93\xE5\xBA\x93\xE5\xB7\xB2\xE6\xBB\xA1");
+		}
+		else
+		{
+			PackageManager::getInstance()->sendItemPositionChange(_desEquip,EICT_RoleWare,pos);
+		}
+	}
+	else if (WCT_PACKAGEUI == _showType)
+	{
+		int pos = PackageManager::getInstance()->getFitIndex(EICT_Bag);
+		if (-1 == pos)
+		{
+			ToolTip::getInstance()->push("\xE8\x83\x8C\xE5\x8C\x85\xE5\xB7\xB2\xE6\xBB\xA1");
+		}
+		else
+		{
+			PackageManager::getInstance()->sendItemPositionChange(_desEquip,EICT_Bag,pos);
+		}
+	}
+	close();
+}
+
+void EquipTipUiLayer::onzhanshiBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	f_item *item = PackageManager::getInstance()->getItem((EItemConType)EICT_Bag, (short)_index);
+	if ( item == NULL )
+	{
+		close();
+		return;
+	}
+	unsigned long long itemINT64 = (unsigned long long)item->get_item_id();
+	showEquipClick( itemINT64);
+	//ToolTip::getInstance()->push("\xE6\xAD\xA4\xE5\x8A\x9F\xE8\x83\xBD\xE6\x9A\x82\xE6\x9C\xAA\xE5\xBC\x80\xE6\x94\xBE");
+}
+
+void EquipTipUiLayer::onfenjieBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CC_ASSERT(NULL != _desEquip);
+
+	if(_desEquip->is_posy() && _desEquip->is_upstar())
+	{
+		std::string strbase = GET_STR(7281);
+		MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,strbase.c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+		World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+		msgUi->signalOkBtnPressed.connect(this,&EquipTipUiLayer::GetDecomBagListOK);
+		msgUi->setLinkUITag(WCT_EQUIP_TIPS_UI_TAG);
+		return ;
+	}
+	else if(_desEquip->is_posy() )
+	{
+		std::string strbase = GET_STR(7278);
+		MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,strbase.c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+		World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+		msgUi->signalOkBtnPressed.connect(this,&EquipTipUiLayer::GetDecomBagListOK);
+		msgUi->setLinkUITag(WCT_EQUIP_TIPS_UI_TAG);
+		return ;
+	}
+
+	else if(_desEquip->is_upstar())
+	{
+		std::string strbase = GET_STR(7279);
+		MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,strbase.c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+		World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+		msgUi->signalOkBtnPressed.connect(this,&EquipTipUiLayer::GetDecomBagListOK);
+		msgUi->setLinkUITag(WCT_EQUIP_TIPS_UI_TAG);
+		return ;
+	}
+	else 
+	{
+		std::string strbase = GET_STR(9385);
+		MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,strbase.c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+		World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+		msgUi->signalOkBtnPressed.connect(this,&EquipTipUiLayer::GetDecomBagListOK);
+		msgUi->setLinkUITag(WCT_EQUIP_TIPS_UI_TAG);
+		return ;
+	}
+	//GetDecomBagListOK();
+}
+
+void EquipTipUiLayer::GetDecomBagListOK()
+{		
+	if(NULL != _desEquip)
+	{
+		NET_SIC_Decompose_begin send;
+		send.decomposeid[0] = _desEquip->get_item_id();
+		//TCP_CLIENT->send_net_cmd(&send, NP_NORMAL, false);
+		std::function<void(bool)> func = [send](bool isSuccess){
+			if (isSuccess)
+			{
+				TCP_CLIENT->send_net_cmd(&send, NP_NORMAL, false);
+			}
+		};
+		SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+	}
+	
+	close();
+}
+
+void EquipTipUiLayer::close()
+{
+	removeFromParent();
+	UiMgr::getInstance()->closeLinkMessageBoxUi(WCT_EQUIP_TIPS_UI_TAG);
+}
+
+CCRect EquipTipUiLayer::GetBtnPos( unsigned char nBtnIdx )
+{
+	if(1 == nBtnIdx && _strengthenBtn && _strengthenBtn->isVisible())
+	{
+		SetNodeTintTo(dynamic_cast<CCNode*>(_strengthenBtn));
+		CCPoint cp = _strengthenBtn->convertToWorldSpace(ccp(0, 0));
+		CCSize cs = _strengthenBtn->getContentSize();
+		return CCRect(cp.x, cp.y, cs.width, cs.height);
+	}
+	else if(2 == nBtnIdx && _inlayBtn && _inlayBtn->isVisible())
+	{
+		SetNodeTintTo(dynamic_cast<CCNode*>(_inlayBtn));
+		CCPoint cp = _inlayBtn->convertToWorldSpace(ccp(0, 0));
+		CCSize cs = _inlayBtn->getContentSize();
+		return CCRect(cp.x, cp.y, cs.width, cs.height);
+	}
+	else if(3 == nBtnIdx && _levelupBtn && _levelupBtn->isVisible())
+	{
+		SetNodeTintTo(dynamic_cast<CCNode*>(_levelupBtn));
+		CCPoint cp = _levelupBtn->convertToWorldSpace(ccp(0, 0));
+		CCSize cs = _levelupBtn->getContentSize();
+		return CCRect(cp.x, cp.y, cs.width, cs.height);
+	}
+	else if(4 == nBtnIdx && _fusionBtn && _fusionBtn->isVisible())
+	{
+		SetNodeTintTo(dynamic_cast<CCNode*>(_fusionBtn));
+		CCPoint cp = _fusionBtn->convertToWorldSpace(ccp(0, 0));
+		CCSize cs = _fusionBtn->getContentSize();
+		return CCRect(cp.x, cp.y, cs.width, cs.height);
+	}
+	else if (5 == nBtnIdx && _equipBtn && _equipBtn->isVisible())
+	{
+		SetNodeTintTo(dynamic_cast<CCNode*>(_equipBtn));
+		CCPoint cp = _equipBtn->convertToWorldSpace(ccp(0, 0));
+		CCSize cs = _equipBtn->getContentSize();
+		return CCRect(cp.x, cp.y, cs.width, cs.height);
+	}
+
+	return CCRect(0.0f, 0.0f, 0.0f, 0.0f);
+}
+
+void EquipTipUiLayer::setData( f_equipment *equip,bool isShowLock /*= true*/,bool isShowSelfEquip /*= true*/ )
+{
+ 	if(equip == NULL)
+ 		return;
+	
+	_desEquip = equip;								//取装备
+	std::string equipName;							//装备名字
+	const EquipTypeData* equipType = PackageManager::getInstance()->getEquipTypeData(equip->get_item_type_id());    //【ji】获取此种装备的类型数据
+	CC_ASSERT(equipType);
+	const EquipTypeData &equipTypeData = *equipType;
+	equipName = PackageManager::getInstance()->GetNameByLevel(equipTypeData,equip->get_star_num()) + equip->GetItemName();
+	//如果位置为戒指或者护腕，则检查最低战力的
+	if (equipTypeData.posIndex == EEP_Finger1 || equipTypeData.posIndex == EEP_Wrist1 )
+	{
+		//检测战力最低
+	}
+	_selfEquipPosIndex = equipTypeData.posIndex;									//取装备位置索引
+
+	if ((equipTypeData.levelUpId == -1)||(_desEquip->get_star_num()==3) || (equipTypeData.posIndex == EEP_Body1))
+	{
+		m_bCanUplevel = false;
+	}
+	//Ji:装备比较
+	if (!m_bEquiped)											//判断装备是否为已装备状态
+	{
+		f_equipment* selfEquip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(EICT_Equip, (short)equipTypeData.posIndex));
+		if (selfEquip == NULL && (equipTypeData.posIndex == EEP_Finger1 || equipTypeData.posIndex == EEP_Wrist1))
+		{
+			short PosIndex = (short)equipTypeData.posIndex + 1;
+			selfEquip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(EICT_Equip, PosIndex));
+		}
+		if (selfEquip != NULL && isShowSelfEquip)
+		{
+			getComparisonUi();
+			_currentLayer = _contentLayerSelf;
+			_fightNumBLabelCurrent = _fightNumBLabel1;
+
+			//CCNode *baseAttrSprite = _contentLayerSelf->getChildByTag(ETT_BaseAttr);
+			CCMenu* exhibitMenu = dynamic_cast<CCMenu*>(_comparisonBg->getChildByTag(102));
+			CCMenuItemImage* exhibitSelfEquip = dynamic_cast<CCMenuItemImage*>(exhibitMenu->getChildByTag(1));
+			exhibitSelfEquip->setTarget(this, menu_selector(EquipTipUiLayer::exhibitSelfEquip));
+			if(IS_UI_OPEN(WCT_TradingUI))
+				exhibitMenu->setVisible(false);
+			else
+				exhibitMenu->setVisible(true);
+
+			//检查另一只戒指或者手镯
+			if (equipTypeData.posIndex == EEP_Finger1 || equipTypeData.posIndex == EEP_Wrist1)
+			{
+				short PosIndex = (short)equipTypeData.posIndex + 1;
+				f_equipment* _selfEquiptemp = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(EICT_Equip, PosIndex));
+				if (_selfEquiptemp == NULL)
+				{
+					setselfdata(selfEquip);
+				}
+				else
+				{
+					int att1 = selfEquip->get_fightli();
+					int att2 = _selfEquiptemp->get_fightli();
+					if (att1 < att2)
+					{
+						setselfdata(selfEquip);
+					}
+					else
+					{
+						setselfdata(_selfEquiptemp);
+					}
+				}
+			}
+			else
+			{
+				setselfdata(selfEquip);
+			}
+			
+		}
+		else
+		{
+			getSingleUi();
+			_currentLayer = _contentLayerSingle;
+			_fightNumBLabelCurrent = _fightNumBLabel1;
+
+			CCMenu* exhibitMenu = dynamic_cast<CCMenu*>(_singleBg->getChildByTag(101));
+			CCMenuItemImage* exhibitSelfEquip = (CCMenuItemImage*)exhibitMenu->getChildByTag(1);
+			exhibitSelfEquip->setTarget(this, menu_selector(EquipTipUiLayer::showMroe));
+			exhibitMenu->setVisible(true);
+			CCNode* equipedSymbol = dynamic_cast<CCNode*>(_contentLayerSingle->getChildByTag(ETT_EquipedSymbol));
+			equipedSymbol->setVisible(false);
+		}
+	}
+	else
+	{
+		getSingleUi();
+		_currentLayer = _contentLayerSingle;
+		_fightNumBLabelCurrent = _fightNumBLabel1;
+
+		CCMenu* exhibitMenu = (CCMenu*)_singleBg->getChildByTag(101);
+		CCMenuItemImage* exhibitSelfEquip = dynamic_cast<CCMenuItemImage*>(exhibitMenu->getChildByTag(1));
+		CCSpriteFrame* selectFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("zhanshibtnh");
+		CCSpriteFrame* normalFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("zhanshibtnn");
+		exhibitSelfEquip->setSelectedSpriteFrame(selectFrame);
+		exhibitSelfEquip->setNormalSpriteFrame(normalFrame);
+		exhibitSelfEquip->setTarget(this, menu_selector(EquipTipUiLayer::exhibitSelfEquip));
+		exhibitMenu->setVisible(true);
+	}
+
+	LocalPlayer *localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if (!isShowSelfEquip)
+	{
+		_layer->setPositionX(_layer->getPositionX() - 110);
+	}
+	std::string proStr;
+	bool isRedColor = true;
+	switch(localPlayer->getAttribute(RA_ROLETYPE))
+	{
+	case RT_Warrior:
+		proStr = GET_STR(9325).c_str();
+		if (equipTypeData.profession2 == PROFESSION1 || equipTypeData.profession2 ==PROFESSION4 || equipTypeData.profession2 ==PROFESSION7)
+		{
+			isRedColor = false;
+		}
+		break;
+	case RT_Mage:
+		proStr = GET_STR(9326).c_str();
+		if (equipTypeData.profession2 == PROFESSION2 || equipTypeData.profession2 ==PROFESSION5 || equipTypeData.profession2 ==PROFESSION8)
+		{
+			isRedColor = false;
+		}
+		break;
+	case RT_Taoist:
+		proStr = GET_STR(9327).c_str();
+		if (equipTypeData.profession2 == PROFESSION3 || equipTypeData.profession2 ==PROFESSION6 || equipTypeData.profession2 ==PROFESSION9)
+		{
+			isRedColor = false;
+		}
+		break;
+	}
+	if (equipTypeData.profession2 == PROFESSION10 || equipTypeData.profession2 ==PROFESSION11 || equipTypeData.profession2 ==PROFESSION12)
+	{
+		isRedColor = false;
+	}
+	std::string allPro("\xE9\x80\x9A\xE7\x94\xA8");
+	int equipConsolidLevel = equip->get_equip_consolidate_level();
+	CCString *equipNameStr;
+	if(equipConsolidLevel != 0)
+		equipNameStr = CCString::createWithFormat("%s + %d", equipName.c_str(), equipConsolidLevel);
+	else
+		equipNameStr = CCString::create(equipName);
+	// 战斗力特效
+	GameActionNode* battleNumAcNode = this->getBattleSuperEffect();
+	battleNumAcNode->setPosition(_currentLayer->getChildByTag(ETT_FightNumSE)->getPosition());
+	_currentLayer->addChild(battleNumAcNode, RZN_EFFECT);
+	_currentLayer->getChildByTag(ETT_FightNum)->setZOrder(RZN_EFFECT + 1);
+	battleNumAcNode->BeginAction(0.07f, true);
+	battleNumAcNode->setScale(0.6f);
+
+	setTitleText(ETT_EquipName, equipNameStr->getCString());
+	setTitleText(ETT_Profession, equipTypeData.profession.c_str(), isRedColor);
+	setTitleText(ETT_EquipLevel, equipTypeData.minUseLevel, localPlayer->getLevel() < equipTypeData.minUseLevel);
+	std::ostringstream ostr;
+	int curDurability = GetEquipNewness(equipTypeData.posIndex, equip->get_item_use_times(), equipTypeData.durability);
+	ostr << curDurability << "/" << equipTypeData.durability;
+	setTitleText(ETT_EquipDurability, ostr.str().c_str(), false, curDurability<=0 );
+	CCSprite* equipSymbol = (CCSprite*)_currentLayer->getChildByTag(ETT_EquipedSymbol);
+	if (equipSymbol!=NULL)
+		equipSymbol->setZOrder(_currentLayer->getChildByTag(ETT_EquipDurability)->getZOrder()+1);
+	if(equipTypeData.bySex == -1)
+		setTitleText(ETT_EquipPos, equipTypeData.pos.c_str());
+	else
+		setTitleText(ETT_EquipPos, equipTypeData.pos.c_str(), equipTypeData.bySex != localPlayer->getAttribute(RA_SEX));
+	this->setEqualityText((EItemQuality)equip->get_item_quality());
+	setFightText(equip->get_fightli());
+	ItemNode* equipNode = ItemNode::create();
+	equipNode->setIsEquipUI(WCT_EQUIP_TIPS_UI_TAG);
+	equipNode->initWithItem(equip,isShowLock);
+	equipNode->setPosition(_currentLayer->getChildByTag(ETT_IconFrame)->getPosition());
+	_currentLayer->addChild(equipNode);
+//	if(!iconFrameName.empty())
+//		setEquipIcon(iconFrameName.c_str());
+	const ItemTypeData  &itemdata = PackageManager::getInstance()->getItemTypeData(equip->get_item_type_id());
+	tagDWORDTime const& getitemtime = equip->get_gain_time();
+
+	if(itemdata.period != 0)
+	{
+		setFashionTime(getitemtime,itemdata.period);
+	}
+
+	if (equipTypeData.showTest != 0)
+	{
+		add_fashion_label(GET_STR(equipTypeData.showTest).c_str(), false);
+	}
+
+	add_equip_suit(equipTypeData.suit_id);
+	//setEquipTime(getitemtime,itemdata.period);
+	if (equipTypeData.gemHole)
+	{
+		if(gem_enable_by_pos_type(equipTypeData.posIndex))
+		{
+			for (int i = 0; i < MAX_EQUIPHOLE_NUM; i++ )
+			{//宝石;
+				unsigned int id = equip->get_equip_hold_gem_id(i);
+				if(id != (unsigned int) -1 && id != (unsigned int) 0)
+				{
+					EquipTipUiStoneItem *item = new EquipTipUiStoneItem(id);
+					_stoneList.push_back(item);
+					//item->addToParent(_currentLayer);
+				}
+				else
+				{
+					EquipTipUiStoneItem *item = new EquipTipUiStoneItem();
+					_stoneList.push_back(item);
+					//item->addToParent(_currentLayer);
+				}
+			}
+		}
+	}else
+	{
+		_currentLayer->getChildByTag(ETT_AditionalAttrCutline)->setVisible(equipTypeData.gemHole);
+		equip->set_equip_hole_num(0);
+	}
+
+	update_wing_att(equipTypeData.posIndex == EEP_Body1,equip->get_item_type_id(),equip->get_equip()->nLevel );
+	
+	if(!equipTypeData.gemHole || (0 == equip->get_equip_max_hole_num()) || !gem_enable_by_pos_type(equipTypeData.posIndex))
+		m_bCanInlay = false;
+	
+	setup_base_att(equip->m_equipex,equipConsolidLevel);
+
+	setup_indentify_att(equip,true);
+
+	set_equip_desc(equipTypeData.equipDesc);
+
+	refresh_list();
+	updateUi();
+
+
+	this->updateButtonStatus(equipTypeData.posIndex);
+}
+
+void EquipTipUiLayer::setData(const tagEquipViewInfo *equipInfo)
+{
+	if(equipInfo == NULL)
+		return;
+
+	const EquipTypeData* equipType = PackageManager::getInstance()->getEquipTypeData(equipInfo->dw_data_id);    //【ji】获取此种装备的类型数据
+	CC_ASSERT(equipType);
+	const EquipTypeData &equipTypeData = *equipType;
+	_selfEquipPosIndex = equipTypeData.posIndex;
+	//Ji:装备比较
+	if (m_bEquiped == false)
+	{
+		showEquipBtn();
+		PackageManager::ItemMap* itemMap = PackageManager::getInstance()->getItemMap(EICT_Equip);
+		f_equipment* self_equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(*itemMap, (short)equipTypeData.posIndex));
+
+		if (self_equip != NULL)
+		{
+			getComparisonUi();
+			_currentLayer = _contentLayerSelf;
+			_fightNumBLabelCurrent = _fightNumBLabel1;
+
+			CCMenu* exhibitMenu = dynamic_cast<CCMenu*>(_currentBg->getChildByTag(102));
+			CCMenuItemImage* exhibitSelfEquip = dynamic_cast<CCMenuItemImage*>(exhibitMenu->getChildByTag(1));
+			exhibitSelfEquip->setTarget(this, menu_selector(EquipTipUiLayer::exhibitSelfEquip));
+			exhibitMenu->setVisible(true);
+			setselfdata(self_equip);
+		}
+		else
+		{
+			getSingleUi();
+			_currentLayer = _contentLayerSingle;
+			_fightNumBLabelCurrent = _fightNumBLabel1;
+
+			CCNode* equipedSymbol = dynamic_cast<CCNode*>(_currentLayer->getChildByTag(ETT_EquipedSymbol));
+			equipedSymbol->setVisible(false);
+		}
+	}
+	else
+	{
+		showUnloadBtn();
+		getSingleUi();
+		_currentLayer = _contentLayerSingle;
+		_fightNumBLabelCurrent = _fightNumBLabel1;
+
+		CCMenu* exhibitMenu = (CCMenu*)_currentBg->getChildByTag(101);
+		CCMenuItemImage* exhibitSelfEquip = dynamic_cast<CCMenuItemImage*>(exhibitMenu->getChildByTag(1));
+		exhibitSelfEquip->setTarget(this, menu_selector(EquipTipUiLayer::exhibitSelfEquip));
+		exhibitMenu->setVisible(true);
+	}
+
+	setAllButtonOff();										//隐藏功能按钮
+
+	int equipConsolidLevel = equipInfo->byConsolidateLevel;
+	CCString *equipNameStr = NULL;
+	if(equipConsolidLevel != 0)
+		equipNameStr = CCString::createWithFormat("%s + %d", equipTypeData.name.c_str(), equipConsolidLevel);
+	else
+		equipNameStr = CCString::create(equipTypeData.name);
+
+	//战斗力特效
+	GameActionNode* battleNumAcNode = this->getBattleSuperEffect();
+	battleNumAcNode->setPosition(_currentLayer->getChildByTag(ETT_FightNumSE)->getPosition());
+	_currentLayer->addChild(battleNumAcNode, RZN_EFFECT);
+	_currentLayer->getChildByTag(ETT_FightNum)->setZOrder(RZN_EFFECT + 1);
+
+	battleNumAcNode->setScale(0.6f);
+	battleNumAcNode->BeginAction(0.07f, true);
+
+	setTitleText(ETT_EquipName, equipNameStr->getCString());
+	setTitleText(ETT_Profession, equipTypeData.profession.c_str());
+	setTitleText(ETT_EquipLevel, equipTypeData.minUseLevel);
+	std::ostringstream ostr;
+	ostr << GetEquipNewness(equipTypeData.posIndex, equipInfo->nUseTimes, equipTypeData.durability) << "/" << equipTypeData.durability;
+	setTitleText(ETT_EquipDurability, ostr.str().c_str());
+	CCSprite* equipSymbol = (CCSprite*)_currentLayer->getChildByTag(ETT_EquipedSymbol);
+	if (equipSymbol!=NULL)
+	    equipSymbol->setZOrder(_currentLayer->getChildByTag(ETT_EquipDurability)->getZOrder()+1);
+	setTitleText(ETT_EquipPos, equipTypeData.pos.c_str());
+	this->setEqualityText((EItemQuality)equipInfo->byConsolidateLevelStar);
+	setFightText(equipInfo->nRating);
+	ItemNode* equipNode = ItemNode::create();
+	equipNode->initWithItem(equipInfo);
+	equipNode->setPosition(_currentLayer->getChildByTag(ETT_IconFrame)->getPosition());
+	_currentLayer->addChild(equipNode);
+
+	if (equipTypeData.showTest != 0)
+	{
+		add_fashion_label(GET_STR(equipTypeData.showTest).c_str(), false);
+	}
+
+	add_equip_suit(equipTypeData.suit_id);
+
+	if (equipTypeData.gemHole)
+	{
+		if(gem_enable_by_pos_type(equipTypeData.posIndex))
+		{
+			for (int i = 0; i < MAX_EQUIPHOLE_NUM; i++ )
+			{//宝石;
+				unsigned int id = equipInfo->dwHoleGemID[i];
+				if(id != (unsigned int) -1 && id != (unsigned int) 0)
+				{
+					EquipTipUiStoneItem *item = new EquipTipUiStoneItem(id);
+					_stoneList.push_back(item);
+					//item->addToParent(_currentLayer);
+				}
+				else
+				{
+					EquipTipUiStoneItem *item = new EquipTipUiStoneItem();
+					_stoneList.push_back(item);
+					//item->addToParent(_currentLayer);
+				}
+			}
+		}
+	}else
+	{
+		_currentLayer->getChildByTag(ETT_AditionalAttrCutline)->setVisible(false);
+	}
+
+	update_wing_att(equipTypeData.posIndex == EEP_Body1,equipInfo->dw_data_id,equipInfo->nLevel );
+
+	setup_base_att(equipInfo,equipConsolidLevel);
+
+	setup_indentify_att(equipInfo/*,true*/);
+
+	set_equip_desc(equipTypeData.equipDesc);
+
+	refresh_list();
+	updateUi();
+}
+
+void EquipTipUiLayer::setData(const tagStallGoodsInfo &stallGoodsInfo)
+{
+	if(stallGoodsInfo.n64_Serial == INVALID)
+		return;
+	const EquipTypeData* equipType = PackageManager::getInstance()->getEquipTypeData(stallGoodsInfo.typeID);    //【ji】获取此种装备的类型数据
+	CC_ASSERT(equipType);
+	const EquipTypeData& equipTypeData = *equipType;
+	_selfEquipPosIndex = equipTypeData.posIndex;
+	//Ji:装备比较
+	if (m_bEquiped == false)
+	{
+		showEquipBtn();
+		PackageManager::ItemMap* itemMap = PackageManager::getInstance()->getItemMap(EICT_Equip);
+		f_equipment* self_equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(*itemMap, (short)equipTypeData.posIndex));
+
+		if (self_equip != NULL)
+		{
+			getComparisonUi();
+			_currentLayer = _contentLayerSelf;
+			_fightNumBLabelCurrent = _fightNumBLabel1;
+
+			CCMenu* exhibitMenu = dynamic_cast<CCMenu*>(_currentBg->getChildByTag(102));
+			CCMenuItemImage* exhibitSelfEquip = dynamic_cast<CCMenuItemImage*>(exhibitMenu->getChildByTag(1));
+			exhibitSelfEquip->setTarget(this, menu_selector(EquipTipUiLayer::exhibitSelfEquip));
+			exhibitMenu->setVisible(true);
+			setselfdata(self_equip);
+		}
+		else
+		{
+			getSingleUi();
+			_currentLayer = _contentLayerSingle;
+			_fightNumBLabelCurrent = _fightNumBLabel1;
+
+			CCMenu* exhibitMenu = dynamic_cast<CCMenu*>(_currentBg->getChildByTag(101));
+			CCMenuItemImage* exhibitSelfEquip = dynamic_cast<CCMenuItemImage*>(exhibitMenu->getChildByTag(1));
+			exhibitSelfEquip->setTarget(this, menu_selector(EquipTipUiLayer::exhibitBagEquip));
+			exhibitMenu->setVisible(true);
+			CCNode* equipedSymbol = dynamic_cast<CCNode*>(_contentLayerSingle->getChildByTag(ETT_EquipedSymbol));
+			equipedSymbol->setVisible(false);
+		}
+	}
+	else
+	{
+		showUnloadBtn();
+		getSingleUi();
+		_currentLayer = _contentLayerSingle;
+		_fightNumBLabelCurrent = _fightNumBLabel1;
+
+		CCMenu* exhibitMenu = (CCMenu*)_currentBg->getChildByTag(101);
+		CCMenuItemImage* exhibitSelfEquip = dynamic_cast<CCMenuItemImage*>(exhibitMenu->getChildByTag(1));
+		exhibitSelfEquip->setTarget(this, menu_selector(EquipTipUiLayer::exhibitSelfEquip));
+		exhibitMenu->setVisible(true);
+	}
+
+	setAllButtonOff();
+	
+	int equipConsolidLevel = stallGoodsInfo.byConsolidateLevel;
+	CCString *equipNameStr = NULL;
+	if(equipConsolidLevel != 0)
+		equipNameStr = CCString::createWithFormat("%s + %d", equipTypeData.name.c_str(), equipConsolidLevel);
+	else
+		equipNameStr = CCString::create(equipTypeData.name);
+
+	//战斗力特效
+	GameActionNode* battleNumAcNode = this->getBattleSuperEffect();
+	battleNumAcNode->setPosition(_currentLayer->getChildByTag(ETT_FightNumSE)->getPosition());
+	_currentLayer->addChild(battleNumAcNode, RZN_EFFECT);
+	_currentLayer->getChildByTag(ETT_FightNum)->setZOrder(RZN_EFFECT + 1);
+//	_currentLayer->getChildByTag(ETT_Sword)->setZOrder(RZN_EFFECT + 1);
+	battleNumAcNode->BeginAction(0.07f, true);
+	battleNumAcNode->setScale(0.6f);
+	setTitleText(ETT_EquipName, equipNameStr->getCString());
+	setTitleText(ETT_Profession, equipTypeData.profession.c_str());
+	setTitleText(ETT_EquipLevel, equipTypeData.minUseLevel);
+	std::ostringstream ostr;
+	ostr << equipTypeData.durability << "/" << equipTypeData.durability;
+	setTitleText(ETT_EquipDurability, ostr.str().c_str());
+	CCSprite* equipSymbol = (CCSprite*)_currentLayer->getChildByTag(ETT_EquipedSymbol);
+	if (equipSymbol!=NULL)
+		equipSymbol->setZOrder(_currentLayer->getChildByTag(ETT_EquipDurability)->getZOrder()+1);
+	setTitleText(ETT_EquipPos, equipTypeData.pos.c_str());
+//	setTitleText(ETT_Quality, converQualityToString((EItemQuality)stallGoodsInfo.byQuality).c_str());
+	this->setEqualityText((EItemQuality)stallGoodsInfo.byQuality);
+//	setFightText(ETT_Sword, stallGoodsInfo.nFightLi);
+	setFightText(stallGoodsInfo.nFightLi);
+	ItemNode* fanciedEquipNode = ItemNode::create();
+	fanciedEquipNode->setDataId(stallGoodsInfo.typeID);
+	fanciedEquipNode->setPosition(_currentLayer->getChildByTag(ETT_IconFrame)->getPosition());
+	_currentLayer->addChild(fanciedEquipNode);
+	std::string iconFrameName = PackageManager::getInstance()->getIconFrameName(stallGoodsInfo.typeID);
+	/*if(!iconFrameName.empty())
+		setEquipIcon(iconFrameName.c_str());*/
+	const ItemTypeData  &itemdata = PackageManager::getInstance()->getItemTypeData(stallGoodsInfo.typeID);
+	tagDWORDTime const& getitemtime = stallGoodsInfo.dwGainTime;
+	if(itemdata.period != 0)
+	{
+		setFashionTime(getitemtime,itemdata.period);
+	}
+
+	if (equipTypeData.showTest != 0)
+	{
+		add_fashion_label(GET_STR(equipTypeData.showTest).c_str(), false);
+	}
+
+	//typedef std::map<ERoleAttribute, int> TempAttrMap;
+	TempAttrMap baseAttr;
+	TempAttrMap indentifyAttr;
+
+	add_equip_suit(equipTypeData.suit_id);
+	if (equipTypeData.gemHole)
+	{
+		if(gem_enable_by_pos_type(equipTypeData.posIndex))
+		{
+			for (int i = 0; i < MAX_EQUIPHOLE_NUM; i++ )
+			{//宝石;
+				unsigned int id = stallGoodsInfo.dwHoleGemID[i];
+				if(id != (unsigned int) 0 && id != (unsigned int) -1)
+				{
+					EquipTipUiStoneItem *item = new EquipTipUiStoneItem(id);
+					_stoneList.push_back(item);
+					item->addToParent(_currentLayer);
+				}
+				else
+				{
+					EquipTipUiStoneItem *item = new EquipTipUiStoneItem();
+					_stoneList.push_back(item);
+					item->addToParent(_currentLayer);
+				}
+			}
+		}
+	}else
+	{
+		_currentLayer->getChildByTag(ETT_AditionalAttrCutline)->setVisible(equipTypeData.gemHole);
+	}
+	
+	update_wing_att( equipTypeData.posIndex == EEP_Body1,0,1);
+
+	bool isNoEra = true;
+	for(int i = MAX_BASE_ATT; i < MAX_ADDITIONAL_EFFECT; i ++)
+	{//鉴定属性;
+		if(stallGoodsInfo.equipAtt[i].eRoleAtt != ERA_Null)
+		{
+			isNoEra = false;
+			indentifyAttr[stallGoodsInfo.equipAtt[i].eRoleAtt] = stallGoodsInfo.equipAtt[i].nValue;
+		}
+	}
+	//EItemQuality EIQ=(EItemQuality)_selfEquip->get_item_quality();
+	if (isNoEra)
+	{
+		addIndentifyAttr(GET_STR(9034).c_str(), -1, -1, "-", true);
+	}
+
+	for(int i = 0; i < MAX_BASE_ATT; i ++)
+	{//基础属性;
+		ERoleAttribute attr = stallGoodsInfo.equipAtt[i].eRoleAtt;
+		if(attr != ERA_Null)
+		{
+			if(attr != ERA_Luck)
+			{
+				baseAttr[attr] = stallGoodsInfo.equipAtt[i].nValue + getConsolidateAtt(stallGoodsInfo.equipAtt[i].nValue, equipConsolidLevel);
+			}
+			else
+			{
+				if (stallGoodsInfo.equipAtt[i].nValue!=0)
+					addLuckAttr(stallGoodsInfo.equipAtt[i].nValue);
+			}
+		}
+	}
+	//交易时查看对方玩家武器和项链的幸运值;
+	if (PackageManager::getInstance()->getEquipTypeData(stallGoodsInfo.typeID)->posIndex == EEP_RightHand)
+	{
+		if (stallGoodsInfo.byLuck != 0)
+			addLuckAttr(stallGoodsInfo.byLuck);
+	}
+	if (PackageManager::getInstance()->getEquipTypeData(stallGoodsInfo.typeID)->posIndex == EEP_Neck)
+	{
+		if (stallGoodsInfo.byLuck != 0)
+			addLuckAttr(stallGoodsInfo.byLuck);
+	}
+
+	for(TempAttrMap::iterator iter = baseAttr.begin(); iter != baseAttr.end(); ++ iter)
+	{
+		if(iter->second == -1)
+			continue;
+
+		switch(iter->first)
+		{
+		case ERA_ExAttackMin:
+			{
+				int v1 = iter->second;
+				int v2 = baseAttr[ERA_ExAttackMax];
+				baseAttr[ERA_ExAttackMax] = -1;
+				addBaseAttr(BaseAttrNameStr[iter->first].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExAttackMax:
+			{
+				int v2 = iter->second;
+				int v1 = baseAttr[ERA_ExAttackMin];
+				baseAttr[ERA_ExAttackMin] = -1;
+				addBaseAttr(BaseAttrNameStr[iter->first].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InAttackMin:
+			{
+				int v1 = iter->second;
+				int v2 = baseAttr[ERA_InAttackMax];
+				baseAttr[ERA_InAttackMax] = -1;
+				addBaseAttr(BaseAttrNameStr[iter->first].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InAttackMax:
+			{
+				int v2 = iter->second;
+				int v1 = baseAttr[ERA_InAttackMin];
+				baseAttr[ERA_InAttackMin] = -1;
+				addBaseAttr(BaseAttrNameStr[iter->first].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ArmorEx:
+			{
+				int v1 = iter->second;
+				int v2 = baseAttr[ERA_ArmorIn];
+				baseAttr[ERA_ArmorIn] = -1;
+				addBaseAttr(BaseAttrNameStr[iter->first].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ArmorIn:
+			{
+				int v2 = iter->second;
+				int v1 = baseAttr[ERA_ArmorEx];
+				baseAttr[ERA_ArmorEx] = -1;
+				addBaseAttr(BaseAttrNameStr[iter->first].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExMaxDefense:
+			{
+				int v2 = iter->second;
+				int v1 = baseAttr[ERA_ExMinDefense];
+				baseAttr[ERA_ExMinDefense] = -1;
+				addBaseAttr(BaseAttrNameStr[iter->first].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExMinDefense:
+			{
+				int v1 = iter->second;
+				int v2 = baseAttr[ERA_ExMaxDefense];
+				baseAttr[ERA_ExMaxDefense] = -1;
+				addBaseAttr(BaseAttrNameStr[iter->first].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InMaxDefense:
+			{
+				int v2 = iter->second;
+				int v1 = baseAttr[ERA_InMinDefense];
+				baseAttr[ERA_InMinDefense] = -1;
+				addBaseAttr(BaseAttrNameStr[iter->first].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InMinDefense:
+			{
+				int v1 = iter->second;
+				int v2 = baseAttr[ERA_InMaxDefense];
+				baseAttr[ERA_InMaxDefense] = -1;
+				addBaseAttr(BaseAttrNameStr[iter->first].c_str(), v1, v2);
+			}
+			break;
+		default:
+			addBaseAttr(BaseAttrNameStr[iter->first].c_str(), iter->second);
+			break;
+		}
+	}
+
+	for(TempAttrMap::iterator iter = indentifyAttr.begin(); iter != indentifyAttr.end(); ++ iter)
+	{
+		addIndentifyAttr(IndentifyAttrNameStr[iter->first].c_str(), iter->second);
+	}
+
+	set_equip_desc(equipTypeData.equipDesc);
+
+	refresh_list();
+	updateUi();
+}
+
+void EquipTipUiLayer::setData(unsigned int typeId)
+{
+	if(!MIsEquipment(typeId))
+		return;
+
+	EquipBaseAttr equipAttr = PackageManager::getInstance()->getEquipBaseAttrDB(typeId);
+	const EquipTypeData* equipTypePtr = PackageManager::getInstance()->getEquipTypeData(typeId);
+	CC_ASSERT(equipTypePtr);
+	const EquipTypeData &equipTypeData = *equipTypePtr;
+
+	_selfEquipPosIndex = equipTypeData.posIndex;
+	//Ji:装备比较
+
+	if (m_bEquiped == false)
+	{
+		showEquipBtn();
+		f_equipment*  self_equip= dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(EICT_Equip, (short)_selfEquipPosIndex));
+
+		if (self_equip != NULL)
+		{
+			getComparisonUi();
+			_currentLayer = _contentLayerSelf;
+			_fightNumBLabelCurrent = _fightNumBLabel1;
+
+			CCMenu* exhibitMenu = dynamic_cast<CCMenu*>(_currentBg->getChildByTag(102));
+			CCMenuItemImage* exhibitSelfEquip = dynamic_cast<CCMenuItemImage*>(exhibitMenu->getChildByTag(1));
+			exhibitSelfEquip->setTarget(this, menu_selector(EquipTipUiLayer::exhibitSelfEquip));
+			exhibitMenu->setVisible(true);
+			setselfdata(self_equip);
+		}
+		else
+		{
+			getSingleUi();
+			_currentLayer = _contentLayerSingle;
+			_fightNumBLabelCurrent = _fightNumBLabel1;
+
+			CCNode* equipedSymbol = dynamic_cast<CCNode*>(_contentLayerSingle->getChildByTag(ETT_EquipedSymbol));
+			equipedSymbol->setVisible(false);
+		}
+	}
+	else
+	{
+		showUnloadBtn();
+		getSingleUi();
+		_currentLayer = _contentLayerSingle;
+		_fightNumBLabelCurrent = _fightNumBLabel1;
+
+		CCMenu* exhibitMenu = (CCMenu*)_currentBg->getChildByTag(101);
+		CCMenuItemImage* exhibitSelfEquip = dynamic_cast<CCMenuItemImage*>(exhibitMenu->getChildByTag(1));
+		exhibitSelfEquip->setTarget(this, menu_selector(EquipTipUiLayer::exhibitSelfEquip));
+		exhibitMenu->setVisible(true);
+	}
+
+	setAllButtonOff();
+
+	//战斗力特效
+	GameActionNode* battleNumAcNode = this->getBattleSuperEffect();
+	battleNumAcNode->setPosition(_currentLayer->getChildByTag(ETT_FightNumSE)->getPosition());
+	_currentLayer->addChild(battleNumAcNode, RZN_EFFECT);
+	_currentLayer->getChildByTag(ETT_FightNum)->setZOrder(RZN_EFFECT + 1);
+	battleNumAcNode->BeginAction(0.07f, true);
+	battleNumAcNode->setScale(0.6f);
+
+	setTitleText(ETT_EquipName, equipTypeData.name.c_str());
+	setTitleText(ETT_Profession, equipTypeData.profession.c_str());
+	setTitleText(ETT_EquipLevel, equipTypeData.minUseLevel);
+	std::ostringstream ostr;
+	ostr << equipTypeData.durability << "/" << equipTypeData.durability;
+	setTitleText(ETT_EquipDurability, ostr.str().c_str());
+	CCSprite* equipSymbol = (CCSprite*)_currentLayer->getChildByTag(ETT_EquipedSymbol);
+	if (equipSymbol!=NULL)
+		equipSymbol->setZOrder(_currentLayer->getChildByTag(ETT_EquipDurability)->getZOrder()+1);
+	setTitleText(ETT_EquipPos, equipTypeData.pos.c_str());
+	this->setEqualityText(equipTypeData.equipQuality);
+	setTitleText(ETT_Sword, "");
+
+	ItemNode* fanciedEquipNode = ItemNode::create();
+	fanciedEquipNode->setDataId(typeId, (unsigned char)equipTypeData.equipQuality);
+	fanciedEquipNode->setPosition(_currentLayer->getChildByTag(ETT_IconFrame)->getPosition());
+	_currentLayer->addChild(fanciedEquipNode);
+
+	const ItemTypeData  &itemdata = PackageManager::getInstance()->getItemTypeData(typeId);
+	if(itemdata.period != 0)
+	{
+		setFashionTime(itemdata.period);
+	}
+
+	if (equipTypeData.showTest != 0)
+	{
+		add_fashion_label(GET_STR(equipTypeData.showTest).c_str(), false);
+	}
+
+	add_equip_suit(equipTypeData.suit_id);
+
+	if (equipTypeData.gemHole)
+	{
+		if(gem_enable_by_pos_type(equipTypeData.posIndex))
+		{
+			for (int i = 0; i < MAX_EQUIPHOLE_NUM; i++ )
+			{//宝石框;	
+				EquipTipUiStoneItem *item = new EquipTipUiStoneItem();
+				_stoneList.push_back(item);
+				//item->addToParent(_currentLayer);
+			}
+		}
+	}else
+	{
+		_currentLayer->getChildByTag(ETT_AditionalAttrCutline)->setVisible(equipTypeData.gemHole);
+	}
+	update_wing_att(equipTypeData.posIndex == EEP_Body1,typeId,1);
+	int equipType=RT_End ;
+	if(equipTypeData.profession2 == PROFESSION1 || equipTypeData.profession2 == PROFESSION4 || equipTypeData.profession2 == PROFESSION7)
+	{
+		equipType = RT_Warrior;
+	}
+	else if (equipTypeData.profession2 == PROFESSION2 || equipTypeData.profession2 == PROFESSION5 || equipTypeData.profession2 == PROFESSION8)
+	{
+		equipType = RT_Mage;
+	}
+	else if (equipTypeData.profession2 == PROFESSION3 || equipTypeData.profession2 == PROFESSION6 || equipTypeData.profession2 == PROFESSION9)
+	{
+		equipType = RT_Taoist;
+	}
+	else if (equipTypeData.profession2 == PROFESSION10 || equipTypeData.profession2 == PROFESSION11 || equipTypeData.profession2 == PROFESSION12)
+	{
+		equipType = RT_End;
+	}
+	if (equipType == RT_End)
+	{
+		LocalPlayer* localPlayer = RoleManager::getInstance()->getLocalPlayer();
+		equipType = localPlayer->getAttribute(RA_ROLETYPE);
+	}
+	//EItemQuality EIQ=(EItemQuality)_selfEquip->get_item_quality();
+	if (equipTypeData.equipQuality == EIQ_Quality0)
+	{
+		addIndentifyAttr(GET_STR(9034).c_str(), -1,-1,"-",true);
+		setFightText(Rating_Helper::getInstance()->GetNoGemRating(typeId,equipType - 1));
+	}
+	else
+	{
+		setFightText(Rating_Helper::getInstance()->GetNoGemRating(typeId,equipType - 1),true);
+		for(int i =0 ; i < equipTypeData.equipQuality ; ++ i)
+		{
+			addIndentifyAttr("\xE6\x9C\xAA\xE7\x9F\xA5\xEF\xBC\x9A", 1,-1,"-",true);
+		}
+	}
+	
+	setup_base_att(equipAttr,equipTypeData.luck);
+	set_equip_desc(equipTypeData.equipDesc);
+
+	refresh_list();
+	updateUi();
+
+}
+
+void EquipTipUiLayer::updateUi()
+{
+	//宝石模型
+	float stoneVerPos = _currentLayer->getChildByTag(ETT_StoneModel)->getPositionY();
+	int stoneIdx = 0;
+	if(_stoneList.size() != NULL)
+	{
+		for (std::vector<EquipTipUiStoneItem*>::iterator iter = _stoneList.begin(); iter != _stoneList.end(); ++iter )
+		{
+			EquipTipUiStoneItem *item = *iter;
+			item->setPosition(ccp(50.0f * (stoneIdx++) + 36.0f , stoneVerPos));
+			delete item;
+		}
+		_stoneList.clear();
+	}
+
+	for(AttrItemList::iterator iter = _baseAttr.begin(); iter != _baseAttr.end(); ++ iter)
+	{
+		delete *iter;
+	}
+	_baseAttr.clear();
+	
+	for(AttrItemList::iterator iter = _indentifyAttr.begin(); iter != _indentifyAttr.end(); ++ iter)
+	{
+		delete *iter;
+	}
+	_indentifyAttr.clear();
+}
+
+CCSize EquipTipUiLayer::getFrameSize()
+{
+	if (m_bComparison == false)
+		return _singleBg->getContentSize();
+	else
+		return _comparisonBg->getContentSize();
+}
+
+void EquipTipUiLayer::setUiPosition(const CCPoint &point)
+{
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+
+	bool putLeft = false;
+	bool putBottom = false;
+	if(point.x > winSize.width / 2.0f)
+		putLeft = true;
+	if(point.y > winSize.height / 2.0f)
+		putBottom = true;
+
+	CCSize uiSize = this->getFrameSize();
+
+	float posX = 0;
+	float posY = 0;
+	if(putLeft)
+	{
+		posX = point.x - uiSize.width - ITEMNODE_CONTENTWIDTH / 2.0f;
+		if(posX < 0.f)
+			posX = 0.f;
+	}
+	else
+	{
+		posX = point.x + ITEMNODE_CONTENTWIDTH / 2.0f;
+		if(posX + uiSize.width > winSize.width)
+			posX = winSize.width - uiSize.width;
+	}
+
+	if(putBottom)
+	{
+		posY = point.y + ITEMNODE_CONTENTHEIGHT / 2.0f - uiSize.height;
+		if(posY < 0.f)
+			posY = 0.f;
+	}
+	else
+	{
+		posY = point.y - ITEMNODE_CONTENTHEIGHT / 2.0f;
+		if(posY + uiSize.height > winSize.height)
+			posY = winSize.height - uiSize.height;
+	}
+
+	setPosition(ccp(posX, posY));
+}
+
+void EquipTipUiLayer::showUi( f_equipment *equip,bool isShowLock /*= true*/,bool isShowSelfEquip /*= true*/ )
+{
+	setData(equip,isShowLock,isShowSelfEquip);
+	
+	setUiPosition(ccp(0,CCDirector::sharedDirector()->getWinSize().height/8));
+	//新手引导
+	NewPlayerGuider::getInstance()->onMessgaeBoxOpen();
+}
+
+void EquipTipUiLayer::showUi(const CCPoint &point, f_equipment *equip)
+{
+	//
+	setData(equip);
+//	setUiPosition(point);
+	setUiPosition(ccp(0,CCDirector::sharedDirector()->getWinSize().height/8));
+}
+
+void EquipTipUiLayer::showUiSetPT(const CCPoint &point, f_equipment *equip)
+{
+	setData(equip);
+	setUiPosition(point);
+}
+
+void EquipTipUiLayer::showUi(const CCPoint &point, const tagEquipViewInfo *equip)
+{
+	setData(equip);
+	setUiPosition(ccp(0,CCDirector::sharedDirector()->getWinSize().height/8));      
+}
+
+void EquipTipUiLayer::showUi(const CCPoint &point, const tagStallGoodsInfo &info)
+{
+	setData(info);
+	setUiPosition(ccp(0,CCDirector::sharedDirector()->getWinSize().height/8));
+}
+
+void EquipTipUiLayer::showUi(const CCPoint &point, unsigned int id)
+{
+	setData(id);
+	setUiPosition(ccp(0,CCDirector::sharedDirector()->getWinSize().height/8));
+}
+
+
+void EquipTipUiLayer::showSelfEquip()
+{
+	m_bEquiped = true;
+}
+
+void EquipTipUiLayer::setEquipVisible(bool isShow)
+{
+	CCNode *node = dynamic_cast<CCNode*>(_contentLayerSingle->getChildByTag(ETT_EquipedSymbol));
+	CC_ASSERT(NULL != node);
+		node->setVisible(isShow);
+}
+void EquipTipUiLayer::showEquipBtn()
+{
+	if(!_equipBtn->isVisible())
+		_equipBtn->setVisible(true);
+	if(!_unloadBtn->isVisible())
+		_unloadBtn->setVisible(true);
+	_equipBtn->setPosition(_layer->getChildByTag(ETT_RlEquipPos)->getPosition());
+	_unloadBtn->setPosition(_layer->getChildByTag(ETT_LlEquipPos)->getPosition());
+}
+
+void EquipTipUiLayer::showUnloadBtn()
+{
+//  	_unloadBtn->setVisible(true);
+//  	_equipBtn->setVisible(false);
+	if(_equipBtn->isVisible())
+		_equipBtn->setVisible(false);
+	if(!_unloadBtn->isVisible())
+		_unloadBtn->setVisible(true);
+	_unloadBtn->setPosition(_layer->getChildByTag(ETT_RlEquipPos)->getPosition());
+}
+
+
+void EquipTipUiLayer::setIndex(int index)
+{
+	if (index != -1)
+	{
+		_index = index;
+	}
+}
+
+void EquipTipUiLayer::useSelectEquip()
+{
+	f_item *item = PackageManager::getInstance()->getItem(EICT_Bag, (short)_index);  
+	if(item != NULL && !item->is_locked())
+	{
+		if(MIsEquipment(item->get_item_type_id()))
+		{
+			int dest = PackageManager::getInstance()->changeDest(item);
+			PackageManager::getInstance()->changeItemPosition(EICT_Bag, EICT_Equip, (short)_index, (short)dest);
+		}
+	}
+}
+
+void EquipTipUiLayer::unloadEquip()
+{
+	if(m_bComparison)
+	{
+//		f_item *itemWore = PackageManager::getInstance()->getItem(EICT_Equip, (short)_selfEquipPosIndex); 
+		if(_selfEquipPosIndex != -1)
+		{
+			int destIndex = PackageManager::getInstance()->getBlankSpace(EICT_Bag);
+			if(destIndex != -1)
+			{//卸下装备
+				if(_selfEquipPosIndex == EEP_Ride)
+				{
+					f_item *item = PackageManager::getInstance()->getItem(EICT_Equip, (short)EEP_Ride);
+					if(item != NULL)
+						PackageManager::getInstance()->unEquipRide(item->get_item_id());
+				}
+				else
+				{
+					PackageManager::getInstance()->changeItemPosition((EItemConType)EICT_Equip,(EItemConType)EICT_Bag, (short)_selfEquipPosIndex, (short)destIndex, 0);
+				}
+			}
+			else
+			{
+				ToolTip::getInstance()->push("\xE8\x83\x8C\xE5\x8C\x85\xE7\xA9\xBA\xE9\x97\xB4\xE5\xB7\xB2\xE6\xBB\xA1");
+			}
+		}
+	}
+	else
+	{
+		if(_index != -1)
+		{
+			int destIndex = PackageManager::getInstance()->getBlankSpace(EICT_Bag);
+			if(destIndex != -1)
+			{//卸下装备
+				if(_index == EEP_Ride)
+				{
+					f_item *item = PackageManager::getInstance()->getItem(EICT_Equip, (short)EEP_Ride);
+					if(item != NULL)
+						PackageManager::getInstance()->unEquipRide(item->get_item_id());
+				}
+				else
+				{
+					PackageManager::getInstance()->changeItemPosition((EItemConType)EICT_Equip, (EItemConType)EICT_Bag,(short)_index, (short)destIndex, 0);
+				}
+			}
+			else
+			{
+				ToolTip::getInstance()->push("\xE8\x83\x8C\xE5\x8C\x85\xE7\xA9\xBA\xE9\x97\xB4\xE5\xB7\xB2\xE6\xBB\xA1");
+			}
+		}
+	}
+	
+}
+
+void EquipTipUiLayer::initAttrNameStr()
+{
+	if(BaseAttrNameStr.empty())
+	{
+		BaseAttrNameStr[ERA_MaxHP] = "\xE7\x94\x9F\xE5\x91\xBD\xEF\xBC\x9A";
+		BaseAttrNameStr[ERA_MaxMP] = "\xE9\xAD\x94\xE5\x8A\x9B\xEF\xBC\x9A";
+		BaseAttrNameStr[ERA_ExAttackMin] = "\xE7\x89\xA9\xE6\x94\xBB\xEF\xBC\x9A";
+		BaseAttrNameStr[ERA_ExAttackMax] = "\xE7\x89\xA9\xE6\x94\xBB\xEF\xBC\x9A";
+		BaseAttrNameStr[ERA_InAttackMin] = "\xE9\xAD\x94\xE6\x94\xBB\xEF\xBC\x9A";
+		BaseAttrNameStr[ERA_InAttackMax] = "\xE9\xAD\x94\xE6\x94\xBB\xEF\xBC\x9A";
+		BaseAttrNameStr[ERA_ArmorIn] = "\xE9\x81\x93\xE6\x94\xBB\xEF\xBC\x9A";
+		BaseAttrNameStr[ERA_ArmorEx] = "\xE9\x81\x93\xE6\x94\xBB\xEF\xBC\x9A";
+		BaseAttrNameStr[ERA_ExMinDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xEF\xBC\x9A";
+		BaseAttrNameStr[ERA_ExMaxDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xEF\xBC\x9A";
+		BaseAttrNameStr[ERA_InMinDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xEF\xBC\x9A";
+		BaseAttrNameStr[ERA_InMaxDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xEF\xBC\x9A";
+		BaseAttrNameStr[ERA_HitRate] = "\xE5\x91\xBD\xE4\xB8\xAD\xEF\xBC\x9A";
+		BaseAttrNameStr[ERA_Dodge] = "\xE9\x97\xAA\xE9\x81\xBF\xEF\xBC\x9A";
+		BaseAttrNameStr[ERA_Crit_Rate] = "\xE6\x9A\xB4\xE5\x87\xBB\xEF\xBC\x9A";
+		BaseAttrNameStr[ERA_UnCrit_Rate] = "\xE5\x85\x8D\xE6\x9A\xB4\xEF\xBC\x9A";
+		BaseAttrNameStr[ERA_UnCrit_Amount] = "\xE5\x85\x8D\xE7\x88\x86\xEF\xBC\x9A";
+		BaseAttrNameStr[ERA_Luck] = "\xE5\xB9\xB8\xE8\xBF\x90\xEF\xBC\x9A";
+	}
+
+	if(IndentifyAttrNameStr.empty())
+	{
+		IndentifyAttrNameStr[ERA_ExAttackMax] = "\xE7\x89\xA9\xE6\x94\xBB\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";
+		IndentifyAttrNameStr[ERA_ExAttackMin] = "\xE7\x89\xA9\xE6\x94\xBB\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";
+		IndentifyAttrNameStr[ERA_ExMaxDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";
+		IndentifyAttrNameStr[ERA_ExMinDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";
+		IndentifyAttrNameStr[ERA_InAttackMax] = "\xE9\xAD\x94\xE6\x94\xBB\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";
+		IndentifyAttrNameStr[ERA_InAttackMin] = "\xE9\xAD\x94\xE6\x94\xBB\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";
+		IndentifyAttrNameStr[ERA_ArmorIn] = "\xE9\x81\x93\xE6\x94\xBB\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";
+		IndentifyAttrNameStr[ERA_ArmorEx] = "\xE9\x81\x93\xE6\x94\xBB\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";
+		IndentifyAttrNameStr[ERA_InMaxDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";
+		IndentifyAttrNameStr[ERA_InMinDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";
+		IndentifyAttrNameStr[ERA_HitRate] = "\xE5\x91\xBD\xE4\xB8\xAD\xEF\xBC\x9A";
+		IndentifyAttrNameStr[ERA_Dodge] = "\xE9\x97\xAA\xE9\x81\xBF\xEF\xBC\x9A";
+		IndentifyAttrNameStr[ERA_Crit_Rate] = "\xE6\x9A\xB4\xE5\x87\xBB\xEF\xBC\x9A";
+		IndentifyAttrNameStr[ERA_UnCrit_Rate] = "\xE5\x85\x8D\xE6\x9A\xB4\xEF\xBC\x9A";
+		IndentifyAttrNameStr[ERA_MaxHP] = "\xE7\x94\x9F\xE5\x91\xBD\xE5\x80\xBC\xEF\xBC\x9A";
+		IndentifyAttrNameStr[ERA_MaxMP] = "\xE9\xAD\x94\xE5\x8A\x9B\xE5\x80\xBC\xEF\xBC\x9A";
+	}
+}
+
+void EquipTipUiLayer::setTitleText(eEquipTag tag, const char *str, bool redColor /*= false*/, bool grayColor /*= false*/)
+{
+	//CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_currentLayer->getChildByTag(tag));
+	LabelFT* label = getLabelFTByTag(_currentLayer,tag);
+	if(label )
+	{
+		if (tag == ETT_EquipDurability && grayColor)
+		{
+			ccColor3B color = ccc3(125, 125, 125);
+			setText(label, str, color);
+		}
+		else
+		{
+			setText(label, str, redColor);
+		}
+	}
+}
+
+void EquipTipUiLayer::setTitleText(eEquipTag tag, const wchar_t *str, bool redColor /*= false*/, bool grayColor /*= false*/ )
+{
+	//CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_currentLayer->getChildByTag(tag));
+	LabelFT* label = getLabelFTByTag(_currentLayer,tag);
+	if(label )
+	{
+		char vStr[128];
+		memset(vStr, 0, sizeof(char) * 128);
+		Utf16ToUtf8(str, vStr, 128, 0);
+		if (tag == ETT_EquipDurability && grayColor)
+		{
+			ccColor3B color = ccc3(125, 125, 125);
+			setText(label, vStr, color);
+		}
+		else
+		{
+			setText(label, vStr, redColor);
+		}
+	}
+}
+
+void EquipTipUiLayer::setTitleText(eEquipTag tag, int v, bool redColor /*= false*/, bool grayColor /*= false*/)
+{
+	//CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_currentLayer->getChildByTag(tag));
+	LabelFT* label = getLabelFTByTag(_currentLayer,tag);
+	if(label )
+	{
+		CCString *str = CCString::createWithFormat("%d", v);
+		if (tag == ETT_EquipDurability && grayColor)
+		{
+			ccColor3B color = ccc3(125, 125, 125);
+			setText(label, str->getCString(), color);
+		}
+		else
+		{
+			setText(label, str->getCString(), redColor);
+		}
+	}
+}
+
+void EquipTipUiLayer::setText(LabelFT *label, const char *str, bool redColor/* = false*/)
+{
+	CC_ASSERT(label != NULL && str != NULL);
+	ccColor3B color;
+	if(redColor)
+		color = ccc3(255, 0, 0);
+	else
+		color = ccc3(0xfe, 0xf8, 0xd8);
+	label->setColor(color);
+	label->setString(str);
+}
+
+void EquipTipUiLayer::setText(LabelFT *label, const char *str, ccColor3B& color)
+{
+	CC_ASSERT(label != NULL && str != NULL);
+	
+	label->setColor(color);
+	label->setString(str);
+}
+
+void EquipTipUiLayer::setFightText( int v ,bool showAdd)
+{
+	std::ostringstream ostr2;
+	//ostr2<<str<< v;         //【Ji】:注释掉战斗力的字符，直接输出数值
+	if (showAdd)
+	{
+		ostr2<<v<<"\x2B";
+	}
+	else
+	{
+		ostr2<<v;
+	}
+	//CCNode* posLabel = _currentLayer->getChildByTag(ETT_Sword);
+	LabelFT* posLabel = getLabelFTByTag(_currentLayer,ETT_Sword);
+	if (posLabel)
+	{
+		_fightNumBLabelCurrent->setPosition(posLabel->getPosition());
+		posLabel->removeFromParent();
+	}
+	
+	_fightNumBLabelCurrent->setString(ostr2.str().c_str());
+	_currentLayer->addChild(_fightNumBLabelCurrent, RZN_EFFECT + 1);
+}
+
+void EquipTipUiLayer::setEquipIcon(const char *iconFrameName)
+{
+	if(iconFrameName == NULL)
+		return;
+
+	CCNode *node = _currentLayer->getChildByTag(ETT_IconFrame);
+	CCSprite *sprite = dynamic_cast<CCSprite*>(node->getChildByTag(ETT_IconFrame));
+	if(sprite == NULL)
+	{
+		sprite = CCSprite::create();
+		sprite->setTag(ETT_IconFrame);
+		node->addChild(sprite);
+		CCSize size = node->getContentSize();
+		sprite->setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+	}
+	sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(iconFrameName));
+}
+
+void EquipTipUiLayer::setFashionTime(unsigned int time)
+{
+	//设置商城时装、翅膀显示时效;
+	if (time != (unsigned int) -1)
+	{
+		//unsigned int sec = time % 60; //秒;
+		unsigned int min = time / 60; //分;
+		unsigned int hour = min / 60; //时;
+		unsigned int day = hour / 24; //天;
+		CCString *limittime = CCString::createWithFormat( "%s%d%s","\xE6\x9C\x89\xE6\x95\x88\xE6\x9C\x9F\xE9\x99\x90\x3A",day,"\xE5\xA4\xA9");
+
+		add_fashion_label(limittime->getCString(), true);
+	}
+}
+
+void EquipTipUiLayer::setFashionTime(tagDWORDTime getitemtime,unsigned int time)
+{
+	//设置背包和角色装备时装、翅膀显示时效;
+	if (time != (unsigned int)-1)
+	{
+		tagDWORDTime limittime = IncreaseTime(getitemtime, time);
+		ostringstream ostr;
+		ostr << limittime.year;
+		std::string str = GET_STR(9528);
+		string year = replaceStr(str,"*****",ostr.str());
+		ostr.str("");
+		ostr << limittime.month;
+		string month = replaceStr(year,"****",ostr.str());
+		ostr.str("");
+		ostr << limittime.day;
+		string day = replaceStr(month,"***",ostr.str());
+		ostr.str("");
+		ostr << limittime.hour;
+		string hour = replaceStr(day,"**",ostr.str());
+		ostr.str("");
+		ostr << limittime.min;
+		string timeMessage = replaceStr(hour,"*",ostr.str());
+		CCString* fashiontime = CCString::createWithFormat("%s",timeMessage.c_str());
+
+		add_fashion_label(fashiontime->getCString(), true);
+	}
+}
+
+void EquipTipUiLayer::addLuckAttr(int v)
+{
+	add_base_att_label(BaseAttrNameStr[ERA_Luck].c_str(), v, 0);
+}
+
+void EquipTipUiLayer::addBaseAttr(const char *attrName, int v1, int v2/* = -1*/, const char *split/* = "-"*/)
+{
+	if(strlen(attrName) > 0)
+	{
+		add_base_att_label(attrName, v1, v2);
+	}
+}
+
+void EquipTipUiLayer::addIndentifyAttr(const char *attrName, int v1, int v2/* = -1*/, const char *split/* = "-"*/,bool hide,const ERoleAttribute  eRoleAtt,stEquipTipViewModel equip)
+{
+	if(strlen(attrName) > 0)
+	{
+		add_indentify_att_label(attrName, v1, eRoleAtt, equip);
+	}
+}
+
+EquipTipUiAttrItem *EquipTipUiLayer::createAttrItem(const ERoleAttribute  eRoleAtt,const char *attrName, int v1, int v2 /*= -1*/, const char *split/* = "-"*/,bool hide,stEquipTipViewModel equip )
+{
+	CCString *str = NULL;
+	CCString* valueStr;
+
+	TTFConfig config;
+	config.fontFilePath=  FT_FONTFACE;
+	config.fontSize = 14;
+	config.outlineSize = 1;
+
+	LabelFT *attrValueLabel = LabelFT::createWithTTF(config,"");
+
+	//CCLabelTTF* attrValueLabel = CCLabelTTF::create();
+//	attrValueLabel->setColor(ccc3(0xfe, 0xf8, 0xd8));
+	attrValueLabel->setColor(ccc3(255, 255, 255));
+	attrValueLabel->setAnchorPoint(ccp(0.0f, 0.5f));
+	_currentLayer->addChild(attrValueLabel);
+	if (hide)
+	{
+		str = CCString::createWithFormat("%s", attrName);
+		if (v1 > 0)
+		{
+			attrValueLabel->setString("???");
+		}
+	}
+	else
+	{
+		if(v2 < 0)
+		{
+			//str = CCString::createWithFormat("%s %d", attrName, v1);
+			str = CCString::createWithFormat("%s", attrName);
+			valueStr = CCString::createWithFormat("%d", v1);
+			attrValueLabel->setString(valueStr->getCString());
+		}
+		else
+		{
+			//str = CCString::createWithFormat("%s %d %s %d", attrName, v1, split, v2);
+			str = CCString::createWithFormat("%s", attrName);
+			valueStr = CCString::createWithFormat("%d %s %d", v1, split, v2);
+			attrValueLabel->setString(valueStr->getCString());
+		}
+	}
+	
+	EquipTipUiAttrItem *item = new EquipTipUiAttrItem;
+	item->setString(str->getCString());
+	_attrValueLabelMap[item] = attrValueLabel;
+
+	if(eRoleAtt>ERA_Null && equip.is_valid()){
+		CCSprite * sprite=CCSprite::create();
+		//std::string name = "";
+		EquipAddAtt att = EquipFusionManager::getInstance()->ERA2EAA(eRoleAtt);
+		float min=0,max=0;
+		EquipFusionManager::getInstance()->getEquipAttBaseRangeVal(equip.model_id,equip.quanlity,att,min,max );
+		std::string name;
+		//value1=equipAtt[att]*fPct;
+		name = getQuanlityCharSpriteFrameName(min,max,(float)v1);
+		CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(name.c_str());
+		sprite->setDisplayFrame(frame);
+		sprite->setVisible(true);
+		sprite->setAnchorPoint(ccp(0.0f, 0.5f));
+	
+		_currentLayer->addChild(sprite);
+		_attrImageMap[item]= sprite;
+	}
+	
+	return item;
+}
+
+void EquipTipUiLayer::setselfdata(f_equipment *selfequip,bool self/*=true*/)
+{
+	if(selfequip == NULL)
+		return;
+
+ 	std::string selfequipName;
+
+	const EquipTypeData* equipType = PackageManager::getInstance()->getEquipTypeData(selfequip->get_item_type_id());    //【ji】获取此种装备的类型数据
+	CC_ASSERT(equipType);
+	const EquipTypeData &equipTypeData = *equipType;
+	selfequipName = PackageManager::getInstance()->GetNameByLevel(equipTypeData,selfequip->get_star_num())+selfequip->GetItemName()  .c_str();
+	
+	LocalPlayer *selflocalPlayer = RoleManager::getInstance()->getLocalPlayer();
+	bool isCurrentRoleProType = true;	
+
+	if (self)
+	{
+		std::string selfproStr;
+		//int selectRoleType = 1;
+		switch(selflocalPlayer->getAttribute(RA_ROLETYPE))
+		{
+		case RT_Warrior:
+			selfproStr = GET_STR(9325).c_str();
+			//selectRoleType = 1;
+			if (equipTypeData.profession2 == PROFESSION1 || equipTypeData.profession2 == PROFESSION4 || equipTypeData.profession2 == PROFESSION7)
+			{
+				isCurrentRoleProType = false;
+			}
+			break;
+		case RT_Mage:
+			selfproStr = GET_STR(9326).c_str();
+			//selectRoleType = 2;
+			if (equipTypeData.profession2 == PROFESSION2 || equipTypeData.profession2 == PROFESSION5 || equipTypeData.profession2 == PROFESSION8)
+			{
+				isCurrentRoleProType = false;
+			}
+			break;
+		case RT_Taoist:
+			selfproStr = GET_STR(9327).c_str();
+			//selectRoleType = 3;
+			if (equipTypeData.profession2 == PROFESSION3 || equipTypeData.profession2 == PROFESSION6 || equipTypeData.profession2 == PROFESSION9)
+			{
+				isCurrentRoleProType = false;
+			}
+			break;
+		}
+	}
+
+	if (equipTypeData.profession2 == PROFESSION10 || equipTypeData.profession2 == PROFESSION11 || equipTypeData.profession2 == PROFESSION12)
+	{
+		isCurrentRoleProType = false;
+	}
+	std::string selfallPro("\xE9\x80\x9A\xE7\x94\xA8");
+
+	int selfequipConsolidLevel = selfequip->get_equip_consolidate_level();
+	CCString *selfequipNameStr;
+	if(selfequipConsolidLevel != 0)
+		selfequipNameStr = CCString::createWithFormat("%s + %d", selfequipName.c_str(), selfequipConsolidLevel);
+	else
+		selfequipNameStr = CCString::create(selfequipName);
+	//J:战斗力特效
+	
+	GameActionNode* battleNumAcNode = this->getBattleSuperEffect();
+	battleNumAcNode->setPosition(_currentLayer->getChildByTag(ETT_FightNumSE)->getPosition());
+	_currentLayer->addChild(battleNumAcNode, RZN_EFFECT);
+	_currentLayer->getChildByTag(ETT_FightNum)->setZOrder(RZN_EFFECT + 1);
+//	_currentLayer->getChildByTag(ETT_Sword)->setZOrder(RZN_EFFECT + 1);
+	battleNumAcNode->BeginAction(0.07f, true);
+	battleNumAcNode->setScale(0.6f);
+
+	setTitleText(ETT_EquipName, selfequipNameStr->getCString());
+	setTitleText(ETT_Profession, equipTypeData.profession.c_str(), isCurrentRoleProType);
+	setTitleText(ETT_EquipLevel, equipTypeData.minUseLevel, ((selflocalPlayer->getLevel()) < equipTypeData.minUseLevel));
+	std::ostringstream ostr;
+	int curDurability = GetEquipNewness(equipTypeData.posIndex, selfequip->get_item_use_times(), equipTypeData.durability);
+	ostr << curDurability << "/" << equipTypeData.durability;
+	setTitleText(ETT_EquipDurability, ostr.str().c_str(), curDurability<=0);
+	CCSprite* equipSymbol = (CCSprite*)_currentLayer->getChildByTag(ETT_EquipedSymbol);
+	if (equipSymbol!=NULL)
+	{
+		equipSymbol->setZOrder(_currentLayer->getChildByTag(ETT_EquipDurability)->getZOrder()+1);
+		equipSymbol->setVisible(selfequip->get_data()->eConType == EICT_Equip);
+	}
+	if(equipTypeData.bySex == -1)
+		setTitleText(ETT_EquipPos, equipTypeData.pos.c_str());
+	else
+		setTitleText(ETT_EquipPos, equipTypeData.pos.c_str(), (equipTypeData.bySex != (selflocalPlayer->getAttribute(RA_SEX))));
+//	setTitleText(ETT_Quality, converQualityToString((EItemQuality)selfequip->get_item_quality()).c_str());
+	//装备品质
+	this->setEqualityText((EItemQuality)selfequip->get_item_quality());
+	//setTitleText(ETT_Sword, selfequip->get_equip()->nRating);
+//	setFightText(ETT_Sword, selfequip->get_fightli());
+	//获取战斗力
+	setFightText(selfequip->get_fightli());
+//	std::string iconFrameName = PackageManager::getInstance()->getIconFrameName(selfequip->get_item_type_id());
+	ItemNode* selfENode = ItemNode::create();
+	selfENode->initWithItem(selfequip);
+	//获取装备图像框的位置设置节点的位置，并且将节点添加到当前层上
+	selfENode->setPosition(_currentLayer->getChildByTag(ETT_IconFrame)->getPosition());
+	_currentLayer->addChild(selfENode);
+//	if(!iconFrameName.empty())
+//		setEquipIcon(iconFrameName.c_str());
+	const ItemTypeData  &itemdata = PackageManager::getInstance()->getItemTypeData(selfequip->get_item_type_id());
+	//获取物品得到时间
+	tagDWORDTime const& getitemtime = selfequip->get_gain_time();
+	//物品时效
+	if(itemdata.period != 0)
+	{
+		setFashionTime(getitemtime,itemdata.period);
+	}
+
+	if (equipTypeData.showTest)
+	{
+		add_fashion_label(GET_STR(equipTypeData.showTest).c_str(), false);
+	}
+
+	add_equip_suit(equipTypeData.suit_id, true);
+
+	if (equipTypeData.gemHole)
+	{
+		if(gem_enable_by_pos_type(equipTypeData.posIndex))
+		{
+			for (int i = 0; i < selfequip->get_equip_max_hole_num(); i++ )
+			{//宝石;
+				unsigned int id = selfequip->get_equip_hold_gem_id(i);
+				if(id != (unsigned int) -1 && id != (unsigned int) 0)
+				{
+					EquipTipUiStoneItem *item = new EquipTipUiStoneItem(id);
+					_stoneList.push_back(item);
+					//item->addToParent(_contentLayerSelf);
+				}
+				else
+				{
+					EquipTipUiStoneItem *item = new EquipTipUiStoneItem();
+					_stoneList.push_back(item);
+					//item->addToParent(_contentLayerSelf);
+				}
+			}
+		}
+	}else
+	{
+		_contentLayerSelf->getChildByTag(ETT_AditionalAttrCutline)->setVisible(equipTypeData.gemHole);
+	}
+	
+	update_wing_att(equipTypeData.posIndex == EEP_Body1,selfequip->get_item_type_id(),selfequip->get_equip()->nLevel);
+
+	for(int i = MAX_BASE_ATT; i < MAX_ADDITIONAL_EFFECT; i ++)
+	{//鉴定属性;
+		if (selfequip->m_equipex.EquipAttitionalAtt[i].eRoleAtt == ERA_UNKNOW)
+		{
+			_selfEquipIdentifyMap[selfequip->m_equipex.EquipAttitionalAtt[i].eRoleAtt] = ERA_UNKNOW;
+			_selfEquipIdentifyVector.push_back(selfequip->m_equipex.EquipAttitionalAtt[i].eRoleAtt);
+		}
+		else if(selfequip->m_equipex.EquipAttitionalAtt[i].eRoleAtt != ERA_Null)
+		{
+			_selfEquipIdentifyMap[selfequip->m_equipex.EquipAttitionalAtt[i].eRoleAtt] = selfequip->m_equipex.EquipAttitionalAtt[i].nValue;
+			_selfEquipIdentifyVector.push_back(selfequip->m_equipex.EquipAttitionalAtt[i].eRoleAtt);
+		}
+	}
+	for(int i = 0; i < MAX_BASE_ATT; i ++)
+	{//基础属性;
+		//属性的数值 
+		ERoleAttribute attr = selfequip->m_equipex.EquipAttitionalAtt[i].eRoleAtt;
+		if(attr != ERA_Null)
+		{
+			if(attr != ERA_Luck)
+			{
+				_selfEquipAttrMap[attr] = selfequip->m_equipex.EquipAttitionalAtt[i].nValue + getConsolidateAtt(selfequip->m_equipex.EquipAttitionalAtt[i].nValue, selfequipConsolidLevel);
+				_selfEquipAttrVector.push_back(attr);
+			}
+		}
+	}
+	if(selfequip->m_equipex.byLuck != 0)
+	{
+		addLuckAttr(selfequip->m_equipex.byLuck);
+	}
+	
+	for(std::vector<ERoleAttribute>::iterator iter = _selfEquipAttrVector.begin(); iter != _selfEquipAttrVector.end(); ++ iter)
+	{
+		int iterValue = _selfEquipAttrMap[*iter];
+		if(iterValue == -1)
+			continue;
+
+		switch(*iter)
+		{
+		case ERA_ExAttackMin:
+			{
+				int v1 = iterValue;
+				int v2 = _selfEquipAttrMap[ERA_ExAttackMax];
+				_selfEquipAttrMap[ERA_ExAttackMax] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExAttackMax:
+			{
+				int v2 = iterValue;
+				int v1 = _selfEquipAttrMap[ERA_ExAttackMin];
+				_selfEquipAttrMap[ERA_ExAttackMin] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InAttackMin:
+			{
+				int v1 = iterValue;
+				int v2 = _selfEquipAttrMap[ERA_InAttackMax];
+				_selfEquipAttrMap[ERA_InAttackMax] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InAttackMax:
+			{
+				int v2 = iterValue;
+				int v1 = _selfEquipAttrMap[ERA_InAttackMin];
+				_selfEquipAttrMap[ERA_InAttackMin] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ArmorEx:
+			{
+				int v1 = iterValue;
+				int v2 = _selfEquipAttrMap[ERA_ArmorIn];
+				_selfEquipAttrMap[ERA_ArmorIn] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ArmorIn:
+			{
+				int v2 = iterValue;
+				int v1 = _selfEquipAttrMap[ERA_ArmorEx];
+				_selfEquipAttrMap[ERA_ArmorEx] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExMaxDefense:
+			{
+				int v2 = iterValue;
+				int v1 = _selfEquipAttrMap[ERA_ExMinDefense];
+				_selfEquipAttrMap[ERA_ExMinDefense] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExMinDefense:
+			{
+				int v1 = iterValue;
+				int v2 = _selfEquipAttrMap[ERA_ExMaxDefense];
+				_selfEquipAttrMap[ERA_ExMaxDefense] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InMaxDefense:
+			{
+				int v2 = iterValue;
+				int v1 = _selfEquipAttrMap[ERA_InMinDefense];
+				_selfEquipAttrMap[ERA_InMinDefense] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InMinDefense:
+			{
+				int v1 = iterValue;
+				int v2 = _selfEquipAttrMap[ERA_InMaxDefense];
+				_selfEquipAttrMap[ERA_InMaxDefense] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		default:
+			addBaseAttr(BaseAttrNameStr[*iter].c_str(), iterValue);
+			break;
+		}
+	}
+	//EItemQuality EIQ=(EItemQuality)selfequip->get_item_quality();
+	if(_selfEquipIdentifyVector.size() == 0)
+	{
+		addIndentifyAttr(GET_STR(9034).c_str(), -1,-1,"-",true);
+	}
+	else
+	{
+		for(std::vector<ERoleAttribute>::iterator iter = _selfEquipIdentifyVector.begin(); iter != _selfEquipIdentifyVector.end(); ++ iter)
+		{
+			addIndentifyAttr(IndentifyAttrNameStr[*iter].c_str(), _selfEquipIdentifyMap[*iter],-1,"-",false,*iter,selfequip);
+		}
+	}
+
+	set_equip_desc(equipTypeData.equipDesc);
+
+	refresh_list();
+	updateSelfUi();
+
+
+
+	_currentLayer = _contentLayerDest;
+	_fightNumBLabelCurrent = _fightNumBLabel2;
+
+	m_nBtnIndex = 0;
+	CCMenu* exhibitMenu = dynamic_cast<CCMenu*>(_comparisonBg->getChildByTag(101));
+	CCMenuItemImage* exhibitSelfEquip = dynamic_cast<CCMenuItemImage*>(exhibitMenu->getChildByTag(1));
+	exhibitSelfEquip->setTarget(this, menu_selector(EquipTipUiLayer::showMroe));
+	exhibitMenu->setVisible(true);
+	exhibitSelfEquip->setVisible(true);
+}
+
+void EquipTipUiLayer::exhibitSelfEquip(CCObject* pObject)
+{
+ 	f_item *item = PackageManager::getInstance()->getItem((EItemConType)EICT_Equip, (short)_selfEquipPosIndex);
+	if (item)
+	{
+		unsigned long long itemINT64 = (unsigned long long)item->get_item_id();
+		showEquipClick( itemINT64 );
+	}
+
+	//ToolTip::getInstance()->push("\xE6\xAD\xA4\xE5\x8A\x9F\xE8\x83\xBD\xE6\x9A\x82\xE6\x9C\xAA\xE5\xBC\x80\xE6\x94\xBE");
+}
+
+
+void EquipTipUiLayer::exhibitBagEquip( CCObject* pObject)
+{
+ 	f_item *item = PackageManager::getInstance()->getItem((EItemConType)EICT_Bag, (short)_index);
+	if (item)
+	{
+		unsigned long long itemINT64 = (unsigned long long)item->get_item_id();
+		showEquipClick( itemINT64);
+	}
+
+	//ToolTip::getInstance()->push("\xE6\xAD\xA4\xE5\x8A\x9F\xE8\x83\xBD\xE6\x9A\x82\xE6\x9C\xAA\xE5\xBC\x80\xE6\x94\xBE");
+}
+
+void EquipTipUiLayer::showMroe( CCObject* pObject )
+{
+	CCMenu* exhibitMenu;
+	CCMenuItemImage* exhibitSelfEquip;
+	if (_comparisonBg->isVisible() && !(_singleBg->isVisible()))
+	{
+		exhibitMenu = dynamic_cast<CCMenu*>(_comparisonBg->getChildByTag(101));
+		exhibitSelfEquip = dynamic_cast<CCMenuItemImage*>(exhibitMenu->getChildByTag(1));
+	}
+	else if(!(_comparisonBg->isVisible()) && _singleBg->isVisible())
+	{
+		exhibitMenu = dynamic_cast<CCMenu*>(_singleBg->getChildByTag(101));
+		exhibitSelfEquip = dynamic_cast<CCMenuItemImage*>(exhibitMenu->getChildByTag(1));
+	}
+	CCSpriteFrame* selectFrame;
+	CCSpriteFrame* normalFrame;
+	if (_isShowMoreBtn)
+	{
+		_isShowMoreBtn = false;
+		_zhanshiBtn->setVisible(false);
+		_fenjieBtn->setVisible(false);
+		selectFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("gengduoshangbtnh");
+		normalFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("gengduoshangbtnn");
+	}
+	else
+	{
+		_isShowMoreBtn = true;
+		_zhanshiBtn->setVisible(true);
+
+		CC_ASSERT(NULL != _desEquip);
+		const EquipTypeData* equipData =PackageManager::getInstance()->getEquipTypeData(_desEquip->get_item_type_id());
+		CC_ASSERT(equipData);
+		if(!MIsEquipment(_desEquip->get_item_type_id())|| -1 == equipData->explodeId)
+			_fenjieBtn->setVisible(false);
+		else
+			_fenjieBtn->setVisible(true);
+
+		selectFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("gengduoxiabtnh");
+		normalFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("gengduoxiabtnn");
+	}
+	exhibitSelfEquip->setSelectedSpriteFrame(selectFrame);
+	exhibitSelfEquip->setNormalSpriteFrame(normalFrame);
+}
+
+//点击装备展示
+void EquipTipUiLayer::showEquipClick( unsigned long long n64EquipID )
+{
+	//先找物品或装备数据
+	f_item *item = PackageManager::getInstance()->getItem(EICT_Bag, (long long)n64EquipID);
+	if( !item )
+	{
+		item = PackageManager::getInstance()->getItem(EICT_Equip, (long long)n64EquipID);
+		if(! item )
+			return;
+	}
+	//取得聊天窗体
+	ChatUiLayer *uiLayer = getUiNodeByTag<ChatUiLayer>(WCT_ChatUi);
+	if( uiLayer == NULL )
+		return;
+
+	//先将界面调整到聊天视窗，如果聊天栏已显示，则不在调用
+	if(!uiLayer->getShowState())
+	{
+		GET_UI(SystemUi, WCT_SystemUi)->slotChangeShowState(); 
+	}
+	//再显示对话框
+	uiLayer->showFrame(FT_Input, true);
+	uiLayer->showFrame(IT_btnYY, true);
+	uiLayer->showFrame(FT_ChatRecord, false);
+	uiLayer->showFrame(FT_btn, false);
+	uiLayer->showFrame(FT_btnWorld, false);
+	uiLayer->showFrame(FT_btnGuild, false);
+	uiLayer->showFrame(FT_btnTeam, false);
+	//隐藏相关ui;
+	World::getInstance()->getTaskTraceUi()->showUi(false);
+	World::getInstance()->getMiniMapUi()->showUi(false);
+	GET_UI(ShortCutUi, WCT_ShorCutUi)->showUi(false);
+	GET_UI(JoyStickUi, WCT_JoyStick)->showUi(false);
+	//加入到对话框
+	uiLayer->InputItemInfo( item );
+}
+
+void EquipTipUiLayer::getComparisonUi()
+{
+	if(!_comparisonBg->isVisible())
+		_comparisonBg->setVisible(true);
+	if(_singleBg->isVisible())
+		_singleBg->setVisible(false);
+	_currentBg = _comparisonBg;
+	if(!m_bComparison)
+		m_bComparison = true;
+}
+
+void EquipTipUiLayer::getSingleUi()
+{
+	if(_comparisonBg->isVisible())
+		_comparisonBg->setVisible(false);
+	if(!_singleBg->isVisible())
+		_singleBg->setVisible(true);
+	_currentBg = _singleBg;
+	if(m_bComparison)
+		m_bComparison = false;
+}
+
+void EquipTipUiLayer::updateSelfUi()
+{
+	float stoneVerPos = _currentLayer->getChildByTag(ETT_StoneModel)->getPositionY();
+	int stoneIdx = 0;
+	if(_stoneList.size() != NULL)
+	{
+		for (std::vector<EquipTipUiStoneItem*>::iterator iter = _stoneList.begin(); iter != _stoneList.end(); ++iter )
+		{
+			EquipTipUiStoneItem *item = *iter;
+			item->setPosition(ccp(50.0f * (stoneIdx++) + 36.0f , stoneVerPos));
+			delete item;
+		}
+		_stoneList.clear();
+	}
+
+	for(AttrItemList::iterator iter = _baseAttr.begin(); iter != _baseAttr.end(); ++ iter)
+	{
+		delete *iter;
+	}
+	_baseAttr.clear();
+
+	for(AttrItemList::iterator iter = _indentifyAttr.begin(); iter != _indentifyAttr.end(); ++ iter)
+	{
+		delete *iter;
+	}
+	_indentifyAttr.clear();
+
+	_attrImageMap.clear();
+}
+
+void EquipTipUiLayer::setAllButtonOff( eWroldChildTag showType /*= WCT_Null*/ )
+{
+	_showType = showType;
+	if(NULL != _buttonBg)
+		_buttonBg->setVisible(false);
+	if(NULL != _currentBg && NULL != _currentBg->getChildByTag(101))
+		_currentBg->getChildByTag(101)->setVisible(false);
+	//	getChildByTag(ETT_UnloadBtn)->setVisible(false);
+	if(NULL != _equipBtn)
+		_equipBtn->setVisible(false);
+	if(NULL != _fusionBtn)
+		_fusionBtn->setVisible(false);
+	if(NULL != _starupBtn)
+		_starupBtn->setVisible(false);
+	if(NULL != _inlayBtn)
+		_inlayBtn->setVisible(false);
+	if(NULL != _strengthenBtn)
+		_strengthenBtn->setVisible(false);
+	if(NULL != _levelupBtn)
+		_levelupBtn->setVisible(false);
+	if(NULL != _maichuBtn)
+		_maichuBtn->setVisible(false);
+	if(!m_bComparison)
+		_unloadBtn->setVisible(false);
+	if (NULL != _zhanshiBtn)
+		_zhanshiBtn->setVisible(false);
+	if (NULL != _fenjieBtn)
+		_fenjieBtn->setVisible(false);
+	if (NULL != _unloadBtn)
+		_unloadBtn->setVisible(false);
+
+	if (NULL != _fly_btn)
+		_fly_btn->setVisible(false);
+	if (NULL != _evo_btn)
+		_evo_btn->setVisible(false);
+
+	CCMenu* exhibitMenu = NULL;
+	if (_comparisonBg->isVisible() && !(_singleBg->isVisible()))
+	{
+		exhibitMenu = dynamic_cast<CCMenu*>(_comparisonBg->getChildByTag(101));
+		if (exhibitMenu)
+		{
+			exhibitMenu->setVisible(false);
+		}
+	}
+	else if(!(_comparisonBg->isVisible()) && _singleBg->isVisible())
+	{
+		exhibitMenu = dynamic_cast<CCMenu*>(_singleBg->getChildByTag(101));
+		if (exhibitMenu)
+		{
+			exhibitMenu->setVisible(false);
+		}
+	}
+
+	exhibitMenu = dynamic_cast<CCMenu*>(_comparisonBg->getChildByTag(102));
+	if (exhibitMenu)
+	{
+		exhibitMenu->setVisible(false);
+	}
+
+	if(WCT_Null == showType)
+		return;
+	std::string strNormal;
+	std::string strSelected;
+	if (WCT_SHOPUI == showType )
+	{
+		strNormal = "maichubtnn";
+		strSelected = "maichubtnh";
+		ItemTypeData data = PackageManager::getInstance()->getItemTypeData(_desEquip->get_item_type_id());
+		if (0 == data.canSell)
+			return;
+	}
+	else if (WCT_StorageUi == showType)
+	{
+		strNormal = "rucangkubtnn";
+		strSelected = "rucangkubtnh";
+	}
+	else if (WCT_PACKAGEUI == showType)
+	{
+		strNormal = "rubeibaobtnn";
+		strSelected = "rubeibaobtnh";
+	}
+	else if(WCT_TradingUI == showType || WCT_ForgingDecomUI == showType)
+	{
+		_unloadBtn->setVisible(false);
+		_fenjieBtn->setVisible(false);
+		_zhanshiBtn->setVisible(false);
+		return;
+	}
+
+	CCSpriteFrame* frameNormal = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(strNormal.c_str());
+	CCSpriteFrame* frameSelected = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(strSelected.c_str());
+	_maichuBtn->setBackgroundSpriteFrameForState(frameNormal,CCControlStateNormal);
+	_maichuBtn->setBackgroundSpriteFrameForState(frameNormal,CCControlStateDisabled);
+	_maichuBtn->setBackgroundSpriteFrameForState(frameSelected,CCControlStateSelected);
+	_maichuBtn->setBackgroundSpriteFrameForState(frameSelected,CCControlStateHighlighted);
+	_maichuBtn->setVisible(true);
+}
+
+void EquipTipUiLayer::updateButtonStatus(EEquipPos pos)
+{
+	CC_ASSERT(_desEquip != NULL);
+	//装备/卸下按钮
+	int nPlayerLv = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	if (!m_bEquiped)
+	{
+		showEquipBtn();
+		if(!m_bComparison)
+		{
+			if(_unloadBtn->isVisible())
+				_unloadBtn->setVisible(false);
+		}
+//		++m_nBtnIndex;
+	}
+	else
+	{
+		showUnloadBtn();
+		if(!m_bComparison)
+		{
+			if(_equipBtn->isVisible())
+				_equipBtn->setVisible(false);
+		}
+//		++m_nBtnIndex;
+	}
+	//进阶按钮
+	if(nPlayerLv < GetFunOpenLevel(EFOL_EquipFusion) || !m_bCanFusion)
+		_fusionBtn->setVisible(false);
+	else
+	{
+		_fusionBtn->setPosition(_buttonCoordsMap[m_nBtnIndex]);
+		++m_nBtnIndex;
+	}
+	//升星按钮 废弃
+	if( nPlayerLv < GetFunOpenLevel(EFOL_EquipStarLevelUp) ||_desEquip->get_star_num() >= MAX_STARUP_LEVEL || m_nSuitID <= 0)
+	{
+		_starupBtn->setVisible(false);
+	}
+	else
+	{
+		_starupBtn->setVisible(false);//新版不需要升星，故而将此按钮隐藏
+	//	_starupBtn->setPosition(_buttonCoordsMap[m_nBtnIndex]);
+	//	++m_nBtnIndex;
+	}
+	//镶嵌按钮
+	if( !m_bCanInlay )
+	{
+		_inlayBtn->setVisible(false);
+	}
+	else
+	{
+		_inlayBtn->setPosition(_buttonCoordsMap[m_nBtnIndex]);
+		++m_nBtnIndex;
+	}
+	//强化按钮
+	if( (_desEquip->get_equip_consolidate_level() >= MAX_STRENGTHEN_LEVEL) || (9431003 == _desEquip->get_item_type_id()) || (9430003 == _desEquip->get_item_type_id()) || RoleManager::getInstance()->getLocalPlayer()->getLevel() < GetFunOpenLevel(EFOL_EquipStrengThen))	//沙巴克城主战袍暂时写死【J】2014.12.18策划不给加表!只能先写死= =.
+	{
+		_strengthenBtn->setVisible(false);
+	}
+	else
+	{
+		_strengthenBtn->setPosition(_buttonCoordsMap[m_nBtnIndex]);
+		++m_nBtnIndex;
+	}
+	//升级
+	if (!m_bCanUplevel)
+	{
+		_levelupBtn->setVisible(false);
+	}
+	else
+	{
+		_levelupBtn->setPosition(_buttonCoordsMap[m_nBtnIndex]);
+		++m_nBtnIndex;
+	}
+
+	bool is_can_evo = (pos == EEP_Body1  ||pos == EEP_Spcial_Finger_ZZ || pos == EEP_Spcial_Finger_JL|| pos == EEP_Ilu_Weapon);
+	bool is_can_fly = (pos == EEP_Body1);
+
+	_evo_btn->setVisible(is_can_evo);
+	if(is_can_evo)
+	{
+		_evo_btn->setPosition(ccp(_buttonCoordsMap[m_nBtnIndex].x ,_buttonCoordsMap[m_nBtnIndex].y - _evo_btn->getContentSize().height*0.5f));
+		++m_nBtnIndex;
+	}
+
+	_fly_btn->setVisible(is_can_fly);
+	if (is_can_fly)
+	{
+		_fly_btn->setPosition(ccp(_buttonCoordsMap[m_nBtnIndex].x ,_buttonCoordsMap[m_nBtnIndex].y - _fly_btn->getContentSize().height*0.5f));
+		++m_nBtnIndex;
+	}
+
+	//设置按钮背景大小
+	if (m_nBtnIndex == 0)
+	{
+		_buttonBg->setVisible(false);
+	}else
+	{
+		_buttonBg->setScaleY(((float)m_nBtnIndex+0.1)/5.0f);
+	}
+
+	if(IS_UI_OPEN(WCT_TradingUI))
+		setAllButtonOff(WCT_TradingUI);
+}
+
+GameActionNode* EquipTipUiLayer::getBattleSuperEffect()
+{
+	GameActionNode* fireSEAcNode = GameActionNode::create();
+	fireSEAcNode->InitTextureWithSpriteFrame("E1_50");
+	return fireSEAcNode;
+}
+
+void EquipTipUiLayer::setSelect_From(const std::string& selectFrom)
+{
+	_Select_From = selectFrom;
+}
+
+void EquipTipUiLayer::setEqualityText( EItemQuality eQuality )
+{
+	ccColor3B textColor;
+	//CCLabelTTF* nameLabel = dynamic_cast<CCLabelTTF*>(_currentLayer->getChildByTag(ETT_EquipName));
+	//CCLabelTTF* qLabel = dynamic_cast<CCLabelTTF*>(_currentLayer->getChildByTag(ETT_Quality));
+	LabelFT* nameLabel = getLabelFTByTag(_currentLayer,ETT_EquipName);
+	LabelFT* qLabel = getLabelFTByTag(_currentLayer,ETT_Quality);
+	if (nameLabel == NULL || qLabel == NULL)
+		return;
+	switch(eQuality)
+	{
+	case EIQ_Null:
+		textColor = ccc3(0xfe,0xf8,0xd8);
+		qLabel->setColor(textColor);
+		nameLabel->setColor(textColor);
+		qLabel->setString(converQualityToString(EIQ_Null).c_str());
+		break;
+	case EIQ_Quality0:
+		textColor = ccc3(0xfe,0xf8,0xd8);
+		qLabel->setColor(textColor);
+		nameLabel->setColor(textColor);
+		qLabel->setString(converQualityToString(EIQ_Quality0).c_str());
+		break;
+	case EIQ_Quality1:
+		textColor = ccc3(0x3f,0xd4,0x16);
+		qLabel->setColor(textColor);
+		nameLabel->setColor(textColor);
+		qLabel->setString(converQualityToString(EIQ_Quality1).c_str());
+		break;
+	case EIQ_Quality2:
+		textColor = ccc3(0x1d,0xad,0xe7);
+		qLabel->setColor(textColor);
+		nameLabel->setColor(textColor);
+		qLabel->setString(converQualityToString(EIQ_Quality2).c_str());
+		break;
+	case EIQ_Quality3:
+		textColor = ccc3(0x91,0x13,0xbc);
+		qLabel->setColor(textColor);
+		nameLabel->setColor(textColor);
+		qLabel->setString(converQualityToString(EIQ_Quality3).c_str());
+		break;
+	case EIQ_Quality4:
+		textColor = ccc3(0xe0,0x78,0x09);
+		qLabel->setColor(textColor);
+		nameLabel->setColor(textColor);
+		qLabel->setString(converQualityToString(EIQ_Quality4).c_str());
+		break;
+	case EIQ_Quality5:
+		textColor = ccc3(0xe1,0xe4,0x00);
+		qLabel->setColor(textColor);
+		nameLabel->setColor(textColor);
+		qLabel->setString(converQualityToString(EIQ_Quality5).c_str());
+		break;
+	default:
+		break;
+	}
+}
+
+LabelFT* EquipTipUiLayer::getLabelFTByTag( CCNode* node,int tag )
+{
+	if (node == NULL)
+		return NULL;
+
+	CCLabelTTF* tempLabel = dynamic_cast<CCLabelTTF*>(node->getChildByTag(tag));
+	if (tempLabel)
+	{
+		LabelFT* newLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(tempLabel);
+		return newLabel;
+	}
+	else
+	{
+		LabelFT* newLabel = dynamic_cast<LabelFT*>(node->getChildByTag(tag));
+		return newLabel;
+	}
+	return NULL;
+}
+
+void EquipTipUiLayer::changLabel()
+{
+	getLabelFTByTag(_contentLayerSelf,ETT_BaseAttr);
+	getLabelFTByTag(_contentLayerSelf,ETT_IndentifyAttr);
+	getLabelFTByTag(_contentLayerSelf,ETT_ProfessionName);
+	getLabelFTByTag(_contentLayerSelf,ETT_EquipLevelName);
+	getLabelFTByTag(_contentLayerSelf,ETT_EquipPosName);
+	getLabelFTByTag(_contentLayerSelf,ETT_EquipDurabilityName);
+
+	getLabelFTByTag(_contentLayerDest,ETT_BaseAttr);
+	getLabelFTByTag(_contentLayerDest,ETT_IndentifyAttr);
+	getLabelFTByTag(_contentLayerDest,ETT_ProfessionName);
+	getLabelFTByTag(_contentLayerDest,ETT_EquipLevelName);
+	getLabelFTByTag(_contentLayerDest,ETT_EquipPosName);
+	getLabelFTByTag(_contentLayerDest,ETT_EquipDurabilityName);
+
+	getLabelFTByTag(_contentLayerSingle,ETT_BaseAttr);
+	getLabelFTByTag(_contentLayerSingle,ETT_IndentifyAttr);
+	getLabelFTByTag(_contentLayerSingle,ETT_ProfessionName);
+	getLabelFTByTag(_contentLayerSingle,ETT_EquipLevelName);
+	getLabelFTByTag(_contentLayerSingle,ETT_EquipPosName);
+	getLabelFTByTag(_contentLayerSingle,ETT_EquipDurabilityName);
+}
+
+void EquipTipUiLayer::showUi(const CCPoint &point, unsigned int id,EItemQuality eQuality)
+{
+	setData(id,eQuality);
+	setUiPosition(ccp(0,CCDirector::sharedDirector()->getWinSize().height/8));
+}
+
+
+void EquipTipUiLayer::setData(unsigned int typeId,EItemQuality eQuality)
+{
+	if(!MIsEquipment(typeId))
+		return;
+
+	EquipBaseAttr equipAttr = PackageManager::getInstance()->getEquipBaseAttrDB(typeId);
+	const EquipTypeData* equipTypePtr = PackageManager::getInstance()->getEquipTypeData(typeId);
+	CC_ASSERT(equipTypePtr);
+	const EquipTypeData &equipTypeData = *equipTypePtr;
+
+	_selfEquipPosIndex = equipTypeData.posIndex;
+	//Ji:装备比较
+
+	if (m_bEquiped == false)
+	{
+		showEquipBtn();
+		f_equipment* self_equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(EICT_Equip, (short)_selfEquipPosIndex));
+
+		if (self_equip != NULL)
+		{
+			getComparisonUi();
+			_currentLayer = _contentLayerSelf;
+			_fightNumBLabelCurrent = _fightNumBLabel1;
+
+			CCMenu* exhibitMenu = dynamic_cast<CCMenu*>(_currentBg->getChildByTag(102));
+			CCMenuItemImage* exhibitSelfEquip = dynamic_cast<CCMenuItemImage*>(exhibitMenu->getChildByTag(1));
+			exhibitSelfEquip->setTarget(this, menu_selector(EquipTipUiLayer::exhibitSelfEquip));
+			exhibitMenu->setVisible(true);
+			setselfdata(self_equip);
+		}
+		else
+		{
+			getSingleUi();
+			_currentLayer = _contentLayerSingle;
+			_fightNumBLabelCurrent = _fightNumBLabel1;
+
+			CCNode* equipedSymbol = dynamic_cast<CCNode*>(_contentLayerSingle->getChildByTag(ETT_EquipedSymbol));
+			equipedSymbol->setVisible(false);
+		}
+	}
+	else
+	{
+		showUnloadBtn();
+		getSingleUi();
+		_currentLayer = _contentLayerSingle;
+		_fightNumBLabelCurrent = _fightNumBLabel1;
+
+		CCMenu* exhibitMenu = (CCMenu*)_currentBg->getChildByTag(101);
+		CCMenuItemImage* exhibitSelfEquip = dynamic_cast<CCMenuItemImage*>(exhibitMenu->getChildByTag(1));
+		exhibitSelfEquip->setTarget(this, menu_selector(EquipTipUiLayer::exhibitSelfEquip));
+		exhibitMenu->setVisible(true);
+	}
+
+	setAllButtonOff();
+
+	//战斗力特效
+	GameActionNode* battleNumAcNode = this->getBattleSuperEffect();
+	battleNumAcNode->setPosition(_currentLayer->getChildByTag(ETT_FightNumSE)->getPosition());
+	_currentLayer->addChild(battleNumAcNode, RZN_EFFECT);
+	_currentLayer->getChildByTag(ETT_FightNum)->setZOrder(RZN_EFFECT + 1);
+	battleNumAcNode->BeginAction(0.07f, true);
+	battleNumAcNode->setScale(0.6f);
+
+	setTitleText(ETT_EquipName, equipTypeData.name.c_str());
+	setTitleText(ETT_Profession, equipTypeData.profession.c_str());
+	setTitleText(ETT_EquipLevel, equipTypeData.minUseLevel);
+	std::ostringstream ostr;
+	ostr << equipTypeData.durability << "/" << equipTypeData.durability;
+	setTitleText(ETT_EquipDurability, ostr.str().c_str());
+	setTitleText(ETT_EquipPos, equipTypeData.pos.c_str());
+	this->setEqualityText(eQuality);
+	setTitleText(ETT_Sword, "");
+
+	ItemNode* fanciedEquipNode = ItemNode::create();
+	fanciedEquipNode->setDataId(typeId, eQuality);
+	fanciedEquipNode->setPosition(_currentLayer->getChildByTag(ETT_IconFrame)->getPosition());
+	_currentLayer->addChild(fanciedEquipNode);
+
+	const ItemTypeData  &itemdata = PackageManager::getInstance()->getItemTypeData(typeId);
+	if(itemdata.period != 0)
+	{
+		setFashionTime(itemdata.period);
+	}
+
+	if (equipTypeData.showTest != 0)
+	{
+		add_fashion_label(GET_STR(equipTypeData.showTest).c_str(), false);
+	}
+
+	add_equip_suit(equipTypeData.suit_id);
+
+	if (equipTypeData.gemHole)
+	{
+		if(gem_enable_by_pos_type(equipTypeData.posIndex))
+		{
+			for (int i = 0; i < MAX_EQUIPHOLE_NUM; i++ )
+			{//宝石框;	
+				EquipTipUiStoneItem *item = new EquipTipUiStoneItem();
+				_stoneList.push_back(item);
+				//item->addToParent(_currentLayer);
+			}
+		}
+	}else
+	{
+		_currentLayer->getChildByTag(ETT_AditionalAttrCutline)->setVisible(equipTypeData.gemHole);
+	}
+
+	update_wing_att(equipTypeData.posIndex == EEP_Body1,typeId,1);
+
+	int equipType=RT_End ;
+	if(equipTypeData.profession2 == PROFESSION1 || equipTypeData.profession2 == PROFESSION4 || equipTypeData.profession2 == PROFESSION7)
+	{
+		equipType = RT_Warrior;
+	}
+	else if (equipTypeData.profession2 == PROFESSION2 || equipTypeData.profession2 == PROFESSION5 || equipTypeData.profession2 == PROFESSION8)
+	{
+		equipType = RT_Mage;
+	}
+	else if (equipTypeData.profession2 == PROFESSION3 || equipTypeData.profession2 == PROFESSION6 || equipTypeData.profession2 == PROFESSION9)
+	{
+		equipType = RT_Taoist;
+	}
+	else if (equipTypeData.profession2 == PROFESSION10 || equipTypeData.profession2 == PROFESSION11 || equipTypeData.profession2 == PROFESSION12)
+	{
+		equipType = RT_End;
+	}
+	if (equipType == RT_End)
+	{
+		LocalPlayer* localPlayer = RoleManager::getInstance()->getLocalPlayer();
+		equipType = localPlayer->getAttribute(RA_ROLETYPE);
+	}
+	//EItemQuality EIQ=(EItemQuality)_selfEquip->get_item_quality();
+	if (eQuality == EIQ_Quality0)
+	{
+		addIndentifyAttr(GET_STR(9034).c_str(), -1,-1,"-",true);
+		setFightText(Rating_Helper::getInstance()->GetNoGemRating(typeId,equipType - 1));
+	}
+	else
+	{
+		setFightText(Rating_Helper::getInstance()->GetNoGemRating(typeId,equipType - 1),true);
+		for(int i =0 ; i < eQuality ; ++ i)
+		{
+			addIndentifyAttr("\xE6\x9C\xAA\xE7\x9F\xA5\xEF\xBC\x9A", 1,-1,"-",true);
+		}
+	}
+
+	setup_base_att(equipAttr,equipTypeData.luck);
+	set_equip_desc(equipTypeData.equipDesc);
+
+	refresh_list();
+	updateUi();
+}
+
+void EquipTipUiLayer::setData( f_equipment* src_equip,f_equipment* dest_equip )
+{
+	const EquipTypeData* equipType = PackageManager::getInstance()->getEquipTypeData(dest_equip->get_item_type_id());    //【ji】获取此种装备的类型数据
+	CC_ASSERT(equipType);
+	const EquipTypeData &equipTypeData = *equipType;
+	//_selfEquipPosIndex = equipTypeData.posIndex;
+	//Ji:装备比较
+	if (/*m_bEquiped == false*/true)
+	{
+		if (src_equip != NULL)
+		{
+			getComparisonUi();
+			_currentLayer = _contentLayerSelf;
+			_fightNumBLabelCurrent = _fightNumBLabel1;
+
+			CCMenu* exhibitMenu = dynamic_cast<CCMenu*>(_currentBg->getChildByTag(102));
+			//CCMenuItemImage* exhibitSelfEquip = dynamic_cast<CCMenuItemImage*>(exhibitMenu->getChildByTag(1));
+			//exhibitSelfEquip->setTarget(this, menu_selector(EquipTipUiLayer::exhibitSelfEquip));
+			exhibitMenu->setVisible(false);
+			setselfdata(src_equip);
+		}
+	}
+
+	setAllButtonOff();										//隐藏功能按钮
+
+	int equipConsolidLevel = dest_equip->get_equip()->byConsolidateLevel;
+	CCString *equipNameStr = NULL;
+	if(equipConsolidLevel != 0)
+		equipNameStr = CCString::createWithFormat("%s + %d", equipTypeData.name.c_str(), equipConsolidLevel);
+	else
+		equipNameStr = CCString::create(equipTypeData.name);
+
+	//战斗力特效
+	GameActionNode* battleNumAcNode = this->getBattleSuperEffect();
+	battleNumAcNode->setPosition(_currentLayer->getChildByTag(ETT_FightNumSE)->getPosition());
+	_currentLayer->addChild(battleNumAcNode, RZN_EFFECT);
+	_currentLayer->getChildByTag(ETT_FightNum)->setZOrder(RZN_EFFECT + 1);
+
+	battleNumAcNode->setScale(0.6f);
+	battleNumAcNode->BeginAction(0.07f, true);
+
+	setTitleText(ETT_EquipName, equipNameStr->getCString());
+	setTitleText(ETT_Profession, equipTypeData.profession.c_str());
+	setTitleText(ETT_EquipLevel, equipTypeData.minUseLevel);
+	std::ostringstream ostr;
+	ostr << GetEquipNewness(equipTypeData.posIndex, dest_equip->get_item_use_times(), equipTypeData.durability) << "/" << equipTypeData.durability;
+	setTitleText(ETT_EquipDurability, ostr.str().c_str());
+	CCSprite* equipSymbol = (CCSprite*)_currentLayer->getChildByTag(ETT_EquipedSymbol);
+	if (equipSymbol!=NULL)
+	    equipSymbol->setZOrder(_currentLayer->getChildByTag(ETT_EquipDurability)->getZOrder()+1);
+	setTitleText(ETT_EquipPos, equipTypeData.pos.c_str());
+	this->setEqualityText((EItemQuality)dest_equip->get_item_quality());
+	setFightText(dest_equip->get_fightli(),true);
+	ItemNode* equipNode = ItemNode::create();
+	equipNode->initWithItem(dest_equip);
+	equipNode->setPosition(_currentLayer->getChildByTag(ETT_IconFrame)->getPosition());
+	_currentLayer->addChild(equipNode);
+
+	if (equipTypeData.showTest != 0)
+	{
+		add_fashion_label(GET_STR(equipTypeData.showTest).c_str(), false);
+	}
+
+	add_equip_suit(equipTypeData.suit_id);
+
+	if (equipTypeData.gemHole)
+	{
+		if(gem_enable_by_pos_type(equipTypeData.posIndex))
+		{
+			for (int i = 0; i < MAX_EQUIPHOLE_NUM; i++ )
+			{//宝石;
+				unsigned int id = dest_equip->get_equip()->dwHoleGemID[i];
+				if(id != (unsigned int) -1 && id != (unsigned int) 0)
+				{
+					EquipTipUiStoneItem *item = new EquipTipUiStoneItem(id);
+					_stoneList.push_back(item);
+					//item->addToParent(_currentLayer);
+				}
+				else
+				{
+					EquipTipUiStoneItem *item = new EquipTipUiStoneItem();
+					_stoneList.push_back(item);
+					//item->addToParent(_currentLayer);
+				}
+			}
+		}
+	}else
+	{
+		_currentLayer->getChildByTag(ETT_AditionalAttrCutline)->setVisible(false);
+	}
+
+	update_wing_att(equipTypeData.posIndex == EEP_Body1,dest_equip->get_item_type_id(),dest_equip->get_equip()->nLevel );
+
+	setup_base_att(dest_equip->m_equipex,equipConsolidLevel);
+	
+	setup_indentify_att(dest_equip,true);
+
+	set_equip_desc(equipTypeData.equipDesc);
+	refresh_list();
+	updateUi();
+
+//	this->updateButtonStatus();
+}
+
+void EquipTipUiLayer::init_wing_label_item( CCNode* root )
+{
+	CCNode* layer = root->getChildByTag(ETT_ComparisonIn)->getChildByTag(0);
+	CC_ASSERT(layer);
+	//comparision source
+	make_item(layer,eSource);
+	set_wing_att_text(eSource,0,"");
+	set_wing_att_text(eSource,1,"");
+
+	//comparision target
+	layer = root->getChildByTag(ETT_ComparisonIn)->getChildByTag(1);
+	CC_ASSERT(layer);
+	make_item(layer,eDest);
+	set_wing_att_text(eDest,0,"");
+	set_wing_att_text(eDest,1,"");
+	//single
+	layer = root->getChildByTag(ETT_SingleIn)->getChildByTag(2);
+	CC_ASSERT(layer);
+	make_item(layer,eSingle);
+	set_wing_att_text(eSingle,0,"");
+	set_wing_att_text(eSingle,1,"");
+}
+
+void EquipTipUiLayer::make_item( CCNode* layer,size_t panel_type )
+{
+	CC_ASSERT(panel_type < eTotal);
+	CCNode* item_root = layer->getChildByTag(999);
+	CC_ASSERT(item_root);
+	CCLabelTTF* tmp =  dynamic_cast<CCLabelTTF*>(item_root->getChildByTag(1));
+	_wing_att_dest_item[panel_type].first_att_label = Helper::replaceLabelTTFWithLabelFTAndRemove(tmp);
+	
+	tmp =  dynamic_cast<CCLabelTTF*>(item_root->getChildByTag(2));
+	_wing_att_dest_item[panel_type].second_att_label = Helper::replaceLabelTTFWithLabelFTAndRemove(tmp);
+
+	tmp =  dynamic_cast<CCLabelTTF*>(item_root->getChildByTag(0));
+	Helper::replaceLabelTTFWithLabelFTAndRemove(tmp);
+
+}
+
+void EquipTipUiLayer::set_wing_att_text( int panel_type,size_t pos,std::string const& text,ccColor3B const& color /*=ccBLUE */)
+{
+	CC_ASSERT(panel_type < eTotal);
+	CC_ASSERT(pos < 2);
+
+	if (pos ==0)
+	{
+		_wing_att_dest_item[panel_type].first_att_label->setString(text.c_str());
+		//_wing_att_dest_item[panel_type].first_att_label->setColor(color);
+	}
+	else
+	{
+		_wing_att_dest_item[panel_type].second_att_label->setString(text.c_str());
+		//_wing_att_dest_item[panel_type].second_att_label->setColor(color);
+	}
+}
+
+void EquipTipUiLayer::update_wing_att(bool show ,unsigned int equip_model_id,int fly_level)
+{
+// 	if(show)
+// 		_currentLayer->getChildByTag(ETT_AditionalAttrCutline)->setVisible(show);
+
+	if (_currentLayer == _contentLayerSelf)
+	{
+		update_wing_att_text(eSource,show,equip_model_id,fly_level);
+	}
+	else if (_currentLayer == _contentLayerDest)
+	{
+		update_wing_att_text(eDest,show,equip_model_id,fly_level);
+
+	}
+	else if (_currentLayer == _contentLayerSingle)
+	{
+		update_wing_att_text(eSingle,show,equip_model_id,fly_level);
+
+	}
+}
+
+void EquipTipUiLayer::update_wing_att_text( int panel_type ,bool show,unsigned int equip_model_id,int fly_level)
+{
+	//_wing_att_dest_item[panel_type].first_att_label->getParent()->setVisible(show);
+	if (show)
+	{
+		CC_ASSERT(equip_model_id != INVALID && equip_model_id!=0);
+
+		CC_ASSERT(fly_level >0);
+
+		float wing_spec_att_stren_pct =0;
+		stBuffStrenEffect stren_effect;
+		EquipTipUiLayer::get_wing_equip_stren(equip_model_id,fly_level,wing_spec_att_stren_pct,stren_effect);
+
+		//翅膀特性增强全属性
+		std::string tmp;
+		if (wing_spec_att_stren_pct)
+		{
+			safe_sprintf(tmp,STRING_TABLE["equip_wing_spec_att"],fly_level,wing_spec_att_stren_pct);
+			_wing_att_dest_item[panel_type].second_att_label->setString(tmp.c_str());
+
+			string text;
+			safe_sprintf(text,STRING_TABLE["special_1_2"], tmp.c_str());
+			add_special_label(text, 2);
+		}
+
+		if (stren_effect.is_valid())
+		{
+			std::string buff_key;
+			safe_sprintf(buff_key,"equip_buff_text_tip_%d",stren_effect.buff_id);
+			safe_sprintf(tmp,STRING_TABLE[buff_key.c_str()],stren_effect.effect_val,stren_effect.persist_time);
+			_wing_att_dest_item[panel_type].first_att_label->setString(tmp.c_str());
+
+			string text;
+			safe_sprintf(text,STRING_TABLE["special_1_1"], tmp.c_str());
+			add_special_label(text, 1);
+		}
+	}
+}
+
+void EquipTipUiLayer::show_pure_compare( f_equipment* src,f_equipment* dest )
+{
+	setData(src,dest);
+	setUiPosition(ccp(0,CCDirector::sharedDirector()->getWinSize().height/8));
+}
+
+
+void EquipTipUiLayer::setup_base_att( tagEquipSpec const& equip_ex,int consolid_level)
+{
+	TempAttrMap baseAttr;
+
+	TempAttrVector baseAttrVector;
+	for(int i = 0; i < MAX_BASE_ATT; i ++)
+	{//基础属性;
+		ERoleAttribute attr = equip_ex.EquipAttitionalAtt[i].eRoleAtt;
+		if(attr != ERA_Null)
+		{
+			if(attr != ERA_Luck)
+			{
+				baseAttr[attr] = equip_ex.EquipAttitionalAtt[i].nValue + getConsolidateAtt(equip_ex.EquipAttitionalAtt[i].nValue, consolid_level);
+				baseAttrVector.push_back(attr);
+			}
+		}
+	}
+	if(equip_ex.byLuck != 0)
+	{
+		addLuckAttr(equip_ex.byLuck);
+	}
+
+	set_base_att_label(baseAttrVector,baseAttr);
+}
+
+void EquipTipUiLayer::setup_base_att( tagEquipViewInfo const* equipInfo,int consolid_level )
+{
+	TempAttrMap baseAttr;
+	TempAttrVector baseAttrVector;
+
+	for(int i = 0; i < MAX_BASE_ATT; i ++)
+	{//基础属性;
+		ERoleAttribute attr = equipInfo->EquipAttitionalAtt[i].eRoleAtt;
+		if(attr != ERA_Null)
+		{
+			if(attr != ERA_Luck)
+			{
+				baseAttr[attr] = equipInfo->EquipAttitionalAtt[i].nValue + getConsolidateAtt(equipInfo->EquipAttitionalAtt[i].nValue, consolid_level);
+				baseAttrVector.push_back(attr);
+			}
+		}
+	}
+
+	//查看对方玩家武器和项链的幸运值;
+	if (PackageManager::getInstance()->getEquipTypeData(equipInfo->dw_data_id)->posIndex == EEP_RightHand)
+	{
+		if (equipInfo->n16MinDmg != 0)
+			addLuckAttr(equipInfo->n16MinDmg);
+	}
+	if (PackageManager::getInstance()->getEquipTypeData(equipInfo->dw_data_id)->posIndex == EEP_Neck)
+	{
+		if (equipInfo->n16MinDmg != 0)
+			addLuckAttr(equipInfo->n16MinDmg);
+	}
+
+	set_base_att_label(baseAttrVector,baseAttr);
+}
+
+void EquipTipUiLayer::setup_base_att( EquipBaseAttr const& equipAttr ,int add_luck)
+{
+	TempAttrVector baseAttrVector;
+	TempAttrMap baseAttr;
+
+	for(int i = 0; i < EquipBaseAttr::EBA_Num; i ++)
+	{//基础属性;
+		if(equipAttr.data[i] != -1)
+		{
+			ERoleAttribute attr = EquipBaseAttr::convert((EquipBaseAttr::eEquipBaseAttr)i);
+			if(attr != ERA_Null)
+			{
+				baseAttr[attr] = equipAttr.data[i];
+				baseAttrVector.push_back(attr);
+			}
+		}
+	}
+
+	set_base_att_label(baseAttrVector,baseAttr);
+
+	if (add_luck!= -1)
+	{
+		addLuckAttr(add_luck);
+	}
+}
+
+void EquipTipUiLayer::set_base_att_label( TempAttrVector const& baseAttrVector,TempAttrMap& baseAttr )
+{
+	for(TempAttrVector::const_iterator iter = baseAttrVector.begin(); iter != baseAttrVector.end(); ++ iter)
+	{
+		int iterValue = baseAttr.at(*iter);
+		if(iterValue == -1)
+			continue;
+
+		switch(*iter)
+		{
+		case ERA_ExAttackMin:
+			{
+				int v1 = iterValue;
+				int v2 = baseAttr[ERA_ExAttackMax];
+				baseAttr[ERA_ExAttackMax] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExAttackMax:
+			{
+				int v2 = iterValue;
+				int v1 = baseAttr[ERA_ExAttackMin];
+				baseAttr[ERA_ExAttackMin] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InAttackMin:
+			{
+				int v1 = iterValue;
+				int v2 = baseAttr[ERA_InAttackMax];
+				baseAttr[ERA_InAttackMax] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InAttackMax:
+			{
+				int v2 = iterValue;
+				int v1 = baseAttr[ERA_InAttackMin];
+				baseAttr[ERA_InAttackMin] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ArmorEx:
+			{
+				int v1 = iterValue;
+				int v2 = baseAttr[ERA_ArmorIn];
+				baseAttr[ERA_ArmorIn] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ArmorIn:
+			{
+				int v2 = iterValue;
+				int v1 = baseAttr[ERA_ArmorEx];
+				baseAttr[ERA_ArmorEx] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExMaxDefense:
+			{
+				int v2 = iterValue;
+				int v1 = baseAttr[ERA_ExMinDefense];
+				baseAttr[ERA_ExMinDefense] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_ExMinDefense:
+			{
+				int v1 = iterValue;
+				int v2 = baseAttr[ERA_ExMaxDefense];
+				baseAttr[ERA_ExMaxDefense] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InMaxDefense:
+			{
+				int v2 = iterValue;
+				int v1 = baseAttr[ERA_InMinDefense];
+				baseAttr[ERA_InMinDefense] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		case ERA_InMinDefense:
+			{
+				int v1 = iterValue;
+				int v2 = baseAttr[ERA_InMaxDefense];
+				baseAttr[ERA_InMaxDefense] = -1;
+				addBaseAttr(BaseAttrNameStr[*iter].c_str(), v1, v2);
+			}
+			break;
+		default:
+			addBaseAttr(BaseAttrNameStr[*iter].c_str(), iterValue);
+			break;
+		}
+	}
+}
+
+void EquipTipUiLayer::setup_indentify_att( f_equipment const* equip ,bool deal_with_unkown )
+{
+	TempAttrMap indentifyAttr;
+	TempAttrVector indentifyAttrVector;
+
+	tagEquipSpec const& spec = *(equip->get_equip());
+
+	bool isNoEra =true;
+	for(int i = MAX_BASE_ATT; i < MAX_ADDITIONAL_EFFECT; i ++)
+	{//鉴定属性;
+		if (spec.EquipAttitionalAtt[i].eRoleAtt == ERA_UNKNOW)
+		{
+			if(deal_with_unkown)
+			{
+				_selfEquipIdentifyMap[spec.EquipAttitionalAtt[i].eRoleAtt] = ERA_UNKNOW;
+				_selfEquipIdentifyVector.push_back(spec.EquipAttitionalAtt[i].eRoleAtt);
+			}
+		}
+		else if(spec.EquipAttitionalAtt[i].eRoleAtt != ERA_Null)
+		{
+			indentifyAttr[spec.EquipAttitionalAtt[i].eRoleAtt] = spec.EquipAttitionalAtt[i].nValue;
+			indentifyAttrVector.push_back(spec.EquipAttitionalAtt[i].eRoleAtt);
+			isNoEra = false;
+		}
+	}
+	if (isNoEra)
+	{
+
+		addIndentifyAttr(GET_STR(9034).c_str(), -1, -1, "-", true);  // 9034 未进阶
+	}
+	else
+	{
+		set_indentify_att_label(indentifyAttrVector,indentifyAttr,equip);
+	}
+}
+
+void EquipTipUiLayer::setup_indentify_att( tagEquipViewInfo const* equipInfo /*,bool deal_with_unkown*/ )
+{
+	TempAttrMap indentifyAttr;
+	TempAttrVector indentifyAttrVector;
+
+	bool isNoEra = true;
+	for(int i = MAX_BASE_ATT; i < MAX_ADDITIONAL_EFFECT; i ++)
+	{//鉴定属性;
+		if(equipInfo->EquipAttitionalAtt[i].eRoleAtt != ERA_Null)
+		{
+			indentifyAttr[equipInfo->EquipAttitionalAtt[i].eRoleAtt] = equipInfo->EquipAttitionalAtt[i].nValue;
+			indentifyAttrVector.push_back(equipInfo->EquipAttitionalAtt[i].eRoleAtt);
+			isNoEra = false;
+		}
+	}
+	//EItemQuality EIQ=(EItemQuality)_selfEquip->get_item_quality();
+	if (isNoEra)
+	{
+		addIndentifyAttr(GET_STR(9034).c_str(), -1, -1, "-", true);  // 9034 未进阶
+	}
+	else
+	{
+		set_indentify_att_label(indentifyAttrVector,indentifyAttr,equipInfo);
+	}
+}
+
+void EquipTipUiLayer::set_indentify_att_label( TempAttrVector const& indentifyAttrVector,TempAttrMap& indentifyAttr,f_equipment const* equip )
+{
+	for(TempAttrVector::const_iterator iter = indentifyAttrVector.begin(); iter != indentifyAttrVector.end(); ++ iter)
+	{
+		if (indentifyAttr[*iter] == ERA_UNKNOW)
+		{
+			addIndentifyAttr(GET_STR(9034).c_str(), 1,-1,"-",true);
+		}
+		else
+		{
+			addIndentifyAttr(IndentifyAttrNameStr[*iter].c_str(), indentifyAttr[*iter],-1,"-",false,*iter,equip);
+		}
+	}
+}
+
+void EquipTipUiLayer::set_indentify_att_label( TempAttrVector const& indentifyAttrVector,TempAttrMap& indentifyAttr,tagEquipViewInfo const* equipInfo )
+{
+	for(TempAttrVector::const_iterator iter = indentifyAttrVector.begin(); iter != indentifyAttrVector.end(); ++ iter)
+	{
+		if (indentifyAttr[*iter] == ERA_UNKNOW)
+		{
+			addIndentifyAttr(GET_STR(9034).c_str(), 1,-1,"-",true);
+		}
+		else
+		{
+			addIndentifyAttr(IndentifyAttrNameStr[*iter].c_str(), indentifyAttr[*iter],-1,"-",false,*iter,equipInfo);
+		}
+	}
+}
+
+bool EquipTipUiLayer::get_wing_equip_stren( unsigned int model_id,int fly_lv,float& spec_att_stren_val,stBuffStrenEffect& buff_stren_effect )
+{
+	if(fly_lv== 0)
+		fly_lv = 1;
+
+	WingManager* wing_mgr = WingManager::getInstance();
+	int val =  wing_mgr->get_add_base_att_by_level(fly_lv);
+	spec_att_stren_val = float(val) / 100.0f;
+
+
+	buff_stren_effect.buff_id= wing_mgr->get_buff_id_by_type_id(model_id);
+	buff_stren_effect.persist_time= wing_mgr->get_buff_time_by_type_id(model_id);
+	buff_stren_effect.effect_val= wing_mgr->get_add_dodge_by_level(fly_lv);
+
+	return true;
+}
+
+void EquipTipUiLayer::on_evolution( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(!IS_VALID_PTR(_desEquip))
+		return;
+
+	WingEvolveUi* evolve_ui = (WingEvolveUi*)OPEN_UI(WCT_WING_EVOLVE_UI);
+	if(IS_VALID_PTR(evolve_ui))
+	{
+		evolve_ui->getUiLayer()->open_node_init(_desEquip->get_item_id());
+	}
+
+	close();
+}
+
+void EquipTipUiLayer::on_fly( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(!IS_VALID_PTR(_desEquip))
+		return;
+
+	WingFlyUpUi* fly_ui = (WingFlyUpUi*)OPEN_UI(WCT_WING_FLY_UP_UI);
+	if(IS_VALID_PTR(fly_ui))
+	{
+		fly_ui->getUiLayer()->set_wing_id(_desEquip->get_item_id());
+		fly_ui->getUiLayer()->refresh_node();
+	}
+
+	close();
+}
+
+void EquipTipUiLayer::show_compare_by_related_id( f_equipment* src,unsigned int related_model_id )
+{
+	f_equipment* related_equip = new f_equipment(*src);
+	related_equip->m_data.dw_data_id = related_model_id;
+
+	modify_equip_base_att(related_equip);
+
+	show_pure_compare(src,related_equip);
+	
+	CC_SAFE_DELETE(related_equip);
+}
+
+void EquipTipUiLayer::modify_equip_base_att( f_equipment* equip )
+{
+	tagEquipSpec& spec = equip->m_equipex;
+
+	EquipBaseAttr equipAttr = PackageManager::getInstance()->getEquipBaseAttrDB(equip->get_item_type_id());
+
+	for (size_t i=0; i<MAX_BASE_ATT;++i)
+	{
+		spec.EquipAttitionalAtt[i].nValue  = 0;
+		ERoleAttribute attr =spec.EquipAttitionalAtt[i].eRoleAtt;
+		int base_val = equipAttr.get_val_by_era(attr);
+		if (base_val)
+		{
+			spec.EquipAttitionalAtt[i].nValue =base_val /*+ getConsolidateAtt(base_val, spec.byConsolidateLevel)*/;
+		}
+	}
+
+}
+
+void EquipTipUiLayer::modify_recast_equip_base_att(f_equipment* equip)
+{
+	tagEquipSpec& spec = equip->m_equipex;
+	spec.nStarLv = 0;
+
+	EquipBaseAttr equipAttr = PackageManager::getInstance()->getEquipBaseAttrDB(equip->get_item_type_id());
+
+	for (size_t i=0; i<MAX_BASE_ATT;++i)
+	{
+		spec.EquipAttitionalAtt[i].nValue  = 0;
+		ERoleAttribute attr =spec.EquipAttitionalAtt[i].eRoleAtt;
+		int base_val = equipAttr.get_val_by_era(attr);
+		if (base_val && (base_val != -1))
+		{
+			spec.EquipAttitionalAtt[i].nValue =base_val;
+		}
+		else
+		{
+			spec.EquipAttitionalAtt[i].nValue = -(spec.byConsolidateLevel + 1);
+		}
+	}
+}
+
+void EquipTipUiLayer::show_recast_tip(f_equipment* src,unsigned int related_model_id)
+{
+	f_equipment* related_equip = new f_equipment(*src);
+	if(!IS_VALID_PTR(related_equip))
+		return;
+
+	related_equip->m_data.dw_data_id = related_model_id;
+
+	modify_recast_equip_base_att(related_equip);
+	show_pure_compare(src,related_equip);
+
+	CC_SAFE_DELETE(related_equip);
+}
+
+void EquipTipUiLayer::scrollViewDidScroll(CCScrollView* view)
+{
+	if(m_list_1 == view)
+	{
+		m_up_1->setVisible(view->getContentOffset().y + view->getContentSize().height > view->getViewSize().height);
+		m_down_1->setVisible(view->getContentOffset().y < 0);
+	}
+	else if(m_list_2 == view)
+	{
+		m_up_2->setVisible(view->getContentOffset().y + view->getContentSize().height > view->getViewSize().height);
+		m_down_2->setVisible(view->getContentOffset().y < 0);
+	}
+	else if(m_list_3 == view)
+	{
+		m_up_3->setVisible(view->getContentOffset().y + view->getContentSize().height > view->getViewSize().height);
+		m_down_3->setVisible(view->getContentOffset().y < 0);
+	}
+}
+
+void EquipTipUiLayer::scrollViewDidZoom(CCScrollView* view)
+{
+
+}
+
+void EquipTipUiLayer::clear_ui_info()
+{
+	for(std::vector<LabelEx*>::iterator iter = m_vector_self_base_att.begin(); iter != m_vector_self_base_att.end(); ++iter)
+	{
+		LabelEx* ft = *iter;
+		ft->removeFromParentAndCleanup(true);
+	}
+	m_vector_self_base_att.clear();
+
+	for(std::vector<LabelEx*>::iterator iter = m_vector_self_base_value.begin(); iter != m_vector_self_base_value.end(); ++iter)
+	{
+		LabelEx* ft = *iter;
+		ft->removeFromParentAndCleanup(true);
+	}
+	m_vector_self_base_value.clear();
+
+	for(std::vector<LabelEx*>::iterator iter = m_vector_self_indentify_att.begin(); iter != m_vector_self_indentify_att.end(); ++iter)
+	{
+		LabelEx* ft = *iter;
+		ft->removeFromParentAndCleanup(true);
+	}
+	m_vector_self_indentify_att.clear();
+
+	for(std::vector<LabelEx*>::iterator iter = m_vector_indentify_value.begin(); iter != m_vector_indentify_value.end(); ++iter)
+	{
+		LabelEx* ft = *iter;
+		ft->removeFromParentAndCleanup(true);
+	}
+	m_vector_indentify_value.clear();
+
+
+	for(std::vector<LabelEx*>::iterator iter = m_vector_indentify_pic.begin(); iter != m_vector_indentify_pic.end(); ++iter)
+	{
+		LabelEx* ft = *iter;
+		ft->removeFromParentAndCleanup(true);
+	}
+	m_vector_indentify_pic.clear();
+
+	for(std::map<int, LabelEx*>::iterator iter = m_map_special_att.begin(); iter != m_map_special_att.end(); ++iter)
+	{
+		LabelEx* ft = iter->second;
+		ft->removeFromParentAndCleanup(true);
+	}
+	m_map_special_att.clear();
+
+	for(std::map<int, LabelEx*>::iterator iter = m_map_suit_att.begin(); iter != m_map_suit_att.end(); ++iter)
+	{
+		LabelEx* ft = iter->second;
+		ft->removeFromParentAndCleanup(true);
+	}
+	m_map_suit_att.clear();
+}
+
+void EquipTipUiLayer::add_base_att_label(const char* name, int v1, int v2)
+{
+	string text1;
+	safe_sprintf(text1, STRING_TABLE["tip_base_att_3"], name);
+
+	LabelEx* label_1 = LabelEx::create();
+	label_1->setAnchorPoint(ccp(0.0f, 0.0f));
+	label_1->setContentSize(CCSizeMake(m_list_width, 0));
+	label_1->set_text(text1);
+	m_vector_self_base_att.push_back(label_1);
+
+	string text2;
+	if(v2 > 0)
+		safe_sprintf(text2, STRING_TABLE["tip_base_att_1"], v1, v2);
+	else
+		safe_sprintf(text2, STRING_TABLE["tip_base_att_2"], v1);
+
+	LabelEx* label_2 = LabelEx::create();
+	label_2->setAnchorPoint(ccp(0.0f, 0.0f));
+	label_2->setContentSize(CCSizeMake(m_list_width, 0));
+	label_2->set_text(text2);
+	m_vector_self_base_value.push_back(label_2);
+}
+
+void EquipTipUiLayer::add_fashion_label(const char* text, bool is_time)
+{
+	string str;
+	safe_sprintf(str,STRING_TABLE["special_3"], text);
+	int add_tag = is_time ? 4 : 5;
+	add_special_label(str, add_tag);
+}
+
+void EquipTipUiLayer::add_indentify_att_label(const char* name, int v1, const ERoleAttribute eRoleAtt, stEquipTipViewModel equip)
+{
+	if(eRoleAtt > ERA_Null && equip.is_valid())
+	{
+		EquipAddAtt att = EquipFusionManager::getInstance()->ERA2EAA(eRoleAtt);
+		float min=0,max=0;
+		EquipFusionManager::getInstance()->getEquipAttBaseRangeVal(equip.model_id,equip.quanlity,att,min,max );
+		std::string pic_name = getQuanlityCharSpriteFrameName(min,max,(float)v1);
+
+		string text;
+		safe_sprintf(text, STRING_TABLE["tip_indentify_att_1"], name);
+
+		LabelEx* label = LabelEx::create();
+		label->setAnchorPoint(ccp(0.0f, 0.0f));
+		label->setContentSize(CCSizeMake(m_list_width, 0));
+		label->set_text(text);
+		label->set_top_down(false);
+		m_vector_self_indentify_att.push_back(label);
+
+		string text1;
+		safe_sprintf(text1, STRING_TABLE["tip_indentify_att_2"], v1);
+
+		LabelEx* label_1 = LabelEx::create();
+		label_1->setAnchorPoint(ccp(0.0f, 0.0f));
+		label_1->setContentSize(CCSizeMake(m_list_width, 0));
+		label_1->set_text(text1);
+		label_1->set_top_down(false);
+		m_vector_indentify_value.push_back(label_1);
+
+		string text2;
+		safe_sprintf(text2, STRING_TABLE["tip_indentify_att_3"], pic_name.c_str());
+
+		LabelEx* label_2 = LabelEx::create();
+		label_2->setAnchorPoint(ccp(0.0f, 0.0f));
+		label_2->setContentSize(CCSizeMake(m_list_width, 0));
+		label_2->set_text(text2);
+		label_2->set_top_down(false);
+		m_vector_indentify_pic.push_back(label_2);
+	}
+}
+
+void EquipTipUiLayer::add_equip_suit(DWORD suit_id, bool is_self)
+{
+	if(IS_VALID(suit_id) && (suit_id > 0))
+	{
+		int own_suit_num = PackageManager::getInstance()->get_own_suit_num_by_suit_id(suit_id);
+		if(m_is_remote_player && !is_self)
+		{
+			own_suit_num = RemoteRoleStateMgr::getInstance()->get_remote_suit_num_by_id(suit_id);
+		}
+
+		const EquipSuitData& suit_data = PackageManager::getInstance()->get_one_suit_data_by_id(suit_id);
+
+		int max_num = 0;
+		for(int i = 0; i < equip_suit_att_num; ++i)
+		{
+			int need_num = suit_data.need_num[i];
+			if(need_num > 0)
+			{
+				LabelEx* label = LabelEx::create();
+				label->setAnchorPoint(ccp(0.0f, 0.0f));
+				label->setContentSize(CCSizeMake(m_list_width - gap_right, 0));
+
+				string text;
+				if(own_suit_num >= need_num)
+					safe_sprintf(text,STRING_TABLE["suit_att_1"], need_num, suit_data.suit_dest[i]);
+				else
+					safe_sprintf(text,STRING_TABLE["suit_att_2"], need_num, suit_data.suit_dest[i]);
+
+				label->set_text(text.c_str());
+				m_map_suit_att.insert(make_pair(i + 1, label));
+
+				max_num = MAX(max_num, need_num);
+			}
+		}
+
+		LabelEx* label = LabelEx::create();
+		label->setAnchorPoint(ccp(0.0f, 0.0f));
+		label->setContentSize(CCSizeMake(m_list_width - gap_right, 0));
+
+		string str;
+		safe_sprintf(str,STRING_TABLE["suit_tip_name"], suit_data.suit_name, own_suit_num, max_num);
+		label->set_text(str.c_str());
+		m_map_suit_att.insert(make_pair(0, label));
+	}
+}
+
+void EquipTipUiLayer::set_equip_desc(const string& str)
+{
+	if(!str.empty())
+	{
+		string text;
+		safe_sprintf(text,STRING_TABLE["special_2"], str.c_str());
+		add_special_label(text, 3);
+	}
+}
+
+void EquipTipUiLayer::add_special_label(const string& str, int tag)
+{
+	if(!str.empty())
+	{
+		LabelEx* label = LabelEx::create();
+		label->setAnchorPoint(ccp(0.0f, 0.0f));
+		label->setContentSize(CCSizeMake(m_list_width - gap_right, 0));
+		label->set_text(str.c_str());
+
+		m_map_special_att.insert(make_pair(tag, label));
+	}
+}
+
+void EquipTipUiLayer::add_cut_line(CCScrollView* list, float& pos_y)
+{
+	if(!IS_VALID_PTR(list))
+		return;
+
+	pos_y = pos_y - cutline_down;
+	CCSpriteFrame* frame1 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(cutline_pic.c_str());
+	CCSprite* cutline = CCSprite::createWithSpriteFrame(frame1);
+	cutline->setAnchorPoint(ccp(0.0f, 0.0f));
+	cutline->setPositionY(pos_y);
+	list->getContainer()->addChild(cutline);
+}
+
+void EquipTipUiLayer::add_title_text(CCScrollView* list, float& pos_y, const string& str)
+{
+	if(!IS_VALID_PTR(list))
+		return;
+
+	pos_y = pos_y - height_one_title_height;
+	LabelEx* label = LabelEx::create();
+	label->setAnchorPoint(ccp(0.0f, 0.0f));
+	label->setContentSize(CCSizeMake(m_list_width, 0));
+	label->set_text(str.c_str());
+	label->setPosition(ccp(0, pos_y));
+	list->getContainer()->addChild(label);
+}
+
+void EquipTipUiLayer::refresh_list()
+{
+	if(!IS_VALID_PTR(_currentLayer))
+		return;
+
+	CCScrollView* scroll_view = dynamic_cast<CCScrollView*>(_currentLayer->getChildByTag(ETT_List));
+	if(!IS_VALID_PTR(scroll_view))
+		return;
+	
+	float content_length = 3.0f;	// 预留三像素
+	// 基础属性高度
+	content_length = content_length + height_one_title_height;
+	float temp1 = ((m_vector_self_base_att.size() + 1) / 2) * height_one_line;
+	content_length = content_length + temp1;
+
+	// 进阶属性高度
+	content_length = content_length + cutline_down;
+	content_length = content_length + height_one_title_height;
+	float temp2 = (m_vector_self_indentify_att.size() == 0) ? height_one_line : ((m_vector_self_indentify_att.size() + 1) / 2) * height_one_line;
+	content_length = content_length + temp2;
+
+	// 宝石属性高度
+	if(!_stoneList.empty())
+	{
+		content_length = content_length + cutline_down;
+		content_length = content_length + height_one_title_height;
+		content_length = content_length + 32;
+	}
+
+	// 套装属性高度
+	if(!m_map_suit_att.empty())
+	{
+		content_length = content_length + cutline_down;
+		for(std::map<int, LabelEx*>::iterator iter = m_map_suit_att.begin(); iter != m_map_suit_att.end(); ++iter)
+		{
+			content_length = content_length + iter->second->get_label_size().height;
+		}
+	}
+
+	// 特殊属性高度
+	if(!m_map_special_att.empty())
+	{
+		content_length = content_length + cutline_down;
+		content_length = content_length + height_one_title_height;
+		for(std::map<int, LabelEx*>::iterator iter = m_map_special_att.begin(); iter != m_map_special_att.end(); ++iter)
+		{
+			content_length = content_length + iter->second->get_label_size().height;
+		}
+	}
+
+	CCSize view_size = scroll_view->getViewSize();
+	if(content_length < view_size.height)
+	{
+		content_length = view_size.height;
+	}
+	scroll_view->setContentSize(CCSizeMake(view_size.width, content_length));
+
+	scroll_view->getContainer()->removeAllChildrenWithCleanup(true);
+
+	// 基础属性------------------------------------------------------------
+	{
+		add_title_text(scroll_view, content_length, STRING_TABLE["tip_titile_1"]);
+
+		int i = 0;
+		for(std::vector<LabelEx*>::iterator iter = m_vector_self_base_att.begin(); iter != m_vector_self_base_att.end(); ++iter)
+		{
+			if(i % 2 == 0)
+				content_length = content_length - height_one_line;
+
+			LabelEx* ft = *iter;
+			scroll_view->getContainer()->addChild(ft);
+			float x = (i % 2 == 0) ? 2 : m_list_width / 2 + 2;
+			ft->setPosition(ccp(x, content_length));
+
+			LabelEx* ft1 = m_vector_self_base_value[i];
+			if(ft1)
+			{
+				scroll_view->getContainer()->addChild(ft1);
+				x = x + ft->get_label_size().width;
+				ft1->setPosition(ccp(x, content_length + 2));
+			}
+			i++;
+		}
+
+		m_vector_self_base_att.clear();
+		m_vector_self_base_value.clear();
+	}
+
+	// 进阶属性---------------------------------------------------------
+	{
+		add_cut_line(scroll_view, content_length);
+		add_title_text(scroll_view, content_length, STRING_TABLE["tip_titile_2"]);
+
+		if(m_vector_self_indentify_att.empty())
+		{
+			content_length = content_length - height_one_line;
+			LabelEx* label = LabelEx::create();
+			label->setAnchorPoint(ccp(0.0f, 0.0f));
+			label->setContentSize(CCSizeMake(m_list_width, 0));
+			label->set_text(STRING_TABLE["no_indentify_cue"]);
+			label->setPosition(ccp(gap_right, content_length));
+			scroll_view->getContainer()->addChild(label);
+		}
+		else
+		{
+			int i = 0;
+			for(std::vector<LabelEx*>::iterator iter = m_vector_self_indentify_att.begin(); iter != m_vector_self_indentify_att.end(); ++iter)
+			{
+				if(i % 2 == 0)
+					content_length = content_length - height_one_line;
+
+				LabelEx* ft = *iter;
+				scroll_view->getContainer()->addChild(ft);
+				float x = (i % 2 == 0) ? 2 : m_list_width / 2 + 2;
+				ft->setPosition(ccp(x, content_length));
+
+				LabelEx* ft1 = m_vector_indentify_value[i];
+				if(ft1)
+				{
+					scroll_view->getContainer()->addChild(ft1);
+					x = x + ft->get_label_size().width;
+					ft1->setPosition(ccp(x, content_length + 2));
+				}
+
+				LabelEx* ft2 = m_vector_indentify_pic[i];
+				if(ft2)
+				{
+					scroll_view->getContainer()->addChild(ft2);
+					x = x + ft1->get_label_size().width;
+					ft2->setPosition(ccp(x, content_length - 2));
+				}
+				i++;
+			}
+		}
+
+		m_vector_self_indentify_att.clear();
+		m_vector_indentify_value.clear();
+		m_vector_indentify_pic.clear();
+	}
+
+	// 宝石属性-----------------------------------------------------------
+	{
+		if(!_stoneList.empty())
+		{
+			add_cut_line(scroll_view, content_length);
+
+			content_length = content_length - height_one_title_height;
+			content_length = content_length - 32;
+
+			int i = 0;
+			for (std::vector<EquipTipUiStoneItem*>::iterator iter = _stoneList.begin(); iter != _stoneList.end(); ++iter )
+			{
+				EquipTipUiStoneItem *item = *iter;
+				item->setPosition(ccp(50.0f * (i++) + gap_right, content_length));
+				item->get_icon()->setAnchorPoint(ccp(0.0f, 0.0f));
+				scroll_view->getContainer()->addChild(item->get_icon());
+				delete item;
+			}
+			_stoneList.clear();
+		}
+	}
+
+	// 套装属性-------------------------------------------------------------
+	if(!m_map_suit_att.empty())
+	{
+		add_cut_line(scroll_view, content_length);
+
+		for(std::map<int, LabelEx*>::iterator iter = m_map_suit_att.begin(); iter != m_map_suit_att.end(); ++iter)
+		{
+			content_length = content_length - iter->second->get_label_size().height;
+
+			LabelEx* ft = iter->second;
+			scroll_view->getContainer()->addChild(ft);
+
+			if(iter->first == 0)
+				ft->setPosition(ccp(0, content_length));
+			else
+				ft->setPosition(ccp(gap_right, content_length));
+		}
+
+		m_map_suit_att.clear();
+	}
+
+	// 特殊属性-------------------------------------------------------------
+	if(!m_map_special_att.empty())
+	{
+		add_cut_line(scroll_view, content_length);
+		add_title_text(scroll_view, content_length, STRING_TABLE["tip_titile_4"]);
+
+		for(std::map<int, LabelEx*>::iterator iter = m_map_special_att.begin(); iter != m_map_special_att.end(); ++iter)
+		{
+			content_length = content_length - iter->second->get_label_size().height;
+
+			iter->second->setPosition(gap_right, content_length);
+			scroll_view->getContainer()->addChild(iter->second);
+		}
+
+		m_map_special_att.clear();
+	}
+
+	// 置顶
+	scroll_view->setContentOffset(ccp(0, view_size.height - scroll_view->getContentSize().height));
+}
+
+bool EquipTipUiLayer::gem_enable_by_pos_type( EEquipPos posIndex ) const
+{
+	return EEP_Body1 != posIndex 
+		&& EEP_Fashion != posIndex 
+		&& EEP_Spcial_Finger_ZZ != posIndex 
+		&& EEP_Spcial_Finger_TZ != posIndex 
+		&& EEP_Spcial_Finger_DZ != posIndex 
+		&& EEP_Spcial_Finger_JL != posIndex;
+}

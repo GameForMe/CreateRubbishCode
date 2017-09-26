@@ -1,0 +1,998 @@
+#include "StallUi.h"
+#include "World.h"
+#include "CfgReader.h"
+#include "ItemNode.h"
+#include "PackageManager.h"
+#include "DBMgr.h"
+#include "UiResourceMgr.h"
+#include "UiTools.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "FrameSprite.h"
+#include "NumKeypad.h"
+#include "StallMgr.h"
+#include "ItemTip.h"
+#include "UiLoader.h"
+#include "UiManager.h"
+#include "EquipTipUi.h"
+#include "BuySetUi.h"
+#include "NameMgr2.h"
+#include "UiManager.h"
+#include "ChatUi.h"
+#include "SystemUi.h"
+
+//////////////////////////////////////////////////////////////////////////
+StallLogItem::StallLogItem()
+{
+	for(int i = NT_ItemName; i <= NT_Price; i ++)
+	{
+		CCLabelTTF *label = createLabel("");
+		label->setTag(i);
+		_node->addChild(label);
+	}
+	getLabel(NT_ItemName)->setPosition(ccp(HP_ItemName, 0.f));
+	getLabel(NT_SoldTime)->setPosition(ccp(HP_SoldTime, 0.f));
+	getLabel(NT_Num)->setPosition(ccp(HP_Num, 0.f));
+	getLabel(NT_Price)->setPosition(ccp(HP_Price, 0.f));
+}
+
+StallLogItem::~StallLogItem()
+{
+
+}
+
+cocos2d::CCSize StallLogItem::getContentSize()
+{
+	return _contentSize;
+}
+
+CCLabelTTF * StallLogItem::getLabel( eNodeTag tag )
+{
+	return dynamic_cast<CCLabelTTF*>(_node->getChildByTag(tag));
+}
+
+CCLabelTTF* StallLogItem::createLabel( const std::string &text )
+{
+	CCLabelTTF *label = CCLabelTTF::create();
+	label->setFontSize(16.0f);
+	label->setAnchorPoint(ccp(0.f, 1.0f));
+	label->setString(text.c_str());
+	label->setColor(ccc3(0xfe,0xf8,0xd8));
+	return label;
+}
+
+void StallLogItem::setData(const tagStallGoodsLog &stallgoodslog)
+{
+	getLabel(NT_ItemName)->setString(stallgoodslog.cItemName);
+	getLabel(NT_SoldTime)->setString(stallgoodslog.cSoldTime);
+	getLabel(NT_Num)->setString(CCString::createWithFormat("%d", stallgoodslog.num)->getCString());
+	getLabel(NT_Price)->setString(CCString::createWithFormat("%d", stallgoodslog.price)->getCString());
+	updateContent();
+}
+
+void StallLogItem::updateContent()
+{
+	float height = 0.f;
+	for(int i = NT_ItemName; i <= NT_Price; i ++)
+	{
+		CCLabelTTF *label = getLabel((eNodeTag)i);
+		if(label != NULL)
+		{
+			float tmpHeight = label->getContentSize().height;
+			if(height < tmpHeight)
+				height = tmpHeight;
+		}
+	}
+
+	_contentSize.height = height;
+
+	CCLabelTTF *last = getLabel(NT_Price);
+	if(last != NULL)
+	{
+		_contentSize.width = HP_Price + last->getContentSize().width;
+	}
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+
+
+StallUiSellSetFrame::StallUiSellSetFrame()
+	: _keypadDelegate(NULL)
+	, _maxPrice(999999)
+	,b_touched(false)
+{
+
+}
+
+StallUiSellSetFrame::~StallUiSellSetFrame()
+{
+	if(_keypadDelegate != NULL)
+	{
+		delete _keypadDelegate;
+		_keypadDelegate = NULL;
+	}
+}
+
+
+void StallUiSellSetFrame::onNodeLoaded( CCNode * pNode, CCNodeLoader * pNodeLoader )
+{
+	CCNode *node = getChildByTag(NT_ItemIcon);
+	ItemNode *itemNode = ItemNode::create();
+	itemNode->setPosition(node->getPosition());
+	itemNode->setTag(NT_ItemNode);
+	itemNode->setBlank();
+	addChild(itemNode);
+
+	_inputNode = getChildByTag(NT_ItemPrice);
+	CC_ASSERT(_inputNode != NULL);
+
+	CCLabelTTF *priceLabel = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_ItemPriceLabel));
+	_keypadDelegate = new NumKeyPadLabelDelegate(priceLabel);
+}
+
+bool StallUiSellSetFrame::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_inputNode, pTouch))
+	{
+		b_touched = true;
+
+	}
+
+	return true;
+}
+
+void StallUiSellSetFrame::setItemTypeId( unsigned int id )
+{
+	dynamic_cast<ItemNode*>(getChildByTag(NT_ItemNode))->setDataId(id);
+}
+
+void StallUiSellSetFrame::setItemNum( int num )
+{
+	std::ostringstream str;
+	str << num;
+	dynamic_cast<CCLabelTTF*>(getChildByTag(NT_ItemCountLabel))->setString(str.str().c_str());
+}
+
+void StallUiSellSetFrame::setItemName( const std::string &name )
+{
+	dynamic_cast<CCLabelTTF*>(getChildByTag(NT_ItemName))->setString(name.c_str());
+}
+
+void StallUiSellSetFrame::setPrice( int price )
+{
+	std::ostringstream str;
+	str << price;
+	if ( price == _maxPrice)
+	{
+		str << _maxPrice;
+	}
+	dynamic_cast<CCLabelTTF*>(getChildByTag(NT_ItemPriceLabel))->setString(str.str().c_str());
+}
+
+void StallUiSellSetFrame::setPackageIndex( short index )
+{
+	_packageIndex = index;
+
+	f_item *item = PackageManager::getInstance()->getItem(EICT_Bag, index);
+	CC_ASSERT(item != NULL);
+	setItemTypeId(item->get_item_type_id());
+	setItemNum(item->get_item_number());
+	const ItemTypeData &data = PackageManager::getInstance()->getItemTypeData(item->get_item_type_id());
+	setItemName(data.name);
+}
+
+int StallUiSellSetFrame::getPrice()
+{
+	CCLabelTTF *priceLabel = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_ItemPriceLabel));
+	CC_ASSERT(priceLabel != NULL);
+	return atoi(priceLabel->getString());
+}
+
+void StallUiSellSetFrame::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(b_touched)
+	{
+		b_touched = false;
+
+		NumKeypad::getInstance()->open();
+		NumKeypad::getInstance()->setPositionByContent(_inputNode);
+		NumKeypad::getInstance()->attachToDelegate(_keypadDelegate);
+		NumKeypad::getInstance()->setMaxNum(_maxPrice);
+
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+StallUiBuyFrame::StallUiBuyFrame()
+	: _keypadDelegate(NULL)
+	,b_touched(false)
+{
+
+}
+
+StallUiBuyFrame::~StallUiBuyFrame()
+{
+	if(_keypadDelegate != NULL)
+	{
+		delete _keypadDelegate;
+		_keypadDelegate = NULL;
+	}
+}
+
+void StallUiBuyFrame::onNodeLoaded( CCNode * pNode, CCNodeLoader * pNodeLoader )
+{
+	CCNode *node = getChildByTag(NT_ItemIcon);
+	CC_ASSERT(node != NULL);
+
+	ItemNode *itemNode = ItemNode::create();
+	itemNode->setBlank();
+	itemNode->setPosition(node->getPosition());
+	itemNode->setTag(NT_ItemNode);
+	addChild(itemNode);
+
+	_inputContent = getChildByTag(NT_CountNode);
+	CC_ASSERT(_inputContent != NULL);
+
+	CCLabelTTF *inputLabel = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_CountLabel));
+	_keypadDelegate = new NumKeyPadLabelDelegate(inputLabel);
+}
+
+bool StallUiBuyFrame::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_inputContent, pTouch))
+	{
+		b_touched =true;
+
+	}
+	return true;
+}
+
+void StallUiBuyFrame::setItemTypeId( unsigned int id )
+{
+	ItemNode *itemNode = dynamic_cast<ItemNode*>(getChildByTag(NT_ItemNode));
+	CC_ASSERT(itemNode != NULL);
+	itemNode->setDataId(id);
+
+	const ItemTypeData &data = PackageManager::getInstance()->getItemTypeData(id);
+	setItemName(data.name);
+}
+
+void StallUiBuyFrame::setItemName( const std::string &name )
+{
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_ItemNameLabel));
+	CC_ASSERT(label != NULL);
+	label->setString(name.c_str());
+}
+
+void StallUiBuyFrame::setBuyCount( int count )
+{
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_CountLabel));
+	CC_ASSERT(label != NULL);
+	std::ostringstream ostr;
+	ostr << count;
+	label->setString(ostr.str().c_str());
+
+	setBuySumPrice(count * _price);
+}
+
+void StallUiBuyFrame::setBuySumPrice( int price )
+{
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_AllPrice));
+	CC_ASSERT(label != NULL);
+	std::ostringstream ostr;
+	ostr << price;
+	label->setString(ostr.str().c_str());
+}
+
+void StallUiBuyFrame::setPrice( int price )
+{
+	_price = price;
+}
+
+int StallUiBuyFrame::getBuyCount()
+{
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_CountLabel));
+	return atoi(label->getString());
+}
+
+void StallUiBuyFrame::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (b_touched)
+	{
+		NumKeypad::getInstance()->open();
+		NumKeypad::getInstance()->setPositionByContent(_inputContent);
+		NumKeypad::getInstance()->attachToDelegate(_keypadDelegate);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+void StallStallNameFrame::onNodeLoaded( CCNode * pNode, CCNodeLoader * pNodeLoader )
+{
+	_inputText = createInputWithContent(getChildByTag(NT_InputNode));
+	addChild(_inputText);
+	CC_ASSERT(_inputText != NULL);
+}
+
+bool StallStallNameFrame::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_inputText, pTouch))
+	{
+		_inputText->attachWithIME();
+	}
+	else
+	{
+		_inputText->detachWithIME();
+	}
+
+	return true;
+}
+
+std::string StallStallNameFrame::getStallName()
+{
+	if(_inputText != NULL)
+	{
+		return _inputText->getString();
+	}
+
+	return NULL;
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+CCNode * StallUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["StallUiLayer"] = UiLayerLoader<StallUiLayer>::loader();
+	nodeLoaders["StallUiSellSetFrame"] = StallUiSellSetFrameLoader::loader();
+	nodeLoaders["StallUiBuyFrame"] = StallUiBuyFrameLoader::loader();
+	nodeLoaders["StallStallNameFrame"] = StallStallNameFrameLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("StallUi", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+StallUiLayer * StallUi::getUiLayer()
+{
+	return getUiNodeByTag<StallUiLayer>(WCT_StallUi);
+}
+
+void StallUi::setRoleId( unsigned int id )
+{
+	StallUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setRoleId(id);
+	}
+}
+
+void StallUi::updateData()
+{
+	StallUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateDisplayData();
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+StallUiLayer::StallUiLayer()
+	:_verticalList(NULL)
+{
+
+}
+
+StallUiLayer::~StallUiLayer()
+{
+	if (_verticalList != NULL)
+	{
+		delete _verticalList;
+		_verticalList = NULL;
+	}
+}
+
+
+cocos2d::SEL_MenuHandler StallUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler StallUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", StallUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed1", StallUiLayer::onCloseBtnPressed1);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed2", StallUiLayer::onCloseBtnPressed2);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed3", StallUiLayer::onCloseBtnPressed3);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCancelBtnPressed2", StallUiLayer::onCloseBtnPressed2);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCancelBtnPressed3", StallUiLayer::onCloseBtnPressed3);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed1", StallUiLayer::onOkBtnPressed1);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed2", StallUiLayer::onOkBtnPressed2);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed3", StallUiLayer::onOkBtnPressed3);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onStallBtnPressed", StallUiLayer::onStallBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLogBtnPressed", StallUiLayer::onLogBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onStopStallBtnPressed", StallUiLayer::onStopStallBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSiLiaoBtnPressed", StallUiLayer::onSiLiaoBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBuyBtnPressed", StallUiLayer::onBuyBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChedanBtnPressed", StallUiLayer::onChedanBtnPressed);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLogOkBtnPressed", StallUiLayer::onLogOkBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLogCloseBtnPressed", StallUiLayer::onLogCloseBtnPressed);
+
+	return NULL;
+}
+
+void StallUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_roleId = (unsigned int) -1;
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(FT_Main));
+	CC_ASSERT(_frame != NULL);
+
+	for(int i = 0; i < MFT_NodeNum; i ++)
+	{
+		CCNode *node = _frame->getChildByTag(i);
+		CC_ASSERT(node != NULL);
+		_pos[i] = node->getPosition();
+		ItemNode *itemNode = ItemNode::create();
+		itemNode->setBlank();
+		itemNode->setTag(i + MFT_ItemNodeBegin);
+		itemNode->setPosition(_pos[i]);
+		_frame->addChild(itemNode, 1);
+	}
+	//stalllog frame
+	_stalllogframe = dynamic_cast<CCSprite*>(getChildByTag(FT_StallLog));
+	CC_ASSERT( _stalllogframe != NULL );
+	_stalllogframe->setVisible(false);
+
+	_content = _stalllogframe->getChildByTag(FT_Content);
+	CC_ASSERT( _content != NULL);
+	_scrollView = createScrollViewWithContent(_content);
+	CC_ASSERT( _scrollView != NULL);
+	_content->addChild(_scrollView);
+	_verticalList = new VerticalList<StallLogItem>;
+	_verticalList->addToScrollView(_scrollView);
+	_verticalList->setMinSize(_content->getContentSize());
+	_verticalList->setEnableSelect(true);
+
+
+	//sell set frame
+	CCLOG("sellset------------------> %d",FT_SellSet);
+	_sellSetFrame = dynamic_cast<StallUiSellSetFrame*>(getChildByTag(FT_SellSet));
+	_buyFrame = dynamic_cast<StallUiBuyFrame*>(getChildByTag(FT_Buy));
+	_nameSetFrame = dynamic_cast<StallStallNameFrame*>(getChildByTag(FT_StallSet));
+	_sellSetFrame->setTouchPriority(0);
+	_buyFrame->setTouchPriority(0);
+	_nameSetFrame->setTouchPriority(0);
+	setAllChildernButtonPriority(_sellSetFrame, -1);
+	setAllChildernButtonPriority(_buyFrame, -1);
+	setAllChildernButtonPriority(_nameSetFrame, -1);
+
+	//select sprite
+	_selectIndex = -1;
+	CCSprite *sprite = CCSprite::create();
+	CCSpriteFrame *selectFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(
+		PackageManager::getInstance()->getSelectFrameName().c_str());
+	CC_ASSERT(selectFrame != NULL);
+	sprite->setDisplayFrame(selectFrame);
+	_frame->addChild(sprite, 0, MFT_SelectSprite);
+	sprite->setVisible(false);
+}
+
+void StallUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	DropDragDelegate::getInstance()->addDropLayer(this);
+}
+
+void StallUiLayer::onExit()
+{
+	DropDragDelegate::getInstance()->removeDropLayer(this);
+	CCLayer::onExit();
+
+	BuySetUi::getInstance()->close();
+}
+
+short StallUiLayer::getItemBegin( CCTouch &touch, eGetResult &result )
+{
+	if(isTouchOnNodeContent(_frame, &touch))
+	{
+		result = GR_SUCCESS;
+	}
+	else
+	{
+		result = GR_ERROR;
+	}
+
+	return -1;
+}
+
+short StallUiLayer::getItemEnd( CCTouch &touch, eGetResult &result, EItemConType src, short itemIndex )
+{
+	if(isTouchOnNodeContent(_frame, &touch))
+	{
+		//只有自己的摆摊界面可以编辑
+		if(src == EICT_Bag && RoleManager::getInstance()->getLocalPlayer()->getId() == _roleId)
+		{
+			CCPoint pt = _frame->convertTouchToNodeSpace(&touch);
+			int index = getItemUnderPoint(pt);
+			if(index != -1)
+			{
+				//ItemNode *itemNode = getItemNode(index);
+				//f_item *item = PackageManager::getInstance()->getItem(EICT_Bag, itemIndex);
+				//CC_ASSERT(item != NULL && itemNode != NULL);
+				//itemNode->setDataId(item->get_item_type_id());
+				//itemNode->setNum(item->get_item_quantity());
+
+				_sellSetFrame->setPackageIndex(itemIndex);
+				_sellSetFrame->setDestIndex(index);
+				showFrame(FT_SellSet, true);
+			}
+		}
+
+		result = GR_SUCCESS;
+	}
+	else
+	{
+		result = GR_ERROR;
+	}
+
+	return -1;
+}
+
+bool StallUiLayer::onClicked( CCTouch &touch )
+{
+	if(isTouchOnNodeContent(_frame, &touch))
+	{
+		CCPoint pos = _frame->convertTouchToNodeSpace(&touch);
+		short index = getItemUnderPoint(pos);
+		setSelectItem(index);
+
+		tagStallGoodsInfo *stallInfo = StallMgr::getInstance()->GetStallGoodsInfo(_roleId);
+		if(stallInfo != NULL)
+		{
+			tagStallGoodsInfo info = stallInfo[index];
+			if(info.goodsNum > 0)
+			{
+				setAllPriceLabel(stallInfo[index].nPrice);
+				if(MIsEquipment(info.typeID))
+				{
+					EquipTipUiLayer *ui = EquipTipUi::create();
+					ui->showUi(convertTouchToNodeSpace(&touch), info);
+				}
+				else
+				{
+					ItemTip::getInstace()->open();
+					ItemTip::getInstace()->setPosition(convertTouchToNodeSpace(&touch));
+					ItemTip::getInstace()->setDataId(info.typeID);
+					ItemTip::getInstace()->hideOpBtn();
+				}
+			}
+			else
+			{
+				setAllPriceLabel(0);
+			}
+		}
+
+		return true;
+	}
+
+	return false;
+}
+
+void StallUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_StallUi);
+}
+
+ItemNode * StallUiLayer::getItemNode( int tag )
+{
+	if(tag >= 0 && tag < MFT_NodeNum)
+	{
+		CC_ASSERT(_frame != NULL);
+		return dynamic_cast<ItemNode*>(_frame->getChildByTag(tag + MFT_ItemNodeBegin));
+	}
+	return NULL;
+}
+
+CCLabelTTF * StallUiLayer::getPriceLabel( int tag )
+{
+	if(tag >= 0 && tag < MFT_NodeNum)
+	{
+		CC_ASSERT(_frame != NULL);
+		return dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(tag + MFT_ItemPriceLabelBegin));
+	}
+	return NULL;
+}
+
+int StallUiLayer::getItemUnderPoint( const CCPoint &point )
+{
+	CCRect rect(point.x - ITEMNODE_CONTENTWIDTH / 2.0f, point.y - ITEMNODE_CONTENTHEIGHT / 2.0f, 
+		ITEMNODE_CONTENTWIDTH, ITEMNODE_CONTENTHEIGHT);
+
+	for(int i = 0; i < MFT_NodeNum; i ++)
+	{
+		if(rect.containsPoint(_pos[i]))
+			return i;
+	}
+
+	return -1;
+}
+
+void StallUiLayer::setRoleId( unsigned int roleId )
+{
+	_roleId = roleId;
+	updateDisplayData();
+}
+
+void StallUiLayer::updateDisplayData()
+{
+	//更新按钮;
+	if(_roleId == RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		if(StallMgr::getInstance()->IsPlayerInStallState())
+			setBtnState(BS_DurStall);
+		else
+			setBtnState(BS_PreStall);
+	}
+	else
+		setBtnState(BS_OtherStall);
+
+	//更新界面显示;
+	tagStallGoodsInfo *stallInfo = StallMgr::getInstance()->GetStallGoodsInfo(_roleId);
+	if(stallInfo == NULL)
+	{
+		for(int i = 0; i < STALL_MAX_DISPLAY; i ++)
+		{
+			ItemNode *itemNode = getItemNode(i);
+			if(itemNode != NULL)
+				itemNode->setBlank();
+			CCLabelTTF *label = getPriceLabel(i);
+			if(label != NULL)
+				label->setString("");
+		}
+	}
+	else
+	{
+		for(int i = 0; i < STALL_MAX_DISPLAY; i ++)
+		{
+			if(stallInfo[i].goodsNum > 0)
+			{
+				ItemNode *itemNode = getItemNode(i);
+				if(itemNode != NULL)
+				{
+					itemNode->setDataId(stallInfo[i].typeID);
+					itemNode->setNum(stallInfo[i].goodsNum);
+
+					if(MIsEquipment(stallInfo[i].typeID))
+					{
+						//装备中不同品质边框显示;
+//						if (stallInfo[i].byQuality != -1 && stallInfo[i].byQuality != 0)
+//						{
+//							itemNode->setEQuality(stallInfo[i].byQuality);
+// 							switch(stallInfo[i].byQuality)
+// 							{
+// 							case 1:
+// 								itemNode->setQualityBox("rendui_youxiu");break;
+// 							case 2:
+// 								itemNode->setQualityBox("rendui_zhuoyue");break;
+// 							case 3:
+// 								itemNode->setQualityBox("rendui_wanmei");break;
+// 							case 4:
+// 								itemNode->setQualityBox("rendui_shishi");break;
+// 							case 5:
+// 								itemNode->setQualityBox("rendui_chuanshuo");break;
+// 							}
+//						}
+					}
+
+				}
+
+
+				CCLabelTTF *label = getPriceLabel(i);
+				if(label != NULL)
+				{
+					std::ostringstream ostr;
+					ostr << stallInfo[i].nPrice;
+					label->setString(ostr.str().c_str());
+				}
+			}
+			else
+			{
+				ItemNode *itemNode = getItemNode(i);
+				if(itemNode != NULL)
+					itemNode->setBlank();
+				CCLabelTTF *label = getPriceLabel(i);
+				if(label != NULL)
+					label->setString("");
+			}
+
+			if (_roleId == RoleManager::getInstance()->getLocalPlayer()->getId())
+			{
+				setAllPriceLabel(StallMgr::getInstance()->GetTotalIncome());
+			}
+		}
+	}
+	//更新交易记录;
+	 std::vector<tagStallGoodsLog>* stallloginfo = StallMgr::getInstance()->GetStallGoodsLog();
+	_verticalList->clear();
+	for (std::vector<tagStallGoodsLog>::const_iterator iter = (*stallloginfo).begin();iter != (*stallloginfo).end();++iter)
+	{
+		const tagStallGoodsLog &loginfo = *iter;
+		StallLogItem *item = new StallLogItem;
+		item->setData(loginfo);
+		_verticalList->addItem(item);
+	}
+	_verticalList->updateDisplay();
+
+}
+
+void StallUiLayer::showFrame( eFrameTag frame, bool show )
+
+{
+	FrameSprite *frameSprite = NULL;
+	if(frame == FT_SellSet)
+		frameSprite = _sellSetFrame;
+	else if(frame == FT_Buy)
+		frameSprite = _buyFrame;
+	else if(frame == FT_StallSet)
+		frameSprite = _nameSetFrame;
+
+	if(frameSprite != NULL)
+	{
+		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+		if(show)
+		{
+			frameSprite->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+			frameSprite->setTouchEnable(true);
+		}
+		else
+		{
+			frameSprite->setPosition(ccp(-winSize.width / 2.0f, winSize.height / 2.0f));
+			frameSprite->setTouchEnable(false);
+		}
+	}
+}
+
+void StallUiLayer::onCloseBtnPressed1( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	showFrame(FT_SellSet, false);
+}
+
+void StallUiLayer::onCloseBtnPressed2( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	showFrame(FT_Buy, false);
+}
+
+void StallUiLayer::onCloseBtnPressed3( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	showFrame(FT_StallSet, false);
+}
+
+void StallUiLayer::onLogOkBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//点击记录确定;
+	setListVisible(false);
+}
+
+void StallUiLayer::onLogCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//点击记录关闭;
+	setListVisible(false);
+}
+
+void StallUiLayer::onOkBtnPressed1( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	showFrame(FT_SellSet, false);
+	int price = _sellSetFrame->getPrice();
+	short packageIndex = _sellSetFrame->getPackageIndex();
+	short destIndex = _sellSetFrame->getDestIndex();
+
+	ItemNode *itemNode = getItemNode(destIndex);
+	f_item *item = PackageManager::getInstance()->getItem(EICT_Bag, packageIndex);
+	CC_ASSERT(item != NULL && itemNode != NULL);
+	itemNode->setDataId(item->get_item_type_id());
+	itemNode->setNum(item->get_item_number());
+
+	CCLabelTTF *label = getPriceLabel(destIndex);
+	CC_ASSERT(label != NULL);
+	std::ostringstream priceStr;
+	priceStr << price;
+	label->setString(priceStr.str().c_str());
+
+	StallMgr::getInstance()->StallSetGoods(item->get_item_id(), price, destIndex,item->get_item_type_id(),item->get_data()->GetNum());
+}
+
+void StallUiLayer::onOkBtnPressed2( bool isOk, int count)
+{
+	if(isOk)
+	{
+		showFrame(FT_Buy, false);
+		tagStallGoodsInfo *goodsInfo = StallMgr::getInstance()->GetStallGoodsInfo(_roleId);
+		if(goodsInfo != NULL)
+		{
+			StallMgr::getInstance()->BuyProduct(_selectIndex, count);
+		}
+	}
+}
+
+void StallUiLayer::onOkBtnPressed3( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	showFrame(FT_StallSet, false);
+	std::string name = _nameSetFrame->getStallName();
+	StallMgr::getInstance()->StallSetTitle(name);
+	//StallMgr::getInstance()->StallSetFinish();
+}
+
+void StallUiLayer::setBtnState( eBtnState state )
+{
+	dynamic_cast<CCControlButton*>(_frame->getChildByTag(MFT_StallBtn))->setVisible(false);
+	dynamic_cast<CCControlButton*>(_frame->getChildByTag(MFT_LogBtn))->setVisible(false);
+	dynamic_cast<CCControlButton*>(_frame->getChildByTag(MFT_StopStallBtn))->setVisible(false);
+	dynamic_cast<CCControlButton*>(_frame->getChildByTag(MFT_SiliaoBtn))->setVisible(false);
+	dynamic_cast<CCControlButton*>(_frame->getChildByTag(MFT_BuyBtn))->setVisible(false);
+	dynamic_cast<CCControlButton*>(_frame->getChildByTag(MFT_ChedanBtn))->setVisible(false);
+
+	switch(state)
+	{
+	case BS_PreStall:
+		dynamic_cast<CCControlButton*>(_frame->getChildByTag(MFT_StallBtn))->setVisible(true);
+		dynamic_cast<CCControlButton*>(_frame->getChildByTag(MFT_LogBtn))->setVisible(true);
+		dynamic_cast<CCControlButton*>(_frame->getChildByTag(MFT_ChedanBtn))->setVisible(true);
+		break;
+	case BS_DurStall:
+		dynamic_cast<CCControlButton*>(_frame->getChildByTag(MFT_LogBtn))->setVisible(true);
+		dynamic_cast<CCControlButton*>(_frame->getChildByTag(MFT_StopStallBtn))->setVisible(true);
+		dynamic_cast<CCControlButton*>(_frame->getChildByTag(MFT_ChedanBtn))->setVisible(true);
+		break;
+	case BS_OtherStall:
+		dynamic_cast<CCControlButton*>(_frame->getChildByTag(MFT_SiliaoBtn))->setVisible(true);
+		dynamic_cast<CCControlButton*>(_frame->getChildByTag(MFT_BuyBtn))->setVisible(true);
+		break;
+	}
+}
+
+void StallUiLayer::setAllPriceLabel(int price)
+{
+	CCLabelTTF *allprice = dynamic_cast<CCLabelTTF *>(_frame->getChildByTag(MFT_AllPriceLabel));
+	CC_ASSERT(allprice != NULL);
+	if (_roleId == RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		std::ostringstream ostr;
+		ostr << "\xE6\x94\xB6\xE7\x9B\x8A\xEF\xBC\x9A" << StallMgr::getInstance()->GetTotalIncome();
+		allprice->setString(ostr.str().c_str());
+	}
+	else
+	{
+		if (_roleId != (unsigned int)-1)
+		{
+			std::ostringstream ostr;
+			ostr << "\xE5\x8D\x95\xE4\xBB\xB7\xEF\xBC\x9A" << price;
+			allprice->setString(ostr.str().c_str());
+		}
+	}
+}
+
+
+void StallUiLayer::onStallBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CCLOG("click stallbtn end ===================================");
+	showFrame(FT_StallSet, true);
+	setListVisible(false);
+}
+
+void StallUiLayer::onLogBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//ToDo click LogBtn event
+	setListVisible(true);
+	updateDisplayData();
+}
+
+void StallUiLayer::onStopStallBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setListVisible(false);
+	if(isLocalPlayer())
+	{
+		StallMgr::getInstance()->StallSetClose();
+		CLOSE_UI(WCT_StallUi);
+	}
+}
+
+void StallUiLayer::onSiLiaoBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if(!isLocalPlayer())
+	{
+		setListVisible(false);
+		std::string roleName("");
+		if (NameMgr2::getInstance()->queryName(_roleId,roleName))
+		{
+			GET_UI(ChatUi, WCT_ChatUi)->sendMessageTo(_roleId, roleName);
+			//点击私聊,下方功能按钮隐藏;
+			GET_UI(SystemUi,WCT_SystemUi)->showUi(false);
+			//关闭当前界面;
+			CLOSE_UI(WCT_StallUi);
+			CLOSE_UI(WCT_PACKAGEUI);
+		}
+	}
+}
+
+void StallUiLayer::onBuyBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//点击记录关闭;
+	setListVisible(false);
+	if(_selectIndex > -1 && _selectIndex < MFT_NodeNum)
+	{
+		tagStallGoodsInfo * goodsInfo = StallMgr::getInstance()->GetStallGoodsInfo(_roleId);
+		if(goodsInfo != NULL && goodsInfo[_selectIndex].goodsNum > 0)
+		{
+			//showFrame(FT_Buy, true);
+			//_buyFrame->setMaxBuyCount(goodsInfo[_selectIndex].goodsNum);
+			//_buyFrame->setItemTypeId(goodsInfo[_selectIndex].typeID);
+			//_buyFrame->setPrice(goodsInfo[_selectIndex].nPrice);
+			BuySetUi::getInstance()->open();
+			BuySetUi::getInstance()->setDataId(goodsInfo[_selectIndex].typeID);
+			BuySetUi::getInstance()->setPrice(goodsInfo[_selectIndex].nPrice);
+			BuySetUi::getInstance()->setNum(1);
+			BuySetUi::getInstance()->setMaxCount(goodsInfo[_selectIndex].goodsNum);
+			BuySetUi::getInstance()->_signalBtnPressed->connect(this, &StallUiLayer::onOkBtnPressed2);
+		}
+	}
+}
+
+void StallUiLayer::onChedanBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	if(!isLocalPlayer())
+		return;
+	//点击记录关闭;
+	setListVisible(false);
+	if(_selectIndex > -1 && _selectIndex < MFT_NodeNum)
+	{
+		tagStallGoodsInfo *goodsInfo = StallMgr::getInstance()->GetStallGoodsInfo(_roleId);
+		if(goodsInfo[_selectIndex].goodsNum > 0)
+			StallMgr::getInstance()->StallUnSetGoods(_selectIndex);
+	}
+}
+
+void StallUiLayer::setSelectItem( short index )
+{
+	CC_ASSERT(index < MFT_NodeNum && index >= -1);
+	CCNode *select = _frame->getChildByTag(MFT_SelectSprite);
+	CC_ASSERT(select != NULL);
+	_selectIndex = index;
+	if(index == -1)
+	{
+		select->setVisible(false);
+	}
+	else
+	{
+		select->setVisible(true);
+		select->setPosition(_pos[index]);
+	}
+}
+
+bool StallUiLayer::isLocalPlayer()
+{
+	if(RoleManager::getInstance()->getLocalPlayer()->getId() == _roleId)
+		return true;
+	return false;
+}
+
+void StallUiLayer::setListVisible( bool visible )
+{
+	CC_ASSERT(_stalllogframe != NULL);
+	_stalllogframe->setVisible(visible);
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	if (visible)
+		_stalllogframe->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+	else
+		_stalllogframe->setPosition(ccp(winSize.width / 2.0f * 1.5f, winSize.height / 2.0f));
+}
+
+
+
+
+
+

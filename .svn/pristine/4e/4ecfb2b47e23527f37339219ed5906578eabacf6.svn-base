@@ -1,0 +1,1455 @@
+﻿#include "AppDelegate.h"
+#include "RoleManager.h"
+#include "MapManager.h"
+#include "Login.h"
+#include "TCPClient.h"
+#include "MessageBoxUi.h"
+#include "SelectRole.h"
+#include "World.h"
+#include "NumericalIniMgr.h"
+
+#include "ClientUpdate.h"
+#include "NameMgr2.h"
+#include "DBMgr.h"
+//#include "LuaMgr.h" 
+#include "AudioPlayer.h"
+#include "Phyx.h"
+#include "Attres.h"
+#include "RewardMgr.h"
+#include "CfgReader.h"
+#include "FilterMgr.h"
+#include "UiManager.h"
+#include "CmdAdapter.h"
+#include "QuestMgr.h"
+#include "MessageBoxUi.h"
+#include "RoleInfoProto.h"
+#include "GameActionNode.h"
+#include "Thread.h"
+#include "UiTools.h"
+//#include "UpdateUI.h"
+#include "CCLuaEngine.h"
+#include "Lua_extensions_CCB.h"
+#include "LuaClient.h"
+#include "LoginProto.h"
+#include "StringMgr.h"
+#include "NewFuncGuider.h"
+
+#include "RadioButton.h"
+#include "RadioMutex.h"
+#include "CoverButton.h"
+#include "ListControl.h"
+#include "ClientCfg.h"
+#include "LabelEx.h"
+
+#include "f_cache_data_mgr.h"
+#include "f_util.h"
+
+//#include "QuickConfig.h"
+//QuickConfig* gQuickConfig = NULL;
+
+#include "cc_profiler.h"
+#include "cc_timer.h"
+//#include "ProfileListener.h"
+#include "ProfileLogger.h"
+#include "PackageManager.h"
+#include "DelayUi.h"
+#include "CrossSceneUI.h"
+#include "MessageBoxUi.h"
+
+#include "RewardQuestMgr.h"
+#include "StoreMgr.h"
+#include "DelayUi.h"
+
+#include "LineSelectUi.h"
+#include "InviteListView.h"
+#include "RespItemView.h"
+#include "TeammateHeadView.h"
+#include "KaifuhuodongItem.h"
+#include "NoticeLayer.h"
+#include "TextTip.h"
+
+#include "TeamUi.h"
+#include "HuoDongFuBenUi.h"
+#include "TeammateMenu.h"
+#include "LevelUpGuideShow.h"
+#include "TeamSettingPanel.h"
+#include "FrameSprite.h"
+
+#include "TradingSetPlane.h"
+#include "TradingSellRightItemList.h"
+#include "TradingSellLeftItemList.h"
+#include "TradingEquipItemTipUI.h"
+#include "TradingSellLeftItemNoList.h"
+#include "TradingBuyRightFinalItemList.h"
+#include "TradingGetItemList.h"
+#include "TradingOnterItemTipList.h"
+#include "TradingUI.h"
+#include "AnimationCache.h"
+
+#include "BaseDefine.h"
+#include "f_string_table.h"
+
+#include "ServerListUi.h"
+#include "FMBManager.h"
+#include "FMBAllTeamItem.h"
+#include "FMBOneTeamItem.h"
+#include "FMBAddItem.h"
+#include "FMBRankItem.h"
+#include "FMBBattleItem.h"
+#include "FMBBetItem.h"
+#include "FMBMenuUiLayer.h"
+
+#include "PlacardManager.h"
+#include "WingManager.h"
+
+#include "SelectTargetItem1.h"
+#include "SelectTargetItem2.h"
+#include "TeamApplyItem.h"
+#include "TeamMatchApplyItem.h"
+
+#include "BFPointsRankUi.h"
+#include "BFBattlePlayerListUi.h"
+
+#include "ZZZTitleTipsUI.h"
+#include "ZZZFLDTipsUI.h"
+#include "ZZZManorTipsUI.h"
+#include "ZZZSignTipsUI.h"
+#include "ZZZAcquireLayer.h"
+#include "NewRoleTitleUi.h"
+#include "f_zhuzai_mgr.h"
+#include "SparseGraph.h"
+#include "client_lua_loader.h"
+#include "f_simple_res_guard.h"
+#include "ToolTip.h"
+#include "BossPKMgr.h"
+#if ENABLE_GOTYE==1
+#include "voice/VoiceMgr.h"
+#endif
+
+#include "BossSkillManager.h"
+#include "SkillAnimManager.h"
+#include "SkillManager.h"
+
+f_data_set* g_ClientCfg;
+
+#ifdef CC_PROFILE_ENABLE
+ProfileLogger logger("profilelogger");
+profile_util::cc_timer g_ProfileTimer;
+profile_util::cc_profiler g_Profiler;
+
+#endif
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_WIN32)
+//#include <vld.h>
+#endif
+
+USING_NS_CC;
+using namespace cocos2d::extension;
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_WIN32)
+#include "MiniDump.h"
+#elif (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+#include "NotificationManager.h"
+#if defined(GOOGLE_BREAKPAD)
+#include "client/linux/handler/exception_handler.h"
+#include "client/linux/handler/minidump_descriptor.h"
+#endif
+#include <jni.h>
+#elif (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+#include "NotificationManager.h"
+#include "wzolJni.h"
+#endif
+
+AppDelegate *g_AppDelegate = NULL;
+const char* g_szDownloadPath="download_res";
+
+//#define USE_ENCRYPTION
+
+#ifdef USE_ENCRYPTION
+#define SET_ENCRYPTION(key,sign) DecFileHelper::setXXTEAKeyAndSign(#key,strlen(#key),#sign,strlen(#sign))
+#endif
+
+#ifndef WIN32
+
+bool g_sendgameinfo = false;
+int g_zoneid = 0;
+std::string g_zonename = "";
+std::string g_zonenum = "";
+std::string g_areaName;
+
+bool g_exit = false;
+
+//f_string_table g_StrTable＝f_string_table();
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+#include "wzolJni.h"
+
+class BackKeyDelegate : public CCKeypadDelegate, public CCObject
+{
+public:
+	BackKeyDelegate(){ bisShow = false;}
+	CREATE_FUNC(BackKeyDelegate);
+	bool init() { return true; }
+	bool bisShow;
+	virtual void keyBackClicked()
+	{
+		if (WzolJni::getInstance()->haveBackKeyEvent())
+			WzolJni::getInstance()->doSdkBackKeyEvent();
+		else
+		{
+			if (!bisShow)
+			{
+				CCScene *scene = UiMgr::getInstance()->getCurScene();
+				if(scene != NULL)
+				{
+					MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, "\xE6\x82\xA8\xE7\xA1\xAE\xE8\xAE\xA4\xE8\xA6\x81\xE9\x80\x80\xE5\x87\xBA\xE6\xB8\xB8\xE6\x88\x8F\xE5\x90\x97\xEF\xBC\x9F",
+						"\xE7\xBB\xA7\xE7\xBB\xAD",
+						"\xE9\x80\x80\xE5\x87\xBA");
+					scene->addChild(msgUi, WZ_Z_MAX);
+					msgUi->signalCancelBtnPressed.connect(this, &BackKeyDelegate::onExitGameBtn);
+					msgUi->signalOkBtnPressed.connect(this, &BackKeyDelegate::onContinueBtn);
+					setAllChildernButtonPriority(msgUi, -100);
+				}
+			}
+			else
+			{
+				MessageBoxUi::clearSelf();
+			}
+
+			bisShow = !bisShow;
+		}
+	}
+
+protected:
+	void onExitGameBtn()
+	{
+		//exitGame();
+		WzolJni::getInstance()->backKeyPressed();
+	}
+
+	void onContinueBtn()
+	{
+		WzolJni::getInstance()->continueKeyPressed();
+	}
+};
+#endif
+
+#endif
+
+void setupClientConfig()
+{
+	CC_ASSERT(g_ClientCfg == NULL);
+	g_ClientCfg = new f_data_set();
+	g_ClientCfg->load("Config/ClientConfig.xml");
+	//CC_ASSERT(gQuickConfig == NULL);
+	//	gQuickConfig = new QuickConfig();
+	//gQuickConfig->load("QuickConfig.ini");
+}
+
+void releaseClientConfig()
+{
+	CC_SAFE_DELETE(g_ClientCfg);
+}
+
+void reloadClientConfig()
+{
+	releaseClientConfig();
+	setupClientConfig();
+}
+
+// void setupQuickConfig()
+// {
+// 	CC_ASSERT(gQuickConfig == NULL);
+// 	gQuickConfig = new QuickConfig();
+// 	gQuickConfig->load("QuickConfig.ini");
+// }
+
+// void releaseQuickConfig()
+// {
+// 	SAFE_DELETE(gQuickConfig);
+// }
+
+void reloadStringTable()
+{
+	f_string_table::get_singleton().Destroy();
+	f_string_table::get_singleton().Init();
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+AppDelegate::AppDelegate()
+#ifndef WIN32
+	: _backKeyDel(NULL)
+	,m_sparse_graph(nullptr)
+#else
+	:m_sparse_graph(nullptr)
+#endif
+{
+	//_CrtSetBreakAlloc(186439);
+
+	_loginScene.onInit(this);
+	CCLog("AppDelegate ------------------ 1");
+	TCP_CLIENT->initialize(5 , false , true);
+	CCLOG("AppDelegate ------------------ 2");
+	ClientUpdate::getInstance()->init();
+	CCLOG("AppDelegate ------------------ 3");
+    
+    m_loadres_thread = new c_thread(_resload_thread_func, NULL, this);
+}
+
+void AppDelegate::initDelegate()
+{
+	init_script_support();
+	CCLOG("init script support");
+
+	reloadClientConfig();
+	CCLOG("AppDelegate ------------------ reloadClientConfig");
+	reloadStringTable();
+	CCLOG("AppDelegate ------------------ reloadStringTable");
+
+	initDatabaseFile();
+	initDataFromXML();
+	CCLOG("AppDelegate ------------------ 3");
+	//initCfgFile();
+
+	AnimationCache::getInstance()->init();
+	CCLOG("AppDelegate ------------------ 4");
+	MapManager::getInstance()->init(this);
+	CCLOG("AppDelegate ------------------ 5");
+
+	CCLOG("AppDelegate ------------------ 7");
+	Phyx::getInstance()->initialize();
+	CCLOG("AppDelegate ------------------ 8");
+	Attres::getInstance()->load();
+	CCLOG("AppDelegate ------------------ 9");
+	QuestMgr::getInstance()->loadQuestProto();
+	CCLOG("AppDelegate ------------------ 10");
+	UiMgr::getInstance()->init();
+	CCLOG("AppDelegate ------------------ 11");
+	FilterMgr::getInstance()->LoadFilterInfoFromDB();//敏感词库的导入
+	CCLOG("AppDelegate ------------------ 12");
+	NewFuncGuider::get_singleton().init();
+	PackageManager::getInstance()->loadPackageDataProto();
+	MirValuableBookMgr::getInstance()->loadDataFromDB();
+	MirValuableBookMgr::getInstance()->loadJudgeDataFromDB();
+	MirValuableBookMgr::getInstance()->loadStrenthRadioFromXML();
+
+	BossSkillManager::getInstance();
+
+	StringMgr::getInstance()->init();
+
+	f_zhuzai_mgr::get_singleton();
+
+	setGameMusicVolume();
+
+	f_cache_data_mgr* cacheMgr = f_cache_data_mgr::get_singleton_ptr();
+	if(cacheMgr->init())
+	{
+		cacheMgr->load();
+	}
+
+	//setupQuickConfig();
+
+	registerNodeLoaderLibary();
+
+#ifdef WIN32
+	CCUserDefault::sharedUserDefault()->setStringForKey(KEY_OF_VERSION,"1.0.2.0");
+#endif
+}
+
+AppDelegate::~AppDelegate() 
+{
+#ifdef WIN32 //仅仅为了内存泄露的查看更精简
+	if (m_loadres_thread) delete m_loadres_thread;
+	
+	if (m_sparse_graph) delete m_sparse_graph;
+
+	NewFuncGuider::get_singleton().destroy();
+
+	unregisterNodeLoaderLibary();
+
+	extern NET_SIS_get_role_init_state_att *g_roleStateMsg;
+	if (g_roleStateMsg)
+	{
+		delete [](char*)g_roleStateMsg;
+	}
+
+	releaseClientConfig();
+
+	exitGame();
+#endif
+
+}
+
+//warning 不能用 因为cocos2dx 不支持多线程加载资源 但是可以先LoadCCImage之后再用Texture2D加载这样就可以用多线程了
+//[bing] 资源加载线程 目前暂用于加载开场动画资源
+#ifdef OVD_PLATFORM_WINDOWS
+unsigned int AppDelegate::_resload_thread_func(void* thread_)
+#else
+void* AppDelegate::_resload_thread_func(void* thread_)
+#endif
+{
+	// 测试用, 多线程创建图结构， 临时方案, 未来有过场以后可能位置有变 //fan
+	AppDelegate* self = (AppDelegate*)((c_thread*)thread_)->lock_user_data();
+	((c_thread*)thread_)->unlock_user_data();
+	if (!self->m_sparse_graph) 
+	{
+		c_sparse_graph * graph = new c_sparse_graph(MAX_MAP_CONTENT_SIZE_W
+			, MAX_MAP_CONTENT_SIZE_H
+			, MAX_MAP_TILE_X
+			, MAX_MAP_TILE_Y);
+
+		graph->init1();
+		graph->init2();
+		graph->init3();
+		self->m_sparse_graph = graph;;
+	}
+	do
+	{	
+		((c_thread*)thread_)->yield();
+	}while(((c_thread*)thread_)->is_running());
+
+#ifdef OVD_PLATFORM_WINDOWS
+	return 0xdead;
+#else 
+	return (void*)0xdead;
+#endif
+}
+
+void AppDelegate::initDataFromXML()
+{
+	PackageManager::getInstance()->loadDataFromXML();
+	BossPKMgr::getInstance()->InitBossDataFromXML();
+	MapManager::getInstance()->initMapCreatureDataWithXML();
+	RoleManager::getInstance()->initNpcTalkDataFromXML();
+	GuildMgr::getInstance()->loadDataFromXML();
+	SkillManager::getInstance()->init_skill_proto();
+	FMBManager::getInstance()->init_rank_prize_info();
+	PlacardManager::getInstance()->init_placard_info();
+	WingManager::getInstance()->init_table_info();
+}
+
+void AppDelegate::initDatabaseFile()
+{
+	NumericalIniMgr::getInstance();
+	std::string strFilename = CCFileUtils::sharedFileUtils()->fullPathForFilename(SQLITE_DBNAME0);
+	if(!strFilename.compare(SQLITE_DBNAME0))
+	{
+		if(f_util::MDecryptFile(SQLITE_DBNAME1, SQLITE_DBNAME0, 0))
+		{
+			strFilename = CCFileUtils::sharedFileUtils()->fullPathForFilename(SQLITE_DBNAME0);
+		}
+	}
+	if(!strFilename.compare(SQLITE_DBNAME0))
+	{
+		if(f_util::MDecryptFile(SQLITE_DBNAME2, SQLITE_DBNAME0, 1))
+		{
+			strFilename = CCFileUtils::sharedFileUtils()->fullPathForFilename(SQLITE_DBNAME0);
+		}
+	}
+	if(!strFilename.compare(SQLITE_DBNAME0))
+	{
+		if(f_util::MDecryptFile(SQLITE_DBNAME3, SQLITE_DBNAME0, 2))
+		{
+			strFilename = CCFileUtils::sharedFileUtils()->fullPathForFilename(SQLITE_DBNAME0);
+		}
+	}
+
+#ifndef _WIN32
+	CCLog("-------------AppDelegate::initDatabaseFile ============= 1");
+#if (CC_TARGET_PLATFORM==CC_PLATFORM_ANDROID)
+	//...096DBJ20EVO.db
+	const char *db_file = SQLITE_DBNAME0;
+	unsigned long size = 0;
+	std::string writablefilePath = CCFileUtils::sharedFileUtils()->getWritablePath();
+	std::string fileName = writablefilePath + db_file;
+	unsigned char* data = CCFileUtils::sharedFileUtils()->getFileData(db_file,  "rb" , &size);
+	GUARD_NEW_ARRAY_PTR(data);
+	FILE* dbFile = fopen(fileName.c_str(), "wb");
+	fwrite(data, sizeof(unsigned char), size, dbFile); 	
+	fclose(dbFile);
+
+//	//CC_SAFE_DELETE_ARRAY(data);
+	bool ret=c_db_manager::getSingleton()->create_a_connection(fileName.c_str() , 0, true);
+	CCLog("-------------fileName::%s" ,fileName.c_str());
+
+	if (!ret)
+	{
+		CCLog("-------------create_a_connection::failed");
+	}
+#else
+	std::string fileInBondle = CCFileUtils::sharedFileUtils()->fullPathForFilename(SQLITE_DBNAME0);
+
+	bool ret=c_db_manager::getSingleton()->create_a_connection(fileInBondle.c_str() , 0, true);
+	CCLog("-------------fileInBondle::%s" ,fileInBondle.c_str());
+
+	if (!ret)
+	{
+		CCLog("-------------create_a_connection::failed");
+	}
+#endif
+
+#ifdef _USE_SDK
+	WzolJni::getInstance()->sendSoVersion();
+#endif
+	CCLog("-------------AppDelegate::initDatabaseFile ============= 5");
+
+#ifndef _USE_SDK
+    const char *path1 = serverlistDownFileName;
+    unsigned long size = 0;
+    std::string writablefilePath = CCFileUtils::sharedFileUtils()->getWritablePath();
+    std::string fileName = writablefilePath + serverlistDownFileName;
+    if( !CCFileUtils::sharedFileUtils()->isFileExist( fileName ) )
+    {
+        unsigned char* data = CCFileUtils::sharedFileUtils()->getFileData(path1,  "rb" , &size);
+        GUARD_NEW_ARRAY_PTR(data);
+        FILE* dbFile = fopen(fileName.c_str(), "wb");
+        fwrite(data, sizeof(unsigned char), size, dbFile);
+        fclose(dbFile);
+        
+        //CC_SAFE_DELETE_ARRAY(data);
+    }
+#endif
+#else
+	CCFileUtils* fileUtil = CCFileUtils::sharedFileUtils();
+	std::string writablefilePath = fileUtil->getWritablePath();
+
+	const char *path1 = serverlistDownFileName;
+	unsigned long size = 0;
+	unsigned char* data = fileUtil->getFileData(path1,  "rb" , &size);
+	GUARD_NEW_ARRAY_PTR(data);
+	std::string fileName = writablefilePath + serverlistDownFileName;
+
+	FILE *dbFile = fopen(fileName.c_str(), "wb");
+	fwrite(data, sizeof(unsigned char), size, dbFile);
+	fclose(dbFile);
+
+	std::string filename = CCFileUtils::sharedFileUtils()->fullPathForFilename(SQLITE_DBNAME0);
+	c_db_manager::getSingleton()->create_a_connection(filename , 0, true);	//[bing] 使用内存拷贝数据库
+	//c_db_manager::getSingleton()->create_a_connection(SQLITE_DBNAME , 0 , false);	//改为不使用内存拷贝试试
+#endif
+}
+
+void AppDelegate::initCfgFile()
+{
+#ifndef _WIN32
+	//const char *path = "client.cfg";
+	//unsigned int size = 0;
+	//unsigned char *data = CCFileUtils::sharedFileUtils()->getFileData(path,  "rb" , &size);
+	//std::string writablePath = CCFileUtils::sharedFileUtils()->getWritablePath();
+	//std::string fileName = writablePath + "client.cfg";
+
+	//FILE *dbFile = fopen(fileName.c_str(), "wb");
+	//fwrite(data, sizeof(unsigned char), size, dbFile);
+	//fclose(dbFile);
+#endif
+}
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+#if defined(GOOGLE_BREAKPAD)
+bool DumpCallback(const google_breakpad::MinidumpDescriptor& descriptor,
+	void* context,
+	bool succeeded) {
+		printf("Dump path: %s\n", descriptor.path());
+		WzolJni::getInstance()->callPlatform(ONCRASH, "");
+		return succeeded;
+}
+#endif
+#endif
+
+//test
+//void Crash() {
+//  volatile int* a = reinterpret_cast<volatile int*>(NULL);
+//  *a = 1;
+//}
+
+
+bool AppDelegate::applicationDidFinishLaunching() {
+
+	g_AppDelegate = this;
+	CCLOG("applicationDidFinishLaunching ------------------ 1");
+#ifdef CC_PROFILE_ENABLE
+	g_Profiler.setTimer(&g_ProfileTimer);
+	//g_Profiler.addListener(new ProfileListener());
+
+	//g_Profiler.setLogger(new ProfileLogger("profilelogger"));
+	g_Profiler.setLogger(&logger);
+	g_Profiler.setEnabled(true);
+
+	CCProfile("Open");
+#endif
+
+#ifdef _WIN32
+
+#ifdef USE_ENCRYPTION
+	CCFileUtils::sharedFileUtils()->addSearchPathAtFrontOnce("res_data_en");
+#else
+	CCFileUtils::sharedFileUtils()->addSearchPathAtFrontOnce("res_data");
+#endif
+	//THROW_EXCEPTION;
+#endif
+
+#ifdef USE_ENCRYPTION
+	SET_ENCRYPTION(random_key,my_sign);
+#endif
+	//DecFileHelper::setXXTEAKeyAndSign("randomkey",strlen("randomkey"),"",strlen());
+
+	initBeforeUpdate();
+
+#ifdef _WIN32
+	initDelegate();
+	//THROW_EXCEPTION;
+#endif
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+#if defined(GOOGLE_BREAKPAD)
+	//dump
+	std::string writablePath = CCFileUtils::sharedFileUtils()->getWritablePath();
+	std::string logPath = writablePath + "log";
+	google_breakpad::MinidumpDescriptor descriptor(logPath.c_str());
+	google_breakpad::ExceptionHandler *eh = new google_breakpad::ExceptionHandler(descriptor, NULL, DumpCallback, NULL, true, -1);
+#endif
+#endif
+
+	//CCLog("----------- AppDelegateLaunching 2");
+
+	// initialize director
+	CCDirector *pDirector = CCDirector::sharedDirector();
+	pDirector->setOpenGLView(CCEGLView::sharedOpenGLView());
+
+	//CCLog("----------- AppDelegateLaunching 3");
+
+	//查看帧率;
+#if defined _WIN32 && defined _DEBUG
+	pDirector->setDisplayStats(true);
+#endif    
+#ifdef WIN32
+	//自适应屏幕大小
+	int viewType = 4;
+	int w = 800;
+	int h = 480;
+	if (viewType == 1)
+	{
+		w = 800;
+		h = 480;
+	}
+	else if (viewType == 2)
+	{
+		w = 800;
+		h = 600;
+	}
+	else if (viewType == 3)
+	{
+		w = 900;
+		h = 480;
+	}
+	else if (viewType == 4)
+	{
+		w = 1024;
+		h = 768;
+	}
+	else if (viewType == 5)
+	{
+		w = 1280;
+		h = 800;
+	}
+	else if (viewType == 6)
+	{
+		w = 1920;
+		h = 1080;
+	}
+	CCEGLView::sharedOpenGLView()->setFrameSize(w, h);
+#endif
+
+	CCLog("----------- AppDelegateLaunching 4");
+
+	CCSize screenSize = CCEGLView::sharedOpenGLView()->getFrameSize();
+	CCSize designSize;
+	float screenRate = screenSize.width / screenSize.height;
+	float designRate = UI_WIDTH / UI_HEIGHT;
+	if(screenRate == designRate)
+	{
+		designSize = CCSizeMake(UI_WIDTH, UI_HEIGHT);
+	}
+	else if(screenRate > designRate)
+	{
+		designSize = CCSizeMake(UI_HEIGHT * screenRate, UI_HEIGHT);
+	}
+	else if(designRate > screenRate)
+	{
+		designSize = CCSizeMake(UI_WIDTH, UI_WIDTH / screenRate);
+	}
+
+	CCLog("----------- AppDelegateLaunching 5");
+
+	CCEGLView::sharedOpenGLView()->setDesignResolutionSize(designSize.width, designSize.height, kResolutionShowAll);
+
+	CCLog("----------- AppDelegateLaunching 6");
+	// set FPS. the default value is 1.0/60 if you don't call this
+	pDirector->setAnimationInterval(1.0 / 60);
+	//pDirector->getScheduler()->setTimeScale(2.0f);
+	CCLog("----------- AppDelegateLaunching 7");
+
+	//add by xy
+#if ENABLE_GOTYE==1
+	VoiceMgr::getSingleton()->init();
+#endif
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS /*|| CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID*/)
+
+	/*
+	std::string writablePath1 = CCFileUtils::sharedFileUtils()->getWritablePath();
+	CCFileUtils::sharedFileUtils()->addSearchPath(writablePath1.c_str());
+
+	addSearchPath("Audio");
+	addSearchPath("Audio/Background");
+	addSearchPath("Audio/SoundEft");
+	addSearchPath("Audio/Soundnpc");
+	addSearchPath("Audio/soundScene");
+	addSearchPath("Audio/SoundUI");
+	addSearchPath("Art");
+	addSearchPath("Art/Effect");
+	addSearchPath("Art/ICON");
+	addSearchPath("Art/Monster");
+	addSearchPath("Art/NPC");
+	addSearchPath("Art/Portrait");
+	addSearchPath("Art/Role");
+	addSearchPath("Art/Scene");
+	addSearchPath("Art/UI");
+	addSearchPath("Art/UI/ccbResources");
+	addSearchPath("Art/Weapon");
+	addSearchPath("Art/Movie");
+	*/
+#endif
+
+	/*CCFileUtils* pFileUtils = CCFileUtils::sharedFileUtils();
+	std::vector<std::string> searchPaths;
+	searchPaths.push_back("Audio");
+	searchPaths.push_back("Audio/Background");
+	searchPaths.push_back("Audio/SoundEft");
+	searchPaths.push_back("Audio/Soundnpc");
+	searchPaths.push_back("Audio/soundScene");
+	searchPaths.push_back("Audio/SoundUI");
+	searchPaths.push_back("Art");
+	searchPaths.push_back("Art/Effect");
+	searchPaths.push_back("Art/ICON");
+	searchPaths.push_back("Art/Monster");
+	searchPaths.push_back("Art/NPC");
+	searchPaths.push_back("Art/Portrait");
+	searchPaths.push_back("Art/Role");
+	searchPaths.push_back("Art/Scene");
+	searchPaths.push_back("Art/UI");
+	searchPaths.push_back("Art/UI/ccbResources");
+	searchPaths.push_back("Art/Weapon");
+	pFileUtils->setSearchPaths(searchPaths);
+	*/
+
+
+	// create a scene. it's an autorelease object
+	//CCScene *pScene = HelloWorld::scene();
+
+	//[bing] 先打开更新场景
+	//#ifndef WIN32
+
+	//    	CCLog("----------- AppDelegateLaunching 6");
+
+	//	CCScene *UpdateScene = CCScene::create();
+	//	UpdateUI::Init(UpdateScene, this);
+	//	pDirector->runWithScene(UpdateScene);
+
+	//	CCLog("----------- AppDelegateLaunching 7");
+	//#else
+#ifndef _USE_SDK
+	RunGame(false);
+	CCLog("----------- AppDelegateLaunching no sdk");
+#endif
+
+#ifdef _USE_SDK
+	string params;
+	WzolJni::getInstance()->logToServer(LOG_GAMELUNCH, params);
+#endif
+	//#endif
+
+
+	//改一下CCTexture2D 默认使用资源格式
+	CCTexture2D::setDefaultAlphaPixelFormat(kCCTexture2DPixelFormat_RGBA8888);
+	CCLog("----------- AppDelegateLaunching 8");
+
+	ClientUpdate::getInstance()->setDidFinishLaunching(true);
+
+	CCLog("----------- AppDelegateLaunching finished");
+
+	return true;
+}
+
+/*
+void AppDelegate::addSearchPath(const char* path)
+{
+std::string p = path;
+
+//设置资源加载路径的顺序
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+std::string downloadedScriptPath = CCFileUtils::sharedFileUtils()->getWritablePath() + p;
+CCFileUtils::sharedFileUtils()->addSearchPath(downloadedScriptPath.c_str());
+std::string scriptPath = CCFileUtils::sharedFileUtils()->fullPathForFilename(p.c_str());
+CCFileUtils::sharedFileUtils()->addSearchPath(scriptPath.c_str());
+#elif (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+std::string downloadedScriptPath = CCFileUtils::sharedFileUtils()->getWritablePath() + p;
+CCLog("%s",downloadedScriptPath.c_str());
+CCFileUtils::sharedFileUtils()->addSearchPath(downloadedScriptPath.c_str());
+std::string scriptPath = "assets/" + p;
+CCLog("%s",scriptPath.c_str());
+CCFileUtils::sharedFileUtils()->addSearchPath(scriptPath.c_str());
+#elif (CC_TARGET_PLATFORM == CC_PLATFORM_WIN32)
+//TODO
+#else
+_ERROR_
+#endif
+
+}
+*/
+
+// This function will be called when the app is inactive. When comes a phone call,it's be invoked too
+void AppDelegate::applicationDidEnterBackground() {
+	ClientUpdate::getInstance()->setGamePause(true);
+	CCDirector::sharedDirector()->stopAnimation();
+	CCLog("applicationDidEnterBackground");
+	// if you use SimpleAudioEngine, it must be pause
+	SimpleAudioEngine::sharedEngine()->pauseBackgroundMusic();
+	SimpleAudioEngine::sharedEngine()->pauseAllEffects();
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	NotificationManager::getNotificationManager()->refreshAllPushMessage();
+#endif
+}
+
+// this function will be called when the app is active again
+void AppDelegate::applicationWillEnterForeground() {
+	ClientUpdate::getInstance()->setGamePause(false);
+	CCDirector::sharedDirector()->startAnimation();
+	CCLog("applicationWillEnterForeground");
+	// if you use SimpleAudioEngine, it must resume here
+	SimpleAudioEngine::sharedEngine()->resumeBackgroundMusic();
+	SimpleAudioEngine::sharedEngine()->resumeAllEffects();
+	/*if(!CrossSceneUI::getInstance()->isInCross() && ClientUpdate::getInstance()->_currentScene == ST_WORLDSCENE)
+	{
+	DelayUi::getInstace()->open();
+	DelayUi::getInstace()->showDelay(true);
+	World::getInstance()->repetLogin(false);
+	}*/
+}
+
+void AppDelegate::RunGame(bool bIsDownloadFinish)
+{
+	CCDirector *pDirector = CCDirector::sharedDirector();
+
+	CCLOG("------------AppDelegate::RunGame-----------1");
+	// run
+	CCScene *logoScene = CCScene::create();
+#if (CC_TARGET_PLATFORM != CC_PLATFORM_IOS)
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	CCSprite *sprite = CCSprite::create((uiDir + "Logo.png").c_str());
+
+	CCSize winSize = pDirector->getWinSize();
+	sprite->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+	logoScene->addChild(sprite);
+#endif
+
+	CCLOG("------------AppDelegate::RunGame-----------2");
+	if(!bIsDownloadFinish)
+		pDirector->runWithScene(logoScene);
+	else
+		pDirector->replaceScene(logoScene);
+	addUpdateWaitingPage(logoScene);
+#ifndef _USE_SDK
+	//m_loadres_thread = new c_thread(_resload_thread_func, NULL, this);
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+	//Login::getInstance()->updateResource();
+#endif
+
+	bool bCG = false;
+	if (bCG)
+	{
+		CCLOG("------------AppDelegate::RunGame-----------3");
+		//不用多线程 用异步处理图片加载达到多线程加载的目的
+		std::string filepath = CFGReader::instance()->get_profile_string("Art", "Movie", "");
+		std::string finfilepath;
+		char filename[10] = {0};
+		for(int i = 1; i <= 453; ++i)
+		{
+			sprintf(filename, "CG%03d.jpg", i);
+			finfilepath = filepath + filename;
+			CCTextureCache::sharedTextureCache()->addImageAsync(finfilepath.c_str(), &_loginScene, callfuncO_selector(GoLoginScene::ImgLoadCallBack));
+		}
+
+		//pDirector->getScheduler()->scheduleSelector(SEL_SCHEDULE(&GoLoginScene::showHealthNotice), &_loginScene, 2.0f, false);
+		pDirector->getScheduler()->scheduleSelector(SEL_SCHEDULE(&GoLoginScene::MovieBegin), &_loginScene, 3.0f, false);
+		//pDirector->getScheduler()->scheduleSelector(SEL_SCHEDULE(&GoLoginScene::loginSceneOn), &_loginScene, 20.0f, false);
+	}
+	else
+	{
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+		CCLOG("------------AppDelegate::RunGame-----------4");
+		pDirector->getScheduler()->scheduleSelector(SEL_SCHEDULE(&GoLoginScene::CGVideoOn), &_loginScene, 0.f, false);
+#else
+		CCLOG("------------AppDelegate::RunGame-----------5");
+		pDirector->getScheduler()->scheduleSelector(SEL_SCHEDULE(&GoLoginScene::CGVideoOn), &_loginScene, 0.3f, false);
+#endif
+		//pDirector->getScheduler()->scheduleSelector(SEL_SCHEDULE(&GoLoginScene::showUPdateSceneOn), &_loginScene, 0.1f, false);
+	}
+
+#else
+	float t = 6.0f;
+	CCLOG("------------AppDelegate::RunGame-----------6");
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+	if(_backKeyDel == NULL)
+	{
+		_backKeyDel = BackKeyDelegate::create();
+		pDirector->getKeypadDispatcher()->addDelegate(_backKeyDel);
+	}
+#endif
+	std::string uiDir1 = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	if (CCFileUtils::sharedFileUtils()->isFileExist((uiDir1 + "Logo_sdk.png").c_str()))
+	{
+		pDirector->getScheduler()->scheduleSelector(SEL_SCHEDULE(&GoLoginScene::showsdklogo), &_loginScene, 3.0f, false);
+		//pDirector->getScheduler()->scheduleSelector(SEL_SCHEDULE(&GoLoginScene::loginSceneOn), &_loginScene, 6.0f, false);
+	}
+	else
+	{
+		//t = 3.0f;
+		//pDirector->getScheduler()->scheduleSelector(SEL_SCHEDULE(&GoLoginScene::loginSceneOn), &_loginScene, 3.0f, false);
+	}
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	pDirector->getScheduler()->scheduleSelector(SEL_SCHEDULE(&GoLoginScene::CGVideoOn), &_loginScene, .0f, false);
+#else
+	pDirector->getScheduler()->scheduleSelector(SEL_SCHEDULE(&GoLoginScene::CGVideoOn), &_loginScene, 4.0f, false);
+#endif
+
+#endif
+}
+
+void AppDelegate::registerNodeLoaderLibary()
+{
+	CCNodeLoaderLibrary* lib =CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	lib->registerCCNodeLoader("RadioButton",RadioButtonLoader::loader());
+	lib->registerCCNodeLoader("RadioMutex",RadioMutexLoader::loader());
+	lib->registerCCNodeLoader("CoverButton",CoverButtonLoader::loader());
+	lib->registerCCNodeLoader("ListControl",ListControlLoader::loader());
+	lib->registerCCNodeLoader("LineItemUi",LineItemUiLoader::loader());
+	lib->registerCCNodeLoader("TeammateHeadView",TeammateHeadViewLoader::loader());
+	lib->registerCCNodeLoader("LabelEx",LabelExLoader::loader());
+	lib->registerCCNodeLoader("FrameSprite", FrameSpriteLoader::loader());
+
+	REG_AUTO_LOADER(InviteListView);
+	REG_AUTO_LOADER(RespItemView);
+	REG_AUTO_LOADER(InviteListItem);
+	REG_AUTO_LOADER(Tian7leUiLayer);
+
+	REG_AUTO_LOADER(HuoDongFuBenUiLayer);
+	REG_AUTO_LOADER(TeammateMenu);
+	REG_AUTO_LOADER(LevelUpGuideShowLayer);
+	REG_AUTO_LOADER(LineSelectUiLayer);
+	REG_AUTO_LOADER(RespListView);
+	REG_AUTO_LOADER(TeamSettingPanel);
+
+	REG_AUTO_LOADER(TradingSellLeftItemList);
+	REG_AUTO_LOADER(TradingSetPlane);
+	REG_AUTO_LOADER(TradingEquipItemTipUILayer);
+	REG_AUTO_LOADER(TradingSellLeftItemNoList);
+	REG_AUTO_LOADER(TradingBuyRightFinalItemList);
+	REG_AUTO_LOADER(TradingBuyRightItemList);
+	REG_AUTO_LOADER(TradingGetItemList);
+	REG_AUTO_LOADER(TradingOnterItemTipList);
+	REG_AUTO_LOADER(TradingSellRightItemList);
+	REG_AUTO_LOADER(TradingUILayer);
+
+	REG_AUTO_LOADER(FMBOneTeamItem);
+	REG_AUTO_LOADER(FMBAllTeamItem);
+	REG_AUTO_LOADER(FMBAddItem);
+	REG_AUTO_LOADER(FMBRankItem);
+	REG_AUTO_LOADER(FMBBattleItem);
+	REG_AUTO_LOADER(FMBBetItem);
+	REG_AUTO_LOADER(FMBMenuUiLayer);
+
+	REG_AUTO_LOADER(SelectTargetItem1);
+	REG_AUTO_LOADER(SelectTargetItem2);
+	REG_AUTO_LOADER(TeamApplyItem);
+	REG_AUTO_LOADER(TeamMatchApplyItem);
+
+	REG_AUTO_LOADER(BFPointsRankItem);
+	REG_AUTO_LOADER(BFBattlePlayerListUi);
+
+	REG_AUTO_LOADER(ZZZTitleTipsUI);
+	REG_AUTO_LOADER(ZZZFLDTipsUI);
+	REG_AUTO_LOADER(ZZZManorTipsUI);
+	REG_AUTO_LOADER(ZZZSignTipsUI);
+	REG_AUTO_LOADER(ZZZAcquireLayer);
+
+	REG_AUTO_LOADER(NewRoleTitleItem);
+}
+
+void AppDelegate::setGameMusicVolume()
+{
+	float bgmMusicValue = ClientCfg::getInstance()->getInt("general", "bgmValue", 50) / 100.f;
+	float effectMusicValue = ClientCfg::getInstance()->getInt("general", "musicValue", 50) / 100.f;
+
+	AudioPlayer::getSigletonPtr()->setBackgroundVolume(bgmMusicValue);
+	AudioPlayer::getSigletonPtr()->setEffectVolume(effectMusicValue);
+}
+
+void AppDelegate::unregisterNodeLoaderLibary()
+{
+	CCNodeLoaderLibrary* lib =CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	lib->purge(true);
+
+	// 	lib->unregisterCCNodeLoader("RadioButton");
+	// 	lib->unregisterCCNodeLoader("RadioMutex");
+	// 	lib->unregisterCCNodeLoader("CoverButton");
+	// 	lib->unregisterCCNodeLoader("ListControl");
+}
+
+void AppDelegate::initBeforeUpdate()
+{
+	/*
+	std::string res_ver=cocos2d::CCUserDefault::sharedUserDefault()->getStringForKey(KEY_OF_VERSION, "");
+	if (res_ver.empty()) {
+	#ifndef WIN32
+	string cmd="rm -r ";
+	cmd += CCFileUtils::sharedFileUtils()->getWritablePath();
+	cmd += g_szDownloadPath;
+
+	system(cmd.c_str());
+	#endif
+	}
+	*/
+	std::string storage_path;
+	safe_sprintf(storage_path, "%s%s", 
+		CCFileUtils::sharedFileUtils()->getWritablePath().c_str(),
+		g_szDownloadPath); 
+	CCLOG("initBeforeUpdate ------------------ %s", storage_path.c_str());
+	CCFileUtils::sharedFileUtils()->addSearchPathAtFrontOnce(CCFileUtils::sharedFileUtils()->getWritablePath().c_str());
+	CCFileUtils::sharedFileUtils()->addSearchPathAtFrontOnce(storage_path.c_str());
+
+	setupClientConfig();
+
+	f_string_table::get_singleton().Init();
+}
+
+void AppDelegate::doSthWhenUpdateFinished(bool bNeedRestart)
+{
+	//调用平台
+	if (!bNeedRestart)
+	{
+		CCLog("init delegate@@@@@");
+		initDelegate();
+
+		Login::getInstance()->openOnCGVedioEnd1();
+		Login::getInstance()->openOnCGVedioEnd2();
+		Login::getInstance()->openOnCGVedioEnd3();
+		Login::getInstance()->openOnCGVedioEnd4();
+	}
+	else
+	{
+		CCLog("reboot delegate@@@@@");
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+		//copy so if needs
+		std::string soPath = CCFileUtils::sharedFileUtils()->getWritablePath() + g_szDownloadPath;
+		std::string fullPathForFilename = soPath + "/libgame.so";
+
+		CCLog("reboot fullpath filename:%s",fullPathForFilename.c_str());
+		if(CCFileUtils::sharedFileUtils()->isFileExist(fullPathForFilename.c_str()))
+		{
+			CCLog("copy solib file and reboot!!!");
+
+			WzolJni::getInstance()->copy_soFile(fullPathForFilename.c_str());
+
+			WzolJni::getInstance()->restartGameApp();
+
+		}
+#endif
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+		//ios 怎么办哪
+
+#endif
+	}
+
+}
+
+void AppDelegate::addUpdateWaitingPage(CCScene *curScene){
+	CCNode *node = CCNode::create();
+	node->setTag(10);
+
+	CCSprite *bgSprite = CCSprite::create("Art/UI/ccbResources/login_men.jpg");
+	fullScreen(bgSprite);
+	node->addChild(bgSprite);
+
+	CCScale9Sprite *tempSprite = CCScale9Sprite::create("Art/ICON/stallNameIcon.png");
+	node->addChild(tempSprite);
+
+	TTFConfig fc;
+	fc.fontFilePath = FT_FONTFACE;
+	fc.fontSize = 20;
+	fc.outlineSize = 1;
+
+	LabelFT* label = LabelFT::createWithTTF(fc, STRING_TABLE["ver_notice_0"]);
+	label->setTextColor(ccc4(0xff,0xff,0xff, 255));
+	node->addChild(label);
+	label->setTag(1);
+	CCSize labelSize = label->getContentSize();
+	labelSize.width += 20;
+	labelSize.height += 10;
+	tempSprite->setContentSize(labelSize);
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	node->setPosition(ccp(winSize.width / 2, winSize.height / 2));
+	curScene->addChild(node);
+	node->setVisible(false);
+}
+
+void AppDelegate::init_script_support()
+{
+	// register lua engine
+	CCLuaEngine* pEngine = CCLuaEngine::defaultEngine();
+	pEngine->addLuaLoader(client_lua_loader);
+	CCScriptEngineManager::sharedManager()->setScriptEngine(pEngine);
+
+	tolua_Client_open(pEngine->getLuaStack()->getLuaState());
+
+	CCString* content  = CCString::createWithContentsOfFile("Script/main.lua",true);
+	if (content)
+	{
+		pEngine->executeString(content->getCString());
+	}
+}
+
+void AppDelegate::end_game()
+{
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_WINRT) || (CC_TARGET_PLATFORM == CC_PLATFORM_WP8)
+	CCMessageBox("You pressed the close button. Windows Store Apps do not implement a close button.","Alert");
+
+#else
+	//close();
+
+	CCDirector::sharedDirector()->end();
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	exit(0);
+#endif
+#endif
+}
+
+void GoLoginScene::showUPdateSceneOn(float dt)
+{
+	/*
+	CCLOG("--------showUPdateSceneOn()  begin");
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&GoLoginScene::showUPdateSceneOn), this);
+	//清除
+	CCLog("-----showUPdateSceneOn()----------1");
+	CCScene *UpdateScene = CCScene::create();
+	ClientUpdate::getInstance()->_currentScene = ST_UPDATESCENE;
+	UpdateUI::Init(UpdateScene, m_AppDelegate);
+	CCDirector::sharedDirector()->replaceScene(UpdateScene);
+	#ifndef WIN32
+	CCLog("-----------showUPdateSceneOn()----------2");
+	//CCDirector::sharedDirector()->replaceScene(UpdateScene);
+	CCLog("----------showUPdateSceneOn()----------3");
+	#else
+	//CCTransitionFade *crossFade = CCTransitionFade::create(1.2f, loginScene);
+	//CCDirector::sharedDirector()->replaceScene(crossFade);
+	#endif
+	CCLOG("--------showUPdateSceneOn()  end");
+	*/
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+void GoLoginScene::MovieBegin(float dt)
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&GoLoginScene::MovieBegin), this);
+	CCLOG("GoLoginScene::MovieBegin:m_curPlayIndex=%d", m_curPlayIndex);
+	if (m_curPlayIndex==0)
+	{
+		m_clickToEnd = false;
+		m_totalCount = 453;
+	}
+
+	//判断结束
+	if (m_clickToEnd)
+		return;
+	if (m_curPlayIndex>=m_totalCount)
+	{
+		CloseMovie();
+		return;
+	}
+
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&GoLoginScene::MovieBegin), this, 0.033f, false);
+
+	//判断是否加载完当前要播放的帧图片
+	if (m_curLoadIndex <= m_curPlayIndex)
+		return;
+	//if (m_curLoadIndex < m_totalCount)
+	//	return;
+
+	m_curPlayIndex++;
+
+	if (m_curPlayIndex==1)
+	{
+		CCScene *logoScene = CCScene::create();
+		CCDirector *pDirector = CCDirector::sharedDirector();
+		CCSize winSize = pDirector->getWinSize();
+		pDirector->replaceScene(logoScene);
+
+		m_Sprite = CCSprite::create();
+		m_Sprite->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+		logoScene->addChild(m_Sprite);
+
+		//m_clickToEnd = false;
+		//m_totalCount = 453;
+
+		CCControlButton* pCanelButton = CCControlButton::create();
+		pCanelButton->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+		pCanelButton->setPreferredSize(winSize);
+		pCanelButton->addTargetWithActionForControlEvents( this, cccontrol_selector(GoLoginScene::BtnCloseMovie), CCControlEventTouchUpInside );
+		logoScene->addChild(pCanelButton);
+
+		//播放背景乐
+		AudioPlayer::getSigletonPtr()->playerMusic("CGbmusic", false);
+	}
+
+	std::string filepath = CFGReader::instance()->get_profile_string("Art", "Movie", "");
+	std::string finfilepath;
+	char filename[10] = {0};
+	sprintf(filename, "CG%03d.jpg", m_curPlayIndex);
+	finfilepath = filepath + filename;
+	//CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addImage(finfilepath.c_str());
+	//CCSpriteFrame *frame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+	CCSpriteFrame *frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(finfilepath.c_str());
+	m_Sprite->setDisplayFrame(frame);
+
+	if (m_curPlayIndex>3)
+	{
+		sprintf(filename, "CG%03d.jpg", m_curPlayIndex-3);
+		finfilepath = filepath + filename;
+		CCTextureCache::sharedTextureCache()->removeTextureForKey(finfilepath.c_str());
+	}
+
+	return;
+
+	//CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&GoLoginScene::MovieBegin), this);
+
+	////阻塞线程 检查若资源加载完毕则开始播放动画
+	//if(m_bResLoadFinish == false)
+	//{
+	//	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&GoLoginScene::MovieBegin), this, 0.5f, false);
+	//	return;
+	//}
+
+	//CCScene *logoScene = CCScene::create();
+	//CCDirector *pDirector = CCDirector::sharedDirector();
+	//CCSize winSize = pDirector->getWinSize();
+	//pDirector->replaceScene(logoScene);
+
+	//m_pActionNode = GameActionNode::create();
+	//m_pActionNode->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+	//logoScene->addChild(m_pActionNode);
+
+	//std::string filepath = CFGReader::instance()->get_profile_string("Art", "Movie", "");
+	//std::string finfilepath;
+	//char filename[10] = {0};
+	//for(int i = 1; i <= 453; ++i)
+	//{
+	//	sprintf(filename, "CG%03d.jpg", i);
+	//	finfilepath = filepath + filename;
+	//	m_pActionNode->InitTexture(finfilepath.c_str());
+	//}
+
+	//m_totalCount = 453;
+	///*
+	//char filename[50] = {0};
+	//m_pActionNode->SetResLoadState(false);
+	//for(int i = 0; i < 211; i++)
+	//{
+	//	sprintf(filename, "%05d", i);
+	//	m_pActionNode->AddTexture(filename, "Movie", "jpg");
+	//}
+	//*/
+
+	//m_pActionNode->SetResLoadState(true);
+	//m_pActionNode->BeginAction(0.033f, false);
+	////播放背景乐
+	//AudioPlayer::getSigletonPtr()->playerMusic("CGbmusic", false);
+	////mTouch.init(this);
+
+	//
+	//CCControlButton* pCanelButton = CCControlButton::create();
+	//pCanelButton->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+	//pCanelButton->setPreferredSize(winSize);
+	//pCanelButton->addTargetWithActionForControlEvents( this, cccontrol_selector(GoLoginScene::BtnCloseMovie), CCControlEventTouchUpInside );
+	//logoScene->addChild(pCanelButton);
+	//
+
+	///*
+	//CCLayerColor* pLayer = CCLayerColor::create(ccc4(0xff, 0x00, 0x00, 0x80));
+	//pLayer->setContentSize(winSize);
+	//pCanelButton->addChild(pLayer);
+	//*/
+}
+
+void GoLoginScene::CGVideoOn( float dt )
+{
+	//CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&GoLoginScene::CGVideoOn), this);
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&GoLoginScene::CGVideoOn), this);
+	WzolJni::getInstance()->CGVideoBegin();
+	string params;
+	WzolJni::getInstance()->logToServer(LOG_CGSTART, params);
+	return;
+	static int nCount = 0;
+	nCount++;
+
+	if (nCount==1)
+	{
+		CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&GoLoginScene::CGVideoOn), this);
+		CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&GoLoginScene::CGVideoOn), this, 2.9f, false);
+		//Login::getInstance()->openOnCGVedioEnd1();
+	}
+	else if (nCount==2)
+	{
+		CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&GoLoginScene::CGVideoOn), this);
+		CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&GoLoginScene::CGVideoOn), this, 3.0f, false);
+
+		WzolJni::getInstance()->CGVideoBegin();
+		CCDirector *pDirector = CCDirector::sharedDirector();
+		CCScene * scene = pDirector->getRunningScene();
+		if (scene)
+		{
+			scene->removeAllChildren();
+		}
+		//Login::getInstance()->openOnCGVedioEnd2();
+	}
+	else if (nCount==3)
+	{
+		//Login::getInstance()->openOnCGVedioEnd3();
+		//CCScene *UpdateScene = CCScene::create();
+		//UpdateUI::Init(UpdateScene, m_AppDelegate);
+		//CCDirector::sharedDirector()->runWithScene(UpdateScene);
+	}
+
+#else
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&GoLoginScene::CGVideoOn), this);
+	loginSceneOn(0);
+#endif
+}
+void GoLoginScene::loginSceneOn( float dt )
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&GoLoginScene::loginSceneOn), this);
+
+	CCLOG("GoLoginScene::loginSceneOn");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeUnusedSpriteFrames();
+	CCTextureCache::sharedTextureCache()->removeUnusedTextures();
+
+#ifdef _USE_TX_SDK
+	Login::getInstance()->openOnSwitchAccount();
+	return;
+#endif
+
+#ifdef _USE_SDK
+	//[bing] 初始化游老大的SDK
+	//init_Uld_Sdk();
+#endif
+
+	//清除
+	CCLog("-----GoLoginScene::loginSceneOn----------1");
+	Login::getInstance()->open();
+
+	CCScene *loginScene = Login::getInstance()->getScene();
+#ifndef WIN32
+	CCLog("-----------GoLoginScene::loginSceneOn----------2");
+	CCDirector::sharedDirector()->replaceScene(loginScene);
+	CCLog("----------GoLoginScene::loginSceneOn----------3");
+#else
+	CCTransitionFade *crossFade = CCTransitionFade::create(1.2f, loginScene);
+	CCDirector::sharedDirector()->replaceScene(crossFade);
+#endif
+	CCLOG("loginSceneOn() ");
+}
+void GoLoginScene::showHealthNotice(float dt)
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&GoLoginScene::showHealthNotice), this);
+	// CCDirector *pDirector = CCDirector::sharedDirector();
+	//std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	//CCSprite *sprite = CCSprite::create((uiDir + "healthgamenotice.png").c_str());
+	//CCScene *logoScene = CCScene::create();
+	//CCSize winSize = pDirector->getWinSize();
+	//sprite->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+	//logoScene->addChild(sprite);
+	//pDirector->replaceScene(logoScene);
+}
+void GoLoginScene::showsdklogo(float dt)
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&GoLoginScene::showsdklogo), this);
+	CCDirector *pDirector = CCDirector::sharedDirector();
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	CCSprite *sprite = CCSprite::create((uiDir + "Logo_sdk.png").c_str());
+	CCScene *logoScene = CCScene::create();
+	CCSize winSize = pDirector->getWinSize();
+	sprite->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+	logoScene->addChild(sprite);
+	pDirector->replaceScene(logoScene);
+}
+
+void GoLoginScene::CloseMovie()
+{
+	//GetActionNode()->StopAction(false);
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&GoLoginScene::loginSceneOn), this, 0.2f, false);
+}
+
+void GoLoginScene::BtnCloseMovie(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	m_clickToEnd = true;
+	//GetActionNode()->StopAction(false);
+	CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&GoLoginScene::loginSceneOn), this, 0.2f, false);
+}
+
+void GoLoginScene::ImgLoadCallBack( CCObject* pTexture )
+{
+	m_curLoadIndex++;
+	std::string filepath = CFGReader::instance()->get_profile_string("Art", "Movie", "");
+	std::string finfilepath;
+	char filename[10] = {0};
+	sprintf(filename, "CG%03d.jpg", m_curLoadIndex);
+	finfilepath = filepath + filename;
+	CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addImage(finfilepath.c_str());
+	CCSpriteFrame *frame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(frame,finfilepath.c_str());
+
+	//if(m_curLoadIndex == 453)
+	//	m_bResLoadFinish = true;
+}
+
+void GoLoginScene::onInit( AppDelegate* pApp )
+{
+	m_AppDelegate = pApp;
+}
+
+void AppTouchHandle::init(GoLoginScene* pAppDelegate)
+{
+	m_pApp = pAppDelegate;
+
+	//[bing] 因为android会崩溃 原因不明 所以我加一个按钮全屏的来解决这个BUG
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void AppTouchHandle::destroy()
+{
+	//CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool AppTouchHandle::ccTouchBegan( CCTouch *touch, CCEvent *event )
+{
+	m_pApp->CloseMovie();
+	return true;
+}

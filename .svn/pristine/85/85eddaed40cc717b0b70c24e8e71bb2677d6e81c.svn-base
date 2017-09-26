@@ -1,0 +1,220 @@
+#include "ArenaDateUi.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "CFGReader.h"
+#include "UiResourceMgr.h"
+#include "Helper.h"
+//////////////////////////////////////////////////////////////////////////
+
+ArenaDateUi::ArenaDateUi()
+{
+
+}
+
+ArenaDateUi::~ArenaDateUi()
+{
+
+}
+
+CCNode* ArenaDateUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["ArenaDateUiLayer"] = UiLayerLoader<ArenaDateUiLayer>::loader();
+	CCNode* pNode = readUiFromCCBI("arenachallenge", nodeLoaders, _loadSpriteSheet);
+
+	return pNode;
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler ArenaDateUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler ArenaDateUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", ArenaDateUiLayer::onCloseBtnPressed);
+	return NULL;
+}
+
+void ArenaDateUiLayer::onCloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CLOSE_UI(WCT_ARENADATEUI);
+	OPEN_UI(WCT_ARENAMAINUI);
+}
+
+void ArenaDateUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_contentLayer = dynamic_cast<CCLayer*>(getChildByTag(0)->getChildByTag(0));
+	_scrollView = CCScrollView::create(_contentLayer->getContentSize());
+	_contentLayer->addChild(_scrollView);
+
+	_container = CCNode::create();
+	//_container->retain();
+	_container->setContentSize(CCSize(_contentLayer->getContentSize().width,_contentLayer->getContentSize().height));
+
+	int tmpPostion = _contentLayer->getContentSize().height / 6 + 10;
+
+	_scrollView->setContainer(_container);
+	_scrollView->setTouchEnabled(true);
+	_scrollView->setBounceable(true);
+	_scrollView->setContentSize(_container->getContentSize());
+	_scrollView->setDirection(kCCScrollViewDirectionVertical);
+	_scrollView->setContentOffset(_scrollView->minContainerOffset());
+
+	int tempIndex = 0;
+
+	for (int i = 0;i < MAX_JJC_RECORD_COUNT;i++)
+	{
+		//int temp = ArenaMainMgr::getInstance()->getLocalPlayerAttr().fightRecord[i].nRank;
+		//int tmp  = temp;
+		if (ArenaMainMgr::getInstance()->getLocalPlayerAttr().fightRecord[i].nRank <= 0)
+		{
+
+		}else{
+			ArenaDateUiItem* temp = new ArenaDateUiItem;
+			_container->addChild(temp->getUiFrame());
+			temp->getUiFrame()->setPositionY(tmpPostion * (5 - tempIndex) - 30);
+			temp->getUiFrame()->setPositionX(_contentLayer->getContentSize().width / 2);
+			temp->getUiFrame()->setData(ArenaMainMgr::getInstance()->getLocalPlayerAttr().fightRecord[i]);
+			tempIndex++;
+		}
+	}
+}
+
+bool ArenaDateUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (!isVisible() || !isRunning() || !hasVisibleParents())
+	{
+		return false;
+	}
+	return true;
+}
+
+void ArenaDateUiLayer::onEnter() 
+{
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+}
+
+void ArenaDateUiLayer::onExit()
+{
+	CCLayer::onExit();
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+}
+//////////////////////////////////////////////////////////////////////////////////////////////////
+ArenaDateUiItem::ArenaDateUiItem()
+	: _uiFrame(NULL)
+{
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("ArenaDateUiItemFrame", ArenaDateUiItemLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	_uiFrame = dynamic_cast<ArenaDateUiItemFrame*>(ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "arenachallengeitem.ccbi").c_str()));
+	_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+	//UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+	ccbReader->release();
+
+	if(_uiFrame != NULL)
+	{
+		_uiFrame->retain();
+		//_uiFrame->_item = this;
+		//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(_uiFrame, 2, true);
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+cocos2d::SEL_MenuHandler ArenaDateUiItemFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler ArenaDateUiItemFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+void ArenaDateUiItemFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	//setAllChildernButtonPriority(this,2);
+	DateMsg = (CCLabelTTF*)getChildByTag(2);
+	icon = dynamic_cast<CCSprite*>(getChildByTag(1));
+}
+
+void ArenaDateUiItemFrame::setData(tagJJCRecord attr)
+{
+	DateMsg->setString(setMsgFormat(attr).c_str());
+}
+
+std::string ArenaDateUiItemFrame::setMsgFormat(tagJJCRecord attr)
+{//先看挑战方，看胜负，看觉醒
+	std::string tempMsg = "";
+	if (attr.bIsAttack)//true = 挑战, false = 被挑战
+	{
+		if (attr.bWinLose)
+		{
+			if (attr.byPowerCount == 0)
+			{
+				tempMsg = CCString::createWithFormat("%s%s%s%d%s","\xE6\x82\xA8\xE5\x90\x91",Helper::convert_wstr_to_string<128>(attr.szRoleName).c_str(),
+					"\xE5\x8F\x91\xE8\xB5\xB7\xE6\x8C\x91\xE6\x88\x98\x2C\xE8\x8E\xB7\xE8\x83\x9C\x2C\xE6\x8E\x92\xE5\x90\x8D\xE5\x8D\x87\xE4\xB8\xBA\xE7\xAC\xAC"
+					,attr.nRank,"\xE5\x90\x8D")->getCString();
+			}else{
+				tempMsg = CCString::createWithFormat("%s%d%s%s%s%d%s","\xE6\x82\xA8\xE4\xBD\xBF\xE7\x94\xA8\xE4\xBA\x86\xE8\xA7\x89\xE9\x86\x92",ArenaMainMgr::getInstance()->getLocalPlayerAttr().nPowerCount,
+					"\xE6\xAC\xA1\x2C\xE5\x90\x91",Helper::convert_wstr_to_string<128>(attr.szRoleName).c_str()
+					,"\xE5\x8F\x91\xE8\xB5\xB7\xE6\x8C\x91\xE6\x88\x98\x2C\xE8\x8E\xB7\xE8\x83\x9C\x2C\xE6\x8E\x92\xE5\x90\x8D\xE5\x8D\x87\xE4\xB8\xBA\xE7\xAC\xAC"
+					,attr.nRank,"\xE5\x90\x8D")->getCString();
+			}
+		}else{
+			if (attr.byPowerCount == 0)
+			{
+				tempMsg = CCString::createWithFormat("%s%s%s","\xE6\x82\xA8\xE5\x90\x91",Helper::convert_wstr_to_string<128>(attr.szRoleName).c_str()
+					,"\xE5\x8F\x91\xE8\xB5\xB7\xE6\x8C\x91\xE6\x88\x98\x2C\xE6\x88\x98\xE8\xB4\xA5\x2C\xE6\x8E\x92\xE5\x90\x8D\xE4\xB8\x8D\xE5\x8F\x98")->getCString();
+			}else{
+				tempMsg = CCString::createWithFormat("%s%d%s%s%s","\xE6\x82\xA8\xE4\xBD\xBF\xE7\x94\xA8\xE4\xBA\x86\xE8\xA7\x89\xE9\x86\x92",ArenaMainMgr::getInstance()->getLocalPlayerAttr().nPowerCount,
+					"\xE6\xAC\xA1\x2C\xE5\x90\x91",Helper::convert_wstr_to_string<128>(attr.szRoleName).c_str()
+					,"\xE5\x8F\x91\xE8\xB5\xB7\xE6\x8C\x91\xE6\x88\x98\x2C\xE6\x88\x98\xE8\xB4\xA5\x2C\xE6\x8E\x92\xE5\x90\x8D\xE4\xB8\x8D\xE5\x8F\x98")->getCString();
+			}
+		}
+	} 
+	else
+	{
+		if (attr.bWinLose)
+		{
+			if (attr.byPowerCount == 0)
+			{
+				tempMsg = CCString::createWithFormat("%s%s",Helper::convert_wstr_to_string<128>(attr.szRoleName).c_str()
+					,"\xE5\x90\x91\xE6\x82\xA8\xE5\x8F\x91\xE8\xB5\xB7\xE6\x8C\x91\xE6\x88\x98\x2C\xE6\x82\xA8\xE5\x8F\x96\xE5\xBE\x97\xE8\x83\x9C\xE5\x88\xA9\x2C\xE6\x8E\x92\xE5\x90\x8D\xE4\xB8\x8D\xE5\x8F\x98")->getCString();
+			}else{
+				tempMsg = CCString::createWithFormat("%s%s%d%s",Helper::convert_wstr_to_string<128>(attr.szRoleName).c_str(),"\xE8\xA7\x89\xE9\x86\x92\xE4\xBA\x86",attr.byPowerCount
+					,"\xE6\xAC\xA1\xE5\x90\x91\xE6\x82\xA8\xE5\x8F\x91\xE8\xB5\xB7\xE6\x8C\x91\xE6\x88\x98\x2C\xE6\x82\xA8\xE5\x8F\x96\xE5\xBE\x97\xE8\x83\x9C\xE5\x88\xA9\x2C\xE6\x8E\x92\xE5\x90\x8D\xE4\xB8\x8D\xE5\x8F\x98")->getCString();
+			}
+		}else{
+			if (attr.byPowerCount == 0)
+			{
+				tempMsg = CCString::createWithFormat("%s%s%d%s",Helper::convert_wstr_to_string<128>(attr.szRoleName).c_str()
+					,"\xE5\x90\x91\xE6\x82\xA8\xE5\x8F\x91\xE8\xB5\xB7\xE6\x8C\x91\xE6\x88\x98\x2C\xE6\x82\xA8\xE8\xA2\xAB\xE5\x87\xBB\xE8\xB4\xA5\xE4\xBA\x86\x2C\xE6\x8E\x92\xE5\x90\x8D\xE9\x99\x8D\xE4\xB8\xBA"
+					,attr.nRank,"\xE5\x90\x8D")->getCString();
+			}else{
+				tempMsg = CCString::createWithFormat("%s%s%d%s%d%s",Helper::convert_wstr_to_string<128>(attr.szRoleName).c_str(),"\xE8\xA7\x89\xE9\x86\x92\xE4\xBA\x86",attr.byPowerCount
+					,"\xE6\xAC\xA1\xE5\x90\x91\xE6\x82\xA8\xE5\x8F\x91\xE8\xB5\xB7\xE6\x8C\x91\xE6\x88\x98\x2C\xE6\x82\xA8\xE8\xA2\xAB\xE5\x87\xBB\xE8\xB4\xA5\xE4\xBA\x86\x2C\xE6\x8E\x92\xE5\x90\x8D\xE9\x99\x8D\xE4\xB8\xBA"
+					,attr.nRank,"\xE5\x90\x8D")->getCString();
+			}
+		}
+	}
+	return tempMsg;
+}
+
+// std::string ArenaDateUiItemFrame::Helper::convert_wstr_to_string<128>( wchar_t* roleName )
+// {
+// 	char vStr[128];
+// 	memset(vStr, 0, sizeof(char) * 128);
+// 	Utf16ToUtf8(roleName, vStr, 128, 0);
+// 	return vStr;
+// }
+
+/*
+void ArenaDateUiItemFrame::setData(ArenaRankAttr* attr)
+{
+
+}*/

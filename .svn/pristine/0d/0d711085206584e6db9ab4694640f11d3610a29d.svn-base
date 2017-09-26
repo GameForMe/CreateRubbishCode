@@ -1,0 +1,157 @@
+#ifndef SPARSEGRAPH_H_INCLUDE
+#define SPARSEGRAPH_H_INCLUDE
+#include "Requisites.h"
+#include <vector>
+#include <list>
+#include <math.h>
+#include "cocos2d.h"
+#include "SafeList.h"
+
+#define MULTI_THREAD_FIND_PATH
+
+struct pathNode
+{
+	float _x;
+	float _y;
+	pathNode()
+	{
+		_x = 0.f;
+		_y = 0.f;
+	}
+	pathNode(float x_ , float y_)
+	{
+		_x = x_;
+		_y = y_;
+	}
+
+	explicit pathNode(cocos2d::CCPoint const& pt)
+		:_x(pt.x)
+		,_y(pt.y)
+	{
+	}
+
+	float x() const {return _x;}
+	float y() const {return _y;}
+	float& x() {return _x;}
+	float& y() {return _y;}
+};
+enum e_brush_type
+{
+	BT_NORMAL = 0,
+	BT_OBSTACLE = 1,
+	BT_WATER = 2,
+	BT_MUD = 3
+};
+
+class c_thread;
+class c_astar_search;
+
+inline float pt_distance( const pathNode& p1 , const pathNode& p2, int f)
+{
+	//return sqrt((p1.x() - p2.x())*(p1.x() - p2.x()) + (p1.y() - p2.y())*(p1.y() - p2.y()));
+	using namespace cocos2d;
+	CCPoint a = ccp(p1.x(), p1.y());
+	a.normalize();
+	CCPoint b = ccp(p2.x(), p2.y());
+	b.normalize();
+	float ang = ccpToAngle(ccpSub(b,a));
+	ang = fabs(ang);
+	float ret =  a.getDistance(b);
+	if (fabs(ang - 1.57079633f) < FLT_EPSILON )
+	{
+		return ret;
+	}
+	else if (fabs(ang - 3.14159265359f) < FLT_EPSILON)
+	{
+		return ret;
+	}
+	else if (fabs(ang - 0.f) < FLT_EPSILON)
+	{
+		return ret;
+	}
+	return ret + f;
+}
+
+class c_sparse_graph
+{
+	friend class c_astar_search;
+public:
+	struct s_nav_node
+	{
+		pathNode pos;
+		unsigned int index;
+	};
+	struct s_nav_edge
+	{
+		unsigned int start;
+		unsigned int end;
+		float cost;
+
+		//fan
+		bool valid;
+		s_nav_edge()
+		{
+			valid = true;
+		}
+	};
+private:
+	std::vector<std::list<s_nav_edge> > m_edges;
+	std::vector<s_nav_node> m_nodes;
+	c_astar_search* m_astar;
+	unsigned int m_next_node_index;
+	unsigned int m_num_cellx;
+	unsigned int m_num_celly;
+	float m_cellw;
+	float m_cellh;
+	unsigned int m_start;
+	unsigned int m_end;
+
+	c_thread * m_find_thread;
+	c_safe_list<std::pair<unsigned int, unsigned int>>	m_qRequests;
+	c_safe_list<std::vector<pathNode>>			m_qResults;
+public:
+	c_sparse_graph(unsigned int width_,unsigned int height_, unsigned int numcellx_, unsigned int numcelly_);
+	~c_sparse_graph();
+
+	unsigned int getNumCelly() {return m_num_celly; }
+	unsigned int getNumCellx() {return m_num_cellx; }
+	void init1();
+	void init2();
+	void init3();
+	void init2(int row);
+	void brush(unsigned int x_ , unsigned int y_, e_brush_type bt_);
+	void brushWithNodeInfo(unsigned idx, e_brush_type bt);
+	bool go(const pathNode& st_, const pathNode& et_,std::vector<pathNode>& out);
+	void go_Multi_Thread(const pathNode& st_, const pathNode& et_);
+	unsigned int num_nodes() const;
+	unsigned int num_edges() const;
+	const c_sparse_graph::s_nav_node& get_node(unsigned int idx_) const;
+	c_sparse_graph::s_nav_node& get_node(unsigned int idx_);
+	const c_sparse_graph::s_nav_edge& get_edge(unsigned int from_, unsigned int to_) const;
+	c_sparse_graph::s_nav_edge& get_edge(unsigned int s_, unsigned int e_);
+	unsigned int add_node(const s_nav_node& node_);
+	void remove_node(unsigned int node_);
+	void valid_node_and_edges(unsigned int node_); //fan
+	void add_edge(const s_nav_edge& edge_);
+	void remove_edge(unsigned int s_, unsigned int e_);
+
+	bool isBlockByAStar(const cocos2d::CCPoint& pos);
+
+	// 多线程寻路时使用
+	std::vector<pathNode> getResult();
+	bool haveResult();
+private:
+	bool _is_node_present(unsigned int nd_) const;
+	bool _is_edge_present(unsigned int s_, unsigned int e_) const;
+	bool _unique_edge(unsigned int s_, unsigned int e_)const;
+	void _add_neighbours(unsigned int row_, unsigned int col_, unsigned int numcellx_, unsigned int numcelly_);
+	void _weight_edges(unsigned int nd_, float weight_);
+	void _set_edge_cost(unsigned int s_, unsigned int e_, float cost_);
+	unsigned int _find_nearest_pos(const pathNode& st_, const pathNode& et_) const;
+	void _smooth_path(std::list<unsigned int>& path_);
+	bool _can_walk_between(unsigned int p1_, unsigned int p2_);
+
+	THREAD_FUNC _find_thread_func(void* thread_);
+
+};
+#endif

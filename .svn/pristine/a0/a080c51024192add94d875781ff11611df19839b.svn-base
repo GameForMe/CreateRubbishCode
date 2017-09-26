@@ -1,0 +1,864 @@
+#include "NewRoleTitleUi.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "Attres.h"
+#include "f_string_table.h"
+#include "f_string_util.h"
+#include "UiManager.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "TouchSprite.h"
+#include "NormalLayer.h"
+#include "CommonClient.h"
+#include "RoleEquipUi.h"
+#include "RoleAttrUi.h"
+#include "RoleInfoUi.h"
+#include "ClientCfg.h"
+#include "TCPClient.h"
+#include "StringMgr.h"
+CCNode* NewRoleTitleUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["NewRoleTitleUiLayer"] = UiLayerLoader<NewRoleTitleUiLayer>::loader();
+	nodeLoaders["TouchSprite"] = TouchSpriteLoader::loader();
+	nodeLoaders["ListControl"] = ListControlLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("roletitleui", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+void NewRoleTitleUi::initTitleDataInfo()
+{
+	LocalPlayer* t_player = RoleManager::getInstance()->getLocalPlayer();
+	EClassType t_eClassType = (EClassType)t_player->getAttribute(RA_ROLETYPE);//获得属性 通过表中 判断是否该显示
+	int t_ItemIndex = 0;
+	const std::map<unsigned int, tagTitleProto>& t_mapTitles = Attres::getInstance()->getAllTitles();
+	std::map<unsigned int, tagTitleProto>::const_iterator iter = t_mapTitles.begin();
+	while(iter != t_mapTitles.end())
+	{
+		bool isShow = (iter->second.classType != 0 && iter->second.classType == t_player->getAttribute(RA_ROLETYPE)) || iter->second.classType == 4;
+		bool t_isExist = t_player->isExist((iter->first));
+		if (isShow || t_isExist)
+		{
+			if (t_isExist)
+			{
+				m_listFixedTitle.push_back(iter->first);
+				m_listTitle.push_back(iter->first);
+			}
+			else
+			{
+				m_listNotTitle.push_back(iter->first);
+			}
+		}
+		iter++;
+	}
+	m_listWearTitle.clear();
+	for (int i = 0; i < NUM_TITLE_WEAR_MAX ; i++)
+	{
+// 		if (t_player->m_showTitle[i] == true)
+// 		{
+			unsigned int titleId = t_player->getCurTitle(i);
+			for (list<unsigned int>::iterator iter = m_listTitle.begin(); iter != m_listTitle.end();iter++)
+			{
+				if (*iter == titleId)
+				{
+					m_listTitle.erase(iter);
+					m_listTitle.push_front(titleId);
+					break;
+				}
+			}
+			m_listWearTitle.push_back(titleId);
+/*		}*/
+	}
+}
+
+void NewRoleTitleUi::refreshTitleList()
+{
+	clearData();
+	initTitleDataInfo();
+	refersh_title_ui_list evt;
+	SEND_EVENT(&evt);
+}
+
+void NewRoleTitleUi::clearData()
+{
+	m_listWearTitle.clear();
+	m_listFixedTitle.clear();
+	m_listTitle.clear();
+	m_listNotTitle.clear();
+}
+/********************************************************************/
+NewRoleTitleUiLayer::NewRoleTitleUiLayer()
+	:m_pFtWearNum(NULL)
+	,m_list(NULL)
+	,m_pMainframe(NULL)
+	,m_pNodeDes(NULL)
+	,m_pNodeDescIcon(NULL)
+	,m_pNodeDescBoard(NULL)
+	,m_pSprite9DesNode(NULL)
+	,m_pUI(NULL)
+{
+}
+
+NewRoleTitleUiLayer::~NewRoleTitleUiLayer()
+{
+
+}
+
+SEL_MenuHandler NewRoleTitleUiLayer::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+SEL_CCControlHandler NewRoleTitleUiLayer::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onClose", NewRoleTitleUiLayer::onClose);
+	return NULL;
+}
+bool NewRoleTitleUiLayer::onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode)
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(ListControl*,	m_list);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCScale9Sprite*,m_pSprite9DesNode);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,		m_pNodeDes);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,		m_pNodeDescIcon);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,		m_pNodeDescBoard);
+	return true;
+}
+
+void NewRoleTitleUiLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	m_pUI = GET_UI(NewRoleTitleUi, WCT_RoleTitleUi);
+	
+	m_pMainframe = dynamic_cast<CCSprite*>(getChildByTag(NT_MainFrame));
+	Helper::getLabelFTByParentAndTag(m_pMainframe, NT_Title_Wear_Des);
+	m_pFtWearNum = Helper::getLabelFTByParentAndTag(m_pMainframe, NT_Title_Wear_Num);
+
+	TouchSprite *equipTab = dynamic_cast<TouchSprite*>(m_pMainframe->getChildByTag(NT_EquipTab));
+	CC_ASSERT(equipTab != NULL);
+	equipTab->signalTouched.connect(this, &NewRoleTitleUiLayer::onOtherUiSelected);
+
+	TouchSprite *attrTab = dynamic_cast<TouchSprite*>(m_pMainframe->getChildByTag(NT_AttrTab));
+	CC_ASSERT(attrTab != NULL);
+	attrTab->signalTouched.connect(this, &NewRoleTitleUiLayer::onOtherUiSelected);
+
+	TouchSprite *infoTab = dynamic_cast<TouchSprite*>(m_pMainframe->getChildByTag(NT_MsgTab));
+	CC_ASSERT(infoTab != NULL);
+	infoTab->signalTouched.connect(this, &NewRoleTitleUiLayer::onOtherUiSelected);
+	
+	m_pNodeDes->setVisible(false);
+	m_list->setDirection(kCCScrollViewDirectionVertical);
+	m_pUI->refreshTitleList();
+	initNode();
+	
+}
+
+void NewRoleTitleUiLayer::onEnter()
+{
+	NormalLayer::onEnter();
+	REGISTER_EVENT(refersh_title_ui_list,NewRoleTitleUiLayer,on_event_refresh_list);
+	REGISTER_EVENT(refersh_title_des_ui,NewRoleTitleUiLayer,on_event_refresh_desc);
+}
+void NewRoleTitleUiLayer::onExit()
+{
+	UNREGISTER_EVENT(refersh_title_ui_list,NewRoleTitleUiLayer,on_event_refresh_list);
+	UNREGISTER_EVENT(refersh_title_des_ui,NewRoleTitleUiLayer,on_event_refresh_desc);
+	NormalLayer::onExit();
+	
+}
+	
+bool NewRoleTitleUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if(isTouchOnNodeContent(m_pMainframe, pTouch) || isTouchOnNodeContent(m_pSprite9DesNode,pTouch))
+	{
+		if (!isTouchOnNodeContent(m_pSprite9DesNode,pTouch))
+		{
+			m_pNodeDes->setVisible(false);
+		}
+		return true;
+	}
+	return false;
+}
+
+void NewRoleTitleUiLayer::onClose(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	CLOSE_UI(WCT_RoleTitleUi);
+}
+
+void NewRoleTitleUiLayer::initNode()
+{
+	LocalPlayer* t_player = RoleManager::getInstance()->getLocalPlayer();
+	int  t_tempIndex = 0;
+	NewRoleTitleItem* t_item = NULL;
+	const std::list<unsigned int>& t_listHave = m_pUI->getHaveList();
+	list<unsigned int>::const_iterator t_listIter = t_listHave.begin();
+
+	for (int i = 0; i < MAX_REFRESH_TITLE_NUM;i++)
+	{
+		unsigned int t_id = t_player->getWearTitleIdByIndex(i);
+		if (t_id != (unsigned int)-1)
+		{
+			t_item = NewRoleTitleItem::CreateItem();
+			bool t_isWear = t_player->getWearTitleShowState(t_id);//刷新显示
+			t_item->refershItemByTitleID(t_id);//刷新数据
+			t_item->refershShowTitleSteate(t_isWear);//设置穿戴
+			t_item->setTag(t_tempIndex);
+			m_mapItemList[t_id] = t_item;
+			m_list->add_item(t_item);
+			t_tempIndex++;
+		}
+	}
+
+	for(; t_listIter != t_listHave.end();t_listIter++)
+	{
+		if (t_player->isSetTitle(*t_listIter)) continue;
+		bool t_isWear = t_player->getWearTitleShowState(*t_listIter); /*RoleManager::getInstance()->getLocalPlayer()->isSetTitle((*t_listIter));*/
+		t_item = NewRoleTitleItem::CreateItem();
+		t_item->refershItemByTitleID(*t_listIter);//刷新数据
+		t_item->refershShowTitleSteate(t_isWear);//设置是否显示
+		t_item->setTag(t_tempIndex);
+		m_mapItemList[*t_listIter] = t_item;
+		m_list->add_item(t_item);
+		t_tempIndex++;
+	}
+
+	const std::list<unsigned int>& t_listNot = m_pUI->getNotHaveList();
+	for(t_listIter = t_listNot.begin(); t_listIter != t_listNot.end();t_listIter++)
+	{
+		t_item = NewRoleTitleItem::CreateItem();
+		t_item->refershItemByTitleID(*t_listIter);//刷新数据
+		t_item->refershShowTitleSteate(false);//设置穿戴
+		t_item->setTag(t_tempIndex);
+		m_mapItemList[*t_listIter] = t_item;
+		m_list->add_item(t_item);
+		t_tempIndex++;
+	}
+	//Todo  稍后添加
+	string t_str;
+	safe_sprintf(t_str,"%d/%d",t_player->getWearTitleNum(),NUM_TITLE_WEAR_MAX);
+	m_pFtWearNum->setString(t_str.c_str());
+	m_list->scroll_to_top();
+}
+
+void NewRoleTitleUiLayer::on_event_refresh_list( refersh_title_ui_list* evt )
+{
+	refershNode();
+}
+
+void NewRoleTitleUiLayer::on_event_refresh_desc(refersh_title_des_ui* evt)
+{
+	m_pNodeDes->setVisible(true);
+	m_pNodeDescIcon->removeAllChildrenWithCleanup(true);
+	m_pNodeDescBoard->removeAllChildrenWithCleanup(true);
+
+	int t_Id = evt->selectId;	
+	const std::map<unsigned int, tagTitleProto>& t_mapTitles = Attres::getInstance()->getAllTitles();
+	std::map<unsigned int, tagTitleProto>::const_iterator iter = t_mapTitles.find(t_Id);
+	if (iter != t_mapTitles.end())
+	{
+		LocalPlayer* t_localPlayer = RoleManager::getInstance()->getLocalPlayer();
+		const tagTitleProto t_title = iter->second;
+
+		CCSprite* t_titleIcon = CCSprite::create();
+		t_titleIcon->setContentSize(m_pNodeDescIcon->getContentSize());
+		
+		if (t_title.b_eft)
+		{
+			AnimationCache::AnimateList anims;
+			AnimationCache::createDefList(1,anims);
+			AnimationCache::getInstance()->getSinEffect(0,t_title.colorStr,anims);
+			BSAnimate* animste = anims[0];
+			t_titleIcon->runAction(CCRepeatForever::create(animste));
+		}
+		else
+		{
+			CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(t_title.colorStr.c_str());
+			CC_ASSERT(spriteFrame != NULL);
+			t_titleIcon->setDisplayFrame(spriteFrame);
+		}
+		t_titleIcon->setPosition(m_pNodeDescIcon->getContentSize() / 2);
+		m_pNodeDescIcon->addChild(t_titleIcon);
+		float t_height = 0.0f;
+		// 称号属性 Des
+
+		TTFConfig fc;
+		fc.fontFilePath = FT_FONTFACE;
+		fc.fontSize = 16;
+		fc.outlineSize = 1;
+		float t_boardWidth = m_pNodeDescBoard->getContentSize().width;
+		CCNode *t_attNode = CCNode::create();
+		LabelFT* t_ftAtt = LabelFT::createWithTTF(fc,"");
+		t_ftAtt->setString(STRING_TABLE["title_ui_att"]);
+		t_ftAtt->setAnchorPoint(ccp(0,1));
+		t_ftAtt->setColor(ccGREEN);
+
+		LabelFT* t_ftAttDes = LabelFT::createWithTTF(fc,"");
+		std::string tmpstr = t_title.stDesc2;
+		tmpstr = replaceStr(tmpstr,"*"," ");
+		replace(tmpstr.begin(), tmpstr.end(),'\\', '\n');
+		t_ftAttDes->setString(tmpstr);
+		t_ftAttDes->setAnchorPoint(ccp(0,1));
+		t_ftAttDes->setMaxLineWidth(t_boardWidth);
+
+		CCSize t_attSize =CCSizeMake(t_boardWidth, t_ftAtt->getContentSize().height + t_ftAttDes->getContentSize().height);
+		t_attNode->setContentSize(t_attSize);
+		t_ftAtt->setPosition(ccp(0,t_attSize.height));
+		t_attNode->addChild(t_ftAtt);
+		
+		t_ftAttDes->setPosition(ccp(0,t_attSize.height - t_ftAtt->getContentSize().height));
+		t_attNode->addChild(t_ftAttDes);
+		t_attNode->setAnchorPoint(ccp(0,1));
+		m_pNodeDescBoard->addChild(t_attNode);
+		t_height += t_attSize.height;
+
+		bool t_isShow = true;
+		string t_str;
+		if (t_title.nTimeLimit == 0)
+		{
+			t_str = STRING_TABLE["title_ui_limit_forever"];
+		}
+		else if (!RoleManager::getInstance()->getLocalPlayer()->isExist(t_title.dwID))
+		{
+			int t_day = t_title.nTimeLimit / 24 / 60 / 60 ;
+			unsigned int t_hour = t_title.nTimeLimit / 60 / 60 ;
+			if (t_day > 0)
+				safe_sprintf(t_str,STRING_TABLE["title_ui_limit_day"],t_day);
+			else
+			{
+				if (t_hour >= 1)
+				{
+					safe_sprintf(t_str,"%d",t_hour);
+					t_str = t_str + STRING_TABLE["9355"];
+				}
+				else
+					STRING_TABLE["title_ui_limit_one_hour"];
+			}	
+		}
+		else
+		{
+			//开始时间
+			DWORD t_CurrentTime = ServerTime::getInstance()->cal_current_server_dword_time();
+			/*tagDWORDTime tagTime = (tagDWORDTime)t_CurrentTime;*/
+			unsigned int t_time = t_localPlayer->getTitleGetTimeByID(t_title.dwID);
+			/*tagDWORDTime tagTime2 = (tagDWORDTime)t_time;*/
+			int t_limitTime = t_title.nTimeLimit;
+			float t_day = ( t_limitTime - (float)CalcTimeDiff(t_CurrentTime,t_time)) / 24 / 60 / 60 ;
+			if (t_day >= 1 )
+			{
+				safe_sprintf(t_str,STRING_TABLE["title_ui_limit_day"],(int)t_day);
+			}
+			else if (t_day < 1 && t_day >= 0)
+			{
+				unsigned int t_hour = (t_title.nTimeLimit - CalcTimeDiff(t_CurrentTime,t_time)) / 60 / 60 ;
+				if (t_hour < 1)
+				{
+					t_str = STRING_TABLE["title_ui_limit_one_hour"];
+					
+				}
+				else{
+					safe_sprintf(t_str,"%d",t_hour);
+					t_str = t_str + STRING_TABLE["9355"];
+				}
+
+			}
+			else
+			{
+				t_day = t_title.nTimeLimit / 24 / 60 / 60 ;
+				safe_sprintf(t_str,STRING_TABLE["title_ui_limit_day"],(int)t_day);
+			}
+		}
+		CCNode *t_limitNode = NULL;
+		CCSize t_limitSize = CCSizeZero;
+
+		// 称号时限 Des
+		t_limitNode = CCNode::create();
+		LabelFT* t_ftLimit = LabelFT::createWithTTF(fc,"");
+		t_ftLimit->setString(STRING_TABLE["title_ui_limit"]);
+		t_ftLimit->setAnchorPoint(ccp(0,1));
+		t_ftLimit->setColor(ccGREEN);
+
+		LabelFT* t_ftLimitDes = LabelFT::createWithTTF(fc,"");
+		t_ftLimitDes->setString(t_str);
+		t_ftLimitDes->setAnchorPoint(ccp(0,1));
+		t_ftLimitDes->setMaxLineWidth(t_boardWidth);
+		t_limitSize =CCSizeMake(m_pNodeDescBoard->getContentSize().width, t_ftLimit->getContentSize().height + t_ftLimitDes->getContentSize().height);
+		t_limitNode->setContentSize(t_limitSize);
+		t_ftLimit->setPosition(ccp(0,t_limitSize.height));
+		t_limitNode->addChild(t_ftLimit);
+		t_ftLimitDes->setPosition(ccp(0,t_limitSize.height - t_ftAtt->getContentSize().height));
+		t_limitNode->addChild(t_ftLimitDes);
+		t_limitNode->setAnchorPoint(ccp(0,1));
+		m_pNodeDescBoard->addChild(t_limitNode);
+		t_height += t_limitSize.height;
+
+		CCNode *t_getNode = NULL;
+		//获取方式
+		if (t_title.stGetMode != "0")
+		{
+			CCSize t_getSize = CCSizeZero;
+			t_getNode = CCNode::create();
+			LabelFT* t_ftGet = LabelFT::createWithTTF(fc,"");
+			t_ftGet->setString(STRING_TABLE["title_ui_get"]);
+			t_ftGet->setAnchorPoint(ccp(0,1));
+			t_ftGet->setColor(ccGREEN);
+
+			LabelFT* t_ftGetDes = LabelFT::createWithTTF(fc,"");
+			t_ftGetDes->setString(t_title.stGetMode);
+			t_ftGetDes->setAnchorPoint(ccp(0,1));
+			t_ftGetDes->setMaxLineWidth(t_boardWidth);
+
+			t_getSize =CCSizeMake(m_pNodeDescBoard->getContentSize().width, t_ftGet->getContentSize().height + t_ftGetDes->getContentSize().height);
+			t_getNode->setContentSize(t_getSize);
+			t_ftGet->setPosition(ccp(0,t_getSize.height));
+			t_getNode->addChild(t_ftGet);
+			t_ftGetDes->setPosition(ccp(0,t_getSize.height - t_ftGet->getContentSize().height));
+			t_getNode->addChild(t_ftGetDes);
+			t_height += t_getSize.height;
+			t_getNode->setAnchorPoint(ccp(0,1));
+			m_pNodeDescBoard->addChild(t_getNode);
+		}
+		
+
+		m_pNodeDescBoard->setContentSize(CCSizeMake(m_pNodeDescBoard->getContentSize().width,t_height));
+
+		CCSize t_size = CCSizeMake(m_pNodeDescBoard->getContentSize().width + 20,t_height + m_pNodeDescIcon->getContentSize().height + 30);
+		m_pSprite9DesNode->setContentSize(t_size);
+		m_pNodeDes->setContentSize(t_size);
+
+		t_attNode->setPosition(ccp(0,t_height));
+		t_height -= t_attSize.height;
+		if (t_limitNode != NULL)
+		{
+			t_limitNode->setPosition(ccp(0,t_height));
+			t_height -= t_limitSize.height;
+		}
+		if (t_getNode != NULL)
+		{
+			t_getNode->setPosition(ccp(0,t_height));
+		}
+
+		NewTitleItemMap::iterator t_ItemIter =  m_mapItemList.find(t_Id);
+		if (t_ItemIter != m_mapItemList.end())
+		{
+			CCNode* pItem = t_ItemIter->second;
+			float t_itemHeight =  pItem->getContentSize().height;
+			float t_bottomPosY = pItem->convertToWorldSpace(CCPointZero).y;
+			float t_topPosY = t_bottomPosY + t_itemHeight;
+			float t_midPosY = t_bottomPosY + t_itemHeight / 2;
+
+			CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+			float t_posY = t_topPosY - t_size.height < 0 ? t_size.height + t_bottomPosY : t_topPosY;
+
+			if (t_topPosY - t_size.height < 0 && t_size.height + t_bottomPosY > winSize.height)
+			{
+				t_posY = t_midPosY + t_size.height / 2;
+			}
+
+			m_pNodeDes->setPositionY(t_posY);
+		}
+	}
+}
+
+
+void NewRoleTitleUiLayer::refershNode()
+{
+	LocalPlayer* t_player = RoleManager::getInstance()->getLocalPlayer();
+	const std::list<unsigned int>& t_listHave = m_pUI->getHaveList();
+	list<unsigned int>::const_iterator t_listIter = t_listHave.begin();
+	int t_nTitleID = 0;
+	int t_nIndex = 0;
+	NewRoleTitleItem *t_item = NULL;
+
+	for (int i = 0; i < MAX_REFRESH_TITLE_NUM;i++)
+	{
+		unsigned int t_id = t_player->getWearTitleIdByIndex(i);
+		if (t_id != (unsigned int)-1)
+		{
+			NewTitleItemMap::iterator itemIter = m_mapItemList.find(t_id);
+			if (itemIter == m_mapItemList.end()) continue;
+			t_item = itemIter->second;
+			bool t_isWear = t_player->getWearTitleShowState(t_id);//刷新显示
+			t_item->refershItemByTitleID(t_id);//刷新数据
+			t_item->refershShowTitleSteate(t_isWear);//设置穿戴
+			t_item->setTag(t_nIndex);
+			t_nIndex++;
+		}
+	}
+
+	for(; t_listIter != t_listHave.end();t_listIter++)
+	{
+		t_nTitleID = *t_listIter;
+		if (t_player->isSetTitle(t_nTitleID)) continue;
+		bool t_isWear = t_player->getWearTitleShowState(t_nTitleID);//刷新显示
+		NewTitleItemMap::iterator itemIter = m_mapItemList.find(t_nTitleID);
+		if (itemIter == m_mapItemList.end()) continue;
+		t_item = itemIter->second;
+		t_item->refershItemByTitleID(t_nTitleID);//刷新数据
+		t_item->refershShowTitleSteate(t_isWear);//设置show
+		t_item->setTag(t_nIndex);
+		t_nIndex++;
+	}
+
+	const std::list<unsigned int>& t_listNot = m_pUI->getNotHaveList();
+	for(t_listIter = t_listNot.begin(); t_listIter != t_listNot.end();t_listIter++)
+	{
+		t_nTitleID = *t_listIter;
+		t_item = m_mapItemList[t_nTitleID];
+		t_item->setTag(t_nIndex);
+		t_nIndex++;
+	}
+
+	string t_str;
+	safe_sprintf(t_str,"%d/%d",t_player->getWearTitleNum(),NUM_TITLE_WEAR_MAX);
+	m_pFtWearNum->setString(t_str.c_str());
+	m_list->sort_items();
+	m_list->scroll_to_top(); 
+}
+
+void NewRoleTitleUiLayer::onOtherUiSelected(TouchSprite* pNode, bool)
+{
+	bool pop = GET_UI(NewRoleTitleUi, WCT_RoleTitleUi)->isPopupPreUiOnClose();
+	RR_PopTag popTag = GET_UI(NewRoleTitleUi, WCT_RoleTitleUi)->getPopTag();
+	GET_UI(NewRoleTitleUi, WCT_RoleTitleUi)->setPopupPreUiOnClose(false);
+
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	unsigned int roleId = RoleManager::getInstance()->getLocalPlayer()->getId();
+
+	int t_nSelectTag = pNode->getTag();
+	if (NT_EquipTab == t_nSelectTag)
+	{
+		OPEN_UI(WCT_ROLEEQUIPUI);
+		GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPlayerId(roleId);
+		GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPopupPreUiOnClose(pop);
+		GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPopTag(popTag);
+	}
+	else if (NT_AttrTab == t_nSelectTag)
+	{
+		OPEN_UI(WCT_ROLEATTRUI);
+		GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->setPlayerId(roleId);
+		GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->setPopupPreUiOnClose(pop);
+		GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->setPopTag(popTag);
+	}
+	else if (NT_MsgTab == t_nSelectTag)
+	{
+		OPEN_UI(WCT_RoleInfoUi);
+		GET_UI(RoleInfoUi, WCT_RoleInfoUi)->setRoleId(roleId);
+		GET_UI(RoleInfoUi, WCT_RoleInfoUi)->setPopupPreUiOnClose(pop);
+		GET_UI(RoleInfoUi, WCT_RoleInfoUi)->setPopTag(popTag);
+	}
+	CLOSE_UI(WCT_RoleTitleUi);
+}
+
+
+
+//*********************************************** NewRoleTitleItem Begin ***********************************************************
+
+NewRoleTitleItem::NewRoleTitleItem()
+	:m_pBtnShowTitle(NULL)
+	,m_pBtnWearTitle(NULL)
+	,m_pNodeTitleState(NULL)
+	,m_pNodeTitleIcon(NULL)
+	,m_pNodeLimit(NULL)
+	,m_pFtPowerScore(NULL)
+	,m_bIsShowOnPlayer(false)
+	,m_bIsWearOnPlayer(false)
+	,m_pBtnToGet(NULL)
+	,m_pNodeWearBtnBg(NULL)
+	,m_pBtnItemBg(NULL)
+{
+}
+
+NewRoleTitleItem::~NewRoleTitleItem()
+{
+
+}
+
+SEL_MenuHandler NewRoleTitleItem::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+SEL_CCControlHandler NewRoleTitleItem::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onShowTitlePressed", NewRoleTitleItem::onShowTitlePressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onWearTitlePressed", NewRoleTitleItem::onWearBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGetTitleBtnPressed", NewRoleTitleItem::onGetTitleBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onItemBtnPressed", NewRoleTitleItem::onItemBtnPressed);
+	return NULL;
+}
+bool NewRoleTitleItem::onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode)
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,m_pNodeEffShow);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_pNodeLimit);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_pNodeWearBtnBg);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_pNodeTitleIcon);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_pNodeTitleState);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*,m_pBtnWearTitle);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*,m_pBtnShowTitle);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*,m_pBtnToGet);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*,m_pBtnItemBg);
+	return true;
+}
+
+void NewRoleTitleItem::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	Helper::getLabelFTByParentAndTag(this, E_Role_Power_Des);
+	m_pFtPowerScore = Helper::getLabelFTByParentAndTag(this, E_Role_Power_Num);
+}
+
+void NewRoleTitleItem::onEnter()
+{
+	CCNode::onEnter();
+}
+void NewRoleTitleItem::onExit()
+{
+	CCNode::onExit();
+}
+
+void NewRoleTitleItem::setTitleData(const tagTitleProto* pData)
+{
+    m_stTitleData.b_eft = pData->b_eft;
+    m_stTitleData.b_normal_eft = pData->b_normal_eft;
+    m_stTitleData.bodyEft = pData->bodyEft;
+    m_stTitleData.classType = pData->classType;
+    m_stTitleData.colorStr = pData->colorStr;
+    m_stTitleData.dwID = pData->dwID;
+    m_stTitleData.nLinkGetUi = pData->nLinkGetUi;
+    m_stTitleData.nShwoForce = pData->nShwoForce;
+    m_stTitleData.nTimeLimit = pData->nTimeLimit;
+    //m_stTitleData.stAtt = pData->stAtt;
+    m_stTitleData.stDesc = pData->stDesc;
+    m_stTitleData.stDesc2  = pData->stDesc2;
+    m_stTitleData.stGetMode = pData->stGetMode;
+    m_stTitleData.stName = pData->stName;
+}
+
+void NewRoleTitleItem::refershItemByTitleID(unsigned int pID)
+{
+	const tagTitleProto* t_pTitle = Attres::getInstance()->getTitleProto(pID);
+	if (t_pTitle == NULL) return;
+	//m_stTitleData = *t_pTitle;
+    setTitleData(t_pTitle);
+    
+	if (m_stTitleData.b_eft)
+	{
+		m_pNodeTitleIcon->stopAllActions();
+
+		AnimationCache::AnimateList anims;
+		AnimationCache::createDefList(1,anims);
+		AnimationCache::getInstance()->getSinEffect(0,m_stTitleData.colorStr,anims);
+		BSAnimate* animste = anims[0];
+		m_pNodeTitleIcon->runAction(CCRepeatForever::create(animste));
+	}
+	else
+	{
+		CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(m_stTitleData.colorStr.c_str());
+		CC_ASSERT(spriteFrame != NULL);
+		m_pNodeTitleIcon->setDisplayFrame(spriteFrame);
+	}
+	m_pNodeTitleIcon->setAnchorPoint(ccp(0.5f,0.5f));
+
+	bool t_isExist = RoleManager::getInstance()->getLocalPlayer()->isExist((m_stTitleData.dwID));
+	if (t_isExist)
+	{
+		this->delGray();
+		
+		m_pBtnWearTitle->setVisible(true);
+		m_pBtnToGet->setVisible(false);
+		m_pNodeLimit->setVisible(m_stTitleData.nTimeLimit != 0);
+		m_bIsWearOnPlayer = RoleManager::getInstance()->getLocalPlayer()->isSetTitle(pID);
+		m_pBtnShowTitle->setVisible(m_bIsWearOnPlayer);
+		m_pNodeTitleState->setVisible(m_bIsWearOnPlayer);
+		if (m_bIsWearOnPlayer)
+			setButtonSpriteFrame(m_pBtnWearTitle,"roleuititle_xianshibtnh","roleuititle_xianshibtnh","roleuititle_xianshibtnh");
+		else
+			setButtonSpriteFrame(m_pBtnWearTitle,"roleuititle_xianshibtnn","roleuititle_xianshibtnn","roleuititle_xianshibtnn");
+
+		setButtonSpriteFrame(m_pBtnItemBg,"roleuititle_framebtnh","roleuititle_framebtnh","roleuititle_framebtnh");
+	}
+	else
+	{
+		this->setGray();
+		m_pBtnToGet->delGray();
+		m_pBtnItemBg->delGray();
+		m_pNodeLimit->setVisible(false);
+		m_pBtnToGet->setVisible(m_stTitleData.nLinkGetUi != 0);
+		m_pNodeTitleState->setVisible(false);
+		m_pBtnWearTitle->setVisible(false);
+		m_pNodeWearBtnBg->setVisible(false);
+		m_pBtnShowTitle->setVisible(false);
+		setButtonSpriteFrame(m_pBtnItemBg,"roleuititle_framebtnn","roleuititle_framebtnn","roleuititle_framebtnn");
+		
+	}
+	string t_str;
+	safe_sprintf(t_str,"%d",m_stTitleData.nShwoForce);
+	m_pFtPowerScore->setString(t_str);
+
+	
+}
+
+void NewRoleTitleItem::refershShowTitleSteate(bool isShow)
+{
+	if (m_bIsShowOnPlayer == isShow) return;
+	m_bIsShowOnPlayer = isShow;
+	//加特效切换 图片显示
+	string str = m_bIsShowOnPlayer ? "roleuititle_yincangwenzi" : "roleuititle_xianshiwenzi";
+	CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str.c_str());
+	CC_ASSERT(spriteFrame != NULL);
+	m_pNodeTitleState->setDisplayFrame(spriteFrame);
+	
+	if (isShow)
+	{
+		m_pNodeEffShow->removeAllChildrenWithCleanup(true);
+		CCSprite * t_eff = CCSprite::create();
+		t_eff->setTag(101);
+		AnimationCache::AnimateList anims1;
+		AnimationCache::createDefList(1,anims1);
+		AnimationCache::getInstance()->getSinEffect(0,"E1_247",anims1);
+		BSAnimate* animste1 = anims1[0];
+		CCSequence *t_pSeq = CCSequence::createWithTwoActions(animste1,CCCallFuncN::create(this,callfuncN_selector(NewRoleTitleItem::onChangeEffVisible)));
+		t_eff->runAction(t_pSeq);
+		
+		m_pNodeEffShow->addChild(t_eff);
+	}
+	else
+	{
+		CCSprite * t_eff = dynamic_cast<CCSprite*>( m_pNodeEffShow->getChildByTag(101));
+		if (t_eff)
+		{
+			t_eff->removeAllChildrenWithCleanup(true);
+			t_eff->stopAllActions();
+			CCSequence *t_pSeq = CCSequence::createWithTwoActions(CCFadeOut::create(0.6f),CCCallFuncN::create(this,callfuncN_selector(NewRoleTitleItem::onRemoveEyeEffFunc)));
+			t_eff->runAction(t_pSeq);
+		}
+	}
+}
+
+void NewRoleTitleItem::onRemoveEyeEffFunc(CCNode* pNode)
+{
+	pNode->stopAllActions();
+	m_pNodeEffShow->removeAllChildrenWithCleanup(true);
+}
+
+void NewRoleTitleItem::onChangeEffVisible(CCNode* pNode)
+{
+	pNode->removeAllChildrenWithCleanup(true);
+	pNode->stopAllActions();
+	CCSprite * t_eff = CCSprite::create();
+	AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1,anims);
+	AnimationCache::getInstance()->getSinEffect(0,"E1_248",anims);
+	pNode->runAction(CCRepeatForever::create(anims.front()));
+}
+
+//显示 隐藏 逻辑
+void NewRoleTitleItem::onShowTitlePressed(CCObject* pSender, CCControlEvent pCCControlEvent)
+{
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return ;
+	std::stringstream ss;
+	ss<<"set"<<"_"<<ploc->getId();
+	int tip = ClientCfg::getInstance()->getInt(ss.str(), "toTitleTip", 0);
+	if (tip == 1)
+	{
+		CheckSendTitleShowOkBtnPressed();
+		return;
+	}
+
+	bool isShow = !m_bIsShowOnPlayer;
+	string str;
+	safe_sprintf(str,isShow ? STRING_TABLE["title_ui_open_show"] : STRING_TABLE["title_ui_close_show"],m_stTitleData.stName);
+	MessageBoxUi *messageBox = MessageBoxUi::createWithTwoBtnWithCheck(str.c_str(),GET_STR(98).c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO, false);
+	messageBox->signalOkBtnPressed.connect(this, &NewRoleTitleItem::CheckSendTitleShowOkBtnPressed);
+	messageBox->signalCheckStateChange.connect(this, &NewRoleTitleItem::CheckSendDeleteShowMessageBox);
+	World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+}
+
+void NewRoleTitleItem::CheckSendDeleteShowMessageBox(bool state)
+{
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return ;
+	unsigned int roleID = ploc->getId();
+	std::stringstream ss;
+	ss<<"set"<<"_"<<roleID;
+	ClientCfg::getInstance()->setInt(ss.str(), "toTitleTip", state ? 1 : 0);
+}
+
+void NewRoleTitleItem::CheckSendTitleShowOkBtnPressed()
+{
+
+	LocalPlayer *t_player = RoleManager::getInstance()->getLocalPlayer();
+	int t_index = -1;
+	for (int i = 0; i < NUM_TITLE_WEAR_MAX ; i++)
+	{
+		unsigned int titleId = t_player->getCurTitle(i);
+		if (titleId == m_stTitleData.dwID)
+		{
+			t_index = i;//找到了位置
+			break;
+		}
+	}
+	if (t_index == -1) return;
+	bool isShow = !m_bIsShowOnPlayer;
+	t_player->m_showTitle[t_index] = isShow;
+	int t_roleId = t_player->getId();
+	string str = "";
+	std::stringstream ss;
+	ss<<"set"<<"_"<<t_roleId;
+	safe_sprintf(str,"Title%d",t_index);
+	ClientCfg::getInstance()->setInt(ss.str(), str.c_str(), t_player->m_showTitle[t_index]);
+	safe_sprintf(str,"TitleId%d",t_index);
+	ClientCfg::getInstance()->setInt(ss.str(), str.c_str(),t_player->getCurTitle(t_index));
+
+	if (t_player->m_showTitle[t_index])
+	{
+		t_player->updateTitleUi();//称号显示;
+	} 
+	else
+	{
+		t_player->updateTitleUi();//称号不显示;
+	}
+	refershShowTitleSteate(isShow);
+
+	//发是否显示激活称号的消息 gx add 2013.10.31
+	NET_SIC_show_active_title send;
+	send.bshow_title[0] = t_player->m_showTitle[0]?1:0;
+	send.bshow_title[1] = t_player->m_showTitle[1]?1:0;
+	send.bshow_title[2] = t_player->m_showTitle[2]?1:0;
+	TCP_CLIENT->send_net_cmd(&send, NP_NORMAL, false);
+
+	ClientCfg::getInstance()->flush();
+}
+
+void NewRoleTitleItem::onWearBtnPressed(CCObject* pSender,CCControlEvent pCCControlEvent)
+{
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+
+	lp->sendSetTitle(lp->getWearTitleShowIndex(m_stTitleData.dwID), m_stTitleData.dwID,!m_bIsWearOnPlayer);
+}
+ 
+void NewRoleTitleItem::onGetTitleBtnPressed(CCObject* pSender,CCControlEvent pCCControlEvent)
+{
+	//打开获得界面
+	if (m_stTitleData.nLinkGetUi == 0) return;
+	eWroldChildTag pTag = (eWroldChildTag)m_stTitleData.nLinkGetUi;
+	UiMgr::getInstance()->addUICloseLink(WCT_RoleTitleUi,pTag);
+	OPEN_UI(pTag);
+}
+
+void NewRoleTitleItem::onItemBtnPressed(CCObject* pSender,CCControlEvent pCCControlEvent)
+{
+	refersh_title_des_ui t_evt;
+	t_evt.selectId = m_stTitleData.dwID;
+	SEND_EVENT(&t_evt);
+}
+
+NewRoleTitleItem* NewRoleTitleItem::CreateItem()
+{
+	CCNodeLoaderLibrary* lib  = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string strFullPath = CFGReader::instance()->get_ui_ccbi_filepath("roletitleuiitem");
+	CCNode* node = reader->readNodeGraphFromFile(strFullPath.c_str());
+	NewRoleTitleItem* item = dynamic_cast<NewRoleTitleItem*>(node);
+	CC_ASSERT(item);
+	return item;
+}

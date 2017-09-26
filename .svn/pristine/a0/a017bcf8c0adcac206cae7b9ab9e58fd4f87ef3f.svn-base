@@ -1,0 +1,640 @@
+#ifndef WORLD_H
+#define WORLD_H
+
+#include "cocos2d.h"
+#include "RoleHeadUi.h"
+#include "UiManager.h"
+#include "BaseDefine.h"
+#include "RoleDefine.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "GameActionNode.h"
+#include "MessageBoxUi.h"
+#include "CombatProto.h"
+#include "RechargeUi.h"
+#include "FightRecordUiLayer.h"
+#include "cc_timer.h"
+
+using namespace cocos2d;
+
+struct s_net_cmd;
+class RoleHeadUi;
+class SelectRoleHeadUi;
+class MiniMapUi;
+class SystemUi;
+class ShortCutUi;
+class SkillUi;
+class TaskTraceUi;
+class NPCTalkUi;
+class PackageUi;
+class RoleAttrUi;
+class FriendUi;
+class RoleEquipUi;
+class WelcomeUi;
+class BePKRemindEffect;
+class StatueWorshipUi;
+
+#define  AUTOFIGHTTIME 300 //	人物不动五分钟自动战斗
+
+enum eHpChangeType
+{
+	HCT_OtherCrit = 0,
+	HCT_OtherNormal,
+	HCT_CRIT,
+	HCT_REDUCE,
+	HCT_Add,
+	HCT_Miss,
+	HCT_Other_Exp ,						// 加经验		
+	HCT_Other_Money ,						// 加钱
+	HCT_Talent_Point ,					// 加技能点
+
+	HCT_AMOUNT ,							// 使用的eHpChangeType的总数
+
+	SCT_ADD				// ??
+};
+
+enum eRedFlagType
+{
+	RF_RoleHead,
+	RF_SystemSkill,
+	RF_SystemForging,
+};
+
+enum eShowButtonType
+{
+	e_null = -1,
+	e_pay,
+	e_wing,
+	e_recast,
+	e_num
+};
+
+struct NET_SIS_get_remote_role_state;
+struct NET_SIS_get_remote_creature_state;
+struct NET_S2C_gvg_login_Group;
+struct tagRemoteCreatureData;
+
+struct  st_recharge_reward_data
+{
+	int yuanbao;
+	int class_type;
+	int sex;
+
+	std::vector<st_item_group>	rewards;
+};
+
+class World
+	: public CCObject
+{
+	friend class WorldFuncCallback;
+public:
+	World();
+	~World();
+public:
+	struct HpChangeAttData
+	{
+		int StartPosX;
+		int StartPosY;
+		int EndPosX;
+		int EndPosY;
+		int JumpHeight;
+		float InitZoom;
+		float MidZoom;
+		float EndZoom;
+		float InitMidTime;
+		float MidEndTime;
+		float ThenMoveTime;
+		float DisappearTime;
+	};
+	static World *getInstance();
+	CCScene *getScene(bool bIfNullCreate =false);
+	inline void setAttached(bool att){_attached = att;}
+	inline bool isAttached() const {return _attached;}
+	void openNPCDialog();
+	NPCTalkUi *getNPCDialog();
+	BePKRemindEffect *getBePKRemindEffectUi();
+	void doscheduleEvent(float ft);
+	TaskTraceUi *getTaskTraceUi() { return  _taskTraceUi;}
+	MiniMapUi *getMiniMapUi();
+	RoleHeadUi *getRoleHeadUi();
+	SelectRoleHeadUi *getSelectRoleHeadUi();
+	//void play_buff_effect(std::string pic_name);
+	void runAcceptTaskEffect();												//接受任务特效
+	void runFinishedTaskEffect();											//完成任务特效
+	void returnToSelectRole();
+
+	void stopUnderAttackEffect();
+	void underAttackBeginCallBack();
+	void underAttackEndCallBack();
+	void runUnderAttackBeginEffect();                                            //刚开始受到攻击特效
+	void runUnderAttackEndEffect();                                              //30%血量时刚受到攻击特效
+	/*屏蔽
+	void setFuncGuideAct(std::string iconName);//引导功能收起动画
+	void onFuncGuideBack();					   //引导收起回调
+	*/
+	//void setPayClick(bool isclick){_isPayClick = isclick;}
+	void movePayIconAction();
+	void setSignBtnAction();
+	void setPayState();
+	void onSignBack();
+	//陆晓龙 2015-6-26 在线图标隐藏
+	void onZaixianBack();
+	//在线进入活动按钮 动作
+	void setZaixianBtnAction();
+	//在线，离线经验等图标往左靠，方法
+	bool btnSetLeft(std::vector<int>& souseObj, int destObj, bool isMove = false);
+	void btnSetLeft();
+	//bool getPayState() {return _isPayClick;}
+	void setPayClickState(bool isclick) { _isPayClickBegin = isclick; }
+	bool getPayClickState() { return _isPayClickBegin;}
+	//bool getPayIconShowState() {return _payIcon->isVisible();} //返回爱的第一次图标显示状态;
+	CCRect getpayIconPos();
+	//开服天数
+	void setServerActivityDay(int day) { m_serveractivityday = day; }
+	int getServerActivityDay() const { return m_serveractivityday; }
+	//开服状态，1 开服 2 合服;
+	void setOpenStage(int stage) { m_openstagee = stage;}
+	int getOpenStage() const {return m_openstagee;}
+	void setBattlefieldIsEnd(bool isEnd) { _battlefieldIsEnd = isEnd; }
+
+	void jjcAmine();
+	void set_countDownTime(int time) { _countDownTime = time;}
+	void countDownEffect( float dt );//倒计时
+	void countDownEffect_UI(int times);
+	void onChangeNodeVisible(CCObject* sprite);
+	void undisableClick();
+	int getcountDownTime(unsigned int mapId);
+	//屏幕控件上加高亮，例：有邮件了在邮件上要
+	//参数：父控件，父控件类型，子空间的tag值，添加的图片文件名，是否显示
+	bool SetHighLight(CCNode* object , int type ,int tag , std::string fileName , bool isShow , int posX = -28 , int posY = -5);//返回是否成功
+	bool SetHighLight(CCNode* object , int type ,int tag , int count , bool isShow , int posX = -28 , int posY = -5);//返回是否成功
+	//检测是否显示
+	//参数：父控件，父控件类型，子空间的tag值
+	bool isHighLight(CCObject* object , int type ,int tag);
+	void setLevelReward();
+	void setLevelRewardBtnState(int count);
+	int getLingJiangLevelByRoleScriptData6(unsigned int rewordIndex);
+	bool SetMenuEffect(CCObject* object , int type ,int tag , std::string fileName , bool isShow , int posX = 21 , int posY = 39);//返回是否成功
+	bool isMenuEffect(CCObject* object , int type ,int tag);
+	void doTransmitEvent(float ft);
+	void initHpChangeAttData();
+	void setVIPLevel(int level);
+	void sbkLianshaBeginAni(CCObject* sprite);
+	void sbkLianshaStopAni();
+	//设置自动喝药
+	void setAutoUseDrug();
+	bool needSlowStr(int index);
+	void rechargeGiftShowFlag();
+	//void changeBtn(float ft);
+	void loopShowFlashSellAndFistBtn(float ft);
+	void setPayIconEnable(bool _enable);
+	bool m_payIconEnable;
+
+	//bool pay_icon_should_show_in_normal_scene()const;
+	bool pay_icon_should_show()const;
+	bool pay_icon_show_by_level()const;
+	bool wing_icon_should_show() const;
+
+	bool update_wing();
+	void openWingsBtnChange(bool pisOpen);
+	bool is_in_pay_icon_move_action()const{return _in_move_action;}
+
+	std::map<int ,st_recharge_reward_data >	m_recharge_data_map;
+	int get_recharge_yuanbao(int type_id);
+	void get_recharge_rewards(int yuanbao,int class_type,int sex,std::vector<st_item_group>& out );
+
+	void init_recharge_data();
+public:
+	unsigned int onDayFirstRechargeState(s_net_cmd *cmd);
+	unsigned int onDaySecondRechargeState(s_net_cmd *cmd);
+	unsigned int onSynchronizeStand(s_net_cmd *cmd);
+	unsigned onSynchronizeMysteryShop( s_net_cmd *cmd );
+	unsigned int onBuyTreasureShopItem( s_net_cmd *cmd );
+	unsigned int onMysteryShopOpen( s_net_cmd *cmd );
+	unsigned int onjjcPkResult(s_net_cmd *cmd);
+	unsigned int onjjcWinRewardInfo(s_net_cmd *cmd); //竞技场挑战胜利奖励信息
+	unsigned int onjjcRankResult(s_net_cmd *cmd);
+	unsigned int onAddMailReward(s_net_cmd *cmd);
+	unsigned int onAddAllMailReward(s_net_cmd *cmd);
+	unsigned int onStallBagNotEnough(s_net_cmd *cmd);
+	unsigned int onMountResult(s_net_cmd *cmd);
+	unsigned int onVipLvChangeInfo(s_net_cmd *cmd);
+	unsigned int onGetMailRewardResult(s_net_cmd *cmd);
+	unsigned int onRequestjjcPKResult(s_net_cmd *cmd);
+	unsigned int onEquipmentNext( s_net_cmd *cmd );
+	unsigned int onUpdatejjcData( s_net_cmd *cmd );
+	unsigned int onSynchronizeWalk(s_net_cmd *cmd);
+	unsigned int onRoleTeleport(s_net_cmd *cmd);
+	unsigned int onGetRemoteRoleState(s_net_cmd *cmd);
+	unsigned int onGetRemoteCreatureState(s_net_cmd *cmd);
+	unsigned int onRemoveRemote(s_net_cmd *cmd);
+	unsigned int onSkill(s_net_cmd *cmd);
+	void onGetName(unsigned int roleid , const std::string& name);
+	unsigned int onHPChange(s_net_cmd* cmd);
+	unsigned int onRoleDead(s_net_cmd* cmd);
+	unsigned int onRoleDiePenalty( s_net_cmd* cmd );
+	unsigned int onRevive(s_net_cmd *cmd);
+	unsigned int onMainAttrChange(s_net_cmd* cmd);
+	unsigned int onMultiAttrChange(s_net_cmd *cmd);
+	unsigned int onOtherAttrChange(s_net_cmd *cmd);
+	unsigned int onRoleLevelChanged(s_net_cmd *cmd);
+	unsigned int onSpecialMove(s_net_cmd *cmd);
+	unsigned int onHitTarget(s_net_cmd *cmd);
+	unsigned int onRoleExpChanged(s_net_cmd *cmd);
+	unsigned int onGotoNewMap(s_net_cmd *cmd);
+	unsigned int onGetLocalRoleDayClearData(s_net_cmd *cmd);//gx add
+	unsigned int onGetLocalRoleDayClearDataTwo(s_net_cmd *cmd);//gx add
+	unsigned int onGetLocalRoleDayData(s_net_cmd *cmd);
+	unsigned int onGetLocalRoleDayFlower( s_net_cmd *cmd );
+	unsigned int onGetLocalRoleDayDoublepair( s_net_cmd *cmd );
+	unsigned int onGetLocalRoleDayRedEnvelope( s_net_cmd *cmd );
+	unsigned int onGetLocalRoleDayByself( s_net_cmd *cmd );
+	unsigned int onGetLocalRoleDayStartTime( s_net_cmd *cmd );
+	unsigned int onGetLocalRoleAllDayClearData( s_net_cmd *cmd );
+	unsigned int onGetRoleTitles(s_net_cmd* cmd);
+	unsigned int onUseRoleTitle(s_net_cmd* cmd);
+	unsigned int onAddRoleTitle(s_net_cmd* cmd);
+	unsigned int ondeleteRoleTitle(s_net_cmd* cmd);
+	unsigned int onOtherRoleTitleChange(s_net_cmd* cmd);
+	unsigned int onInitActiveInfo(s_net_cmd* cmd);
+	unsigned int onReturnSelectRole(s_net_cmd *cmd);
+	unsigned int onSkillExpInfo(s_net_cmd *cmd);
+	unsigned int onEnumRoleList(s_net_cmd *cmd);
+	unsigned int onGetLeaveExp(s_net_cmd *cmd);
+	unsigned int onChangeRoleName(s_net_cmd *cmd);
+	unsigned int onGetLeaveExpInfo(s_net_cmd *cmd);
+	unsigned int onPickupLeaveExp(s_net_cmd *cmd);
+	unsigned int onOfflineLeaveIsExp( s_net_cmd *cmd );
+	unsigned int onGetDailyReward(s_net_cmd *cmd);
+	unsigned int onGetRoleScriptData(s_net_cmd *cmd);
+	unsigned int onGetRoleSomeData(s_net_cmd* cmd);
+	unsigned int onGetRechargeFeedbackOpen(s_net_cmd* cmd);
+	unsigned int jieshoutexiao(s_net_cmd* cmd);
+	unsigned int onCgsBegin(s_net_cmd* cmd);
+	unsigned int onLoginProof(s_net_cmd* cmd);
+	unsigned int onRecvMapLimitInfo(s_net_cmd* cmd);
+	unsigned int onRecvLeaveInstance(s_net_cmd* cmd); //离开副本
+	unsigned int onRecvSaodangInfo(s_net_cmd* cmd);
+	unsigned int onRecvFubenFinalInfo(s_net_cmd* cmd);
+	unsigned int onRecvFubenRet(s_net_cmd* cmd);
+	unsigned int onRecvDuoRenFubenRet(s_net_cmd* cmd);
+	unsigned int onUplevelEquipment( s_net_cmd* cmd );
+	unsigned int onGetLevelUpStuff( s_net_cmd* cmd );
+	unsigned int onGetKungfuPickUpResult( s_net_cmd* cmd ); //功法拾取结果
+	
+	unsigned int onGetBossData( s_net_cmd* cmd);
+	unsigned int onPlayTalk( s_net_cmd* cmd );
+	unsigned int onG2C_CONFIRM_STALL_ITEM_RESULT(s_net_cmd* cmd);
+	unsigned int onG2C_REQUEST_STALL_START_RESULT(s_net_cmd* cmd);
+	unsigned int onLOOK_OTHER_STALL_RESULT(s_net_cmd* cmd);
+	unsigned int onG2C_REQUEST_STALL_DOWN_RESULT(s_net_cmd* cmd);
+	unsigned int onG2C_REQUEST_STALL_BUY_RESULT(s_net_cmd* cmd);
+	unsigned int onG2C_REQUEST_STALL_END_RESULT(s_net_cmd* cmd);
+	unsigned int onGetStallName( s_net_cmd *cmd );
+	unsigned int onMysteryBoxReward( s_net_cmd* cmd);					//打开宝箱物品
+	unsigned int onGetMysteryBoxResult( s_net_cmd* cmd);				//领取宝箱奖励
+	unsigned int onG2C_SendTipMsg( s_net_cmd* cmd ); //服务器给客户端发送提示信息
+	unsigned int onRechargeGiftLevelGet( s_net_cmd* cmd );//获得当前充值赠礼领奖情况
+	unsigned int onTotalRechargeChange( s_net_cmd* cmd );//获得当前充值总数
+	unsigned int onUpdateData( s_net_cmd *cmd ); //合成物品
+	unsigned int onDarongluDegree( s_net_cmd *cmd ); //大熔炉温度
+	unsigned int receiveZhanbaoRequest( s_net_cmd *cmd ); //战报消息
+	unsigned int receiveZhanbaoResult(s_net_cmd *cmd ); //sbk攻城战结束时收到的战报情况
+	unsigned int onServerSkillStone(s_net_cmd *cmd );
+	unsigned int onServerSummonBoss(s_net_cmd *cmd);
+	unsigned int onGotoQuestPos( s_net_cmd *cmd );
+	unsigned int onLogoutToRelation( s_net_cmd *cmd );
+	unsigned int onLoginToRelation( s_net_cmd *cmd );
+	unsigned int onServerHeartbeat(s_net_cmd *cmd);
+	unsigned int onRoleInitStateAtt(s_net_cmd *cmd);
+	unsigned int onCardDeadLineInfo(s_net_cmd* cmd);
+	unsigned int onPlayerTimeMessage(s_net_cmd* cmd); //玩家登录时间和角色进入游戏时间
+	unsigned int onXiaomiInfo(s_net_cmd* cmd); //是否开启小蜜功能以及相关信息
+	unsigned int onDailyacttransmit( s_net_cmd *cmd );
+	unsigned int onSetPath(s_net_cmd *cmd );
+	unsigned int onMonthCardState( s_net_cmd *cmd );
+	unsigned int onReceiveWarTeamState(s_net_cmd *cmd );
+	unsigned int onShowFMBBet(s_net_cmd *cmd );
+	unsigned int changeGuildState( s_net_cmd *cmd);//行会改名结果
+	unsigned int onMonthCardBeginTime( s_net_cmd *cmd );
+	void sendHeartbeat();
+	void noticeRecharge();//跳转充值界面
+	void ReLogin();	//[bing] 掉线重登
+	void setShowToolTip(int level);
+	void sendZhanBaoRequest();
+	void fubenCountDown(s_net_cmd *cmd);
+
+	void updateHeartbeat(float dt);
+	void repetStopAllAct();
+	//void repetLogin(bool isInCross);
+	void repetInit();
+	bool getRepetLoginState(){return false;}
+	bool getRepetCanGotoMap(){return _repetCanGotoMap;}
+	void setRepetCanGotoMap(bool isCan){_repetCanGotoMap = isCan;}
+	bool getRepetCanClose(){return _repetCanClose;}
+	void setRepetCanClose(bool isCan){_repetCanClose = isCan;}
+	bool getRepetCanAutoRun(){return _canAutoRun;}
+	void setRepetCanAutoRun(bool isCan){_canAutoRun = isCan;}
+	void resetData();
+protected:
+	class PayClickCallBack :public CCObject
+	{
+	public:
+		static PayClickCallBack *getInstance()
+		{
+			static PayClickCallBack instance;
+			return &instance;
+		}
+		void onPayIconBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+		{
+			if (World::getInstance()->_payIcon == NULL)
+				return;
+
+			if (World::getInstance()->_payIcon->isVisible() == false)
+				return;
+
+			//return;
+			World::getInstance()->setPayClickState(true);
+			AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_14);
+			OPEN_UI(WCT_ShouChongUi);
+		}
+
+		void onFlashSellShopBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+		{
+			//ToDo 根据类型 OpenUI;
+			OPEN_UI(WCT_FlashWingShopUi);
+		}
+
+		void onFightRecordBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+		{			
+			//WorldPacket C2G_Msg("");	//组装消息头
+			//TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);		//发送
+			//FightRecordUiMgr::GetInstance()->openFightRecordUi();
+			World::getInstance()->sendZhanBaoRequest();		
+		}
+		void onLevelEquipBtnPressed(cocos2d::CCObject * pSender,cocos2d::extension::CCControlEvent pCCControlEvent)
+		{
+			OPEN_UI(WCT_LevelEquipUi);
+		}
+	};
+private:
+	void close_ui_when_cross_map_in_world();
+
+	void do_sth_before_close_map();
+	void do_sth_reenter_new_map();
+
+	void update_auto_combat_in_idle_state();
+
+	void slow_update();
+public:
+	void open(bool isRepetLogin = false);
+	void close(bool isRepetLogin = false);
+	void update(float dt);
+	void enter_wolrd_form_create_role_update(float dt);
+	void enter_world_from_select_role_update(float dt);
+
+	void go_through_map_in_world();
+	//void gotoNewMapUpdate(float dt);
+	void repetLoginUpdate(float dt);
+	void getCreatureNameByID(unsigned int typeID,std::string &name);
+	void changeRoleName(std::string role_name);//角色更名;
+	void changeGuildName(std::string guild_name);//更改行会名
+	void onTog(INT64 exp, bool hasDelayTime = false);
+	void onShowTalentPointChange(int nChange);
+
+	//[bing] 动画用直接添加Creature
+	void MovieAddCreatureState(tagRemoteCreatureData *pData);
+	void checkRedFlag();
+	void checkIsRemoveRedFlag(eRedFlagType eRedFlag);
+	//int getGotoNewMapStep() { return _gotoNewMapStep;}
+	//void setGotoNewMapStep(int value) { _gotoNewMapStep = value;}
+	void setTransmitTypeIsTrigger(bool isTrigger){_isInTrigger = isTrigger;}
+	bool getTransmitType(){return _isInTrigger;}
+	void setAccountId(unsigned int id) { _accountId = id;}
+	unsigned int getAccountId() { return _accountId;}
+	void setSignBtnUpdate();
+	void sbkGCZShowLianshaNode(int num); //进入到了sbk攻城战,显示连杀ui	
+	void addStoneAnim(bool isAdd);
+	AnimationCache::AnimateList& getStoneAnim(){return _stoneAnim;}
+	void addDiceAnim(bool isAdd);
+	void playGambleAn();
+	void animationCallback();
+	void animationCallback2();
+
+	void setLeftlabel(std::string leftTime,int leftNumber);
+	void landouhuiStart();
+
+	int getWorldMaxLoadStep()const{return 3;} 
+	void setStartSendHeartbeat(bool state) {_startSend = state;}
+
+	void onChangeSelect(int selectId);
+	void removeRemoteRole(unsigned int id);
+	void willEnterForeground(bool isEnter);
+	void removeRemoteCreature(unsigned int id);
+	void resetHeartData();
+
+	int getRandMsgNums();
+	void initRandMsgNums();
+	void UpdateLevelTime(int m_nHour,int m_nMin,int m_nSec);
+	void updateFlashBtnTimeLabel(int m_nHour,int m_nMin,int m_nSec);
+	inline void set_is_show_fmb_btn(bool is_show){m_is_show_fmb_btn = is_show;}
+	inline bool get_is_show_fmb_btn(){return m_is_show_fmb_btn;}
+	void onFlashSellEffDone();
+protected:
+	void addRemoteRoleState(NET_SIS_get_remote_role_state *state);
+	void addRemoteCreatureState(NET_SIS_get_remote_creature_state *state);
+	void onSystemUiTaskBtnPressed();
+	void onAttackBtnPressed();
+	void onManualAttrackBtnPressed(int skillId);
+	void slotReviveOk();
+	void slotReviveCancel();
+	void hpChangeEffect(int value, eHpChangeType type, const CCPoint &pos, float zOrder, bool bLocal=false);
+	void hpChangeEffectCallback(CCNode *node);
+	void missEffect(const CCPoint &pos, const CCPoint &srcPos ,float zOrder,bool isSelf);
+	void updateRemoteRoleState();
+	void updateRemoteCreatureState();
+	void clearRemoteList();
+	void runAnimation();//显示首冲特效
+	void stopAnimation();
+	void showFlashSellShopEffBtn(bool isShow);//显示 限时商店按钮
+
+	//void runServerAnimation();
+	//void stopServerAnimation();
+	void monsterDeadCallback(CCNode *node);
+	
+	void onMonsterDied(CCObject *node, void *data);
+	void onDelayHPMsg(CCObject *node, void *data);
+	void setSingCurDayVisible(int curday);
+	
+	//test
+	void justTest(CCObject* pSender);
+	void runLevelEquipAim();//显示30级Iocn特效
+	void stopLevleAim();
+protected:
+
+	MessageBoxUi *_messageBox;//add by vvv 2014.11.05 元宝不足，提示框
+	CCScene *_scene;
+	bool _attached;
+	RoleHeadUi *_roleHeadUi;
+	SelectRoleHeadUi *_selectRoleHeadUi;
+	MiniMapUi *_miniMapUi;
+	TaskTraceUi *_taskTraceUi;
+	bool _gotoNewMap;
+	bool _loginEnterSceneFlag;
+	unsigned int _newMapId;
+	int _gotoNewMapStep;
+	int m_serveractivityday;
+	int m_openstagee;
+
+	void init_pay_icon();
+	void destroy_pay_icon();
+	void update_pay_icon();
+
+	CCControlButton* _payIcon;	
+	CCControlButton* _pFlashShopBtn;
+	CCControlButton* m_recast_button;
+	eShowButtonType m_cur_show_button_type;
+
+	CCSprite *_payEffect;
+	//CCSprite *_serverEffect;
+	bool _isInTrigger;
+	//bool _isPayClick;
+	bool _isPayClickBegin;
+	bool _serverEffectShowN;
+	//bool _giftuiIsOpen;
+	HpChangeAttData _hpChangeAttData[HCT_AMOUNT];
+	CCControlButton* _signbtn;
+	CCControlButton* _insignbtn;
+	CCSprite*			m_pDiceSp;
+	int					m_pBossType;
+	AnimationCache::AnimateList _stoneAnim;
+	AnimationCache::AnimateList _diceAnim;
+	bool _isRunShowChongEffect;//是否在运行首冲特效
+	CCControlButton* _levelEquipBtn;
+	CCLabelBMFont* _LevelEquipTimeLab;
+private:
+	bool _in_move_action;
+	bool _bDeadName;								//标识是否需要向服务器请求杀死自己的远程玩家的姓名 gx add
+	CCSprite *_LevelEquipEffect;
+	bool _battlefieldIsEnd;							//战场是否结束 Kid
+	tagDWORDTime IsAutoFight;
+	bool ReSetIsAutoFight;
+	unsigned int _killRoleID;						//杀死自己的玩家的ID
+
+	
+	std::map<unsigned int, char*> _remoteRoleStateList;			//缓存远程玩家信息，分批处理
+	std::map<unsigned int, char*> _remoteCreatureStateList;		
+				//特效			【Ji：】 add
+	//GameActionNode* _acceptTaskAcNode;				//接受任务特效
+	//GameActionNode* _finishTaskAcNode;				//完成任务特效
+	std::set<std::string> _plist;					//保存特效图片plist文件名称
+
+	bool isLowHpSoundPlaying;						//判断20%hp以下是否播放正在音效
+	
+	int _countDownTime;								//倒计时变量
+	CCLabelBMFont* _fubenNumBLabel;					//副本倒计时艺术字
+	CCLabelTTF *_luandouTimeLabel;                  //距离乱斗会开始的时间
+	float addUpTime;								//标识时间累积
+	unsigned int _RoleScriptData[MAX_ROLE_SCRIPT_DATA_NUM];//玩家脚本数据信息
+	       
+	CCSprite *_topSprite,*_bottomSprite;          //乱斗会开始的标志
+	int beginIndex;                              //为了不多次执行乱斗动画设置的计数
+	//CCLabelTTF *_fubenLeaveLabel;                //龙婷神兽副本离开的倒计时文字
+	//int fubenLeaveTime;                          //离开副本的倒计时时间
+
+	bool _bOpenRechargeFeedback;					//是否开启了摇钱树活动
+	unsigned int  CountTime;						//摇钱树剩余时间
+	bool _bInitDayClear;							//玩家每日清零数据是否已初始化
+	bool _bInitDayClearTwo;							//玩家每日清零数据是否已初始化
+	NET_SIS_role_hp_change _aHPMsg[100];
+	int _curHPMsg;
+	//int _curHPMsg;
+	float addSpeedUpTime;							//标识时间累积
+	float addOffLineTime;
+	unsigned int _accountId;						//账号
+	NET_SIS_role_hp_change* getHPMsgFromCache();
+	int _BallCount;
+	int bezier1x;
+	int bezier1y;
+	int bezier2x;
+	int bezier2y;
+
+	float _heartbeatInterval;//心跳机制发送心跳包的间隔时间
+	float _heartbeatDelay;//最长接收到服务器返回消息的延迟时间
+	float _accumulateTime;//最大的延迟积累值
+	float _disconnectionTims;//断线重连时间
+	float _intervalTime;//
+	float _delayTime;//单次延迟时间
+	float _finalTime;//延迟积累值-
+	bool _sendHeartbeat;	//能否发送
+	bool _startSend;		//是否开始发送心跳包
+	bool _repetLoginState;	//是否在延迟重连状态
+	bool _repetCanGotoMap;	//能否跳转新地图
+	bool _repetCanClose;	//能否调用close
+	bool _canOpenOffLine;	//是否自动打开离线经验界面
+	bool _canAutoRun;		//能否显示自动寻路
+	bool _isOpen;
+	bool _isShowFlashBtn;
+	profile_util::cc_timer _heartSendTimer;
+	int	_recvHeartDelay;
+	tagDWORDTime		recvOldHeartTime;				//接受心跳时间
+	profile_util::cc_timer _heartTimer;
+
+	int _randMsgNums; //从SenceTips中获取可以随机的数量
+	//勇闯天牢 需要在跳完地图后显示经验获得
+	bool _getTLEXP;
+	INT64 _getTLEXPNums;
+	bool _isOpenChange;
+
+	bool m_is_show_fmb_btn;
+
+	CCSprite* _underAttackEffect;
+	bool _isPlayUnderAttackBegin;
+	bool _isPlayUnderAttackEnd;
+public:
+	inline unsigned int GetRoleScriptDataByIndex (int nIndex)
+	{
+		if (nIndex < 0 || nIndex >= MAX_ROLE_SCRIPT_DATA_NUM)
+			return (unsigned int)INVALID;
+		return _RoleScriptData[nIndex];
+	}
+public:
+	inline void SetDayClearFlag(bool bFlag) { _bInitDayClear = bFlag;}
+	inline void SetDayClearFlagTwo(bool bFlag) { _bInitDayClearTwo = bFlag;}
+	inline bool GetDayClearFlag() { return _bInitDayClear;}
+	inline bool GetDayClearFlagTwo() { return _bInitDayClearTwo;}
+	inline void SetRechargeFeedback_Flag(bool bFlag) {_bOpenRechargeFeedback = bFlag;}
+	inline bool GetRechargeFeedback_Flag() { return _bOpenRechargeFeedback;}
+	void DuoRenFuBenConfrim();
+	//[bing] 设置控制界面隐藏状态(小地图等界面)
+	void SetVisibleControlUI( bool bSet );
+	void SetRoleHeadTouch();
+	int GetIsShowMysteryEffect();
+
+	void setLoginEnterSceneFlagUpdate() { setLoginEnterSceneFlag(true);  _gotoNewMapStep=0; }
+	void setLoginEnterSceneFlag(bool bFlag) { _loginEnterSceneFlag=bFlag; }
+	void setBallImage();
+	float getParticleAngle(CCPoint startPos,CCPoint endPos);
+	void bezierOverCallFun(CCNode *node, void *data);
+	void CreateBall(float dt);
+	void FreeBall();
+	void openOfflineExp(float dt);
+	void RunStandAni(float dt);
+	bool IsOpen() { return _isOpen;}
+	bool needShowFight();
+	void removeNotFindRole(DWORD roleID);
+	void on_show_recast_node(CCObject * pSender, CCControlEvent pCCControlEvent);
+	void register_update(bool is_register);
+	void update_button(float dt);
+	void create_recast_button();
+	void refresh_recast_time(float dt);
+	void show_loop_button(eShowButtonType show_type);
+	inline bool isGuildHuoDongRed();
+public:
+	//CCLayer* _fightRecord;
+	CCLabelBMFont* _lianshaNum;
+	CCSprite* _lianshaText;
+	CCLayer* _lianshaLayer;
+};
+
+#endif //WORLD_H

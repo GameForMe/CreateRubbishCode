@@ -1,0 +1,369 @@
+#include "RewardGotoItem.h"
+#include "UiResourceMgr.h"
+#include "CfgReader.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "RewardQuestUi.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "Auto_ActionMgr.h"
+#include "ToolTip.h"
+#include "ExchangeBusinessMgr.h"
+#include "StringMgr.h"
+#include "DBMgr.h"
+#include "World.h"
+#include "TaskTraceUi.h"
+#include "UiTools.h"
+#include "FubenUI.h"
+#include "BossPKMgr.h"
+#include "WorldPacket.h"
+#include "CommonMsgDefine.h"
+#include "TCPClient.h"
+#include "RewardQuestUi.h"
+#include "GameEventDefine.h"
+#include "Helper.h"
+#include "QuestMgr.h"
+#include "Auto_ActionMgr.h"
+/*
+RewardGotoItem * RewardGotoItem::getInstance()
+{
+	static RewardGotoItem instance;
+	return &instance;
+}
+*/
+RewardGotoItem::RewardGotoItem()
+{
+	_isOpenUI = false;
+}
+
+RewardGotoItem::~RewardGotoItem()
+{
+	if(_uiGoteFrame != NULL)
+	{
+		_uiGoteFrame->release();
+		_uiGoteFrame = NULL;
+	}
+
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+	_isOpenUI = false;
+	//_questID = 0;
+}
+
+void RewardGotoItem::open()
+{
+	if(_isOpenUI)
+	{
+		UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+		_uiGoteFrame->removeFromParent();
+		_uiGoteFrame->release();
+		_uiGoteFrame = NULL;
+	}
+
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary1 = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary1->registerCCNodeLoader("OnlineUiLayer", RewardQuestGotoItemLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader1 = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary1);
+	_uiGoteFrame = dynamic_cast<RewardUiGotoItemFrame*>(ccbReader1->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "rewardthat2.ccbi").c_str()));
+	_usedPlistFile = ccbReader1->getLoadedSpriteSheet();
+	UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+	ccbReader1->release();
+	if(_uiGoteFrame != NULL)
+	{
+		_uiGoteFrame->retain();
+		_uiGoteFrame->_item = this;
+	}
+
+	std::string dir = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "SingleUI/";
+	std::string	str = dir + "rewardthat_selected.png";
+	Frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str.c_str());
+	if(Frame == NULL)
+	{
+		CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addImage(str.c_str());
+		Frame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(Frame, str.c_str());
+	}
+	describeSprite = NULL;
+	_isOpenUI = true;
+}
+
+void RewardGotoItem::releaseAllFrame()
+{
+	if(_uiGoteFrame != NULL)
+	{
+		_uiGoteFrame->removeFromParent();
+		_uiGoteFrame->release();
+		_uiGoteFrame = NULL;
+	}
+
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+	_isOpenUI = false;
+}
+
+void RewardGotoItem::addSelected()
+{
+	if(describeSprite == NULL && _isOpenUI)
+	{
+		describeSprite = CCSprite::create();
+		describeSprite->setDisplayFrame(Frame);
+		_uiGoteFrame->addChild(describeSprite);
+		describeSprite->setAnchorPoint(ccp(0.0,0.0));
+		describeSprite->setPosition(ccp(-15,0));
+	}
+}
+
+void RewardGotoItem::removeSelected()
+{
+	if(!_uiGoteFrame)
+		return ;
+	if(describeSprite != NULL)
+	{
+		describeSprite->removeFromParentAndCleanup(true);
+		describeSprite = NULL;
+	}
+}
+
+void RewardGotoItem::setGoPosition(const CCPoint &pos)
+{
+	if(_uiGoteFrame != NULL)
+	{
+		_uiGoteFrame->setPosition(pos);
+	}
+}
+
+void RewardGotoItem::updateGotoData(int questID,int number)
+{
+	if(questID == 0)
+	{
+		CCSprite *gotoBg = dynamic_cast<CCSprite*>(_uiGoteFrame->getChildByTag(0));
+		gotoBg->setVisible(false);
+		//CCControlButton *gotoButton = dynamic_cast<CCControlButton*>(gotoBg->getChildByTag(4));
+		//gotoButton->setTouchEnabled(false);
+	}
+	else
+	{
+		setGotoShow(questID,number);
+	}	
+}
+
+void RewardGotoItem::setGotoShow(int questID,int number)
+{
+	RewardQuestProto rewardQuest;;
+	rewardQuest.questId = questID;
+	RewardQuestMgr::getInstance()->findRewardQusetInfo(rewardQuest);
+	CCSprite *gotoBg = dynamic_cast<CCSprite*>(_uiGoteFrame->getChildByTag(0));
+	gotoBg->setVisible(true);
+	CCControlButton *gotoButton = dynamic_cast<CCControlButton*>(gotoBg->getChildByTag(4));
+	gotoButton->setTouchEnabled(true);
+	gotoButton->setZOrder(20);
+	if(number >= rewardQuest.needNum)
+	{
+		setButtonSpriteFrame(gotoButton,"xuanshang_finishn","xuanshang_finishbit","xuanshang_finishbit");
+		gotoButton->addTargetWithActionForControlEvents(_uiGoteFrame,SEL_CCControlHandler(&RewardUiGotoItemFrame::onFinishBtnPressed),CCControlEventTouchUpInside);
+	}
+	else
+	{
+		gotoButton->addTargetWithActionForControlEvents(_uiGoteFrame,SEL_CCControlHandler(&RewardUiGotoItemFrame::onGotoBtnPressed),CCControlEventTouchUpInside);
+	}
+	
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	std::string rewardthatList = uiDir + std::string("ccbResources/rewardthat.plist");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(rewardthatList.c_str());
+	CCSprite *hardIcon = dynamic_cast<CCSprite*>(gotoBg->getChildByTag(1));
+	switch(rewardQuest.questGrade)
+	{
+	case ERQG_SSS:
+		hardIcon->initWithSpriteFrameName("SSS");
+		break;
+	case ERQG_SS:
+		hardIcon->initWithSpriteFrameName("SS");
+		break;
+	case ERQG_S:
+		hardIcon->initWithSpriteFrameName("S");
+		break;
+	case ERQG_A:
+		hardIcon->initWithSpriteFrameName("A");
+		break;
+	case ERQG_B:
+		hardIcon->initWithSpriteFrameName("B");
+		break;
+	case ERQG_C:
+		hardIcon->initWithSpriteFrameName("C");
+		break;
+	case ERQG_D:
+		hardIcon->initWithSpriteFrameName("D");
+		break;
+	}
+
+	//CCLabelTTF *describe = dynamic_cast<CCLabelTTF*>(gotoBg->getChildByTag(2));
+	LabelFT *describe = Helper::getLabelFTByParentAndTag(gotoBg, 2);
+	CC_ASSERT(describe);
+	if (describe)
+	{
+		describe->setString(rewardQuest.target.c_str());
+		//describe->setFontSize(20);
+		//describe->setPositionX(describe->getPositionX()-20);
+		describe->setColor(ccc3(255,253,228));
+	}
+	
+	//CCLabelTTF *numberLabel = dynamic_cast<CCLabelTTF*>(gotoBg->getChildByTag(3));
+	LabelFT *numberLabel = Helper::getLabelFTByParentAndTag(gotoBg, 3);
+	CC_ASSERT(numberLabel);
+
+	if(number >rewardQuest.needNum )
+	{
+		number = rewardQuest.needNum;
+	}
+	std::string numberLabels = CCString::createWithFormat("%d",number)->getCString();
+	std::string leftnumber = numberLabels.append("/").append(CCString::createWithFormat("%d",rewardQuest.needNum)->getCString());
+	if (numberLabel)
+	{
+		numberLabel->setString(leftnumber.c_str());
+		//numberLabel->setPositionX(numberLabel->getPositionX()+60);
+		numberLabel->setColor(ccc3(174,255,0));
+	}
+}
+
+cocos2d::SEL_MenuHandler RewardUiGotoItemFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler RewardUiGotoItemFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "xuanshang_goto", RewardUiGotoItemFrame::onGotoBtnPressed);
+
+	return NULL;
+}
+
+void RewardUiGotoItemFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	setAllChildernButtonPriority(this, -1);
+	gotoBg = dynamic_cast<CCSprite*>(getChildByTag(0));
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+//	setTouchPriority(-1);
+	_rewardQuest = new RewardQuestProto;
+	_rewardFrameBG = getChildByTag(0);
+}
+
+void RewardUiGotoItemFrame::onGotoBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CLOSE_UI(WCT_RewardQuestUi);
+	RewardQuestProto rewardQuest;
+	rewardQuest.questId = RewardQuestMgr::getInstance()->getCurQuestData()->questId;
+	RewardQuestMgr::getInstance()->findRewardQusetInfo(rewardQuest);
+
+	stCreateProto const* proto = RoleManager::getInstance()->getCreatureProto(rewardQuest.attactId);
+	if(proto == NULL)
+	{
+		return;
+	}
+	QuestMgr::getInstance()->setTargetPosition(proto->nPosX,proto->nPosY);
+//	World::getInstance()->getTaskTraceUi()->appendTask(rewardQuest->questId  , rewardQuest->title.c_str(), CCString::createWithFormat("%d%s",rewardQuest->needNum,"\xE5\x8F\xAA")->getCString() ,_item->getCurrentNum(),rewardQuest->needNum);
+	
+	switch(rewardQuest.type)
+	{
+	case ERQT_Help:
+	case ERQT_Attact:
+		{   
+			LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+			ploc->setQuestId(rewardQuest.questId);
+			ploc->setAttackQuestId( rewardQuest.questId);
+			ploc->setAttackMonsterId(rewardQuest.NPCId);
+			AutoActionMgr::getInstance()->setCurrentQuestID(rewardQuest.questId,AutoActionMgr::TraceTarget(rewardQuest.attactId,false) );
+			ChangeMonsterName evt;
+			SEND_EVENT(&evt);
+			RewardQuestMgr::getInstance()->runToNPC(rewardQuest.NPCId);
+		}
+		break;
+	case  ERQT_Boss:
+		{   
+			WorldPacket C2G_Msg(NET_C2G_REQUEST_BOSS_LIST);
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);
+			BossPKMgr::getInstance()->setOpenBossUi(true,false);
+		}
+		break;
+	case ERQT_Fuben:
+		{
+			OPEN_UI(WCT_FubenUI);
+			FubenUiLayer* pUI = getUiNodeByTag<FubenUiLayer>(WCT_FubenUI);
+			pUI->hardAction();
+		}
+		break;
+	}
+}
+
+void RewardUiGotoItemFrame::onFinishBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent){
+	RewardQuestMgr::getInstance()->sendCompleteQuest(RewardQuestMgr::getInstance()->getCurQuestData()->questId);
+}
+
+bool RewardUiGotoItemFrame::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	//CCNode *node = getChildByTag(0);
+	if(isTouchOnNodeContent(_rewardFrameBG, pTouch))
+	{
+		CCScene *scene = UiMgr::getInstance()->getCurScene();
+		_stPt = scene->convertTouchToNodeSpace(pTouch);
+		std::list<RewardQuestItem*> items = GET_UI(RewardQuestUi,WCT_RewardQuestUi)->getUiLayer()->getItemList();
+		for(std::list<RewardQuestItem*> ::iterator iter = items.begin(); iter != items.end(); ++ iter)
+		{
+			RewardQuestItem *item = *iter;
+			item->removeSelected();
+		}
+
+		return true;
+	}
+
+	if (isTouchOnNodeContent(this,pTouch))
+	{
+		CCScene *scene = UiMgr::getInstance()->getCurScene();
+		scene->convertTouchToNodeSpace(pTouch);
+		return true;
+	}
+	return false;
+}
+
+void RewardUiGotoItemFrame::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	_rewardQuest->questId = RewardQuestMgr::getInstance()->getCurQuestData()->questId;
+	RewardQuestMgr::getInstance()->findRewardQusetInfo(*_rewardQuest);
+	//CCNode *node = getChildByTag(0);
+	if(isTouchOnNodeContent(_rewardFrameBG, pTouch))
+	{
+		_item->addSelected();
+		CCScene *scene = UiMgr::getInstance()->getCurScene();
+		scene->convertTouchToNodeSpace(pTouch);
+		if(IS_UI_OPEN(WCT_RewardQuestUi))
+		{
+			RewardQuestUiLayer* rewardLayer = GET_UI(RewardQuestUi,WCT_RewardQuestUi)->getUiLayer();
+			if(rewardLayer != NULL)
+			{
+				rewardLayer->updateDetail(_rewardQuest);
+				if(RewardQuestMgr::getInstance()->getCurQuestData()->completeNum >= _rewardQuest->needNum)
+				{
+					rewardLayer->setGiveupButton(false);
+				}
+				else
+				{
+					rewardLayer->setGiveupButton(true);
+				}
+			}
+		}
+	}
+}
+
+void RewardUiGotoItemFrame::onExit()
+{
+	if(_rewardQuest)
+	{
+		delete _rewardQuest;
+		_rewardQuest = NULL;
+	}
+	CCSprite::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+
+
+
+

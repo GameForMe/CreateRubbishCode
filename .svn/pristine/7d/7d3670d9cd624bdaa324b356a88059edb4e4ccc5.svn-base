@@ -1,0 +1,2441 @@
+#include "LocalPlayer.h"
+#include "PlayerState.h"
+#include "SparseGraph.h"
+#include "MapManager.h"
+#include "RoleManager.h"
+#include "SkillManager.h"
+#include "SkillAnimManager.h"
+#include "ActionProto.h"
+#include "QuestMgr.h"
+#include "TCPClient.h"
+#include "DBMgr.h"
+#include "MessageDispatcher.h"
+#include "HuoYueUi.h"
+#include "InstanceUi.h"
+#include "JoyStick.h"
+#include "RoleHeadUi.h"
+#include "World.h"
+#include "UiManager.h"
+#include "ExchangeBusinessMgr.h"
+#include "Auto_ActionMgr.h"
+#include "StringMgr.h"
+#include "ToolTip.h"
+#include "InstanceProto.h"
+#include "MiniMapUi.h"
+#include "CfgReader.h"
+#include "ClientCfg.h"
+#include "Role.h"
+#include "HookSetUi.h"
+#include "MountUi.h"
+#include "MasterPrenticeMgr.h"
+#include "LoginProto.h"
+#include "PackageManager.h"
+#include "UiTools.h"
+#include "MessageBoxUi.h"
+#include "MartialEquipUi.h"
+#include "VIPMgr.h"
+#include "UiResourceMgr.h"
+#include "AttackAction.h"
+#include "RechargeUi.h"
+#include "tools.h"
+#include "CommonView.h"
+#include "CrossSceneUI.h"
+#include "GuildMgr.h"
+#include "f_string_util.h"
+#include "GambleMgr.h"
+
+#if ENABLE_GOTYE==1
+#include "voice/VoiceMgr.h"
+#endif
+
+void LocalPlayer::initFsm()
+{
+	Player::initFsm();
+	QuestMgr::getInstance()->initEvery();
+
+	unsigned int roleID = getId();
+	std::stringstream ss;
+	ss<<"set"<<"_"<<roleID;
+	m_showTitle[0] = (ClientCfg::getInstance()->getInt(ss.str(),"Title0",1))?true:false;
+	m_showTitle[1] = (ClientCfg::getInstance()->getInt(ss.str(),"Title1",1))?true:false;
+	m_showTitle[2] = (ClientCfg::getInstance()->getInt(ss.str(),"Title2",1))?true:false;
+	_delayNode = CCNode::create();
+	_delayNode->retain();
+
+	CCPoint pos;
+	//顶上第一排
+	pos = CCPoint(1560,2472);
+	_posList.push_back(pos);
+	pos = CCPoint(1656,2472);
+	_posList.push_back(pos);
+	pos = CCPoint(1608,2472);
+	_posList.push_back(pos);
+	//2
+	pos = CCPoint(1608,2424);
+	_posList.push_back(pos);
+	pos = CCPoint(1656,2424);
+	_posList.push_back(pos);
+	pos = CCPoint(1704,2472);
+	_posList.push_back(pos);
+	//第二排
+	pos = CCPoint(1608,2376);
+	_posList.push_back(pos);
+	pos = CCPoint(1656,2376);
+	_posList.push_back(pos);
+	pos = CCPoint(1704,2424);
+	_posList.push_back(pos);
+	//第三排
+	pos = CCPoint(1656,2328);
+	_posList.push_back(pos);
+	pos = CCPoint(1704,2376);
+	_posList.push_back(pos);
+	pos = CCPoint(1752,2376);
+	_posList.push_back(pos);
+
+/*
+ 	m_u16ActiveID[0] = ClientCfg::getInstance()->getInt(ss.str(),"TitleId0",-1);
+ 	m_u16ActiveID[1] = ClientCfg::getInstance()->getInt(ss.str(),"TitleId1",-1);
+ 	m_u16ActiveID[2] = ClientCfg::getInstance()->getInt(ss.str(),"TitleId2",-1);
+
+	for (int i = 0; i < 3; i++)
+	{
+		sendSetTitle(i,m_u16ActiveID[i]);	
+	}
+	//发是否显示激活称号的消息 gx add 2013.10.31
+	NET_SIC_show_active_title send;
+	send.bshow_title[0] = m_showTitle[0]?1:0;
+	send.bshow_title[1] = m_showTitle[1]?1:0;
+	send.bshow_title[2] = m_showTitle[2]?1:0;
+	TCP_CLIENT->send_net_cmd(&send, NP_NORMAL, false);*/
+	//end
+	
+	//std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+	//std::string sSEAutoRun = sSEDir + "E1_40.plist";
+	//std::string sSEAutoAttack = sSEDir + "E1_41.plist";
+	//_plist.insert(sSEAutoAttack);																
+	//_plist.insert(sSEAutoRun);
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+
+	//preloadLaunchEffect();
+	//CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEAutoRun.c_str());
+	//CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEAutoAttack.c_str());
+	//[bing] 放在这里初始化自动寻路特效文字
+//		_autoRunAcNode->setPositionY(_boundBox.getMaxY() /* - CCDirector::sharedDirector()->getWinSize().height/19.0f*/);
+//		_autoRunAcNode->setPositionY(CCDirector::sharedDirector()->getWinSize().height / 2.0f);
+//		_node->addChild(_autoRunAcNode, RZN_State);		 
+}
+void LocalPlayer::loadLocalPlayerTitleData()
+{
+	unsigned int roleID = getId();
+	std::stringstream ss;
+	ss<<"set"<<"_"<<roleID;
+	m_showTitle[0] = (ClientCfg::getInstance()->getInt(ss.str(),"Title0",1))?true:false;
+	m_showTitle[1] = (ClientCfg::getInstance()->getInt(ss.str(),"Title1",1))?true:false;
+	m_showTitle[2] = (ClientCfg::getInstance()->getInt(ss.str(),"Title2",1))?true:false;
+	NET_SIC_show_active_title send;
+	send.bshow_title[0] = m_showTitle[0]?1:0;
+	send.bshow_title[1] = m_showTitle[1]?1:0;
+	send.bshow_title[2] = m_showTitle[2]?1:0;
+	TCP_CLIENT->send_net_cmd(&send, NP_IDLE, false);
+	return;
+}
+cocos2d::CCPoint LocalPlayer::getHeadPos() const
+{
+	//TODO
+	return ccp(0.0, 0.0);
+}
+
+LocalPlayer::LocalPlayer()
+	: _curLevelExp(0)
+	, _curMaxExp(1)
+	, _autoRunAcNode(NULL)
+	, _attackState(false)
+	, _targetPathMapId((unsigned int)-1)
+	, m_InstanceData(0)
+	,m_VIPExp((unsigned int)-1)
+	, _lastArea(MapManager::MapArea::AT_Normal)
+	, _rideCurExp(0)
+	, _nMaPai(0)
+	, _fMaPaiInc(0.0f) 
+	, _rideTimer(1.0f)
+	, _canRide(false)
+	, _bRideInit(false)
+	, _bRideButton(false)
+	, _LeaveExp(0)
+	,_tempLeaveExp(0)
+	, _LeaveTime(0)
+	, _nLeaveExpType(1)
+	, _nOneKeyBeishu(0)
+	,m_DayNumFromCreateTime(0)
+	, m_bIsAutoRun(false)
+	, m_bIsRunSEStay(false)
+	, m_bIsReachDes(false)
+	, _autoAttackAcNode(NULL)
+	,m_bIsAcceptShuangXiuState(false)
+	,_predistance(0)
+	,_nOfflineFlower(0)
+	,_nOffLineDouble(0)
+	,_nOffLineRedEnvelope(0)
+	,_nOffLineSelf(0)
+	,_nOffLineMaxExp(0)
+	,_nOfflineCoin(0)
+	,_nDice1(0)
+	,_nDice2(0)
+	,_nMulriple(0)
+	,_bOfflineIsGet(false)
+	,_dwOfflineLeaveTime(0)
+	//,fireSEAcNode(NULL)
+	,isGotoFuben(false)
+	,_questId(0)
+    ,_isMouseClick(false)
+	,_blackSp(NULL)
+	,pClip(NULL)
+	,_attackMonsterId(0)
+	,_attackQuestId(0)
+	,_ispath(true)
+	, _oldPathNum(0)
+	,bSkillPreloaded(false)
+	,_initSelectRideLv(false)
+	,_nSelectRideLv(0)
+	,_showFightTime(0)
+	,m_bIsJock(false)
+	,m_bAttBtnClick(false)
+	,m_is_fmb_active_open(false)
+	,m_roleCreateTime(0)
+	,m_low_hp_warning(false)
+	, _issueNum(0)
+	, _getNum(0)
+	, _guildAssign(false)
+	, _shenDianEnterCounts(0)
+{
+	_node->setTag(ELN_LP);
+	_guildPos = EGMP_Null;
+	memset(m_byDayClear,0,sizeof(m_byDayClear));
+	/*m_byDayClear[ERDCT_Sign_Nubmer] = -1;*/
+	m_byDayClear[ERDCT_Xili_LIMIT_SOMETHING] = -1;//雕像膜拜
+
+	m_pRunMoveAction = NULL;	//[bing] 初始化_node移动action
+	_delayNode = NULL;
+	_cardDeadLine.Clear();
+	_cardActiveTime.Clear();
+	_MonthCardStartTime.Clear();
+	preloadLaunchEffect();
+
+	REGISTER_EVENT(SBKEquipEffectUpdate,LocalPlayer,onUpdateSBKEquipEffect);
+	REGISTER_EVENT(sync_display_flag_to_server,LocalPlayer,on_event_sync_display_flag_to_server);
+
+}
+
+LocalPlayer::~LocalPlayer()
+{
+	if (!_delayNode)
+	{
+		return;
+	}
+	_autoRunAcNode = NULL;	//[bing] 挂载场景上 随着场景销毁而销毁
+	_autoAttackAcNode = NULL;
+	_delayNode->release();
+
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+
+	releaseLauchEffect();
+
+	UNREGISTER_EVENT(SBKEquipEffectUpdate,LocalPlayer,onUpdateSBKEquipEffect);
+	UNREGISTER_EVENT(sync_display_flag_to_server,LocalPlayer,on_event_sync_display_flag_to_server);
+
+}
+
+void LocalPlayer::update( float dt )
+{
+	if (_node->getParent()==NULL)
+	{
+		return;
+	}
+
+	first_update_if_ness();
+
+	if(_updateRideAnim)
+	{
+		_updateRideAnim = false;
+		loadAnimate();						//如果是骑乘状态，重新加载动画 getAttribute(RA_RideState)
+	}
+
+	updateRealPosition();
+
+	updateRoleOrderOnMap();
+
+	updateAnimConfig();
+
+	update_skill_state();
+
+	update_hp_warning();
+
+	if(_stateMechine)
+		_stateMechine->Update(dt);
+
+}
+
+
+
+void LocalPlayer::attackTo( unsigned int roleId )
+{
+	setIsPath(true);
+	setEnterAttackState();
+	MessageDispatcher::Instance()->DispatchMsg(-1.0, NULL, this, M_ATTRACK, (void *)&roleId);
+}
+
+bool LocalPlayer::runPath(bool runBodyAnim /*= false*/)
+{
+	if(!getIsPath() || _path.size() == 0)	
+	{
+			setAutoRunState(false);
+
+		//if(0 < _path.size())
+		//	_path.clear();
+		ClearPath();
+
+		MessageDispatcher::Instance()->DispatchMsg(-1.0, NULL, this, M_LpStand, NULL);
+
+		skillbook_pathfind_reached evt;
+		SEND_EVENT(&evt);
+
+		return false;
+	}
+
+	if(!_isMouseClick && !AutoActionMgr::getInstance()->Get_Auto_Action() && m_isOnFindPath)
+	{
+		setAutoRunState(true);
+	}
+	
+	pathNode pos = _path.front();
+	//_path.erase(_path.begin());
+	
+	CCPoint pt = ccp(pos.x(),pos.y());
+	Role* _role = NULL;
+
+	CCPoint ps;
+	RoleManager::RoleMap tmpRoleMap;
+	tmpRoleMap = RoleManager::getInstance()->getAllRemotePlayer();
+	RoleManager::RoleMap::iterator iter = tmpRoleMap.begin();
+	for(;iter!= tmpRoleMap.end(); ++iter)
+	{		
+		Role* tmpRole = iter->second;
+		if (tmpRole)
+		{
+			if (!IS_PLAYER(tmpRole->getId()))
+			{
+				continue;
+			}
+			ps = tmpRole->getPosition();
+		}
+	}	
+
+	if (_posList.size() > 0)
+	{
+		for (size_t i =0 ;i< _posList.size(); i++)
+		{
+			RoleManager::getInstance()->pickRole(pt,&_role);
+			if (_role != NULL)
+			{
+				//计算出角色的可视区域
+				CCPoint _pos = _role->getPosition();
+				//CCRect rect(_pos.x - 150,_pos.y - 150,200,200);
+				//CCRect rect1(getPosition().x - 150,getPosition().y - 150,200,200);
+				//const CCRect &bound = _role->getBoundBox();
+				//const CCRect &curRoleBound = getBoundBox();
+				/*if (IS_PLAYER(_role->getId()))
+				{
+					if (pos.x() == _posList[i].x && pos.y() == _posList[i].y)
+					{
+						_path.clear();
+						pos._x = getPosition().x;
+						pos._y = getPosition().y;
+					}					
+					else if (curRoleBound.containsPoint(ccpSub(pt, getPosition())))
+					{
+						_path.clear();
+						pos._x = getPosition().x;
+						pos._y = getPosition().y;
+					}
+					
+				}			*/		
+
+
+				/*for (int i = 0;i <_posList.size();i++)
+				{
+					if (pos.x() == _posList[i].x && pos.y() == _posList[i].y)
+					{
+						_path.clear();
+						pos._x = getPosition().x;
+						pos._y = getPosition().y;
+					}
+				}*/
+			}
+		}			
+	}
+	int oldDir = getRoleDir();
+	const CCPoint &curPos = getPosition();
+	setDirection(ccp(pos.x() - curPos.x, pos.y() - curPos.y));
+	int newDir = getRoleDir();
+	if(oldDir != newDir && runBodyAnim)
+	{
+		stopAni();
+		runRunAni();
+	}
+	setDestMovePoint(pt);
+	float dis = ccpDistance(curPos, ccp(pos.x(), pos.y()));
+
+	CCMoveTo *moveTo = CCMoveTo::create(dis / _roledata[RA_SPEED], ccp(pos.x() , pos.y()));
+	m_pRunMoveAction = CCSequence::createWithTwoActions(moveTo, CCCallFuncND::create(LocalPlayerActionCallBack::getInstance(), SEL_CallFuncND(&LocalPlayerActionCallBack::runPathCallBack), this));
+
+	_node->runAction(m_pRunMoveAction);
+
+	return true;
+	//CCMoveTo *moveToName = CCMoveTo::create(dis / _roledata[RA_SPEED], ccp(pos.x() , pos.y()));
+	//_nodeName->stopAllActions();
+	//_nodeName->runAction(moveToName);
+}
+
+void LocalPlayer::runPathTo( const CCPoint &pos, int mapId /*= -1 */)
+{
+	//LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	//if (!IS_VALID_PTR(ploc))
+	//	return;
+	if (ccpDistance(pos,getPosition()) < 1.0f )
+	{
+		_sigPathFinished.emit();
+		return;
+	}
+
+	CCTMXTiledMap* curMap = MapManager::getInstance()->getMap();
+	if (curMap == NULL)
+		return;
+	if (this->isInRoleStateAny(RA_ShuangXiu) || this->isInRoleStateAny(RA_Stall) || this->isInRoleStateAny(RA_Exchange))
+	{
+		if (this->isInRoleStateAny(RA_Exchange))
+		{
+			ExchangeBusinessMgr::getInstance()->CancleExchange();
+		}
+		return;
+	}
+	
+	this->setExitAttackState();
+	setTargetMapId(mapId);
+	setIsPath(true);
+	MessageDispatcher::Instance()->DispatchMsg(-1.0, NULL, this, M_PATHFIND, (void*)&pos);
+}
+
+void LocalPlayer::setTargetMapId( unsigned int mapId )
+{
+	_targetPathMapId = mapId;
+}
+
+// bool LocalPlayer::isAnimationFinished() const
+// {
+// 	if(_lastAni)
+// 		return _lastAni->isDone();
+// 	return true;
+// }
+
+void LocalPlayer::updateCurMaxExp()
+{
+	//读取数据库，获取升级最大经验;
+	int level = _level;
+	switch(_roledata[RA_ROLETYPE])
+	//switch(RT_Warrior)
+	{
+	case RT_Warrior:
+		level += 1000;
+		break;
+	case RT_Mage:
+		level += 2000;
+		break;
+	case RT_Taoist:
+		level += 3000;
+		break;
+	}
+
+	_curMaxExp = RoleManager::getInstance()->get_max_exp_by_role_lv_index(level);
+
+}
+
+// void LocalPlayer::addBufferId( int bufferId ,UINT srcRoleId)
+// {
+// 	buffDestInfo info;
+// 	info.buffId = bufferId;
+// 	info.roleId = srcRoleId;
+// 	Role* role = RoleManager::getInstance()->findRole(srcRoleId);
+// 	if (role)
+// 	{
+// 		info.level = role->getLevel();
+// 		info.profession = role->getAttribute(RA_ROLETYPE);
+// 		info.rating = role->getAttribute(RA_BATTLE_POINT);
+// 		info.name = role->getNameUtf8();
+// 	}
+// 	_plBuffersId.push_back(info);
+// 
+// 	play_buff_take_effect_sfx(bufferId);
+// }
+
+void LocalPlayer::removeBufferId( int bufferId )
+{
+	for(std::vector<buffDestInfo>::iterator iter = _plBuffersId.begin(); iter != _plBuffersId.end(); ++ iter)
+	{
+		if(iter->buffId == bufferId)
+		{
+			_plBuffersId.erase(iter);
+			return;
+		}
+	}
+}
+
+const std::vector<buffDestInfo> &LocalPlayer::getBuffersId()
+{
+	return _plBuffersId;
+}
+
+bool LocalPlayer::hasBuff( int buffId )
+{
+	for(std::vector<buffDestInfo>::iterator iter = _plBuffersId.begin(); iter != _plBuffersId.end(); ++iter)
+	{
+		if(buffId == iter->buffId)
+			return true;
+	}
+	return false;
+}
+
+void LocalPlayer::setRoleDayClearInfo(const int _index, const unsigned char _num)
+{
+	if (_index < 0 || _index >= ROLE_DAY_CLEAR_NUM)
+		return;
+	m_byDayClear[_index] = _num;
+
+	if (_index == ERDCT_BIQI_TASKS_COUNT)
+		QuestMgr::getInstance()->updateBiqi();
+	if(_index == ERDCT_DAILY_TASKS_COUNT)
+	{
+		QuestMgr::getInstance()->updateJunXu();
+	}
+	if(_index == ERDCT_BUYLINGQI)
+	{
+		GET_UI(InstanceUi, WCT_InstanceUi)->setLastTimes(_num);
+	}
+	/*else if(_index == ERDCT_Sign_Nubmer)
+	{
+		MiniMapUi *miniMapUi = World::getInstance()->getMiniMapUi();
+		if(miniMapUi != NULL)
+			miniMapUi->updateAnimation();
+	}*/
+	else if(_index == ERDCT_RideTogTimes)
+	{
+		GET_UI(MountUi, WCT_MountUi)->updateData();
+	}
+}
+
+void LocalPlayer::setRoleDayClearInfoTwo(int _index,unsigned char _num)
+{
+	if (_index < 0 || _index >= ROLE_DAY_CLEAR_TWO_NUM)
+		return;
+	m_byDayClearTwo[_index] = _num;
+}
+
+const unsigned char LocalPlayer::getRoleDayClearInfo(const int _index)
+{
+	if (_index < 0 || _index >= ROLE_DAY_CLEAR_NUM)
+		return 0;
+	return m_byDayClear[_index];
+}
+
+const unsigned char LocalPlayer::getRoleDayClearInfoTwo(const int _index)
+{
+	if (_index < 0 || _index >= ROLE_DAY_CLEAR_TWO_NUM)
+		return 0;
+	return m_byDayClearTwo[_index];
+}
+
+void LocalPlayer::insterTitle( const tagTitleData& titleData )
+{
+	_mapTitle.insert(std::make_pair(titleData.dwTitleID, titleData));
+}
+
+void LocalPlayer::removeTitle( unsigned int dwID )
+{
+	std::map<unsigned int, tagTitleData>::iterator iter = _mapTitle.find(dwID);
+	if (iter != _mapTitle.end())
+	{
+		_mapTitle.erase(iter);
+	}
+
+	for(int i = 0; i < 3; i++)
+	{
+		if (m_u16ActiveID[i] == dwID)
+		{
+			setCurTille(i, INVALID);
+		}
+	}
+}
+
+void LocalPlayer::clearTitle()
+{
+	_mapTitle.clear();
+}
+
+void LocalPlayer::sendSetTitle( int nIndex, unsigned int dwID,bool isWear)
+{
+	if (!isWear)
+	{
+		if (nIndex == -1) return;
+		for (int i = nIndex; i < MAX_REFRESH_TITLE_NUM;i++)
+		{
+			if (i < MAX_REFRESH_TITLE_NUM - 1)
+			{
+				m_u16ActiveID[i] = m_u16ActiveID[i+1];
+				m_showTitle[i] = m_showTitle[i+1];
+			}
+		}
+		m_u16ActiveID[MAX_REFRESH_TITLE_NUM - 1] = -1;
+		m_showTitle[MAX_REFRESH_TITLE_NUM - 1] = false;
+	}
+	else
+	{
+		bool t_isFull = true;
+		int t_index = 0;
+		for (int i = 0; i < MAX_REFRESH_TITLE_NUM;i++)
+		{
+			if (m_u16ActiveID[i] == dwID)
+			{
+				return;
+			}
+			if (m_u16ActiveID[i] == -1)
+			{
+				t_isFull = false;
+				t_index = i;
+			}
+		}
+		if (t_isFull)
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["title_ui_max_wear"]);
+			return; //提示满了
+		}
+		for (int i = t_index; i > 0; i--)
+		{
+			m_u16ActiveID[i] = m_u16ActiveID[i - 1];
+			m_showTitle[i] = m_showTitle[i - 1];
+		}
+		m_u16ActiveID[0] = dwID;
+		m_showTitle[0] = true;
+	}
+
+	NET_SIC_use_role_title send;
+	send.dw_role_id = getId();
+	for (int i = 0; i < MAX_REFRESH_TITLE_NUM; i++)
+	{
+		send.u16TitleID[i] = m_u16ActiveID[i];
+	}
+	TCP_CLIENT->send_net_cmd(&send, NP_INSIGNIFICANT, false);
+
+
+	string str = "";
+	for (int t_index = 0 ; t_index < MAX_REFRESH_TITLE_NUM;t_index++)
+	{
+		std::stringstream ss;
+		ss<<"set"<<"_"<<getId();
+		safe_sprintf(str,"Title%d",t_index);
+		ClientCfg::getInstance()->setInt(ss.str(), str.c_str(), m_showTitle[t_index]);
+		safe_sprintf(str,"TitleId%d",t_index);
+		ClientCfg::getInstance()->setInt(ss.str(), str.c_str(),m_u16ActiveID[t_index]);
+	}
+	
+
+	//发是否显示激活称号的消息 gx add 2013.10.31
+	NET_SIC_show_active_title sendShow;
+	sendShow.bshow_title[0] = m_showTitle[0]?1:0;
+	sendShow.bshow_title[1] = m_showTitle[1]?1:0;
+	sendShow.bshow_title[2] = m_showTitle[2]?1:0;
+	TCP_CLIENT->send_net_cmd(&sendShow, NP_NORMAL, false);
+
+	ClientCfg::getInstance()->flush();
+}
+
+void LocalPlayer::sendSetTitle( int nIndex, unsigned int dwID )
+{
+	if (m_u16ActiveID[nIndex] == dwID)
+		return;
+	
+	for (int j = 0;j < MAX_REFRESH_TITLE_NUM;++j)
+	{
+		if (m_u16ActiveID[j] == dwID)
+		{
+			m_u16ActiveID[j] = m_u16ActiveID[nIndex];
+			break;
+		}
+	}
+	m_u16ActiveID[nIndex] = dwID;
+	NET_SIC_use_role_title send;
+	send.dw_role_id = getId();
+	for (int i = 0; i < MAX_REFRESH_TITLE_NUM; i++)
+	{
+		send.u16TitleID[i] = m_u16ActiveID[i];
+	}
+
+	TCP_CLIENT->send_net_cmd(&send, NP_INSIGNIFICANT, false);
+}
+
+void LocalPlayer::sendInitTitle()
+{
+	NET_SIC_get_role_titles send;
+	send.dw_role_id = getId();
+	TCP_CLIENT->send_net_cmd(&send, NP_INSIGNIFICANT, false);
+}
+
+const std::map<unsigned int, tagTitleData>& LocalPlayer::getAllTitle() const
+{
+	return _mapTitle;
+}
+
+unsigned int LocalPlayer::getTitleGetTimeByID(unsigned int pId)
+{
+	std::map<unsigned int, tagTitleData>::iterator iter = _mapTitle.find(pId);
+	if (iter != _mapTitle.end())
+	{
+		return iter->second.dwTime;
+	}
+	return 0;
+}
+
+int LocalPlayer::getWearTitleNum()
+{
+	int t_num = 0;
+	for ( int i = 0; i < 3; i++)
+	{
+		if (m_u16ActiveID[i] != INVALID)
+		{
+			t_num ++;
+		}
+	}
+	return t_num;
+}
+
+unsigned int LocalPlayer::getWearTitleIdByIndex(int pIndex)
+{
+	if (pIndex >= MAX_REFRESH_TITLE_NUM)
+	{
+		return -1;
+	}
+	return m_u16ActiveID[pIndex];
+}
+
+bool LocalPlayer::isSetTitle( unsigned int dwID )
+{
+	for (int i = 0; i < 3; i++)
+	{
+		if (m_u16ActiveID[i] == dwID)
+			return true;
+	}
+
+	return false;
+}
+
+bool LocalPlayer::isExist( unsigned int dwID )
+{
+	if (_mapTitle.empty())
+		return false;
+
+	std::map<unsigned int, tagTitleData>::iterator iter = _mapTitle.find(dwID);
+	if (iter != _mapTitle.end())
+	{
+		return true;
+	}
+
+	return false;
+}
+
+bool LocalPlayer::getWearTitleShowState(unsigned int dwID)
+{
+	for (int j = 0;j < MAX_REFRESH_TITLE_NUM;++j)
+	{
+		if (m_u16ActiveID[j] == dwID)
+		{
+			return m_showTitle[j];
+		}
+	}
+	return false;
+}
+
+int LocalPlayer::getWearTitleShowIndex(unsigned int dwID)
+{
+	for (int index = 0;index < MAX_REFRESH_TITLE_NUM;++index)
+	{
+		if (m_u16ActiveID[index] == dwID)
+		{
+			return index;
+		}
+	}
+	return -1;
+}
+
+void LocalPlayer::autoSetCurTitle( unsigned int dwID )
+{
+	bool needSet = false;
+	for (int j = 0;j < MAX_REFRESH_TITLE_NUM;++j)
+	{
+		if (m_u16ActiveID[j] == INVALID)
+		{
+			m_u16ActiveID[j] = dwID;
+			m_showTitle[j] = true;
+			needSet = true;
+			break;
+		}
+	}
+	if (needSet)
+	{
+		NET_SIC_use_role_title send;
+		send.dw_role_id = getId();
+		for (int i = 0; i < MAX_REFRESH_TITLE_NUM; i++)
+		{
+			send.u16TitleID[i] = m_u16ActiveID[i];
+		}
+		TCP_CLIENT->send_net_cmd(&send, NP_INSIGNIFICANT, false);
+	}
+}
+
+void LocalPlayer::setActiveData( const tagActiveData& data )
+{
+	//memcpy(&m_activeData, &data, sizeof(tagActiveData));
+	m_activeData = data;
+	if(IS_UI_OPEN(WCT_HuoyueUi))
+	{
+		GET_UI(HuoYueUi, WCT_HuoyueUi)->updateData();
+	}
+}
+
+const tagActiveData& LocalPlayer::getActiveData()
+{
+	return m_activeData;
+}
+
+void LocalPlayer::sendInitActiveData()
+{
+	NET_SIC_get_active_info send;
+	TCP_CLIENT->send_net_cmd(&send, NP_INSIGNIFICANT, false);
+}
+
+void LocalPlayer::sendReceiveActive( int nIndex )
+{
+	NET_SIC_role_active_receive send;
+	send.nIndex = nIndex;
+	TCP_CLIENT->send_net_cmd(&send, NP_INSIGNIFICANT, false);
+}
+
+void LocalPlayer::sendActivedone( int nIndex ,int nBeishu)
+{
+	NET_SIC_active_done send;
+	send.nIndex = nIndex;
+	send.nBeishu = nBeishu;
+	TCP_CLIENT->send_net_cmd(&send, NP_INSIGNIFICANT, false);
+}
+void LocalPlayer::sendActivedone(int nIndex,int nBeishu,unsigned short currentQuestID,unsigned int npcid)
+{
+	NET_SIC_active_done send;
+	send.nIndex = nIndex;
+	send.currentQuestId=currentQuestID;
+	send.npcid=npcid;
+	send.nBeishu = nBeishu;
+	TCP_CLIENT->send_net_cmd(&send, NP_INSIGNIFICANT, false);
+}
+void LocalPlayer::setEnterAutoAttack()
+{
+	//if (getAutoRunState())
+	if (NULL != _autoRunAcNode && _autoRunAcNode->isVisible())
+	{
+		this->setAutoRunState(false);
+		setShowAutoRun(false);
+	}
+
+	this->activateAutoFighteSE();
+//		_autoAttackAcNode->setPositionY(_boundBox.getMaxY()/* + CCDirector::sharedDirector()->getWinSize().height/11.0f*/);
+//		_node->addChild(_autoAttackAcNode, RZN_State);
+	if(!_autoAttackAcNode->GetActionState())
+		_autoAttackAcNode->BeginAction(0.15f, true);
+	SkillManager::getInstance()->planUseManual(-1);
+}
+
+void LocalPlayer::setExitAutoAttack()
+{
+	//CCNode* atk_effect_node = CCDirector::sharedDirector()->getRunningScene()->getChildByTag(WCT_AUTOFIGHTSE);
+	if (_autoAttackAcNode)
+	{
+		_autoAttackAcNode->StopAction(false, true);
+		_autoAttackAcNode->removeFromParent();
+		_autoAttackAcNode = NULL;
+	}
+}
+
+// void LocalPlayer::onDelayCalbackImpl()
+// {
+// 	CCDirector* director = CCDirector::sharedDirector();
+//	CCScheduler* sched = director->getScheduler();
+//	sched->unscheduleSelector(schedule_selector(LocalPlayer::onDelayCalback), this);
+// 	MessageDispatcher::Instance()->DispatchMsg(-1.0, NULL, this, M_PATHFIND, (void*)&_delayPos);
+// }
+
+void LocalPlayer::onDelayCalback( float dt )
+{
+	CCDirector* director = CCDirector::sharedDirector();
+	CCScheduler* sched = director->getScheduler();
+	sched->unscheduleSelector(schedule_selector(LocalPlayer::onDelayCalback), this);
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	CCTMXTiledMap* curMap = MapManager::getInstance()->getMap();
+	if (lp && curMap)
+		MessageDispatcher::Instance()->DispatchMsg(-1.0, NULL, lp, M_PATHFIND, (void*)&_delayPos);
+
+	//LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	//lp->onDelayCalbackImpl();
+}
+
+bool LocalPlayer::changeState(unsigned int mask, const Telegram& telegram)
+{
+	if((mask & MSG_MASK(telegram.Msg)) == 0)
+		return false;
+	CCTMXTiledMap* curMap = MapManager::getInstance()->getMap();
+	if (curMap == NULL)
+		return false;
+	switch(telegram.Msg)
+	{
+// 	case M_UnRide:
+// 		{
+// 			stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+// 			return true;
+// 		}
+	case M_JOYSTICKPRESS:
+		{
+			if (getAutoRunState())
+			{
+				this->setAutoRunState(false);
+			}				
+			setExitAttackState();
+			JoyMessagePressedData *data = (JoyMessagePressedData*)telegram.ExtraInfo;
+			eOctDir oldDir = (eOctDir)getRoleDir();
+			setDirection(data->direction);
+			eOctDir newDir = (eOctDir)getRoleDir();
+			if(oldDir != newDir || stateMachine()->CurrentState() != LocalPlayerStateRun::getInstance())
+			{
+				AutoActionMgr::getInstance()->setCurrentQuestID(INVALID,AutoActionMgr::TraceTarget());
+
+				stateMachine()->ChangeState((LocalPlayerStateRun::getInstance()));
+			}
+			return true;
+		}
+	case M_LpStand:
+		{
+			stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+			if (m_bIsReachDes)
+			{
+// 				if(_autoRunAcNode->isVisible())
+// 				{
+// 					_autoRunAcNode->StopAction();
+// 					_autoRunAcNode->setVisible(false);
+// 				}
+				if(_autoRunAcNode->GetActionState())
+					_autoRunAcNode->StopAction(false, true);
+				m_bIsReachDes = false;
+			}
+			return true;
+		}
+	case M_ATTRACK:
+		{
+
+// 			if(RoleManager::getInstance()->getLocalPlayer()->getAttackState())
+// 			{
+// 				RoleManager::getInstance()->getLocalPlayer()->setEnterAutoAttack();
+// 			}
+
+			CC_ASSERT(telegram.ExtraInfo != NULL);
+			setIsOnFindPath(false);
+			Role* role = RoleManager::getInstance()->findRole(RoleManager::getInstance()->get_select_role_id());
+			if(role != NULL)
+			{
+				//!不能打npc
+				if(role->getCreatureType() == CT_NPC)
+				{
+					setExitAttackState();
+					return true;
+				}
+
+				//!先寻路
+				pathNode sp(this->getPosition().x , this->getPosition().y);
+				pathNode tp(role->getPosition().x , role->getPosition().y);
+				
+				ClearPath();
+				//_path.clear();
+				MapManager::getInstance()->findPath(sp, tp,_path);
+				//_oldPathNum = 0;
+				if (_path.size())
+				{
+					setEndMovePoint(ccp(_path[_path.size() - 1].x(), _path[_path.size() - 1].y()));
+				}
+				else
+				{
+					setEndMovePoint(ccp(role->getPosition().x, role->getPosition().y));
+				}
+			}
+			else
+			{
+				ClearPath();
+				//_path.clear();
+			}
+
+			stateMachine()->ChangeState(LocalPlayerStatePreAttack::getInstance());
+			return true;
+		}
+	case M_ATTRACKED:
+		{
+			if (!getAttackState())
+				stateMachine()->ChangeState(LocalPlayerStateBeAttack::getInstance());
+			return true;
+		}
+	case M_MANUALATTRACK:
+		{
+			stateMachine()->ChangeState(LocalPlayerStateManualAttack::getInstance());
+			return true;
+		}
+	case M_ASSAULT:
+		{
+			CC_ASSERT(telegram.ExtraInfo != NULL);
+			setDestMovePoint(*(CCPoint*)(telegram.ExtraInfo));
+			stateMachine()->ChangeState(LocalPlayerStateAssault::getInstance());
+			return true;
+		}
+	case M_REPEL:
+		{
+			CC_ASSERT(telegram.ExtraInfo != NULL);
+			setDestMovePoint(*(CCPoint*)(telegram.ExtraInfo));
+			stateMachine()->ChangeState(LocalPlayerStateRepel::getInstance());
+			return true;
+		}
+	case M_DEAD:
+		{
+			if (getAutoRunState())
+			{
+				this->setAutoRunState(false);
+			}
+			stateMachine()->ChangeState(LocalPlayerStateDead::getInstance());
+			return true;
+		}
+	case M_PATHFIND:
+		{
+			CC_ASSERT(telegram.ExtraInfo != NULL);
+			CCPoint start = getPosition();
+			CCPoint pos = *((CCPoint*)telegram.ExtraInfo);
+			setIsOnFindPath(true);
+			if (_path.size())
+				sendStandMsg(getPosition());
+			std::vector<pathNode> path;
+			pathNode sp(start.x , start.y);
+			pathNode tp(pos.x , pos.y);
+
+			ClearPath();
+			//_path.clear();
+			MapManager::getInstance()->findPath(sp, tp,_path, _targetPathMapId);
+
+			//_oldPathNum = 0;
+
+			if(_path.size() > 0)
+			{
+				setEndMovePoint(ccp(_path[_path.size() - 1].x(), _path[_path.size() - 1].y()));
+				if (stateMachine()->CurrentState() == LocalPlayerStateAttack::getInstance())
+				{
+					CCDirector* director = CCDirector::sharedDirector();
+					CCScheduler* sched = director->getScheduler();
+					_delayPos = pos;
+					sched->scheduleSelector(SEL_SCHEDULE(&LocalPlayer::onDelayCalback), this, 0.5f, false);
+					return true;
+				}
+				//[bing] 移动中点击如果不切换方向不重置动作 否则跑步动作会抽
+				if(stateMachine()->CurrentState() != LocalPlayerStateRunPath::getInstance())
+					stateMachine()->ChangeState(LocalPlayerStateRunPath::getInstance());
+				else
+				{
+					//[bing] 单独拿掉_node移动action 保留其他动作
+					if(m_pRunMoveAction)
+						_node->stopAction(m_pRunMoveAction);
+					runPath(true);
+				}
+				//playAutoRunEffectByVisible();					//【Ji:】开启自动寻路特效
+			}
+			//!TODO
+			else
+			{
+				//[bing] 如果在自动寻路应该取消
+//				setAutoRunState(false);				【Ji：】移动到了每次点击地图即取消自动寻路
+				_sigPathFinished.emit();
+
+				skillbook_pathfind_reached evt;
+				SEND_EVENT(&evt);
+				//#bug 111 [huo] 
+				//stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+			}
+
+
+			return true;
+		}
+	case M_LIVE:
+		{
+			stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+			return true;
+		}
+	case M_SIT:
+		{
+			stateMachine()->ChangeState(LocalPlayerStateSit::getInstance());
+			return true;
+		}
+	case M_UNSIT:
+		stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+		return true;
+	case M_AutoUse:
+		stateMachine()->ChangeState(LocalPlayerAutoUse::getInstance());
+		return true;
+	case M_Dizzy:
+		if (getAutoRunState())
+		{
+			this->setAutoRunState(false);
+		}
+		stateMachine()->ChangeState(LocalPlayerDizzyState::getInstance());
+		return true;
+	case M_Tie:
+		if (getAutoRunState())
+		{
+			this->setAutoRunState(false);
+		}
+		stateMachine()->ChangeState(LocalPlayerTieState::getInstance());
+		return true;
+	case M_UnDizzy:
+	case M_UnTie:
+		stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+		return true;
+	case M_UpdateDis:
+		stateMachine()->ChangeState(RoleStateUpdateDisplay::getInstance());
+		return true;
+	}
+	return false;
+}
+
+void LocalPlayer::sendRunMsg( const CCPoint &oldPos, const CCPoint &newPos )
+{
+// 	if (World::getInstance()->getTransmitType())
+// 	{
+		//CCLog("LocalPlayer move, NET_SIC_mouse_walk. oldPos(%f, %f), newPos(%f, %f)", oldPos.x, oldPos.y, newPos.x, newPos.y);
+	//}
+
+	//完善逻辑，在切换场景中，或者已经在发送了小飞鞋或者传送点触发器，等待服务器返回的时候就不要再发送走路等消息
+	if ( CrossSceneUI::getInstance()->isInCross() )
+		return;
+	//if ( !MapManager::getInstance()->getisEnabled() )
+	//	return;
+
+	NET_SIC_mouse_walk walk;
+	walk.srcPos[0] = oldPos.x;
+	walk.srcPos[2] = oldPos.y;
+	walk.dstPos[0] = newPos.x;
+	walk.dstPos[2] = newPos.y;
+	TCP_CLIENT->send_net_cmd(&walk, NP_INSIGNIFICANT, true);
+
+	CCLOG(">>>>>>>>>>>>>>>>> LocalPlayer move, NET_SIC_mouse_walk. oldPos(%f, %f), newPos(%f, %f) >>>>>>>>>>>>>>>>>", oldPos.x, oldPos.y, newPos.x, newPos.y);
+}
+
+void LocalPlayer::runPathCallback()
+{
+	if(_path.size() > 0)
+		_path.erase(_path.begin());
+	runPath(true);
+}
+
+void LocalPlayer::stopAni()
+{
+	m_pRunMoveAction = NULL;
+	_node->stopAllActions();
+
+	//int rideState = this->getAttribute(RA_RideState);//=0是下马，=1是骑乘中
+	//if (rideState == 0)
+	{
+		_isPlayingRunSound = false;
+		AudioPlayer::getSigletonPtr()->stopSoundSceneEffect();
+	}
+	//_nodeName->stopAllActions();
+	Player::stopAni();
+}
+
+void LocalPlayer::setAttribute( eRoleAttribute attr, int val )
+{
+	if(attr != RA_BATTLE_POINT)
+ 		Player::setAttribute(attr, val);
+
+	if (attr == RA_Jinengdian)
+	{
+		update_skill_can_use evt;
+		SEND_EVENT(&evt);
+	}
+
+	if(attr == RA_BATTLE_POINT)
+	{
+		RoleHeadUi *ui = World::getInstance()->getRoleHeadUi();
+		if(ui != NULL)
+			ui->setZhandouli(val);
+		GET_UI(MartialEquipUi,WCT_MartialEquipUi)->setZhandouli(val);
+
+		Player::setAttribute(attr, val);
+	}
+	else if(attr == RA_WalkSpeed)
+	{
+		if(getAttribute(RA_RideState) == 0)
+			setAttribute(RA_SPEED, val);
+	}
+	else if(attr == RA_RideSpeed)
+	{
+		if(getAttribute(RA_RideState) != 0)
+			setAttribute(RA_SPEED, val);
+	}
+	else if(attr == RA_RideState)
+	{
+		if(val == 0)
+		{
+			setAttribute(RA_SPEED, getAttribute(RA_WalkSpeed));
+		}
+		else
+		{
+			setAttribute(RA_SPEED, getAttribute(RA_RideSpeed));
+		}
+	}
+	else if(attr == RA_BattleMode)
+	{
+		if(val == 0)
+		{
+			_rideTimer = 6.0f;//退出战斗状态6秒之后可以骑乘
+		}
+	}
+	else if(attr == RA_IsGrayName)
+	{
+		if(val == 0)
+		{
+			_rideTimer = 6.0f;//退出战斗状态6秒之后可以骑乘
+		}
+	}
+}
+
+void LocalPlayer::showLevelUpGuideInfo( int nLevel )
+{
+	//add by XSea 2014.11.14 屏蔽掉
+	return;
+	switch (nLevel)
+	{
+	case 10:
+		ToolTip::getInstance()->push(GET_STR(2080));
+		break;
+	case 15:
+		ToolTip::getInstance()->push(GET_STR(2081));
+		break;
+	case 25:
+		ToolTip::getInstance()->push(GET_STR(2082));
+		break;
+	case 30:
+		ToolTip::getInstance()->push(GET_STR(2083));
+		break;
+	case 31:
+		ToolTip::getInstance()->push(GET_STR(2084));
+		break;
+	case 33:
+		ToolTip::getInstance()->push(GET_STR(2085));
+		break;
+	case 35:
+		ToolTip::getInstance()->push(GET_STR(2086));
+		break;
+	case 40:
+		ToolTip::getInstance()->push(GET_STR(2087));
+		break;
+	case 45:
+		ToolTip::getInstance()->push(GET_STR(2091));
+		break;
+	default:
+		break;
+	}
+}
+
+std::string LocalPlayer::getManualAttackBtnFrame()
+{
+	int level = getLevel();
+	if(level < 40)
+	{
+		return "rendui_cdbtncdsprite";
+	}
+	else
+	{
+		eRoleType roleType = getRoleType();
+
+		if(roleType == RT_WWARRIOR || roleType == RT_MWARRIOR)
+		{
+			return "rendui_yeman";
+		}
+		else if(roleType == RT_WTAOIST || roleType == RT_MTAOIST)
+		{
+			return "rendui_qigongbo";
+		}
+		else if(roleType == RT_WMAGE || roleType == RT_MMAGE)
+		{
+			return "rendui_kangjubinghuan";
+		}
+		CC_ASSERT(0);
+	}
+	return "rendui_cdbtncdsprite";
+}
+
+std::string LocalPlayer::getHeadFrameName()
+{
+	switch(getRoleType())
+	{
+	case RT_MWARRIOR:
+		return "rendui_rolezhanshiman";//vv 人物角色头像
+		break;
+	case RT_WWARRIOR:
+		return "rendui_rolezhanshiwoman";
+		break;
+	case RT_MMAGE:
+		return "rendui_rolefashiman";
+		break;
+	case RT_WMAGE:
+		return "rendui_rolefashiwoman";
+		break;
+	case RT_WTAOIST:
+		return "rendui_roledaoshiwoman";
+		break;
+	case RT_MTAOIST:
+		return "rendui_roledaoshiman";
+		break;
+	}
+	return "";
+}
+
+bool LocalPlayer::isInstancePassByIndex( int index )
+{
+	if (index >= Max_Instance_Num)
+		return false;
+	return (bool)(m_InstanceData & (1 << index));
+}
+
+bool LocalPlayer::hasHighBuff( int buffId )
+{
+	int buffType = buffId / 100;
+	int buffLv = buffId % 100;
+	for(std::vector<buffDestInfo>::iterator iter = _plBuffersId.begin(); iter != _plBuffersId.end(); ++iter)
+	{
+		int id = iter->buffId;
+		int t = id / 100;
+		if(buffType == t)
+		{
+			int lv = id % 100;
+			if(lv > buffLv)
+				return true;
+		}
+	}
+	return false;
+}
+
+void LocalPlayer::checkToRide(float dt)
+{
+	//检查开放等级
+	int nOpenLevel = GetFunOpenLevel(EFOL_Ride);
+	if(getLevel() < nOpenLevel)
+	{
+		return;
+	}
+	if (InstanceMgr::getInstance()->IsPlayerInInstanceMap())
+		return;
+	
+	if(getAttribute(RA_RideState) == 0 && GET_UI(MountUi, WCT_MountUi)->getAutoRide())
+	//if(getAttribute(RA_RideState) == 0 && GET_UI(HookSetUi, WCT_HookSetUi)->getAutoSetData().data[AutoSetData::ASD_AutoRide])
+	{
+		//非骑乘状态，检查能否骑乘
+		_rideTimer -= dt;
+		if(_rideTimer < 0)
+		{
+			_rideTimer = 2.0f;//2秒中检查一次
+
+			unsigned int mapId = MapManager::getInstance()->getCurMapId();
+			bool bIsInArea = MapManager::getInstance()->IsInSafeArea();
+			if(_canRide && (MapManager::getInstance()->checkRoleArea(this) != MapManager::MapArea::AT_UnRide) && mapId != SBK_MAP_CRC_ID/* && mapId != SBK_CASTLE_MAP_CRC_ID*/)
+			{
+				if (MapManager::getInstance()->getCurMapCanRideWithMaPai() || bIsInArea == true )
+				{
+					if ( 0 == getMaPaiLevel())
+					{
+						return;
+					}
+				}
+				unsigned int tempLv = getSelectRideLv();
+				if (tempLv <= 0)
+					tempLv = getRideLv();
+				int nMountStage = 0;
+				if ((tempLv % 10) == 0)
+				{
+					nMountStage = tempLv / 10;
+				}
+				else
+				{
+					nMountStage = tempLv / 10 + 1;
+				}
+
+				RoleManager::getInstance()->sendRideMsg(nMountStage);
+			}
+		}
+	}
+}
+
+void LocalPlayer::SendPickupLeaveExp( int nType )
+{
+	if (0 < GetOffLineTotalExp())
+	{
+		NET_SIC_pickup_leave_exp send;
+		send.n16Type = nType;
+		send.nLeaveTime = GetOfflineTime();
+		TCP_CLIENT->send_net_cmd(&send , NP_INSIGNIFICANT , false);
+	}
+}
+
+void LocalPlayer::ConfirmPickupLeaveExp()
+{
+	if (0 < GetOffLineTotalExp())
+	{
+		int yuanbaoNeed = 0;
+		if (2 == _nLeaveExpType)
+		{
+			yuanbaoNeed =  GetOffLineTotalExp() / 10000;
+		}
+		else 
+		{
+			return;
+		}
+
+		if (PackageManager::getInstance()->getYuanBao() < yuanbaoNeed)
+		{
+			RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+			return;
+		}
+		NET_SIC_pickup_leave_exp send;
+		send.n16Type = _nLeaveExpType;
+		send.nLeaveTime = GetOfflineTime();
+		TCP_CLIENT->send_net_cmd(&send , NP_INSIGNIFICANT , false);
+	}
+}
+
+void LocalPlayer::setVIPExp( unsigned int Experience )
+{
+	m_VIPExp = Experience;
+	VIPMgr::getInstance()->setVIPMgrVExp(Experience);
+}
+
+void LocalPlayer::VisibleSelf( bool bSet )
+{
+	_node->setVisible(bSet);
+	//_nodeName->setVisible(bSet);
+}
+
+void LocalPlayer::playAutoRunEffectByVisible()
+{
+	if(NULL != _autoAttackAcNode && _autoAttackAcNode->isVisible() && !AutoActionMgr::getInstance()->Get_Auto_Action())
+		setExitAutoAttack();
+
+	this->activateAutoRunSE();
+	if(getAutoRunState() && !_autoRunAcNode->GetActionState())
+		_autoRunAcNode->BeginAction(0.1f, true);
+	else if(!getAutoRunState() && _autoRunAcNode->GetActionState())
+	{
+		_autoRunAcNode->StopAction(false, true);
+		if (m_bIsRunSEStay)
+		{
+			m_bIsRunSEStay = false;
+		}
+	}
+}
+
+void LocalPlayer::autoSEToNewMap()
+{
+	if (m_bIsRunSEStay)
+	{
+		if (getAutoRunState())
+		{
+			if(_autoRunAcNode != NULL)
+			{
+				if (!_autoRunAcNode->GetActionState())
+					_autoRunAcNode->BeginAction(0.1f, true);
+			}
+		}
+	}
+	else
+	{
+		if(_autoRunAcNode != NULL)
+		{
+			if (_autoRunAcNode->GetActionState())
+				_autoRunAcNode->StopAction(false, true);
+		}
+	}
+}
+
+void LocalPlayer::activateAutoRunSE()
+{
+	_autoRunAcNode = dynamic_cast<GameActionNode*>(CCDirector::sharedDirector()->getRunningScene()->getChildByTag(WCT_AUTORUNSE));
+	if (NULL == _autoRunAcNode)
+	{
+		std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+		std::string sSEAutoRun = sSEDir + "E1_40.plist";
+		//CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEAutoRun.c_str());
+
+		_autoRunAcNode = GameActionNode::create();
+		//_autoRunAcNode->retain();
+
+		_autoRunAcNode->InitWithPList(sSEAutoRun.c_str(), "E1_40");
+
+		//for(int i=1; i<99; ++i)
+		//{
+		//	CCString* autoRunStr = CCString::createWithFormat("%s%02d", "E1_40",i);
+		//	if (!_autoRunAcNode->AddTexture(autoRunStr->getCString(), "Effect", "png"))
+		//		break;
+		//}
+
+		_autoRunAcNode->setPosition(ccp(CCDirector::sharedDirector()->getWinSize().width / 2.f, CCDirector::sharedDirector()->getWinSize().height / 3.f));
+		CCDirector::sharedDirector()->getRunningScene()->addChild(_autoRunAcNode, RZN_BODY);
+		_autoRunAcNode->setTag(WCT_AUTORUNSE);
+	}
+
+	_autoRunAcNode->setVisible(true);
+}
+
+void LocalPlayer::runTransmitEffect()
+{
+	//这种常用的就不删除缓存了
+	CCSprite* target = CCSprite::create();
+	AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims,true);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_121", anims);
+
+	target->runAction(CCSequence::createWithTwoActions(anims.front(),CCRemoveSelf::create()));
+
+	target->setPosition(getPosition());
+	target->setZOrder(_node->getZOrder() + RZN_EFFECT);
+	
+	_node->getParent()->addChild(target);
+// 	GameActionNode* oldNode = (GameActionNode*)_node->getChildByTag(NT_TransmitEffect);
+// 	if (oldNode)
+// 	{
+// 		oldNode->StopAction(false,true);
+// 		oldNode->playAnimOnce(0.09f,false);
+// 	}
+// 	else
+// 	{
+// 		std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+// 		std::string sSEPlist = sSEDir + "E1_121.plist";
+// 
+// 		GameActionNode* pNode = GameActionNode::create();
+// 		pNode->InitWithPList(sSEPlist.c_str(), "E1_121");
+// 		pNode->setAnchorPoint(ccp(0.f, 0.0f));
+// 		pNode->setPosition(ccp(0.f,39.0f));
+// 		_node->addChild(pNode,RZN_EFFECT,NT_TransmitEffect);
+// 
+// 		pNode->playAnimOnce(0.09f,false);
+// 	}
+}
+
+void LocalPlayer::activateAutoFighteSE()
+{
+	_autoAttackAcNode = dynamic_cast<GameActionNode*>(CCDirector::sharedDirector()->getRunningScene()->getChildByTag(WCT_AUTOFIGHTSE));
+	if (NULL == _autoAttackAcNode)
+	{
+		std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+		std::string sSEAutoAttack = sSEDir + "E1_41.plist";
+		//CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEAutoAttack.c_str());
+
+		_autoAttackAcNode = GameActionNode::create();
+
+		_autoAttackAcNode->InitWithPList(sSEAutoAttack.c_str(), "E1_41");
+
+		//for (int i = 1; i < 99; ++i)
+		//{
+		//	CCString* seNameStr = CCString::createWithFormat("%s%02d", "E1_41", i);
+		//	if (!_autoAttackAcNode->AddTexture(seNameStr->getCString(), "Effect", "png"))
+		//		break;
+		//}
+
+		_autoAttackAcNode->setPosition(ccp(CCDirector::sharedDirector()->getWinSize().width / 2.f, CCDirector::sharedDirector()->getWinSize().height / 3.f));
+		CCDirector::sharedDirector()->getRunningScene()->addChild(_autoAttackAcNode, RZN_BODY);
+		_autoAttackAcNode->setTag(WCT_AUTOFIGHTSE);
+	}
+
+	_autoAttackAcNode->setVisible(true);
+}
+
+void LocalPlayer::on_Attracked()
+{
+	stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+}
+
+void LocalPlayer::destroyFsm()
+{
+	Player::destroyFsm();
+
+	//releaseLauchEffect();
+}
+
+bool LocalPlayer::isMyPet( unsigned int petId )
+{
+	unsigned int kulouId = SkillManager::getInstance()->getKulouID();
+	unsigned int shengShouId = SkillManager::getInstance()->getShengshouID();
+	if (petId == kulouId || petId == shengShouId)
+	{
+		return true;
+	}
+	return false;
+}
+
+void LocalPlayer::addToMap( bool repetLogin /*= false*/ )
+{
+	unsigned int tempMapId = MapManager::getInstance()->getCurMapId();
+	if (needShowShadowOps(tempMapId))
+	{
+		if (_blackSp == NULL)
+		{
+			std::string uiDir = CFGReader::instance()->get_profile_string("Art", "ICON", "");
+			std::string FullFileName = uiDir + "SingleUI/smallui_miwu.png";
+			CCSpriteFrame* Frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(FullFileName.c_str());
+			if(Frame == NULL)
+			{
+				CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addImage(FullFileName.c_str());
+				Frame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+				CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(Frame, FullFileName.c_str());
+			}
+
+			CCSize winSize = CCDirector::sharedDirector()->getVisibleSize();
+			_blackSp = CCSprite::createWithSpriteFrame(Frame);
+			_blackSp->setAnchorPoint(ccp(0.5,0.5));
+			_blackSp->setPosition(ccp(winSize.width /2,winSize.height /2));
+			_blackSp->setVisible(true);
+			CCScene *scene = UiMgr::getInstance()->getCurScene();
+			CC_ASSERT(scene != NULL);
+			scene->addChild(_blackSp, WZ_JOY);
+
+			CCSize size = _blackSp->getContentSize();
+			SetClip(CCRect((winSize.width - size.width)/2,(winSize.height - size.height)/2,_blackSp->getContentSize().width,_blackSp->getContentSize().height));
+		}
+		else
+		{
+			_blackSp->setVisible(true);
+			pClip->setVisible(true);
+		}
+
+	}
+	else
+	{
+		if (_blackSp != NULL)
+		{
+			_blackSp->removeFromParentAndCleanup(true);
+			_blackSp = NULL;
+		}
+		if (pClip != NULL)
+		{
+			pClip->removeFromParentAndCleanup(true);
+			pClip = NULL;
+		}
+	}
+
+	Player::addToMap(repetLogin);
+
+	CCLog("---LocalPlayer AddToMap---");
+}
+
+void LocalPlayer::SetClip( const CCRect& rc )
+{
+	if(pClip)
+		pClip->removeFromParentAndCleanup(true);
+
+	CCSize vSize = CCDirector::sharedDirector()->getVisibleSize();
+	pClip = CCNode::create();
+	pClip->setContentSize(ccp(vSize.width, vSize.height));
+	pClip->setAnchorPoint(ccp(0.0,0.0));
+
+	int nMinX = (int)rc.getMinX();
+	int nMinY = (int)rc.getMinY();
+	int nMaxX = (int)rc.getMaxX();
+	int nMaxY = (int)rc.getMaxY();
+
+	float fWidth = abs(nMinX);
+	float fHeight = vSize.height;
+	CCLayerColor* pLeft = CCLayerColor::create(ccc4(0, 0, 0, 255), fWidth, fHeight);
+	if (nMinX < 0)
+		pLeft->setPosition(ccp(nMinX - fWidth, 0.0f));
+	else
+		pLeft->setPosition(ccp(0.0f, 0.0f));
+	pClip->addChild(pLeft);
+
+	fWidth = nMaxX - nMinX;
+	fHeight = abs((int)vSize.height - nMaxY);
+	CCLayerColor* pTop = CCLayerColor::create(ccc4(0, 0, 0, 255), fWidth, fHeight);
+	pTop->setPosition(ccp(nMinX, nMaxY));
+	pClip->addChild(pTop);
+
+	fWidth = nMaxX - nMinX;
+	fHeight = abs(nMinY);
+	CCLayerColor* pMid = CCLayerColor::create(ccc4(0, 0, 0, 255), fWidth, fHeight);
+	if (nMinY < 0)
+		pMid->setPosition(ccp(nMinX, nMinY - fHeight));
+	else
+		pMid->setPosition(ccp(nMinX, 0.0f));
+	pClip->addChild(pMid);
+
+	fWidth = abs((int)vSize.width - nMaxX);
+	fHeight = vSize.height;
+	CCLayerColor* pRight = CCLayerColor::create(ccc4(0, 0, 0, 255), fWidth, fHeight);
+	pRight->setPosition(ccp(nMaxX, 0.0f));
+	pClip->addChild(pRight);
+
+	//_blackSp->addChild(pClip, 0);
+	CCScene *scene = UiMgr::getInstance()->getCurScene();
+	CC_ASSERT(scene != NULL);
+	scene->addChild(pClip, WZ_JOY);
+}
+
+bool LocalPlayer::needShowShadowOps( unsigned int tempMapId ) const
+{
+	return ZUMA_FUBEN_COMMON_MAP_ONE == tempMapId 
+		|| ZUMA_FUBEN_COMMON_MAP_TWO == tempMapId 
+		|| ZUMA_FUBEN_COMMON_MAP_THREE == tempMapId 
+		|| ZUMA_FUBEN_COMMON_MAP_FOUR == tempMapId 
+		|| ZUMA_FUBEN_COMMON_MAP_LEVEL_LIMIT == tempMapId
+		|| ORCISH_ANCIENT_TOMB_ONE_MAP == tempMapId
+		|| ORCISH_ANCIENT_TOMB_TWO_MAP == tempMapId;
+}
+void LocalPlayer::clear(){
+	_cardActiveTime.Clear();
+	_cardDeadLine.Clear();
+}
+void LocalPlayer::loadLocalPlayerSkillEffect()
+{
+	if (bSkillPreloaded)
+	{
+		return;
+	}
+
+	//int sex = getAttribute(RA_SEX);
+	switch ( getRoleType() )
+	{
+	case RT_MWARRIOR:
+	case RT_WWARRIOR:
+		{
+			SkillAnimManager::getInstance()->preLoadAnims(1010101);
+			_currentSkillId =1010101;
+			loadSkillUpAnims();
+		}
+		break;
+	case RT_MMAGE:
+	case RT_WMAGE:
+		{
+			SkillAnimManager::getInstance()->preLoadAnims(1020101);
+			_currentSkillId =1020101;
+			loadSkillUpAnims();
+		}
+		break;
+	case RT_MTAOIST:
+	case RT_WTAOIST:
+		{
+			SkillAnimManager::getInstance()->preLoadAnims(1030101);
+			_currentSkillId =1030101;
+			loadSkillUpAnims();
+		}
+		break;
+	default:
+		break;
+	}
+
+	bSkillPreloaded = true;
+	//preloadLaunchEffect();
+}
+
+bool LocalPlayer::loadAnimate( unsigned int id /*= 0*/ )
+{
+	bool ret =Player::loadAnimate(id);
+	
+	if(ret)
+		loadLocalPlayerSkillEffect();
+
+	return ret;
+}
+
+void LocalPlayer::runStandAni()
+{
+// 	SkillData *skillData = SkillManager::getInstance()->getSkillData(SKILLMOFADUNTYPEID,true);
+// 	int rideState = this->getAttribute(RA_RideState);//=0是下马，=1是骑乘中
+// 	if (rideState == 1 && skillData != NULL)
+// 	{
+// 		SkillAnimManager::getInstance()->stopAnims(getId(),skillData->id);
+// 		_isPlayingRunSound = false;
+// 		AudioPlayer::getSigletonPtr()->stopSoundSceneEffect();
+// 	}
+
+	Player::runStandAni();
+}
+
+void LocalPlayer::runLevelUpEffect()
+{
+	AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_35", anims);				//【Ji：】更改升级特效文件名称(levelUp)
+	BSAnimate *animate = anims[0];
+	CCSprite *sprite = CCSprite::create();
+	float offestX = 0.0f;
+	float offestY = 0.0f;
+	getModelOffest("E1_35", offestX, offestY);
+	sprite->setPosition(ccp(offestX, offestY));
+	_node->addChild(sprite ,RZN_EFFECT, NT_LevelUpEffect);
+	CCSequence *action = CCSequence::createWithTwoActions(animate, CCRemoveSelf::create()/* CCCallFuncN::create(PlayerActionCallback::getInstance(), SEL_CallFuncN(&PlayerActionCallback::onLevelUpEffectCallback))*/);
+	sprite->runAction(action);
+
+	AudioPlayer::getSigletonPtr()->playerLevelUpSoundEffect(SCENE_LVUP);
+}
+
+void LocalPlayer::setRideLv( int lv )
+{
+	Player::setRideLv(lv);
+
+	GET_UI(MountUi, WCT_MountUi)->onRideLVUp();
+}
+
+void LocalPlayer::preloadLaunchEffect()
+{
+	AnimationCache::getInstance()->setupEffectAnim(AT_Sin,"huofu_youshang",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Sin,"huofu_shang",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Sin,"huofu_you",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Sin,"huofu_youxia",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Sin,"E1_153",true);
+
+	//预加载新手动画用到的特效
+	AnimationCache::getInstance()->setupEffectAnim(AT_Oct,"E8_1",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Oct,"E8_2",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Oct,"E8_3",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Oct,"E8_4",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Oct,"E8_6",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Oct,"E8_7",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Sin,"E1_2",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Special,"E1_4",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Sin,"E1_5",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Sin,"E1_7",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Sin,"E1_8",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Sin,"E1_10",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Sin,"E1_11",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Sin,"E1_12",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Sin,"E1_14",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Sin,"E1_17",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Sin,"E1_19",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Sin,"E1_235",true);
+	AnimationCache::getInstance()->setupEffectAnim(AT_Sin,"E1_270",true);
+
+	//unsigned int aLongData[2]={51,4}; 
+	//AnimationCache::getInstance()->setupPlayerAni((void*)(&aLongData),"female_05",1,true);
+}
+
+void LocalPlayer::releaseLauchEffect()
+{
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Sin,"huofu_youshang");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Sin,"huofu_shang");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Sin,"huofu_you");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Sin,"huofu_youxia");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Sin,"E1_153");
+
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Oct,"E8_1");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Oct,"E8_2");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Oct,"E8_3");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Oct,"E8_4");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Oct,"E8_6");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Oct,"E8_7");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Sin,"E1_2");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Special,"E1_4");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Sin,"E1_5");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Sin,"E1_7");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Sin,"E1_8");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Sin,"E1_10");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Sin,"E1_11");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Sin,"E1_12");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Sin,"E1_14");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Sin,"E1_17");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Sin,"E1_19");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Sin,"E1_235");
+	AnimationCache::getInstance()->releaseAnimsNew(AT_Sin,"E1_270");
+
+}
+
+void LocalPlayer::sendStandMsg(const CCPoint &pos)
+{
+	//完善逻辑，在切换场景中，或者已经在发送了小飞鞋或者传送点触发器，等待服务器返回的时候就不要再发送走路等消息
+	if ( CrossSceneUI::getInstance()->isInCross() )
+		return;
+	//if ( !MapManager::getInstance()->getisEnabled() )
+	//	return;
+
+	NET_SIC_stop_walk stopWalk;
+	stopWalk.curPos[0] = pos.x;
+	stopWalk.curPos[2] = pos.y;
+	TCP_CLIENT->send_net_cmd(&stopWalk, NP_INSIGNIFICANT, true);
+
+	CCLOG("XXXXXXXXXXXXXXXXXXXXXX LocalPlayer stop move, NET_SIC_stop_walk. at pos(%f, %f) XXXXXXXXXXXXXXXXXXXXXX", pos.x,pos.y);
+}
+
+bool LocalPlayer::getNextPathPoint(CCPoint& pos,bool force)
+{
+	if (!force && _oldPathNum == _path.size())
+		return false;
+	_oldPathNum = _path.size();
+	if (_path.size() >= 3)
+	{
+		pos.x = _path[2].x();
+		pos.y = _path[2].y();
+		return true;
+	}
+	if (_path.size() >= 2)
+	{
+		pos.x = _path[1].x();
+		pos.y = _path[1].y();
+		return true;
+	}
+	if (_path.size() >= 1)
+	{
+		pos.x = _path[0].x();
+		pos.y = _path[0].y();
+		return true;
+	}
+
+	return false;
+}
+
+void LocalPlayer::repetSetCurrentState()
+{
+	stopAni();
+	_firstUpdate = true;
+}
+
+void LocalPlayer::resetData()
+{
+	_autoRunAcNode = NULL;
+	_autoAttackAcNode = NULL;
+	pClip = NULL;
+	_blackSp = NULL;
+
+	setTargetMapId(INVALID);
+}
+
+void LocalPlayer::playRunSound()
+{
+#ifdef _WIN32
+	return;
+#endif
+	if ( NULL == MapManager::getInstance()->getMap() )
+		return;
+
+	//更新角色地图材质
+	CCPoint pos = getRoleNode()->getPosition();
+	MAP_MATERIAL eMaterial = MapManager::getInstance()->getMaterial(pos);
+	if (_materialMap != eMaterial)
+	{
+		_materialMap = eMaterial;
+	}
+ 
+ 	int rideState = getAttribute(RA_RideState);//=0是下马，=1是骑乘中
+ 	if (!_isPlayingRunSound)
+ 	{
+ 		_isPlayingRunSound = true;
+ 		if (rideState)
+ 		{
+ 			_mPose=RIDERUN_POSE;
+			playSoundByRiding();
+ 		}
+ 		else
+ 		{
+ 			_mPose=RUN_POSE;
+ 			playSoundByMap(_materialMap);
+ 			//CCLOG("地面的声音");
+ 		}
+ 	}
+}
+
+void LocalPlayer::playSoundByMap( MAP_MATERIAL material )
+{
+	AudioPlayer::getSigletonPtr()->stopSoundSceneEffect();
+
+	std::string soundName;
+
+	switch(material)
+	{
+	case grassGround:
+		soundName = SCENE_GRASSMOVE;//草地
+		break;
+	case sandGround:
+		soundName = SCENE_SANDMOVE;//沙地
+		break;
+	case hardGround:
+		soundName = SCENE_HARDGROUNDMOVE;//坚硬地面
+		break;
+	case woodGround:
+		soundName = SCENE_WOODMOVE;//木板地面
+		break;
+	case riverSide:
+		soundName = SCENE_RIVERSIDEMOVE;//河边
+		break;
+	case snowGround:
+		soundName = SCENE_SNOWMOVE;//雪地
+		break;
+	default:
+		soundName = SCENE_PLAYERRUNMOVE;//角色奔跑移动
+		break;
+	}
+
+	AudioPlayer::getSigletonPtr()->playerSoundSceneEffect(soundName,true);
+}
+
+void LocalPlayer::playSoundByRiding()
+{
+	AudioPlayer::getSigletonPtr()->stopSoundSceneEffect();
+	return;
+	unsigned int useRideLv = getUseRideLv();
+  	if (useRideLv >= 1 && useRideLv <= 20)
+  	{
+  		AudioPlayer::getSigletonPtr()->playerSoundSceneEffect(SCENE_HORSEMOVE,true);//坐骑马移动
+  	}
+  	else if (useRideLv >= 21 && useRideLv <= 40)
+  	{
+  		AudioPlayer::getSigletonPtr()->playerSoundSceneEffect(SCENE_WOLF,true);//狼声音
+  	}
+  	else if (useRideLv >= 41 && useRideLv <= 80)
+  	{			
+  		AudioPlayer::getSigletonPtr()->playerSoundSceneEffect(SCENE_ELEPHANT,true);//大象声音
+  	}
+  	else if (useRideLv >= 81 && useRideLv <= 100)
+  	{
+  		AudioPlayer::getSigletonPtr()->playerSoundSceneEffect(SCENE_WOLF,true);//麒麟奔跑,用的是狼声音
+  	}
+  	else if (useRideLv >= 101 /*&& useRideLv <= 120*/)
+  	{
+  		AudioPlayer::getSigletonPtr()->playerSoundSceneEffect(SCENE_PTEROSAUR,true);//飞龙声音
+  	}				
+}
+
+void LocalPlayer::changeRunSound()
+{
+	if ( NULL == MapManager::getInstance()->getMap() )
+		return;
+
+	if (_isPlayingRunSound)
+ 	{
+	 	int rideState = getAttribute(RA_RideState);//=0是下马，=1是骑乘中
+ 		if (rideState)
+ 		{
+ 			_mPose=RIDERUN_POSE;
+			playSoundByRiding();
+ 		}
+ 		else
+ 		{
+ 			_mPose=RUN_POSE;
+ 			playSoundByMap(_materialMap);
+ 			//CCLOG("地面的声音");
+ 		}
+ 	}
+}
+
+void LocalPlayer::saveSelectRideLv()
+{
+	if (_initSelectRideLv == false)
+		return;
+	unsigned int roleID = getId();
+	std::stringstream ss;
+	ss<<"set"<<"_"<<roleID;
+	ClientCfg::getInstance()->setInt(ss.str(), "selectRideLv", getSelectRideLv());
+}
+
+void LocalPlayer::initSelectRideLv()
+{
+	if (_initSelectRideLv == true)
+		return;
+	_initSelectRideLv = true;
+	unsigned int roleID = getId();
+	std::stringstream ss;
+	ss<<"set"<<"_"<<roleID;
+	_nSelectRideLv = ClientCfg::getInstance()->getInt(ss.str(), "selectRideLv", 1);
+}
+
+void LocalPlayer::setSelectRideLv( unsigned int selectLv )
+{
+	if (_nSelectRideLv == selectLv)
+		return;
+	_nSelectRideLv = selectLv;
+	saveSelectRideLv();
+}
+
+unsigned int LocalPlayer::getSelectRideLv()
+{
+	return _nSelectRideLv;
+}
+
+DWORD LocalPlayer::getShowFightTime()
+{
+	return _showFightTime;
+}
+
+void LocalPlayer::setShowFightTime( DWORD time )
+{
+	_showFightTime = time;
+}
+
+void LocalPlayer::runRunAni()
+{
+	Player::runRunAni();
+	playRunSound();
+}
+
+bool LocalPlayer::needShowGuildColor( ccColor3B &color )
+{
+	if (getGuildID() != 0 && getGuildID() != (unsigned int)INVALID)
+	{
+		//有宣战行会
+		if (GuildMgr::getInstance()->getWarGuildNum() > 0)
+		{
+			color = ccc3(0,112,192);//蓝色
+			return false;
+		}
+		//有联盟行会
+		if (GuildMgr::getInstance()->haveLeagueGuild())
+		{
+			color = ccc3(0,112,192);//蓝色
+			return false;
+		}
+		//沙巴克行会
+		if (GuildMgr::getInstance()->getSBKGuildId() == getGuildID())
+		{
+			color = ccc3(112,48,160);//紫色
+			return false;
+		}
+		//沙城战开始
+		if (GuildMgr::getInstance()->isSbkStart())
+		{
+			if (GuildMgr::getInstance()->isSBKCompetitiveGuild(getGuildID()))
+			{
+				color = ccc3(0,112,192);//蓝色
+				return false;
+			}
+		}
+	}
+	color = ccc3(255,255,255);//白色
+	return false;
+}
+
+void LocalPlayer::updateGuildNameColor()
+{
+	ccColor3B color;
+	if (needShowGuildColor(color))
+	{
+		showWarGuild(true);
+	}
+	else
+	{
+		showWarGuild(false);
+	}
+	setGuildNameColor(color);
+}
+
+void LocalPlayer::onUpdateSBKEquipEffect( SBKEquipEffectUpdate* evt )
+{
+	updateSBKMasterEffect(evt->show);
+}
+
+void LocalPlayer::setGuild( unsigned int gid )
+{
+#if ENABLE_GOTYE==1
+	//add by xy
+	unsigned int yyguild = gid;
+	int op = yyguild == INVALID?0:1;
+	yyguild = yyguild == INVALID?_guildID:yyguild;
+	stringstream param;
+	param << "operate="<< op;
+	param << "\tchannel="<< YYC_GUILD;
+	param << "\twildCard="<< yyguild;
+	VoiceMgr::getSingleton()->process(YYS_CHANNEL, YY_OP_WILDCARD, param.str());
+#endif
+
+	Role::setGuild(gid);
+}
+
+void LocalPlayer::setAutoRunState( bool isAutoRuning )
+{
+	if (World::getInstance()->getScene() == NULL)
+		return;
+	m_bIsAutoRun = isAutoRuning;
+	RoleHeadUi* ui = World::getInstance()->getRoleHeadUi();
+	if (ui == NULL)
+		return;
+	unsigned int curMapId = MapManager::getInstance()->getCurMapId();
+	//unsigned int nopassId =  name_crc32(convertWName(std::string("m9")));
+	if (MapManager::getInstance()->getCurSceneType(curMapId) == 0  || 
+		MapManager::getInstance()->getCurSceneType(curMapId) == 2  ||
+		MapManager::getInstance()->getCurSceneType(curMapId) == 14 || 
+        MapManager::getInstance()->getCurSceneType(curMapId) == 27)
+	{
+		if(NULL != ui && isAutoRuning && getLevel() >= 8)
+			ui->SetShowShoe(true);
+		else
+			ui->SetShowShoe(false);
+	}
+	else
+	{
+		if(NULL != ui)
+			ui->SetShowShoe(false);
+	}	
+
+	playAutoRunEffectByVisible();
+}
+
+void LocalPlayer::setExitAttackState()
+{
+	 _attackState = false; 
+
+	 if (stateMachine()->CurrentState() == LocalPlayerStateStand::getInstance())
+	 {
+		 LocalPlayerStateStand::getInstance()->cancel_atk_state(this);
+	 }
+}
+
+void LocalPlayer::do_sth_before_close_map_in_world()
+{
+	//停止播放特戒特效
+	stopAllRingEffect();
+
+	//在特殊地图，取消骑乘状态
+	if(getAttribute(RA_RideState) != 0 )
+	{
+		if (MapManager::getInstance()->getCurMapId() == SBK_MAP_CRC_ID)
+			RoleManager::getInstance()->sendUnRideMsg();
+	}
+
+}
+
+void LocalPlayer::do_sth_when_reenter_map_in_world()
+{
+	addToMap();
+
+	if(!MapManager::getInstance()->isCrossMaping())
+		stateMachine()->ChangeState(LocalPlayerStateStand::getInstance());
+
+	loadAnimate();
+
+	//重新刷新一下buff显示
+	std::vector<buffDestInfo> buffersId = getBuffersId();
+	for(std::vector<buffDestInfo>::iterator iter = buffersId.begin(); iter != buffersId.end(); ++ iter)
+	{
+		SkillAnimManager::getInstance()->continueBufferAnims(iter->buffId, getId(), getId());
+		if (iter->buffId / 100 == SKILLQUNDUSHU || iter->buffId / 100 == SKILLCUIDUSHU)
+		{
+			setColorPoisoning(39,255,39); //中毒效果
+		}
+		if(getAttribute(RA_RideState) && (getRoleType() == RT_WMAGE || getRoleType() == RT_MMAGE) && iter->buffId / 100 == SKILLMOFADUNTYPEID)//法师带魔法盾过图后，骑乘状态不显示技能特效
+		{
+			SkillAnimManager::getInstance()->stopBuffer(getId(), iter->buffId);
+		}
+	}
+
+	//更新一下沙巴克城主衣服效果
+	//pLp->updateLocalSBKMasterEffect(pLp->getId());
+	updateSBKMasterEffect(PackageManager::getInstance()->wearSBKMasterEquip());
+	updateGongFaRealmEffect(GambleMgr::getInstance()->m_curGongFaRealm);
+	autoSEToNewMap();
+
+	sendStandMsg(getPosition());
+
+	bool isInTrigger = World::getInstance()->getTransmitType();
+	if (isInTrigger == false) runTransmitEffect();
+
+	World::getInstance()->setTransmitTypeIsTrigger(false);
+}
+
+void LocalPlayer::update_hp_warning()
+{
+	if (getAttribute(RA_HP) < getAttribute(RA_MaxHP) * 0.2)
+	{
+		if (!m_low_hp_warning)
+		{
+			AudioPlayer::getSigletonPtr()->playerSoundSceneEffect("Audio/soundScene/sound_lowhp",true);
+			m_low_hp_warning = !m_low_hp_warning;
+		}
+	}
+	else
+	{
+		if (m_low_hp_warning )
+		{
+			AudioPlayer::getSigletonPtr()->stopSoundSceneEffect(0);
+			m_low_hp_warning = !m_low_hp_warning;
+		}
+	}
+}
+
+void LocalPlayer::update_skill_state()
+{
+	if(getAttribute(RA_DEAD) == 0 && getAttribute(RA_RideState) == 0 && getAttribute(RA_Stall)==0 && getAttribute(RA_ShuangXiu)==0 )
+	{//非死亡状态，非骑乘状态
+		SkillManager* skill_mgr = SkillManager::getInstance();
+		MessageDispatcher* msg_dispatch = MessageDispatcher::Instance();
+		if(getRoleType() == RT_WMAGE || getRoleType() == RT_MMAGE)
+		{//如果是法师，自动释放魔法盾;
+			//在安全和摆摊区域不自动释放魔法盾
+/*
+			if (MapManager::getInstance()->checkRoleArea(RoleManager::getInstance()->getLocalPlayer()) != 2
+				&& MapManager::getInstance()->checkRoleArea(RoleManager::getInstance()->getLocalPlayer()) != 3)
+			{*/
+				SkillData *skillData = skill_mgr->getSkillData(SKILLMOFADUNTYPEID, true);
+				if(skillData != NULL)
+				{
+					if(skill_mgr->queryAndUseSkill(skillData->proto->id, false))
+					{
+						msg_dispatch->DispatchMsg(-1.0, NULL, this, M_AutoUse, NULL);
+					}
+				}
+				//RoleActionMgr::GetInstance()->ExecuteAction(dt);
+			//}
+		}
+		else if(getRoleType() == RT_WTAOIST || getRoleType() == RT_MTAOIST)
+		{//如果是道士，自动召唤骷髅和圣兽
+			//在安全和摆摊区域不自动释放幽灵战甲
+/*
+			if (MapManager::getInstance()->checkRoleArea(RoleManager::getInstance()->getLocalPlayer()) != 2
+				&& MapManager::getInstance()->checkRoleArea(RoleManager::getInstance()->getLocalPlayer()) != 3)
+			{*/
+				SkillData *skillData1 = skill_mgr->getSkillData(SKILLSHENGSHOUTYPEID, true);
+				if(skillData1 != NULL &&skill_mgr->queryAndUseSkill(skillData1->proto->id, false))
+				{
+					msg_dispatch->DispatchMsg(-1.0, NULL, this, M_AutoUse, NULL);
+				}
+				else 
+				{
+					SkillData *skillData2 = skill_mgr->getSkillData(SKILLKULOUTYPEID, true);
+					if(skillData2 != NULL && skill_mgr->queryAndUseSkill(skillData2->proto->id, false))
+					{
+						msg_dispatch->DispatchMsg(-1.0, NULL, this, M_AutoUse, NULL);
+					}
+					else
+					{
+						SkillData *skillData3 = skill_mgr->getSkillData(SKILLYOULINGHUJIA, true);
+						if(skillData3 != NULL && !hasHighBuff(skillData3->proto->id))
+						{
+							if(skill_mgr->queryAndUseSkill(skillData3->proto->id, false))
+							{
+								msg_dispatch->DispatchMsg(-1.0, NULL, this, M_AutoUse, NULL);
+							}
+						}
+					}
+				}
+			//}
+			//RoleActionMgr::GetInstance()->ExecuteAction(dt);
+		}
+	}
+}
+
+void LocalPlayer::first_update_if_ness()
+{
+	if(_firstUpdate && _stateMechine != NULL && _isAniLoaded)
+	{
+		if(isDead())
+		{
+			runDeadAni();
+			_stateMechine->SetCurrentState(LocalPlayerStateDead::getInstance());
+		}
+		else if(getAttribute(RA_Stall) != 0)
+		{
+			runSitAni();
+			//if(getId() == localPlayerId)
+			_stateMechine->SetCurrentState(LocalPlayerStateSit::getInstance());
+			//else
+			//	_stateMechine->SetCurrentState(RoleStateSit::getInstance());
+			enterStallState();
+		}
+		else if(getAttribute(RA_ShuangXiu) != 0)
+		{
+			runSitAni();
+			_stateMechine->SetCurrentState(LocalPlayerStateSit::getInstance());
+			enterShuangxiuState();
+		}
+		else
+		{
+			runStandAni();
+			_stateMechine->SetCurrentState(LocalPlayerStateStand::getInstance());
+		}
+
+		_firstUpdate = false;
+	}
+}
+
+void LocalPlayer::update_player_buff( tagBuffMsgInfo const& buff_info )
+{
+	RoleHeadUi *ui = World::getInstance()->getRoleHeadUi();
+	if(ui) ui->set_buff_overlap(buff_info.dwBuffTypeID,buff_info.nWarpTimes);
+
+	Player::update_player_buff(buff_info);
+}
+
+//判断是否处于点卡有效期，如果是则返回true
+bool isShowLeftTime()
+{
+	//获取当前服务器时间
+	tagDWORDTime nowTime = ServerTime::getInstance()->cal_current_server_dword_time();
+	tagDWORDTime cardDeadLine = RoleManager::getInstance()->getLocalPlayer()->getCardDeadLine();
+	tagDWORDTime cardActiveTime = RoleManager::getInstance()->getLocalPlayer()->getCardActiveTime();
+	if((cardActiveTime < nowTime) && (nowTime < cardDeadLine))
+	{
+		return true;
+	}
+	return false;
+}
+
+bool LocalPlayer::can_guild_assign()
+{
+	bool canAssign = true;
+	if (_guildAssign)
+	{
+		canAssign = false;
+		ToolTip::getInstance()->push(STRING_TABLE["today_guild_assign"]);
+	}
+	if (_level<PUBLISHOPENLEVEL)
+	{
+		canAssign = false;
+		ToolTip::getInstance()->push(STRING_TABLE["guild_assign_level_limit"]);
+	}
+	return canAssign;
+}
+
+void LocalPlayer::on_event_sync_display_flag_to_server( sync_display_flag_to_server* evt )
+{
+	if (_display_flag != evt->flag)
+	{
+		NET_SIC_fashion cmd;
+		cmd.fasion_flag = evt->flag;
+		TCP_CLIENT->send_net_cmd(&cmd, NP_INSIGNIFICANT, true);
+	}
+}
+
+void LocalPlayer::revertToPreviousState()
+{
+	if(_stateMechine != NULL)
+	{
+		State<Role> *preState = _stateMechine->PreviousState();
+		State<Role> *curState = _stateMechine->CurrentState();
+		if(preState == curState || preState ==RoleStateUpdateDisplay::getInstance())
+			_stateMechine->ChangeState(LocalPlayerStateStand::getInstance());
+		else
+			_stateMechine->RevertToPreviousState();
+	}
+}
+
+void LocalPlayer::removeFromMap()
+{
+	Player::removeFromMap();
+
+	CCLog("---LocalPlayer remove from map---");
+}

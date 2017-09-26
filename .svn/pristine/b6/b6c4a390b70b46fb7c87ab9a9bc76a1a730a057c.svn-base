@@ -1,0 +1,344 @@
+#ifndef ANIMATIONCACHE_H
+#define ANIMATIONCACHE_H
+
+//#include "BSpriteReader.h"
+#include "cocos2d.h"
+#include "cocos-ext.h"
+#include "SafeList.h"
+#include "SafeMap.h"
+#include "BSAnimate.h"
+#include "BaseDefine.h"
+#include "CfgReader.h"
+#include "Thread.h"
+#include "RoleManager.h"
+
+#include <boost/function.hpp>
+using namespace cocos2d;
+using namespace cocos2d::extension;
+
+
+class BSPriteReader;
+//class BSAnimate;
+
+struct sResData
+{
+	long resid;					//资源ID
+	long restype;				//资源类型
+	long lastUsedTime;	//上次使用时间戳
+	long resSize;				//资源大小
+	char resname[32];		//资源名字
+};
+
+enum eRoleAnimationId
+{
+	RAI_STAND = 0x3000,
+	RAI_ATTRACK = RAI_STAND + 5,
+	RAI_ATTRACKED1 = RAI_ATTRACK + 5,
+	RAI_ATTRACKED2 = RAI_ATTRACKED1 + 5,
+	RAI_DEATH = RAI_ATTRACKED2 + 5,
+	RAI_RUN = RAI_DEATH + 5,
+	RAI_SIT = RAI_RUN + 5,
+	RAI_MAX = RAI_SIT + 1
+};
+
+//enum eMonsterAnimationId
+//{
+//	MAI_ATTRACK = 0x3000,
+//	MAI_ATTRACKED = MAI_ATTRACK + 3,
+//	MAI_RUN = MAI_ATTRACKED + 3,
+//	MAI_STAND = MAI_RUN + 3,
+//	MAI_MAX = MAI_STAND + 3
+//};
+
+enum eMonsterAnimationId
+{
+	MAI_ATTRACK = 0x3000,
+	MAI_RUN = MAI_ATTRACK + 2,
+	MAI_STAND = MAI_RUN + 2,
+	MAI_MAX = MAI_STAND + 2
+};
+
+enum eNPCAnimationId
+{
+	NAI_STAND = 0x3000,
+	NAI_MAX
+};
+
+enum eOctEffectId
+{
+	OEI_UP = 0x3000,
+	OEI_MAX = OEI_UP + 5
+};
+
+enum eSinEffectId
+{
+	SEI_SIN = 0x3000
+};
+
+enum eAnimsType
+{
+	AT_Null = -1,
+	AT_Player,
+	AT_Npc,
+	AT_Monster,
+	AT_Monster5,
+	AT_Monster8,
+	AT_Weapon,
+	AT_Sin,
+	AT_Oct,
+	AT_Special,
+	AT_Wing,
+	AT_Ride,	//[bing] 坐骑
+	AT_RideTexiao,	//坐骑特效
+	AT_RidePlayer,	//坐骑玩家
+	AT_A_Player,	//[bing] 纸娃娃 用于role装备界面
+	AT_A_Weapon,
+	AT_A_Wing,
+	AT_Num
+};
+
+
+struct AnimsUsed
+{
+	eAnimsType animType;
+	std::string name;
+
+	AnimsUsed(eAnimsType at, const std::string &n)
+		: animType(at)
+		, name(n)
+	{
+
+	}
+};
+
+typedef boost::function<void(AnimsUsed const&)> LoadedCallback;
+typedef std::shared_ptr<BSAnimation> bsanimation_ptr;
+typedef std::vector<bsanimation_ptr> bsanimation_ptr_array;
+
+struct Animations
+{
+	int ref;
+	bool unremovable;//不用删除的，超级常用的
+	bsanimation_ptr_array bs_animation_array;
+
+	Animations():ref(0),unremovable(false)
+	{
+
+	}
+
+	inline void increaseRef(){++ref;}
+
+	inline void decreaseRef(){--ref;}
+};
+
+typedef std::shared_ptr<BSPriteReader>	bsprite_reader_ptr;
+typedef std::shared_ptr<CCDictionary>	dic_ptr;
+typedef std::shared_ptr<CCImage>		image_ptr;
+
+struct SetupNode
+{
+	image_ptr						img;
+	bsprite_reader_ptr				reader;
+	dic_ptr							dict;
+	std::shared_ptr<unsigned char>	file_data; 
+	//unsigned char*		data;
+	unsigned int		len;
+
+	SetupNode():len(0)
+	{
+// 		img = NULL;
+// 		reader = NULL;
+// 		dict = NULL;
+// 		data = NULL;
+// 		len = 0;
+	}
+
+	~SetupNode()
+	{
+		//CC_SAFE_RELEASE(img);
+		//CC_SAFE_DELETE_ARRAY(data);
+		//CC_SAFE_RELEASE_NULL(dict);
+	}
+};
+class AnimationCache
+{
+public:
+	typedef std::map<std::string, Animations> AnimationMap;
+	typedef std::vector<BSAnimate*> AnimateList;
+
+	struct animate_action_cache_data
+	{
+		AnimateList animList;
+		std::string name;
+		eAnimsType	type;
+
+	};
+
+	typedef std::list<animate_action_cache_data> AnimationDataList;
+
+	static void createDefList(int num, AnimateList &animateList, bool autoRelease = true);
+	static void releaseDefList(AnimateList &animateList);
+
+	static AnimationCache* getInstance();
+	//角色动画
+	bool addPlayerAni(const void* pData, int id, const std::string &name, AnimateList &animateList, int nType);
+	void getPlayerAnis(const void* pData, int id, const std::string &name, AnimateList &animateList, int nType = 1);
+	void releasePlayerAnis(const char *name);
+
+	bool setupPlayerAni(const void* pData,const std::string &name,int nType,bool bRetain=false);
+	BSAnimation* peekBSAnimation(int  type,std::string const& name,size_t pos);
+	//武器动画
+	bool addWeaponAni(const void* pData, int id, const std::string &name, AnimateList &animateList);
+	void getWeaponAnis(const void* pData, int id, const std::string &name, AnimateList &animateList);
+	void releaseWeaponAnis(const char *name);
+	bool setupWeaponAni(const void* pData,const std::string &name,int nType,bool bRetain);
+
+	//翅膀动画
+	bool addWingAni( const void* pData, int id, const std::string &name, AnimateList &animateList);
+	void getWingAnis( const void* pData, int id, const std::string &name, AnimateList &animateList);
+	void releaseWingAnis(const char *name);
+
+	bool setupWingAni(const void* pData,const std::string &name,int nType,bool bRetain);
+	////坐骑特效动画
+	//bool addZuoqitexiaoAni( const void* pData, int id, const std::string &name, AnimateList &animateList);
+	//void getZuoqitexiaoAnis( const void* pData, int id, const std::string &name, AnimateList &animateList);
+	//void releaseZuoqitexiaoAnis(const char *name);
+	//怪物动画
+	bool addMonsterAni(int id, const std::string &name, AnimateList &animateList,int nType);
+	void getMonsterAni(int id, const std::string &name, AnimateList &animateList,int nType=0);
+	void releaseMonsterAnis(const char *name);
+
+	bool setupMonsterAni(std::string const& name,int nType,bool bRetain);
+	//NPC动画
+	bool addNPCAni(int id, const std::string &name, AnimateList &animateList);
+	void getNPCAni(int id, const std::string &name, AnimateList &animateList);
+	void releaseNPCAnis(const char *name);
+	//八方向特效
+	bool addOctEffect(int id, const std::string &name, AnimateList &animateList);
+	void getOctEffect(int id, const std::string &name, AnimateList &animateList);
+	void releaseOctEffect(const char *name);
+	//单方向特效
+	bool addSinEffect(int id, const std::string &name, AnimateList &animateList);
+	void getSinEffect(int id, const std::string &name, AnimateList &animateList);
+	void releaseSinEffect(const char *name, bool del=false);
+	void setupEffectAnim(eAnimsType type,const std::string &name,bool preload);
+	//特殊特效(魔法盾等)
+	bool addSpecialEffect(int id, const std::string &name, AnimateList &animateList);
+	void getSpecialEffect(int id, const std::string &name, AnimateList &animateList);
+	void releaseSpecislEffect(const char *name);
+	//移除所有的动画
+	void releaseAnims(eAnimsType type, const std::string &name);
+	void releaseAnims(std::vector<AnimsUsed> &anims);
+	//角色动画
+	bool add_A_PlayerAni(const void* pData, int id, const std::string &name, AnimateList &animateList);
+	void get_A_PlayerAnis(const void* pData, int id, const std::string &name, AnimateList &animateList);
+	//武器动画
+	bool add_A_WeaponAni(const void* pData, int id, const std::string &name, AnimateList &animateList);
+	void get_A_WeaponAnis(const void* pData, int id, const std::string &name, AnimateList &animateList);
+	//翅膀动画
+	bool add_A_WingAni( const void* pData, int id, const std::string &name, AnimateList &animateList);
+	void get_A_WingAnis( const void* pData, int id, const std::string &name, AnimateList &animateList);
+	//更新
+	void update(float dt);
+	//在2帧之后清空资源
+	void releaseUnUsedAnims();
+
+	bool checkAndReleaseAllAnis();
+
+	void createImgFromFile(unsigned short byIdx, unsigned int mapID,const char *fileName);
+
+	void loadUI(int index, const char *ccbifileName);
+
+	//void releaseResZuoqi();
+
+	void releaseAnimsNew(std::vector<AnimsUsed> &anims);
+	void releaseAnimsNew(eAnimsType type,std::string const& name);
+	
+	bool		init();
+
+	void releaseResByCurMem();
+private:
+	void createAnisFromFile(const void* pData, const char *fileName, const std::string &name, eAnimsType animType, AnimateList &animateList, int backZorder = -1, int frontZorder = -1);
+	void createAnisFromFileNew(const void* pData, const char *fileName, const std::string &name, eAnimsType animType, AnimateList &animateList, int backZorder, int frontZorder, bool bMainThreadLoad,int nRetainCnt=0,LoadedCallback cb=LoadedCallback());
+	void setupAnisFromFileWithoutAniList(const void* pData, const char *fileName, const std::string &name, eAnimsType animType, int backZorder = -1, int frontZorder = -1,bool bPreload = false/*,LoadedCallback cb=LoadedCallback()*/);
+
+	void deleteAnimsFromName(const char *name);
+	//void releaseAllAnim();
+	//void releaseAnimMap(AnimationMap &aminMap);
+
+	//void updateAnimate(BSPriteReader *reader, AnimationMap &animMap);
+	void updateAnimate(BSPriteReader *reader);
+	void initAnimation(animate_action_cache_data &data);
+	AnimationMap &getAnimationMap(eAnimsType type);
+	void addAnimData(eAnimsType type, AnimateList &animList, const std::string &name, Animations &anims);
+	//读取配置文件中动作帧的每帧时长
+	void readActFramsTimes(const std::string &name, int actNum, float fs[], int maxCount, float fValue=1.0f);
+
+	std::string getAnimsDict(eAnimsType animType);
+	bool releaseOneAnim(const char *name, eAnimsType animType, Animations &anims);
+	void releaseOneAnimByRealName(std::string const& path,std::string const&	keyname);
+	//更新资源最近一次的使用时间，只有资源不被使用时才调用此方法
+	//这里指管理用不到的资源，对其进行时间判断，超过一定时间才真正释放
+	//如果资源又被重新使用，则从这个管理表中删除
+	void updateResLastUsedTime(int refCount, const std::string &name, int nType);
+	void updateResSize(const std::string &name, int nSize);
+	void releaseResByLongTime();
+	
+	bool releaseResTry(const char *name, int nType);
+	//void releaseResAll();
+
+	void dealWithSetupNode(SetupNode& node);
+	void dealWithAnimation();
+	void geneTextureAndCacheSpriteFrame(SetupNode& setup_node);
+
+	void geneNPCBSAnimation(const std::string &name, eAnimsType animType,Animations& anims, float* fs,int frontZorder,int& outZOder,float const& baseValue);
+	void geneMonsterBSAnimation(const std::string &name, eAnimsType animType,Animations& anims, float* fs,int frontZorder,int& outZOder,float const& baseValue);
+	void geneSinSpecBSAnimation(const std::string &name, eAnimsType animType,Animations& anims, float* fs,int frontZorder,int& outZOder,float const& baseValue);
+	void geneOctSpecBSAnimation(const std::string &name, eAnimsType animType,Animations& anims, float* fs,int frontZorder,int& outZOder,float const& baseValue);
+
+	void geneRideBSAnimation(void const* pData,int type,const std::string &name, eAnimsType animType,Animations& anims, float* fs,int frontZorder,int& outZOder,float const& baseValue);
+	void geneAvatorRoleBSAnimation(void const* pData,int type,const std::string &name, eAnimsType animType,Animations& anims, float* fs,int frontZorder,int& outZOder,float const& baseValue);
+	void geneRoleBSAnimation(void const* pData,int type,const std::string &name, eAnimsType animType,Animations& anims, float* fs,int frontZorder,int backZorder,int& outZOder,float const& baseValue);
+
+	void	initSplit();
+
+	void cleanup_reader();
+protected:
+	AnimationCache();
+	~AnimationCache();
+	bool checkAndRelease(AnimationMap &animMap, eAnimsType animType);
+	THREAD_FUNC _decode_thread_func(void* thread_);
+protected:
+	typedef std::map<std::string,int > PlistMap;
+	PlistMap		_animPlistToRealPlist;
+	void				getRealPlistFilepath(std::string& realpath,int index);
+	void				createDecodeByName(const void* pData, const char *fileName, const std::string &name, eAnimsType animType,  AnimateList *animateList, int backZorder, int frontZorder,bool bPreload =false);
+
+	AnimationMap _playerAnims;
+	AnimationMap _sinEffects;
+	AnimationMap _octEffects;
+	AnimationMap _specialEffects;
+	AnimationMap _monsterAnims;
+	AnimationMap _NPCAnims;
+	AnimationMap _weaponAnims;
+	AnimationMap _wingAnims;
+	int _frames;
+	c_thread* m_decode_thread;
+
+	c_safe_list<bsprite_reader_ptr> m_decode_q;
+	c_safe_list<SetupNode> m_wait_setup_queue;
+
+	typedef std::map<std::string, bsprite_reader_ptr> key_to_reader;
+	key_to_reader m_waiting_reader_queue;//当前正在处理队列中的任务，防止重复添加
+	//std::map<std::string, BSPriteReader*> mmapReaderInQueue;//另外一个加载方式
+
+	c_safe_list<SetupNode> _curBGResLoad;
+
+	AnimationDataList _animationDataList;
+
+	typedef std::shared_ptr<sResData> res_data_ptr;
+	std::map<long, res_data_ptr> _resMap;
+	int curMemCanUse;
+};
+
+#endif //ANIMATIONCACHE_H

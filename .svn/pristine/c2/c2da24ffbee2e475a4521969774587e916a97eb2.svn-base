@@ -1,0 +1,408 @@
+#include "NPCChatUi.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "NPCChatMgr.h"
+#include "CFGReader.h"
+#include "UiTools.h"
+#include "NewPlayerGuide.h"
+#include "UiResourceMgr.h"
+#include "ImmediateEquipUi.h"
+#include "Helper.h"
+#include "Movie.h"
+//////////////////////////////////////////////////////////////////////////
+
+NPCChatUi::NPCChatUi()
+{
+	//ccbReader=NULL;
+	lastId=-1;
+}
+
+NPCChatUi::~NPCChatUi()
+{
+// 	if (ccbReader!=NULL)
+// 	{
+// 		ccbReader->release();
+// 	}
+// 	ccbReader=NULL;
+	//UiResourceMgr::getInstance()->releasePlistFile(_plist);
+}
+
+void NPCChatUi::updateNpcData()
+{
+	NPCChatUiLayer *ui = getUiNodeByTag<NPCChatUiLayer>(WCT_NPCCHATUI);
+	if(ui != NULL)
+	{
+		ui->setChatData();
+	}
+	NPCChatData *temp=NPCChatMgr::getInstance()->getNpcChatData();
+	if (temp->liftRolePicPath!=lastId && temp->rightRolePicPath!=lastId)
+	{
+		//ccbReader->getAnimationManager()->runAnimations("right");
+		if (temp->liftRolePicPath!=0)
+			lastId=temp->liftRolePicPath;
+		else
+			lastId=temp->rightRolePicPath;
+	}
+}
+
+CCNode* NPCChatUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["FubenChatUiLayer"] = UiLayerLoader<NPCChatUiLayer>::loader();
+	//CCNode* pNode = readUiFromCCBI("fubenduihua", nodeLoaders, _loadSpriteSheet);
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	for(std::map<std::string, CCNodeLoader*>::const_iterator iter = nodeLoaders.begin(); iter != nodeLoaders.end(); ++iter)
+	{
+		ccNodeLoaderLibrary->registerCCNodeLoader(iter->first.c_str(), iter->second);
+	}
+	auto ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	ccbReader->autorelease();
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	std::string uiFile = uiDir + "fubenduihua" + ".ccbi";
+	CCNode * uiNode = ccbReader->readNodeGraphFromFile(uiFile.c_str());
+	if(!uiNode)
+		CCLOG("readUiFromCCBI NULL file: %s", uiFile.c_str());
+
+	_loadSpriteSheet= ccbReader->getLoadedSpriteSheet();
+	//_plist=npcChattexture;
+	//UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	if(ImmediateEquipUi::getInstance()->isOpen())
+	{
+		ImmediateEquipUi::getInstance()->getFrame()->setVisible(false);
+	}
+	return uiNode;
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+bool NPCChatUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	NPCChatMgr::getInstance()->setNpcChatData();
+	return true;
+}
+
+cocos2d::SEL_MenuHandler NPCChatUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler NPCChatUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onNextMsgBtnPressed", NPCChatUiLayer::onNextMsgBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSkipBtnPressed", NPCChatUiLayer::onSkipBtnPressed);
+	return NULL;
+}
+
+void NPCChatUiLayer::onNextMsgBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	NPCChatMgr::getInstance()->setNpcChatData();
+}
+
+void NPCChatUiLayer::onSkipBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	NPCChatMgr::getInstance()->chearNpcAllChatData();
+	CLOSE_UI(WCT_NPCCHATUI);
+	if (NPCChatMgr::getInstance()->getNeedShowUi())
+	{
+		NPCChatMgr::getInstance()->openNPCChatUi();
+		NPCChatMgr::getInstance()->setNeedShowUi(false);
+		NPCChatMgr::getInstance()->setSelectIndex(-1);
+	}
+	CMovie::GetInstance().skipSprogMovie();
+}
+
+void NPCChatUiLayer::setChatData()//设置对话内容
+{
+	//isplaying = true;
+	NPCChatData *temp = NPCChatMgr::getInstance()->getNpcChatData();
+	//左边头像
+	int tempId = temp->liftRolePicPath;
+	std::string uiDir = "";
+	bool tempFlagL = false;
+	tempPicNameL = getBanshenxiangName(tempId);
+	if (!tempFlagL)
+	{
+		uiDir = CCString::createWithFormat("%s%s%s%s%s","Art","/","Portrait","/",tempPicNameL.c_str())->getCString();
+		//liftRolePic->setDisplayFrame(CCSpriteFrame::create(uiDir.c_str(),CCRect(0,0,192,192)));
+		liftRolePic->initWithFile(uiDir.c_str());
+		liftRolePic->setScale(0.8f);
+		if (tempId>0)
+		{
+			roleName->setPositionX(800-327);
+			roleChatData->setPositionX(228-110);
+		}
+	}
+/*
+	if (uiiconL.empty())
+	{
+		isFirstL = false;
+	}
+
+	if (isFirstL)
+	{
+		isFirstL = false;
+	}else{
+		if (tempFlagL)
+		{
+			uiDir = CCString::createWithFormat("%s%s%s%s%s","Art","/","Portrait","/",tempPicNameL.c_str())->getCString();
+			liftRolePic->setDisplayFrame(CCSpriteFrame::create(uiDir.c_str(),CCRect(0,0,192,192)));
+			//liftRolePic->setScale(0.5f);
+			CCScaleBy* actionScale = CCScaleBy::create(0.5f,0.5f,0.5f);
+			CCAction* callbackFun = CCCallFunc::create(actionScale, SEL_CallFunc(&NPCChatUiLayer::setIsPlayingForFalse));
+			liftRolePic->runAction(callbackFun);
+			liftRolePic->setColor(ccc3(96,96,96));
+			isScaleL = true;
+			tempFlagL = false;
+		}else{
+			uiDir = CCString::createWithFormat("%s%s%s%s%s","Art","/","Portrait","/",uiiconL.c_str())->getCString();
+			liftRolePic->setDisplayFrame(CCSpriteFrame::create(uiDir.c_str(),CCRect(0,0,192,192)));
+			if (isScaleL)
+			{
+				CCScaleBy* actionScale = CCScaleBy::create(0.5f,2.0f,2.0f);
+				CCAction* callbackFun = CCCallFunc::create(actionScale, SEL_CallFunc(&NPCChatUiLayer::setIsPlayingForFalse));
+				liftRolePic->runAction(callbackFun);
+				liftRolePic->setScale(1.0f);
+				liftRolePic->setColor(ccc3(255,255,255));
+				isScaleL = false;
+			}
+		}
+	}*/
+	//右边头像
+	int tempIdR = temp->rightRolePicPath;
+	std::string uiDirR = "";
+	bool tempFlagR = false;
+	tempPicNameR = getBanshenxiangName(tempIdR);
+	if (!tempFlagR)
+	{
+		uiDir = CCString::createWithFormat("%s%s%s%s%s","Art","/","Portrait","/",tempPicNameR.c_str())->getCString();
+		rightRolePic->initWithFile(uiDir.c_str());
+		rightRolePic->setScale(0.8f);
+		rightRolePic->setFlipX(true);
+		if (tempIdR>0)
+		{
+			roleName->setPositionX(267+40);
+			roleChatData->setPositionX(228+50);
+		}
+	}
+
+/*
+	if (uiiconR.empty())
+	{
+		isFirstR = false;
+	}
+	if (isFirstR)
+	{
+		isFirstR = false;
+	}else{
+		if (tempFlagR)
+		{
+			uiDir = CCString::createWithFormat("%s%s%s%s%s","Art","/","Portrait","/",tempPicNameR.c_str())->getCString();
+			rightRolePic->setDisplayFrame(CCSpriteFrame::create(uiDir.c_str(),CCRect(0,0,192,192)));
+			CCScaleBy* actionScale = CCScaleBy::create(0.5f,0.5f,0.5f);
+			CCAction* callbackFun = CCCallFunc::create(actionScale, SEL_CallFunc(&NPCChatUiLayer::setIsPlayingForFalse));
+			rightRolePic->runAction(callbackFun);
+			rightRolePic->setColor(ccc3(96,96,96));
+			isScaleR = true;
+			tempFlagR = false;
+		}else{
+			uiDirR = CCString::createWithFormat("%s%s%s%s%s","Art","/","Portrait","/",uiiconR.c_str())->getCString();
+			rightRolePic->setDisplayFrame(CCSpriteFrame::create(uiDirR.c_str(),CCRect(0,0,192,192)));
+			if (isScaleR)
+			{
+				CCScaleBy* actionScale = CCScaleBy::create(0.5f,2.0f,2.0f);
+				CCAction* callbackFun = CCCallFunc::create(actionScale, SEL_CallFunc(&NPCChatUiLayer::setIsPlayingForFalse));
+				rightRolePic->runAction(callbackFun);
+				rightRolePic->setColor(ccc3(255,255,255));
+				isScaleR = false;
+			}
+		}
+	}*/
+
+	roleName->setString(temp->roleName.c_str());
+	roleChatData->setString(temp->roleChatData.c_str());
+
+	_skipButton->setVisible(temp->bShowSkip);
+}
+
+void NPCChatUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	CCLayer *frame=dynamic_cast<CCLayer*>(pNode->getChildByTag(0));
+	World::getInstance()->SetVisibleControlUI(false);
+	isplaying = false;
+	rightRolePic = dynamic_cast<CCSprite*>(frame->getChildByTag(RIGHTROLEPIC));//右侧人物头像
+	liftRolePic = dynamic_cast<CCSprite*>(frame->getChildByTag(LIFTROLEPIC));//左侧人物头像
+
+	_skipButton= frame->getChildByTag(6);
+
+	roleName = Helper::replaceLabelTTFWithLabelFTAndRemove((CCLabelTTF*)frame->getChildByTag(ROLENAME));//说话的人物名称
+	roleChatData = Helper::replaceLabelTTFWithLabelFTAndRemove((CCLabelTTF*)frame->getChildByTag(ROLECHATDATA));//说话的人物内容
+	roleChatData->setDimensions(380.0f,0.0f);
+	isScaleL = false;
+	isScaleR = false;
+	isFirstL = true;
+	isFirstR = true;
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -12, true);	//[bing] 设置为点击优先级最高
+
+	setAllChildernButtonPriority(this, -12);
+
+	NPCChatMgr::getInstance()->setNpcChatData();
+	setChatData();
+}
+
+void NPCChatUiLayer::onExit()
+{
+	World::getInstance()->SetVisibleControlUI(true);
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+	NewPlayerGuider::getInstance()->onNpcChatOver();
+	if(ImmediateEquipUi::getInstance()->isOpen())
+	{
+		ImmediateEquipUi::getInstance()->getFrame()->setVisible(true);
+		ImmediateEquipUi::getInstance()->getFrame()->setImmEquipTime(10.0f);
+	}
+}
+
+std::string NPCChatUiLayer::getBanshenxiangName( int id )
+{
+	std::string uiIconName;
+	if(id >0 && id <60)
+	{
+		uiIconName = CCString::createWithFormat("role_%d.png",id)->getCString();
+	}
+	else
+	{
+		uiIconName = "gx.png";
+	}
+	return uiIconName;
+
+	/*
+	switch (id)
+	{
+	case 1://男战士
+		uiIconNane = "role_1.png";
+		break;
+	case 2://男法师
+		uiIconNane = "role_2.png";
+		break;
+	case 3://男道士
+		uiIconNane = "role_3.png";
+		break;
+	case 4://女战士
+		uiIconNane = "role_4.png";
+		break;
+	case 5://女法师
+		uiIconNane = "role_5.png";
+		break;
+	case 6://女道士
+		uiIconNane = "role_6.png";
+		break;
+	case 7://神秘人、送宝人偶
+		uiIconNane = "role_7.png";
+		break;
+	case 8://龙科洛、镇守大将、镇北军先锋、东海于都督、京鲨、中军龙将
+		uiIconNane = "role_8.png";
+		break;
+	case 9://龙欣儿、龙婷、绝望的龙婷
+		uiIconNane = "role_9.png";
+		break;
+	case 10://凯撒
+		uiIconNane = "role_10.png";
+		break;
+	case 11://天尊、天尊之影
+		uiIconNane = "role_11.png";
+		break;
+	case 12://罗伊
+		uiIconNane = "role_12.png";
+		break;
+	case 13://席法
+		uiIconNane = "role_13.png";
+		break;
+	case 14://沙老二、海贼金三牙、金刚龙将、阎帮主、铁胖哥
+		uiIconNane = "role_14.png";
+		break;
+	case 15://绝对§嚣张、地狱使者、魔龙化身
+		uiIconNane = "role_15.png";
+		break;
+	case 16://舞魅↗妖姬、阿娇、阿萨
+		uiIconNane = "role_16.png";
+		break;
+	case 17://至尊√大帝、黄天师、凡尘道长、凡尘道长之魂、魂念
+		uiIconNane = "role_17.png";
+		break;
+	case 18://拂晓
+		uiIconNane = "role_18.png";
+		break;
+	case 19://雷晧、垂死的雷晧
+		uiIconNane = "role_19.png";
+		break;
+	case 20://冷悠、负伤的冷悠
+		uiIconNane = "role_20.png";
+		break;
+	case 21://老兵
+		uiIconNane = "role_21.png";
+		break;
+	case 22://屠夫、茶店老板、客栈老板、酒保
+		uiIconNane = "role_22.png";
+		break;
+	case 23://药店老板、有间客栈老板、守夜人、农夫、流浪汉
+		uiIconNane = "role_23.png";
+		break;
+	case 24://武器店老板、王大锤、教官洪武、王都尉
+		uiIconNane = "role_24.png";
+		break;
+	case 25://衣服店老板、玲兰、明玑
+		uiIconNane = "role_25.png";
+		break;
+	case 26://首饰店老板、明珠、渔女薇薇
+		uiIconNane = "role_26.png";
+		break;
+	case 27://杂货店老板、地下商贩、摸金校尉、疯人张、凌云
+		uiIconNane = "role_27.png";
+		break;
+	case 28://仓库保管员、仓库后勤、水手亮仔、观星
+		uiIconNane = "role_28.png";
+		break;
+	case 29://老村长、老渔夫、黄岛主
+		uiIconNane = "role_29.png";
+		break;
+	case 30://龙骑将军、边关守将、龙枪兵、猎魔人、前卫龙将
+		uiIconNane = "role_30.png";
+		break;
+	case 31://国王
+		uiIconNane = "role_31.png";
+		break;
+	case 32://宋护卫、海护卫、亲卫哨兵、暗哨、受伤的侦察兵、邪兵卫
+		uiIconNane = "role_32.png";
+		break;
+	case 33://军需官、先锋黑虎、海盗罗杰
+		uiIconNane = "role_33.png";
+		break;
+		//下面的先临时这样加吧，为了今天快速出版本，完了有时间改成自动的。
+	case 34:
+		uiIconNane = "role_34.png";
+		break;
+	case 35:
+		uiIconNane = "role_35.png";
+		break;
+	case 36:
+		uiIconNane = "role_36.png";
+		break;
+	case 37:
+		uiIconNane = "role_37.png";
+		break;
+	case 38:
+		uiIconNane = "role_38.png";
+		break;
+	case 39:
+		uiIconNane = "role_39.png";
+		break;
+	case 40:
+		uiIconNane = "role_40.png";
+		break;
+	default:
+		uiIconNane = "gx.png";
+		break;
+	}
+	return uiIconNane;
+	*/
+}

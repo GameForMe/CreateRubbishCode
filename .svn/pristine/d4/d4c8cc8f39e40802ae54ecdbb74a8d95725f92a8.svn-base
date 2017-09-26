@@ -1,0 +1,219 @@
+#include "BattleModeUiLayer.h"
+#include "tools.h"
+#include "UiManager.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "TCPClient.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "TeamMgr.h"
+#include "ToolTip.h"
+
+using namespace cocos2d;
+
+
+
+BattleModeUi::BattleModeUi()
+{
+
+}
+
+BattleModeUi::~BattleModeUi()
+{
+
+}
+
+CCNode* BattleModeUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["BattleModeUiLayer"] = UiLayerLoader<BattleModeUiLayer>::loader();
+	CCNode* pNode = readUiFromCCBI("battleMode", nodeLoaders, _loadSpriteSheet);
+	return pNode;
+}
+
+//////////////////
+cocos2d::SEL_MenuHandler BattleModeUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler BattleModeUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "guildModePressed", BattleModeUiLayer::guildModePressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "peaceModePressed", BattleModeUiLayer::peaceModePressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "allModePressed", BattleModeUiLayer::allModePressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "teamPressed", BattleModeUiLayer::teamModePressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "shanePressed", BattleModeUiLayer::JusticePressed);
+	return NULL;
+}
+
+void BattleModeUiLayer::update_Pos()
+{
+	int state = RoleManager::getInstance()->\
+		getLocalPlayer()->getAttribute(RA_BATTLEMODE);
+	if (state < ERolePK_Peace || state >= ERPKS_End)
+		return;
+	std::list<int> lists;
+	lists.push_back(state);
+	for (int i = ERolePK_Peace; i < ERPKS_End; ++i)
+	{
+		if ( i != state)
+		{
+			lists.push_back(i);
+		}
+	}
+	std::list<int>::iterator i, iend = lists.end();
+	int idx = 0;
+	for (i = lists.begin(); i != iend; ++i,++idx)
+	{
+		Bm_Map::iterator bi = mMap.find(*i);
+		if (bi == mMap.end())
+		{
+			continue;
+		}
+		const BM_BUTTON& bm = bi->second;
+		////////////
+		Bm_Pos_Map::iterator pi = mPosMap.find(idx*2);
+		if (pi == mPosMap.end())
+		{
+			continue;
+		}
+		bm.bt->setPosition(pi->second);
+
+		pi = mPosMap.find(idx*2+1);
+		if (pi == mPosMap.end())
+		{
+			continue;
+		}
+		bm.des->setPosition(pi->second);
+	}
+}
+
+void BattleModeUiLayer::make_map(int state, CCControlButton* bt, CCLabelTTF* ttf)
+{
+	BM_BUTTON bmb;
+	bmb.bt = bt;
+	bt->setVisible(true);
+	mPosMap.insert(Bm_Pos_Map::value_type(state*2,bt->getPosition()));
+	bmb.des = ttf;
+	ttf->setVisible(true);
+	mPosMap.insert(Bm_Pos_Map::value_type(state*2+1,ttf->getPosition()));
+	mMap.insert(Bm_Map::value_type(state, bmb));
+}
+
+void BattleModeUiLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	mMap.clear();
+	mPosMap.clear();
+	_frame=(CCSprite*)getChildByTag(0);
+	CCLabelTTF *guildttf=(CCLabelTTF*)_frame->getChildByTag(BM_Guild);
+	CCLabelTTF *allttf=(CCLabelTTF*)_frame->getChildByTag(BM_All);
+	CCLabelTTF *peacettf=(CCLabelTTF*)_frame->getChildByTag(BM_Peace);
+	CCLabelTTF *teamttf=(CCLabelTTF*)_frame->getChildByTag(BM_Team);
+	CCLabelTTF *Justicettf=(CCLabelTTF*)_frame->getChildByTag(BM_Justice);
+	CCControlButton *guildBtn=(CCControlButton*)_frame->getChildByTag(BTN_Guild);
+	CCControlButton *allBtn=(CCControlButton*)_frame->getChildByTag(BTN_All);
+	CCControlButton *peaceBtn=(CCControlButton*)_frame->getChildByTag(BTN_Peace);
+	CCControlButton *teamBtn=(CCControlButton*)_frame->getChildByTag(BTN_Team);
+	CCControlButton *JusticeBtn=(CCControlButton*)_frame->getChildByTag(BTN_Justice);
+	make_map(ERolePK_Peace, peaceBtn,peacettf);
+	make_map(ERolePK_Guild, guildBtn,guildttf);
+	make_map(ERolePK_All, allBtn,allttf);
+	make_map(ERolePK_Team, teamBtn,teamttf);
+	make_map(ERolePK_Justice,JusticeBtn,Justicettf);
+	update_Pos();
+}
+
+//界面退出后执行
+void BattleModeUiLayer::onEnter()
+{
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+}
+void BattleModeUiLayer::onExit()
+{
+//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+bool BattleModeUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (!isVisible() || !isRunning() || !hasVisibleParents())
+	{
+		return false;
+	}
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		return true;
+	}
+	else
+	{
+		CLOSE_UI(WCT_BattleMode);
+	}
+	return false;
+}
+void BattleModeUiLayer::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+
+}
+
+void BattleModeUiLayer::peaceModePressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_6);
+	send_NET_SIC_change_pk_value(ERolePK_Peace);
+}
+
+void BattleModeUiLayer::allModePressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_6);
+	send_NET_SIC_change_pk_value(ERolePK_All);
+}
+
+void BattleModeUiLayer::guildModePressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_6);
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	if(lp != NULL && lp->getGuildID() == 0xffffffff)
+	{
+		ToolTip::getInstance()->push(GET_STR(2390));
+		CLOSE_UI(WCT_BattleMode);
+	}
+	else
+	{
+		send_NET_SIC_change_pk_value(ERolePK_Guild);
+	}
+}
+
+void BattleModeUiLayer::teamModePressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	if(!TeamMgr::getInstance()->is_inteam())
+	{
+		ToolTip::getInstance()->push(GET_STR(9515));
+		CLOSE_UI(WCT_BattleMode);
+	}
+	else
+	{
+		send_NET_SIC_change_pk_value(ERolePK_Team);
+	}	
+}
+void BattleModeUiLayer::JusticePressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	send_NET_SIC_change_pk_value(ERolePK_Justice);
+}
+void BattleModeUiLayer::send_NET_SIC_change_pk_value(int state)
+{
+	int lpState = RoleManager::getInstance()->getLocalPlayer()->getAttribute(RA_BATTLEMODE);
+	if(lpState == state)
+		return ;
+
+	NET_SIC_change_pk_value cmd;
+	cmd.eState = (ERolePKState)state;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_INSIGNIFICANT , false);
+	_frame->setVisible(false);
+}
+

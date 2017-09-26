@@ -1,0 +1,185 @@
+#include "SkillEffect.h"
+#include "SkillAnimManager.h"
+#include "RoleManager.h"
+#include "Role.h"
+#include "MapManager.h"
+#include "SQLCommand.h"
+#include "DBMgr.h"
+#include "LandNode.h"
+#include "SkillManager.h"
+
+SkillEffect::SkillEffect()
+	: _sprite(NULL)
+	, _updatePos(false)
+	, _targetRoleId(INVALID_ID)
+	,_bNeedRunOnUpdate(false)
+	,_usedTime(0)
+	,mpLandNode(NULL)
+{
+	mpLandNode = LandNode::create();
+	mpLandNode->setTag(ELN_PlayerSkillEft);
+	mpLandNode->retain();
+	_sprite = CCSprite::create();
+	mpLandNode->addChild(_sprite);
+	//_sprite->retain();
+	//_sprite->setAnchorPoint(ccp(0.0f, 1.0f));
+}
+
+SkillEffect::~SkillEffect()
+{
+	removeFromMap();
+// 	if(_sprite != NULL)
+// 	{
+// 		_sprite->release();
+// 		_sprite = NULL;
+// 	}
+	//CC_ASSERT(mpLandNode->retainCount() == 1);
+
+	CC_SAFE_RELEASE(mpLandNode);
+
+	releaseAllLoadAnim();
+}
+bool SkillEffect::initSkill(unsigned int skillId,  const st_skill_proto &skillInfo )
+{
+	_skillId = skillId;
+
+	//判断技能是否有起手特效
+	_bHasUpEffect = !skillInfo.beginEffect.empty();
+	_bHasEffect = skillInfo.animFile !="0";
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM SkillData WHERE ID = ?1");
+// 	cmd->set_integer32(1 , _skillId);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("BeginEffect");
+// 		std::string beginEffect = table->get_text(idx);
+// 		if (beginEffect == "0")
+// 		{
+// 			_bHasUpEffect = false;
+// 		}
+// 
+// 		idx = table->get_index("EffectFile");
+// 		std::string hasEffect = table->get_text(idx);
+// 		if (hasEffect =="0")
+// 		{
+// 			_bHasEffect = false;
+// 		}
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+	return true;
+}
+bool SkillEffect::run( unsigned int targetRoleId )
+{
+	if(targetRoleId == INVALID_ID)
+		return false;
+
+	_targetRoleId = targetRoleId;
+	_usedTime = 0;
+
+	if (!_bHasEffect)
+	{
+		return false;
+	}
+
+	//ZHJL 如果有起手特效就延迟显示，到更新里去判断时间再显示
+	if (_bHasUpEffect)
+	{
+		_bNeedRunOnUpdate = true;
+		return false;
+	}
+
+	return true;
+}
+void SkillEffect::update( float dt )
+{
+	//ZHJL 更新判断特效延迟显示
+	//_usedTime += dt;
+	//if (_bNeedRunOnUpdate && _usedTime>=0.5)
+	//{
+	//	_bNeedRunOnUpdate = false;
+	//	runOnUpdate();
+	//}
+
+	if (!_bHasEffect)
+	{
+		return;
+	}
+
+	if(_updatePos && _targetRoleId != INVALID_ID && _sprite != NULL && _sprite->isVisible())
+	{
+		Role *role = RoleManager::getInstance()->findRole(_targetRoleId);
+		if(role != NULL)
+		{
+			setPosition(role->getPosition());
+		}
+	}
+}
+
+void SkillEffect::removeFromManager()
+{
+	SkillAnimManager::getInstance()->removeAnims(this);
+}
+
+void SkillEffect::addToMap()
+{
+	CC_ASSERT(_sprite != NULL);
+	CC_ASSERT(mpLandNode != NULL);
+	CCNode *mapNode = MapManager::getInstance()->getMap();
+	if(mapNode != NULL)
+	{
+		mapNode->addChild(mpLandNode);
+	}
+	//MapManager::getInstance()->getMap()->addChild(_sprite);
+}
+
+void SkillEffect::removeFromMap()
+{
+	//CC_ASSERT(_sprite != NULL);
+	//MapManager::getInstance()->getMap()->removeChild(_sprite);
+	//_sprite->removeFromParent();
+	mpLandNode->removeFromParentAndCleanup(true);
+}
+
+void SkillEffect::setPosition( const CCPoint &pos )
+{
+	mpLandNode->setPosition(pos);
+
+	//_sprite->setPosition(pos);
+	MapManager* map_mgr = MapManager::getInstance();
+	int new_zoder  = map_mgr->getZOrderAtPoint(pos);
+	if (mpLandNode->getZOrder() != new_zoder)
+		mpLandNode->setZOrder(new_zoder);
+
+	_sprite->setOpacity(map_mgr->isAlpha(pos) ? 128:255);
+// 	if(mpLandNode != NULL && mpLandNode->getParent())
+// 	{
+// 		int zorder = MapManager::getInstance()->getZOrderAtPoint(pos);
+// 		mpLandNode->getParent()->reorderChild(mpLandNode, zorder);
+// 	}
+// 
+// 	if(MapManager::getInstance()->isAlpha(pos))
+// 	{
+// 		_sprite->setOpacity(128);
+// 	}
+// 	else
+// 	{
+// 		_sprite->setOpacity(225);
+// 	}
+}
+
+void SkillEffect::releaseAllLoadAnim()
+{
+	AnimationCache::getInstance()->releaseAnims(_usedAnim);
+}
+
+void SkillEffect::setVisible( bool isShow )
+{
+	mpLandNode->setVisible(isShow);
+}
+
+void SkillEffect::setPriority( int nPriority )
+{
+	CC_ASSERT(mpLandNode);
+	mpLandNode->setTag(nPriority);
+}

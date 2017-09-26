@@ -1,0 +1,609 @@
+#include "ArenaRankUi.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "CFGReader.h"
+#include "WorldPacket.h"
+#include "ArenaMainMgr.h"
+#include "DBMgr.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "UiResourceMgr.h"
+#include "PackageManager.h"
+#include "ItemDefine.h"
+#include "ItemTip.h"
+#include "Helper.h"
+//////////////////////////////////////////////////////////////////////////
+
+ArenaRankUi::ArenaRankUi()
+{
+
+}
+ArenaRankUi::~ArenaRankUi()
+{
+
+}
+
+CCNode* ArenaRankUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["ArenaRankUiLayer"] = UiLayerLoader<ArenaRankUiLayer>::loader();
+	CCNode* pNode = readUiFromCCBI("jingjipaihang", nodeLoaders, _loadSpriteSheet);
+
+	return pNode;
+}
+
+void ArenaRankUi::updateRewardData()
+{
+	ArenaRankUiLayer *ui = getUiNodeByTag<ArenaRankUiLayer>(WCT_ARENARANKUI);
+	if(ui != NULL)
+	{
+		ui->updateRewardItem();
+		ui->updateSelect();
+	}
+}
+
+void ArenaRankUi::updateRankData()
+{
+	ArenaRankUiLayer *ui = getUiNodeByTag<ArenaRankUiLayer>(WCT_ARENARANKUI);
+	if(ui != NULL)
+	{
+		ui->updateArenaRankData();
+	}
+}
+
+CCNode* ArenaRankUi::getRankFrame()
+{
+	ArenaRankUiLayer *ui = getUiNodeByTag<ArenaRankUiLayer>(WCT_ARENARANKUI);
+	CCNode *layer=NULL;
+	if(ui != NULL)
+	{
+		layer=ui->getChildByTag(0)->getChildByTag(0);
+	}
+	return layer;
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler ArenaRankUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler ArenaRankUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", ArenaRankUiLayer::onCloseBtnPressed);
+	return NULL;
+}
+
+void ArenaRankUiLayer::onCloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_ARENARANKUI);
+	OPEN_UI(WCT_ARENAMAINUI);
+}
+
+void ArenaRankUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	reward_6 = dynamic_cast<CCSprite*>(getChildByTag(0)->getChildByTag(6));
+	_frame = dynamic_cast<CCNode*>(getChildByTag(0));
+	for (int i = 0;i < 5;++i)
+	{
+		_node[i] = dynamic_cast<CCNode*>(_frame->getChildByTag(i + 1));
+		//_rewardName[i] = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(i + 16));
+		_rewardName[i] = Helper::getLabelFTByParentAndTag(_frame, i + 16);
+		CC_ASSERT(_rewardName[i]);
+		_rewardNode[i] = ItemNode::create();
+		_rewardNode[i]->hideItemOpBtn();
+		_rewardNode[i]->setVisible(false);
+		_rewardNode[i]->setAnchorPoint(ccp(0.5,0.5));
+		CCSize size = _node[i]->getContentSize();
+		_rewardNode[i]->setPosition(ccp(size.width/2 ,size.height/2));
+		_node[i]->addChild(_rewardNode[i]);
+	}
+}
+
+bool ArenaRankUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (!isVisible() || !hasVisibleParents() || !isRunning())
+	{
+		return false;
+	}
+	CCPoint framePoint = this->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = this->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+/*
+		CCPoint framePoint2 = _scrollView->convertTouchToNodeSpace(pTouch);
+		const CCSize &frameSize2 = _scrollView->getContentSize();
+		CCRect frameRect2(0.0f, 0.0f, frameSize2.width, frameSize2.height);
+		if (frameRect2.containsPoint(framePoint2))
+		{
+			return false;
+		}*/
+		return true;
+	}
+	return true;
+}
+
+void ArenaRankUiLayer::updateArenaRankData()
+{
+	_contentLayer = dynamic_cast<CCLayer*>(getChildByTag(0)->getChildByTag(0));
+	_scrollView = CCScrollView::create(_contentLayer->getContentSize());
+	_contentLayer->addChild(_scrollView);
+
+	_container = CCNode::create();
+	//_container->retain();
+
+	int tempCount = ArenaMainMgr::getInstance()->getjjcRankCount();
+	int tmpPostion = _contentLayer->getContentSize().height / 3;
+	//设置容器大小
+	_container->setContentSize(CCSize(_contentLayer->getContentSize().width, tmpPostion * tempCount));
+
+	//_container->setContentSize(CCSize(_contentLayer->getContentSize().width,_contentLayer->getContentSize().height * 10));
+	_scrollView->setContainer(_container);
+	_scrollView->setTouchEnabled(true);
+	_scrollView->setBounceable(true);
+	_scrollView->setContentSize(_container->getContentSize());
+	_scrollView->setDirection(kCCScrollViewDirectionVertical);
+	_scrollView->setContentOffset(_scrollView->minContainerOffset());
+	
+
+	for (int i = 0;i < tempCount;i++)
+	{
+// 		if (ArenaMainMgr::getInstance()->getChallengePlayerRankAttr(i).nLevel < 30)
+// 		{
+// 			continue;
+// 		}
+		ArenaRankUiItem* temp = new ArenaRankUiItem;
+		_container->addChild(temp->getUiFrame(),2); 
+		temp->getUiFrame()->setPositionY(tmpPostion * (tempCount - i) - 40);
+		//temp->getUiFrame()->setPositionX(temp->getUiFrame()->getContentSize().width / 2 + 70);
+		temp->getUiFrame()->setPositionX(temp->getUiFrame()->getContentSize().width / 2 + 10);
+		temp->getUiFrame()->setData(ArenaMainMgr::getInstance()->getChallengePlayerRankAttr(i));
+		temp->getUiFrame()->setTag(i + 1);
+		_items.push_back(temp);
+	}
+
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM MAILDATA WHERE id = ?1");
+	cmd->set_integer32(1 , 1);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	unsigned int rewardDataId[5] = {0};
+	int rewardDataCount[5] = {0};
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("item1");
+		rewardDataId[0] = table->get_integer64(idx);
+		idx = table->get_index("item1_num");
+		rewardDataCount[0] = table->get_integer32(idx);
+		idx = table->get_index("item2");
+		rewardDataId[1] = table->get_integer64(idx);
+		idx = table->get_index("item2_num");
+		rewardDataCount[1] = table->get_integer32(idx);
+		idx = table->get_index("item3");
+		rewardDataId[2] = table->get_integer64(idx);
+		idx = table->get_index("item3_num");
+		rewardDataCount[2] = table->get_integer32(idx);
+		idx = table->get_index("item4");
+		rewardDataId[3] = table->get_integer64(idx);
+		idx = table->get_index("item4_num");
+		rewardDataCount[3] = table->get_integer32(idx);
+		idx = table->get_index("item5");
+		rewardDataId[4] = table->get_integer64(idx);
+		idx = table->get_index("item5_num");
+		rewardDataCount[4] = table->get_integer32(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	for (int i = 0;i < 5;++i)
+	{
+		if (rewardDataId[i] == 0 || rewardDataId[i] == INVALID)
+		{
+			_rewardNode[i]->setVisible(false);
+			_rewardNode[i]->setClickable(false);
+			if (_rewardName[i])
+				_rewardName[i]->setVisible(false);
+		}
+		else
+		{
+			_rewardNode[i]->setDataId(rewardDataId[i]);
+			_rewardNode[i]->setNum(rewardDataCount[i]);
+			_rewardNode[i]->setVisible(true);
+			_rewardNode[i]->setClickable(true);
+			updateRewardItemName(rewardDataId[i],i);
+		}
+	}
+}
+
+void ArenaRankUiLayer::onEnter()
+{
+//	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 2, true);
+	setTouchPriority(2);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+}
+
+void ArenaRankUiLayer::onExit()
+{
+//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+	RemoveAllItem();
+}
+
+void ArenaRankUiLayer::updateRewardItemName(int checked,int index)
+{
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM ITEMTIPDATA WHERE id = ?1");
+	cmd->set_integer32(1 , checked);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	std::string rewardDataName;
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("name");
+		rewardDataName = table->get_text(idx);
+		if (!rewardDataName.empty())
+		{
+			if (_rewardName[index])
+			{
+				_rewardName[index]->setString(rewardDataName.c_str());
+				_rewardName[index]->setVisible(true);
+			}
+		}
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+}
+
+void ArenaRankUiLayer::updateRewardItem()
+{
+	int checked = ArenaMainMgr::getInstance()->getCheckedRankIndex();
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM MAILDATA WHERE id = ?1");
+	cmd->set_integer32(1 , checked);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	unsigned int rewardDataId[5] = {0};
+	int rewardDataCount[5] = {0};
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("item1");
+		rewardDataId[0] = table->get_integer64(idx);
+		idx = table->get_index("item1_num");
+		rewardDataCount[0] = table->get_integer32(idx);
+		idx = table->get_index("item2");
+		rewardDataId[1] = table->get_integer64(idx);
+		idx = table->get_index("item2_num");
+		rewardDataCount[1] = table->get_integer32(idx);
+		idx = table->get_index("item3");
+		rewardDataId[2] = table->get_integer64(idx);
+		idx = table->get_index("item3_num");
+		rewardDataCount[2] = table->get_integer32(idx);
+		idx = table->get_index("item4");
+		rewardDataId[3] = table->get_integer64(idx);
+		idx = table->get_index("item4_num");
+		rewardDataCount[3] = table->get_integer32(idx);
+		idx = table->get_index("item5");
+		rewardDataId[4] = table->get_integer64(idx);
+		idx = table->get_index("item5_num");
+		rewardDataCount[4] = table->get_integer32(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	for (int i = 0;i < 5;++i)
+	{
+		if (rewardDataId[i] == 0 || rewardDataId[i] == INVALID)
+		{
+			_rewardNode[i]->setVisible(false);
+			_rewardNode[i]->setClickable(false);
+			if (_rewardName[i])
+				_rewardName[i]->setVisible(false);
+		}
+		else
+		{
+			_rewardNode[i]->setDataId(rewardDataId[i]);
+			_rewardNode[i]->setNum(rewardDataCount[i]);
+			_rewardNode[i]->setVisible(true);
+			_rewardNode[i]->setClickable(true);
+			updateRewardItemName(rewardDataId[i],i);
+		}
+	}
+	reward_6->initWithSpriteFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(CCString::createWithFormat("%s%d","jingjirank_number",checked)->getCString()));
+}
+
+void ArenaRankUiLayer::updateSelect()
+{
+	int checked = ArenaMainMgr::getInstance()->getCheckedRankIndex();
+	int count=1;
+	for(ArenaRankUiItemList::iterator iter = _items.begin(); iter != _items.end(); ++ iter)
+	{
+		ArenaRankUiItem *item = *iter;
+		if (count==checked)
+		{
+			item->setSelectVisible(true);
+		}
+		else
+		{
+			item->setSelectVisible(false);
+		}
+		count++;
+	}
+}
+
+void ArenaRankUiLayer::setQuality( int tag,int quality )
+{
+	CCSprite *qualitySprite = dynamic_cast<CCSprite*>(getChildByTag(0)->getChildByTag(tag));
+	EItemQuality itemQuality = (EItemQuality)quality;
+	std::string _qualitybox;
+	switch(itemQuality)
+		{
+		case EIQ_Null:
+			_qualitybox = PackageManager::getInstance()->getQualityFramName(EIQ_Null).c_str();
+			break;
+		case EIQ_Quality0:
+			_qualitybox = PackageManager::getInstance()->getQualityFramName(EIQ_Quality0).c_str();
+			break;
+		case EIQ_Quality1:
+			_qualitybox = PackageManager::getInstance()->getQualityFramName(EIQ_Quality1).c_str();
+			break;
+		case EIQ_Quality2:
+			_qualitybox = PackageManager::getInstance()->getQualityFramName(EIQ_Quality2).c_str();
+			break;
+		case EIQ_Quality3:
+			_qualitybox = PackageManager::getInstance()->getQualityFramName(EIQ_Quality3).c_str();
+			break;
+		case EIQ_Quality4:
+			_qualitybox = PackageManager::getInstance()->getQualityFramName(EIQ_Quality4).c_str();
+			break;
+		case EIQ_Quality5:
+			_qualitybox = PackageManager::getInstance()->getQualityFramName(EIQ_Quality5).c_str();
+			break;
+		default:
+			return;
+			break;
+		}
+	CCImage image;
+	image.initWithImageFile(_qualitybox.c_str());
+	CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addUIImage(&image, _qualitybox.c_str());
+	CCSpriteFrame *frame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+	qualitySprite->setDisplayFrame(frame);
+}
+
+void ArenaRankUiLayer::RemoveAllItem()
+{
+	for(ArenaRankUiItemList::iterator iter = _items.begin(); iter != _items.end(); ++ iter)
+	{
+		ArenaRankUiItem *item = *iter;
+		delete item;
+	}
+	_items.clear();
+}
+
+void ArenaRankUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint framePoint = this->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = this->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if (frameRect.containsPoint(framePoint))
+	{
+// 		if (isTouchOnNodeContent(reward_1, pTouch))
+// 		{
+// 			setItemTipsId(rewardDataId_1,reward_2);
+// 		}
+// 		if (isTouchOnNodeContent(reward_2, pTouch))
+// 		{
+// 			setItemTipsId(rewardDataId_2,reward_3);
+// 		}
+// 		if (isTouchOnNodeContent(reward_3, pTouch))
+// 		{
+// 			setItemTipsId(rewardDataId_3,reward_4);
+// 		}
+// 		if (isTouchOnNodeContent(reward_4, pTouch))
+// 		{
+// 			setItemTipsId(rewardDataId_4,reward_5);
+// 		}
+// 		if (isTouchOnNodeContent(reward_5, pTouch))
+// 		{
+// 			setItemTipsId(rewardDataId_5,reward_5);
+// 		}
+	}
+}
+
+void ArenaRankUiLayer::setItemTipsId( unsigned int id ,CCSprite* sprite)
+{
+	ItemTip::getInstace()->open();
+	ItemTip::getInstace()->setDataId(id);
+	ItemTip::getInstace()->setPosition(ccp(sprite->getPositionX(),sprite->getPositionY()+itemTipsY));
+	ItemTip::getInstace()->hideOpBtn();
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+ArenaRankUiItem::ArenaRankUiItem()
+	: _uiFrame(NULL)
+{
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("ArenaRankUiItemFrame", ArenaRankUiItemLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	_uiFrame = dynamic_cast<ArenaRankUiItemFrame*>(ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "arenarankitem.ccbi").c_str()));
+	_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+	//UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+	ccbReader->release();
+
+	if(_uiFrame != NULL)
+	{
+		//_uiFrame->retain();
+		_uiFrame->_item = this;
+	}
+}
+
+void ArenaRankUiItem::setSelectVisible( bool visible )
+{
+	CCSprite *selectSprite = dynamic_cast<CCSprite*>(_uiFrame->getChildByTag(7));
+	CC_ASSERT(selectSprite!=NULL);
+	selectSprite->setVisible(visible);
+}
+
+ArenaRankUiItem::~ArenaRankUiItem()
+{
+	_uiFrame->removeFromParent();
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+cocos2d::SEL_MenuHandler ArenaRankUiItemFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler ArenaRankUiItemFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+bool ArenaRankUiItemFrame::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (!isVisible() || !isRunning() || !hasVisibleParents())
+	{
+		return false;
+	}
+	CCPoint framePoint = this->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = this->getContentSize();
+	CCNode *node=GET_UI(ArenaRankUi,WCT_ARENARANKUI)->getRankFrame();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if (!isTouchOnNodeContent(node,pTouch))
+	{
+		return false;
+	}
+	if(frameRect.containsPoint(framePoint))
+	{
+		ArenaMainMgr::getInstance()->setCheckedRankIndex(this->getTag());
+		GET_UI(ArenaRankUi,WCT_ARENARANKUI)->updateRewardData();
+		return true;
+	}
+	return false;
+}
+
+void ArenaRankUiItemFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_rolehead = dynamic_cast<CCSprite*>(getChildByTag(2));
+	_rewardIcon = dynamic_cast<CCSprite*>(getChildByTag(6));
+// 	roleName = (CCLabelTTF*)getChildByTag(1);
+// 	roleLv = (CCLabelTTF*)getChildByTag(3);
+// 	rolePower = (CCLabelTTF*)getChildByTag(4);
+// 	roleWinSteark = (CCLabelTTF*)getChildByTag(5);
+	_roleName = Helper::getLabelFTByParentAndTag(this,1);
+	CC_ASSERT(_roleName);
+	_roleLv = Helper::getLabelFTByParentAndTag(this,3);
+	CC_ASSERT(_roleLv);
+	_rolePower = Helper::getLabelFTByParentAndTag(this,4);
+	CC_ASSERT(_rolePower);
+	_roleWinSteark = Helper::getLabelFTByParentAndTag(this,5);
+	CC_ASSERT(_roleWinSteark);
+	//setAllChildernButtonPriority(this,2);
+}
+
+void ArenaRankUiItemFrame::setData(tagJJCTargetRoleInfo attr)
+{
+	std::string tmpName = Helper::convert_wstr_to_string<128>(attr.szRoleName);
+	std::string tmpHeadName = getRoleHeadName(attr.eClassType,attr.bySex);
+	if (_rolehead)
+		_rolehead->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(tmpHeadName.c_str()));
+	if (_roleName)
+		_roleName->setString(tmpName.c_str());
+	CCString* rankSpriteString = CCString::createWithFormat("%s%d","jingjirank_number",attr.nRank);
+	CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(rankSpriteString->getCString());
+	if(frame)
+		_rewardIcon->initWithSpriteFrame(frame);
+	if (_roleLv)
+		_roleLv->setString(CCString::createWithFormat("%d",attr.nLevel)->getCString());
+	if (_rolePower)
+		_rolePower->setString(CCString::createWithFormat("%d",attr.n32Rating)->getCString());
+	if (_roleWinSteark)
+		_roleWinSteark->setString(CCString::createWithFormat("%d",attr.nWinnerCount)->getCString());
+}
+
+// std::string ArenaRankUiItemFrame::Helper::convert_wstr_to_string<128>(wchar_t* roleName)
+// {
+// 	char vStr[128];
+// 	memset(vStr, 0, sizeof(char) * 128);
+// 	Utf16ToUtf8(roleName, vStr, 128, 0);
+// 	return vStr;
+// }
+
+void ArenaRankUiItemFrame::onEnter()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	CCSprite::onEnter();
+}
+
+void ArenaRankUiItemFrame::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCSprite::onExit();
+}
+
+std::string ArenaRankUiItemFrame::getRoleHeadName(EClassType _eClassType,BYTE bySex)
+{
+	eRoleType tempRloeType;
+	switch(_eClassType)
+	{
+	case EV_Warrior:
+		if (bySex == 1)
+		{
+			tempRloeType = RT_MWARRIOR;
+		}
+		else
+		{
+			tempRloeType = RT_WWARRIOR;
+		}
+		break;
+	case EV_Mage:
+		if (bySex == 1)
+		{
+			tempRloeType = RT_MMAGE;
+		}
+		else
+		{
+			tempRloeType = RT_WMAGE;
+		}
+		break;
+	case EV_Taoist:
+		if (bySex == 1)
+		{
+			tempRloeType = RT_MTAOIST;
+		}
+		else
+		{
+			tempRloeType = RT_WTAOIST;
+		}
+		break;
+	default:
+		tempRloeType = RT_MWARRIOR;
+		break;
+	}
+
+	std::string tiaozhantouxiangPicPath="";
+	switch(tempRloeType)//选择角色类型
+	{
+	case RT_MWARRIOR:
+		tiaozhantouxiangPicPath = CCString::createWithFormat("%s","jingjirank_zhanshiman")->getCString();
+		break;
+	case RT_WWARRIOR:
+		tiaozhantouxiangPicPath = CCString::createWithFormat("%s","jingjirank_zhanshiwoman")->getCString();
+		break;
+	case RT_MMAGE:
+		tiaozhantouxiangPicPath = CCString::createWithFormat("%s","jingjirank_fashiman")->getCString();
+		break;
+	case RT_WMAGE:
+		tiaozhantouxiangPicPath = CCString::createWithFormat("%s","jingjirank_fashiwoman")->getCString();
+		break;
+	case RT_MTAOIST:
+		tiaozhantouxiangPicPath = CCString::createWithFormat("%s","jingjirank_daoshiman")->getCString();
+		break;
+	case RT_WTAOIST:
+		tiaozhantouxiangPicPath = CCString::createWithFormat("%s","jingjirank_daoshiwoman")->getCString();
+		break;
+	default:
+		CC_ASSERT(0);
+	}
+	return tiaozhantouxiangPicPath;
+}
+

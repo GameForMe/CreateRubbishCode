@@ -1,0 +1,294 @@
+#ifndef SKILLMANAGER_H
+#define SKILLMANAGER_H
+
+#include "BaseDefine.h"
+#include <string>
+#include "cocos2d.h"
+class Role;
+struct s_net_cmd;
+using namespace cocos2d;
+
+struct st_skill_proto
+{
+	int replaceId;
+	int id;
+	int next_id;
+	float max_cd;
+	int mp;
+	int range;
+	int priority;
+	int LvItem_6to7;
+	int LvItem_3to4;
+	//int proficiency;
+	int maxProficienty;
+	int skill_level;
+	int need_role_lv_next_skill;
+	int isMononmer;// 是否单体攻击
+	int	isNeedBook;// 是否需要技能书
+	int isAtive;//1是主动技能 0是被动技能
+	int need_role_lv;//学习等级
+	std::string iconFrameName;
+	std::string desc;
+	std::string nextDes;
+
+	std::string dropTest;
+
+	std::string skillName;
+	eSkillType type;
+	eSkillDirType dirType;
+	eSkillTargetType targetType;
+	int orderingRule;
+	bool isUpAttack;
+
+	int skillPower;//技能对应的战斗力加成 add by 16.2.19
+	int skillPowerSum;//当前技能对应的总战斗力 16.4
+
+	std::string animFile;    // 合表时添加  将SkillInfo结构体和本结构体一些内容合并过来
+	std::string musicEffectName;
+	std::string beginEffect;
+
+	st_skill_proto():need_role_lv_next_skill(0)
+	{
+
+	}
+};
+
+struct SkillData
+{
+	//bool isCodeDone;
+	bool activity;
+	//int replaceId;
+	//int id;
+	//int next_id;
+	//float max_cd;
+	float cur_cd;
+	int proficiency;
+	//int mp;
+	//int range;
+	//int priority;
+	//int proficiency;
+	//int LvItem_6to7;
+	//int LvItem_3to4;
+	//int maxProficienty;
+	//int skill_level;
+	//int need_role_lv_next_skill;
+	//int isMononmer;// 是否单体攻击
+	//int	isNeedBook;// 是否需要技能书
+	//int isAtive;//1是主动技能 0是被动技能
+	//int need_role_lv;//学习等级
+	bool canUse;
+// 	std::string iconFrameName;
+// 	std::string desc;
+// 	std::string nextDes;
+// 	
+// 	std::string dropTest;
+	
+// 	std::string skillName;
+// 	eSkillType type;
+// 	eSkillDirType dirType;
+// 	eSkillTargetType targetType;
+// 	int orderingRule;
+// 	bool isUpAttack;
+
+//	int skillPower;//技能对应的战斗力加成 add by 16.2.19
+//	int skillPowerSun;//当前技能对应的总战斗力 16.4
+
+	st_skill_proto const* proto;
+
+	SkillData(st_skill_proto const* p):proto(p)
+		,activity(false)
+		,cur_cd(0)
+		,canUse(false)
+		,proficiency(0)
+	{
+		//activity = false;
+		//replaceId = -1;
+	}
+
+
+	bool canClose() const { return proto->replaceId != -1; }
+};
+
+struct SkillExpByLv
+{
+	int playerLv;
+	int normalExp;
+	int MoneyExp;
+
+	SkillExpByLv():normalExp(0),MoneyExp(0)
+	{
+
+	}
+};
+
+const static int MAX_SKILL_NUM = 9; //最大技能个数 add by XSea 2014.6.17 修改此值要同时修改SkillListItemUi const static int ITEMS_NUM
+
+//技能书和寻路的索引数据
+struct	st_skillbook_pathfind_info
+{
+	unsigned int role_id;		//npc or monster
+	std::string  notice_text;
+};
+
+struct skillExpCost
+{
+	INT16	n16Count;			// 今日领悟次数
+	INT16	n16Cost;			// 花费
+	skillExpCost()
+	{
+		memset(this, 0, sizeof(this));
+	}
+};
+
+struct skillbook_pathfind_reached;
+struct update_skill_can_use;
+struct LpLevelUpEvent;
+struct item_num_change;
+//LocalPlayer 技能控制
+class SkillManager
+{
+public:
+	static SkillManager *getInstance();
+	SkillManager();
+	~SkillManager();
+	void setDayCount(int Count);
+	void setskillPointUpper(unsigned int Count);
+	int getskillPointUpper(){return skillPointUpper;};
+	void init();
+	void destroy();
+	void delayDestroy();//延迟重连需要销毁
+	unsigned int  onSkillAddExpRerult(s_net_cmd* cmd);
+	void addSkill(int skillId, bool canUse = true);
+	void sendFastAddSkillExp(int addNum);
+	void removeSkill(int skillId);
+	//void querySkillExpByLv( int curPlayerLv);
+	int querySkill_bySkillID(int skillId,eSkillQueryState &state);
+	int querySkill(eSkillQueryState &state, bool use = true);
+	bool queryAndUseSkill(int skillId, bool use = true);
+	void activeSkill(int skillId);
+	void deactiveSkill(int skillId);
+	void update(float dt);
+	bool isDuringCommonCd();
+	int getLastUsedSkill() { return _lastUsedSkillId; }
+
+	SkillExpByLv* getSkillExpByLv(int playerLv) ;
+	SkillData *getSkillData(int skillId, bool typeId = false);
+	const std::list<SkillData*> getSkills();
+	eSkillQueryState queryManualSkill(bool use = false);
+	void updateSkillUi();
+	void sendSkillLevelUp(unsigned int skillId, unsigned int npcId = (unsigned int)-1, INT64 itemId = -1);
+
+	unsigned int getManualSkillId() { return _manualSkillId; }
+	unsigned int getSkillTypeId(unsigned int skillId) { return skillId / 100; }
+	unsigned int getSkillId(unsigned int skillId, int level) { return skillId * 100 + level; }
+	unsigned int getSkillId(unsigned int skillTypeId);
+	bool isManaualSkill(int skillId);
+	bool planUseManual();//技能列表中的最后一个技能
+	bool planUseManual(int skillId);
+
+	std::string getSkillIcon(int skillIndex);
+	int getSkillIsActive( int skillIndex );
+	int getSkillId(short skillIndex);
+	SkillData *getSkillDataByIndex(int skillIndex);
+	std::string getSkillNameByID(unsigned int skillID);//通过技能大ID得到该技能的名称 gx add 2013.9.4
+
+	std::map<int, bool> _auto_skill_list; //保存所有技能是否自动释法列表 key = skillid / 100，value false=不自动 true=自动
+	void SetAutoSkillList(int nSkillID); //根据_auto_skill_list 设置自动施法
+	void NowIsAttack(bool bAttack){IsAttackState = bAttack;};
+	bool GetIsAttack(){return IsAttackState;};
+	unsigned int getKulouID() { return _nKulouID;}
+	unsigned int getShengshouID() { return _nShengshouID;}
+	bool getSkillCanUse( int skillId );
+	int getSkillOrderingRule( int skillId );
+	void SetCurIndex(int index) {_CurSelectIndex = index;}
+	int	 GetCurIndex(){return _CurSelectIndex;}
+	void switchIsCanUpGradeValue();
+	bool getSkillCanUpGrade(int skillId);
+	bool getSkillCanBreak(int skillId);
+	//void judgeIsSkillCanBreak(unsigned int itemId, unsigned int itemNum);
+	bool getSkillLearnState(const int& skillIndex); //通过技能UI索引判断技能是否学习..ZG
+	void judgeIsSkillCanBreak();
+	inline bool isShowRedPoint() const{ return _isCanBreak || _isCanUpGrade;}
+	void resetData();
+	double getAllSkillPower();
+	unsigned int getLearnSkillTotalNum();
+
+	st_skillbook_pathfind_info const* get_skillbook_pathfind_info(unsigned int skill_book_id)const;
+
+	bool try_to_findpath(unsigned int skillbook_id);
+	void initLoadSkillExpCostMap();
+	const skillExpCost* const getSkillExpCost(INT16 count);
+	st_skill_proto const* get_skill_proto(int long_id);
+	void init_skill_proto();
+protected:
+	void addSkill(SkillData *skillData);
+	int getNextLevel(int skillId, bool canUse = true);
+	bool isSkillExist(int skillId);
+	eSkillQueryState canSkillRun(SkillData *skillData, float mp, float dis, Role *targetRole, bool isManual = false);
+protected:
+	unsigned int onRoleInitSkill( s_net_cmd *cmd ); //角色初始化技能
+	unsigned int onAddSkill(s_net_cmd *cmd);
+	unsigned int onCreatureChange(s_net_cmd*cmd);
+	unsigned int onSkillLevelUp(s_net_cmd *cmd);
+	unsigned int onSkillUpdate(s_net_cmd *cmd);
+
+	unsigned int on_server_sync_skill_cd(s_net_cmd* cmd);
+
+	void on_event_pathfind_reached(skillbook_pathfind_reached* evt);
+	void on_event_update_skill_can_use(update_skill_can_use* evt);
+	void on_event_lp_level_change(LpLevelUpEvent* evt);
+	void on_event_item_change(item_num_change* evt);
+protected:
+	typedef std::map<int, SkillData*> SkillDataMap;
+	typedef std::map<int,int> SkillPriorityMap;
+	typedef std::map<INT16,skillExpCost> SkillCostMap;
+
+	typedef std::map<int,st_skill_proto>	skill_proto_map;
+	skill_proto_map			m_skill_proto;
+	
+	void init_next_lv();
+	//SkillDataMap _activeSkill;
+	//SkillDataMap _deactiveSkill;
+	SkillDataMap _readyStateSkill;
+	SkillDataMap _cdStateSkill;
+	SkillDataMap _unUsedSkill;
+	SkillDataMap _canUsedSkill;
+	SkillData *_manualSkill;//特指技能列表中的最后一个技能
+	SkillCostMap _expCostMap;
+	//SkillExpByLv* skillExpByLv; 
+	float _commonCd;
+	bool  IsAttackState;
+	float _commonCdTime;
+	float _huoQiangCd;
+	int _lastUsedSkillId;
+	float _time;
+	bool _petExist;
+	bool _willUseManual;//特指技能列表中的最后一个技能
+	int _manualSkillId;//手动使用的技能
+	int dayCount;//每日修炼次数
+	unsigned int skillPointUpper;//技能点上限	
+
+	//保存骷髅宝宝和圣兽的ID
+	unsigned int _nKulouID;
+	unsigned int _nShengshouID;
+
+	int _CurSelectIndex;
+	bool _isCanUpGrade;
+	bool _isCanBreak;
+
+	std::map<unsigned int,st_skillbook_pathfind_info>	_skillbook_pathfind_map;
+	void init_skillbook_pathfind();
+	void reset_skillbook_pathfind(){_skillbook_pathfind_map.clear();}
+
+	unsigned int _cache_pf_target_id;
+	void reset_pf_target(){_cache_pf_target_id = 0;}
+	bool is_valid_pf_target()const{return _cache_pf_target_id != 0;}
+
+	void confirm_pf();
+
+private:
+	std::map<int,SkillExpByLv> m_skill_exp_level;
+	void init_skill_exp_level();
+};
+
+#endif //SKILLMANAGER_H

@@ -1,0 +1,857 @@
+/**
+ *	@file		SelectTargetUi.cpp
+ *	@author		guantiejun
+ *	@date		2016/06/30
+ *	@version	
+ *	@brief		队伍选择目标
+ */
+
+#include "QuickTeamUi.h"
+#include "CommonClient.h"
+#include "World.h"
+#include "TeamMgr.h"
+#include "QuestMgr.h"
+#include "ActivityMgr.h"
+#include "BloodFightMgr.h"
+#include "BossPKMgr.h"
+#include "BossPKUi_new.h"
+#include "InstanceMgr.h"
+#include "MapManager.h"
+#include "LocalPlayer.h"
+#include "ActionProto.h"
+#include "UiLoader.h"
+#include "UiManager.h"
+#include "f_string_table.h"
+#include "GameEventDefine.h"
+#include "ListControl.h"
+#include "SelectTargetItem1.h"
+#include "SelectTargetItem2.h"
+#include "f_string_table.h"
+#include "InstanceMgr.h"
+#include "ToolTip.h"
+#include "TeamMatchApplyItem.h"
+#include "UsefulFunction.h"
+#include "RewardQuestMgr.h"
+#include "TaskTraceUi.h"
+
+const int time_limit = 3;
+const int max_add_level = 9;
+const int role_max_level = 100;
+const int instance_map_id = 2904547788;
+
+QuickTeamUi::QuickTeamUi()
+{
+
+}
+
+QuickTeamUi::~QuickTeamUi()
+{
+
+}
+
+CCNode * QuickTeamUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["QuickTeamUiLayer"] = UiLayerLoader<QuickTeamUiLayer>::loader();
+	nodeLoaders["ListControl"] = ListControlLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("bianjiezudui", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+QuickTeamUiLayer * QuickTeamUi::getUiLayer()
+{
+	return getUiNodeByTag<QuickTeamUiLayer>(QUICK_TEAM_UI);
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+QuickTeamUiLayer::QuickTeamUiLayer()
+: m_list(NULL)
+, m_list_team(NULL)
+, m_match(NULL)
+, m_cancel_match(NULL)
+, m_target_cue(NULL)
+, m_no_team_cue(NULL)
+, m_select_type(e_target_null)
+, m_select_index(0)
+, m_match_team_num(0)
+, m_last_refresh_time(0)
+, m_is_msg_return(true)
+{
+	m_list_info.clear();
+}
+
+QuickTeamUiLayer::~QuickTeamUiLayer()
+{
+	m_target_type.clear();
+	m_own_quest_map.clear();
+	m_limit_active_map.clear();
+	m_world_boss_map.clear();
+	m_field_boss_map.clear();
+	m_mutil_instance_map.clear();
+	m_auto_action_map.clear();
+
+	m_list_info.clear();
+}
+
+cocos2d::extension::SEL_CCControlHandler QuickTeamUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(QuickTeamUiLayer,onClose);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(QuickTeamUiLayer,onRefresh);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(QuickTeamUiLayer,onCreate);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(QuickTeamUiLayer,onMatch);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(QuickTeamUiLayer,onCancelMatch);
+
+	return NULL;
+}
+
+cocos2d::SEL_MenuHandler QuickTeamUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+
+	return NULL;
+}
+
+bool QuickTeamUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(ListControl*, m_list);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(ListControl*, m_list_team);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*, m_match);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*, m_cancel_match);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*, m_no_team_cue);
+
+	return false;
+}
+
+void QuickTeamUiLayer::onEnter()
+{
+	TCP_CLIENT->register_net_cmd("NET_SIC_Team_List" , this , &QuickTeamUiLayer::onServerTeamList);
+	REGISTER_EVENT(team_target_1_event,QuickTeamUiLayer,select_target_event_1);
+	REGISTER_EVENT(team_target_2_event,QuickTeamUiLayer,select_target_event_2);
+
+	NormalLayer::onEnter();
+}
+
+void QuickTeamUiLayer::onExit()
+{
+	TCP_CLIENT->unregister_net_cmd("NET_SIC_Team_List" , this , &QuickTeamUiLayer::onServerTeamList);
+	UNREGISTER_EVENT(team_target_1_event,QuickTeamUiLayer,select_target_event_1);
+	UNREGISTER_EVENT(team_target_2_event,QuickTeamUiLayer,select_target_event_2);
+
+	NormalLayer::onExit();
+}
+
+void QuickTeamUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_target_cue = Helper::getLabelFTByParentAndTag(getChildByTag(0), 2);
+
+	m_list->setBounceable(false);
+	m_list_team->setBounceable(true);
+
+	//init_quest_list();
+	init_limit_active_list();
+	//init_boss_list();
+	init_muilt_instance_list();
+	init_auto_list();
+
+	init_type_list();
+
+	refresh_list();
+	refresh_match_state();
+}
+
+void QuickTeamUiLayer::select_target_event_1(team_target_1_event* event)
+{
+	if(event->index != m_select_type)
+	{
+		m_select_type = e_team_target_type(event->index);
+		m_select_index = 0;
+		if(m_select_type == e_target_protect_skydoor || m_select_type == e_target_underground_aisle || m_select_type == e_target_double_practice || m_select_type == e_target_near)
+		{
+			m_match_team_num = 0;
+
+			send_get_team();
+		}
+		else
+		{
+			refresh_list();
+		}
+	}
+}
+
+void QuickTeamUiLayer::select_target_event_2(team_target_2_event* event)
+{
+	m_select_index = event->index;
+	m_select_type = e_team_target_type(event->index_type);
+	m_match_team_num = 0;
+
+	send_get_team();
+}
+
+void QuickTeamUiLayer::onClose(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	CLOSE_UI(QUICK_TEAM_UI);
+}
+
+void QuickTeamUiLayer::onRefresh(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	DWORD time_now = ServerTime::getInstance()->cal_current_server_dword_time();
+	DWORD time = CalcTimeDiff(time_now, m_last_refresh_time);
+	if(time < time_limit)
+	{
+		UsefulFunction::show_string_cur("refresh_too_quick");
+		return;
+	}
+
+	m_last_refresh_time = time_now;
+	send_get_team();
+}
+
+void QuickTeamUiLayer::onCreate(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	if(m_select_type < e_target_near || m_select_type > e_target_double_practice)
+	{
+		UsefulFunction::show_string_cur("select_target_first");
+		return;
+	}
+
+	if(TeamMgr::getInstance()->is_player_in_match())
+	{
+		MessageBoxUi* ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, STRING_TABLE["sure_create_team_cue"], TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+		World::getInstance()->getScene()->addChild(ui, WZ_MESSAGEBOX);
+		ui->signalOkBtnPressed.connect(this,&QuickTeamUiLayer::on_sure_create_team);
+	}
+	else
+	{
+		on_sure_create_team();
+	}
+}
+
+void QuickTeamUiLayer::onMatch(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	if(TeamMgr::getInstance()->is_player_in_match())
+	{
+		return;
+	}
+
+	if(m_select_type == e_target_near)
+	{
+		UsefulFunction::show_string_cur("match_target_can_not");
+		return;
+	}
+
+	if(m_select_type < e_target_near)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["select_father_item"]);
+		return;
+	}
+
+	if(m_select_type != e_target_protect_skydoor && m_select_type != e_target_underground_aisle && m_select_type != e_target_double_practice && m_select_type != e_target_near)
+	{
+		if(m_select_index == 0)
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["select_child_item"]);
+			return;
+		}
+	}
+
+	if(m_is_msg_return)
+	{
+		set_msg_return(false);
+		TeamMgr::getInstance()->send_player_match(m_select_type, m_select_index);
+	}
+}
+
+void QuickTeamUiLayer::send_get_team()
+{
+	if(m_select_type < e_target_near)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["select_father_item"]);
+		return;
+	}
+
+	if(m_select_type != e_target_protect_skydoor && m_select_type != e_target_underground_aisle && m_select_type != e_target_double_practice && m_select_type != e_target_near)
+	{
+		if(m_select_index == 0)
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["select_child_item"]);
+			return;
+		}
+	}
+
+	NET_C2S_Team_List send;
+	send.dwFatherTarget = m_select_type;
+	send.dwSonTarget = m_select_index;
+	TCP_CLIENT->send_net_cmd(&send, NP_NORMAL, false);
+}
+
+void QuickTeamUiLayer::onCancelMatch(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	if(!TeamMgr::getInstance()->is_player_in_match())
+	{
+		return;
+	}
+
+	if(m_is_msg_return)
+	{
+		set_msg_return(false);
+
+		NET_C2S_Team_CancelRoleMatching send;
+		TCP_CLIENT->send_net_cmd(&send, NP_NORMAL, false);
+	}
+}
+
+void QuickTeamUiLayer::init_type_list()
+{
+	m_target_type.clear();
+
+	m_target_type.push_back(e_target_near);
+
+	TaskTraceUi* taskTraceUi = World::getInstance()->getTaskTraceUi();
+	if(taskTraceUi)
+	{
+		for(std::list<TaskTraceItem*>::iterator iter = taskTraceUi->getQuestItemList().begin(); iter != taskTraceUi->getQuestItemList().end(); ++iter)
+		{
+			TaskTraceItem* info = *iter;
+			if(!IS_VALID_PTR(info))
+				continue;
+
+			if(!info->getCanAccept())
+				continue;
+
+			QuestType type = info->getQuestType();
+			if(type == Quest_Type_Main || type == Quest_Type_BiQi || type == Quest_Type_Daily || type == Quest_Type_Sub || type == Quest_Type_Huan || type == Quest_Type_XuanShang)
+				continue;
+
+			m_target_type.push_back(e_target_own_quest);
+			break;
+		}
+	}
+// 	if(!m_own_quest_map.empty())
+// 	{
+// 		m_target_type.push_back(e_target_own_quest);
+// 	}
+
+	if(!m_limit_active_map.empty())
+	{
+		m_target_type.push_back(e_target_limit_active);
+	}
+
+	if(!m_world_boss_map.empty())
+	{
+		m_target_type.push_back(e_target_world_boss);
+	}
+
+	if(!m_field_boss_map.empty())
+	{
+		m_target_type.push_back(e_target_field_boss);
+	}
+
+	if(!m_mutil_instance_map.empty())
+	{
+		m_target_type.push_back(e_target_multi_instance);
+	}
+
+	if(!m_auto_action_map.empty())
+	{
+		m_target_type.push_back(e_target_auto_action);
+	}
+
+	int local_player_level = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+
+	if(local_player_level >= InstanceMgr::getInstance()->getFubenLevle(GUARD_CUSTOMS_MAP))
+	{
+		m_target_type.push_back(e_target_protect_skydoor);
+	}
+
+	if(local_player_level >= InstanceMgr::getInstance()->getFubenLevle(UNDERGROUND_PALACE_MAP))
+	{
+		m_target_type.push_back(e_target_underground_aisle);
+	}
+
+	if(local_player_level >= GetFunOpenLevel(EFOL_DoublePractice))
+	{
+		m_target_type.push_back(e_target_double_practice);
+	}
+}
+
+void QuickTeamUiLayer::refresh_list()
+{
+	m_list->clear_list();
+	for(vector_target_type::iterator iter = m_target_type.begin(); iter != m_target_type.end(); ++iter)
+	{
+		e_team_target_type type = *iter;
+		SelectTargetItem1* item = SelectTargetItem1::create_item("bianjiezuduibtn1",NULL);
+		if(!IS_VALID_PTR(item))
+			return;
+
+		string str;
+		safe_sprintf(str, "team_target_%d", type);
+		item->refresh_info(type, STRING_TABLE[str.c_str()]);
+		m_list->add_item(item);
+
+		if(type == m_select_type)
+		{
+			add_child_type(type);
+		}
+	}
+
+	m_list->scroll_to_pos(m_select_type + 1);
+}
+
+void QuickTeamUiLayer::add_child_type(e_team_target_type type)
+{
+	if(type == e_target_own_quest)
+	{
+		TaskTraceUi* taskTraceUi = World::getInstance()->getTaskTraceUi();
+		if(taskTraceUi)
+		{
+			for(std::list<TaskTraceItem*>::iterator iter = taskTraceUi->getQuestItemList().begin(); iter != taskTraceUi->getQuestItemList().end(); ++iter)
+			{
+				TaskTraceItem* info = *iter;
+				if(!IS_VALID_PTR(info))
+					continue;
+
+				if(!info->getCanAccept())
+					continue;
+
+				QuestType type = info->getQuestType();
+				if(type == Quest_Type_Main || type == Quest_Type_BiQi || type == Quest_Type_Daily || type == Quest_Type_Sub || type == Quest_Type_Huan || type == Quest_Type_XuanShang)
+					continue;
+
+				add_child_item(info->getId(), info->getTitle());
+			}
+		}
+
+// 		for(map_own_quset::iterator iter = m_own_quest_map.begin(); iter != m_own_quest_map.end(); ++iter)
+// 		{
+// 			add_child_item(iter->first, iter->second);
+// 		}
+	}
+	else if(type == e_target_limit_active)
+	{
+		for(map_limit_active::iterator iter = m_limit_active_map.begin(); iter != m_limit_active_map.end(); ++iter)
+		{
+			add_child_item(iter->first, iter->second);
+		}
+	}
+	else if(type == e_target_world_boss)
+	{
+		for(map_boss::iterator iter = m_world_boss_map.begin(); iter != m_world_boss_map.end(); ++iter)
+		{
+			add_child_item(iter->first, iter->second);
+		}
+	}
+	else if(type == e_target_field_boss)
+	{
+		for(map_boss::iterator iter = m_field_boss_map.begin(); iter != m_field_boss_map.end(); ++iter)
+		{
+			add_child_item(iter->first, iter->second);
+		}
+	}
+	else if(type == e_target_multi_instance)
+	{
+		std::map<int, unsigned int> temp_map;
+		for(map_mutil_instance::iterator iter = m_mutil_instance_map.begin(); iter != m_mutil_instance_map.end(); ++iter)
+		{
+			int level = InstanceMgr::getInstance()->getFubenLevle(iter->first);
+			temp_map.insert(std::make_pair(level, iter->first));
+		}
+
+		for(std::map<int, unsigned int>::iterator iter = temp_map.begin(); iter != temp_map.end(); ++iter)
+		{
+			add_child_item(iter->second, m_mutil_instance_map[iter->second]);
+		}
+
+		temp_map.clear();
+	}
+	else if(type == e_target_auto_action)
+	{
+		for(map_auto_action::iterator iter = m_auto_action_map.begin(); iter != m_auto_action_map.end(); ++iter)
+		{
+			add_child_item(iter->first, iter->second);
+		}
+	}
+}
+
+void QuickTeamUiLayer::add_child_item(int index, string name)
+{
+	SelectTargetItem2* item = SelectTargetItem2::create_item("bianjiezuduibtn2",NULL);
+	if(!IS_VALID_PTR(item))
+		return;
+
+	item->refresh_info(index, name, m_select_type);
+	m_list->add_item(item);
+}
+
+void QuickTeamUiLayer::init_quest_list()
+{
+// 	m_own_quest_map.clear();
+// 
+// 	TaskTraceUi* taskTraceUi = World::getInstance()->getTaskTraceUi();
+// 	if(taskTraceUi)
+// 	{
+// 		taskTraceUi->getQuestIdNameList(m_own_quest_map);
+// 	}
+
+// 	std::map<unsigned short, eQuestState>& quest_map = QuestMgr::getInstance()->get_quest_map();
+// 	for(std::map<unsigned short, eQuestState>::iterator iter = quest_map.begin(); iter != quest_map.end(); ++iter)
+// 	{
+// 		if(QuestMgr::getInstance()->haveQuestState(iter->first) && iter->second != QS_INVALID && iter->second != QS_GET)
+// 		{
+// 			const s_quest_detail* quest_data = QuestMgr::getInstance()->getQuestDetail(iter->first);
+// 			if(IS_VALID_PTR(quest_data))
+// 			{
+// 				m_own_quest_map.insert(make_pair(iter->first, quest_data->title));
+// 			}
+// 		}
+// 	}
+// 
+// 	RewardQuestData* reward_quest = RewardQuestMgr::getInstance()->getCurQuestData();
+// 	if(IS_VALID_PTR(reward_quest))
+// 	{
+// 		AllRewardQuestProto* quest_data = RewardQuestMgr::getInstance()->get_one_reward_quest_data(reward_quest->questId);
+// 		if(IS_VALID_PTR(quest_data))
+// 		{
+// 			m_own_quest_map.insert(make_pair(reward_quest->questId, quest_data->title));
+// 		}
+// 	}
+}
+
+void QuickTeamUiLayer::init_limit_active_list()
+{
+	m_limit_active_map.clear();
+
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if (player == NULL)
+		return;
+
+	const tagActiveData &activityData = player->getActiveData();
+	const std::vector<DayActivityData>& datas = ActivityMgr::getInstance()->getData();
+	for(std::vector<DayActivityData>::const_iterator iter = datas.begin(); iter != datas.end(); ++ iter)
+	{
+		const DayActivityData &data = *iter;
+		if (DayActivityData::S_NotToday == data.state)
+		{
+			continue;
+		}
+
+		if(data.id == ACT_FMB_INDEX && (!RoleManager::getInstance()->getLocalPlayer()->get_fmb_active_open()))
+		{
+			continue;
+		}
+
+		if(data.id == ACT_BF_INDEX && (!BloodFightMgr::getInstance()->get_bf_active_open()))
+		{
+			continue;
+		}
+
+		if(data.is_team_show == 0)
+		{
+			continue;
+		}
+
+		m_limit_active_map.insert(make_pair(data.id, data.name));
+	}
+}
+
+void QuickTeamUiLayer::init_boss_list()
+{
+	m_world_boss_map.clear();
+	m_field_boss_map.clear();
+
+	BossPKMgr::BossDataMap *bossIDMap = BossPKMgr::getInstance()->getBossDatamap(BPK_BOSSIDMAP);
+	BossPKMgr::BossFlushMap bossFlushTimeMap = BossPKMgr::getInstance()->getBossFlushMap();
+	for(unsigned int j = 0; j < (*bossIDMap).size() ; ++j)
+	{
+		unsigned int bossID = (*bossIDMap)[ j ];
+		BossPKMgr::BossFlushMap::iterator flushIter = bossFlushTimeMap.find(bossID);
+		if (flushIter != bossFlushTimeMap.end())
+		{
+			int page = int((*BossPKMgr::getInstance()->getBossDatamap(BPK_BOSSTYPE)).at( bossID ));
+			if(page == 3)
+			{
+				m_world_boss_map.insert(make_pair(bossID, BossPKMgr::getInstance()->get_boss_name_by_id(bossID)));
+			}
+			else if(page == 11)
+			{
+				m_field_boss_map.insert(make_pair(bossID, BossPKMgr::getInstance()->get_boss_name_by_id(bossID)));
+			}
+		}
+	}
+}
+
+void QuickTeamUiLayer::init_muilt_instance_list()
+{
+	m_mutil_instance_map.clear();
+
+	int role_level = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+
+	map<unsigned int, string>& temp_instance = InstanceMgr::getInstance()->get_mutil_instance();
+	for(map<unsigned int, string>::iterator iter = temp_instance.begin(); iter != temp_instance.end(); ++iter)
+	{
+		if(role_level >= InstanceMgr::getInstance()->getFubenLevle(iter->first))
+		{
+			m_mutil_instance_map.insert(std::make_pair(iter->first, iter->second));
+		}
+	}
+}
+
+void QuickTeamUiLayer::init_auto_list()
+{
+	m_auto_action_map.clear();
+
+	int role_level = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+
+	std::map<unsigned int, int>& temp_level_map = MapManager::getInstance()->get_auto_fight_map_level();
+	std::map<unsigned int, int>::iterator iter = temp_level_map.begin();
+	for( ; iter != temp_level_map.end(); iter++)
+	{
+		if(role_level >= iter->second)
+		{
+			string map_name = MapManager::getInstance()->getMapName(iter->first);
+			m_auto_action_map.insert(make_pair(iter->first, map_name));
+		}
+	}
+}
+
+void QuickTeamUiLayer::refresh_match_state()
+{
+	string str = "";
+
+	e_team_target_type type = TeamMgr::getInstance()->get_player_match_type();
+	if(type >= 0)
+	{
+		const string str1 = TeamMgr::getInstance()->get_target_name_by_target_type(type);
+		int index = TeamMgr::getInstance()->get_player_match_index();
+		if(index > 0)
+		{
+			const string str2 = TeamMgr::getInstance()->get_target_index_name_by_target_type_and_index(type, index);
+			safe_sprintf(str, STRING_TABLE["match_target_2"], str1.c_str(), str2.c_str());
+		}
+		else
+		{
+			safe_sprintf(str, STRING_TABLE["match_target_1"], str1.c_str());
+		}
+	}
+	else
+	{	
+		if(m_select_type == 0)
+		{
+			str = STRING_TABLE["match_target_can_not"];
+		}
+		else if(m_match_team_num > 0)
+		{
+			safe_sprintf(str, STRING_TABLE["match_target_num"], m_match_team_num);
+		}
+		else
+		{
+			str = STRING_TABLE["match_target_no"];
+		}
+	}
+
+	m_target_cue->setString(str.c_str());
+
+	bool is_in_match = TeamMgr::getInstance()->is_player_in_match();
+	m_match->setVisible(!is_in_match);
+	m_cancel_match->setVisible(is_in_match);
+}
+
+unsigned int QuickTeamUiLayer::onServerTeamList(s_net_cmd *cmd)
+{
+	NET_SIC_Team_List* msg = (NET_SIC_Team_List*)cmd;
+	CC_ASSERT(msg);
+
+	m_list_info.clear();
+	for(int i = 0; i < msg->listInfosSize; ++i)
+	{
+		m_list_info.push_back(msg->listInfos[i]);
+	}
+
+	m_list_team->clear_list();
+	m_list_team->add_items_sync(m_list_info.size(), boost::bind(&QuickTeamUiLayer::create_list_item, this, _1, _2));
+	m_list_team->scroll_to_top();
+
+	m_list_team->setVisible(m_list_info.size() > 0);
+	m_no_team_cue->setVisible(m_list_info.size() <= 0);
+
+	m_match_team_num = msg->dwMatchingTeamNum;
+	refresh_match_state();
+
+	return 0;
+}
+
+TeamMatchApplyItem* QuickTeamUiLayer::create_list_item(ListControl* list, int i)
+{
+	TeamMatchApplyItem* item = TeamMatchApplyItem::create_item("bianjiezuduiitem",NULL);
+
+	std::map<DWORD, DWORD>& team_list = TeamMgr::getInstance()->get_apply_team_list();
+	std::map<DWORD, DWORD>::iterator iter = team_list.find(m_list_info[i].dwLeaderID);
+	bool is_find = iter != team_list.end();
+
+	item->refresh_info(m_list_info[i], m_list_info[i].dwLeaderID, is_find);
+	return item;
+}
+
+void QuickTeamUiLayer::set_msg_return(bool is_return)
+{
+	m_is_msg_return = is_return;
+}
+
+void QuickTeamUiLayer::init_select(e_quick_team_open_type type)
+{
+	int index_1 = e_target_near;
+	int index_2 = 0;
+	if(type == e_open_none)
+	{
+		index_1 = e_target_near;
+	}
+	else if(type == e_open_mohundian)
+	{
+		map_limit_active::iterator iter = m_limit_active_map.find(e_ActivitMoHun);
+		if(iter != m_limit_active_map.end())
+		{
+			index_1 = e_target_limit_active;
+			index_2 = e_ActivitMoHun;
+		}
+	}
+	else if(type == e_open_zumage)
+	{
+		map_limit_active::iterator iter = m_limit_active_map.find(e_ActivityZuMaGe);
+		if(iter != m_limit_active_map.end())
+		{
+			index_1 = e_target_limit_active;
+			index_2 = e_ActivityZuMaGe;
+		}
+	}
+	else if(type == e_open_duorenfuben)
+	{
+		map_mutil_instance::iterator iter = m_mutil_instance_map.find(instance_map_id);
+		if(iter != m_mutil_instance_map.end())
+		{
+			index_1 = e_target_multi_instance;
+			index_2 = instance_map_id;
+		}
+	}
+	else if(type == e_open_shouweitianguan)
+	{
+		index_1 = e_target_protect_skydoor;
+	}
+	else if(type == e_open_digongchanglang)
+	{
+		index_1 = e_target_underground_aisle;
+	}
+
+	bool is_has_key = false;
+	BOOST_FOREACH(e_team_target_type const& one, m_target_type)
+	{
+		if(one == index_1)
+		{
+			is_has_key = true;
+			break;
+		}
+	}
+
+	if(!is_has_key)
+	{
+		index_1 = e_target_near;
+	}
+
+	team_target_1_event event;
+	event.index = index_1;
+	SEND_EVENT(&event);
+
+	if(index_2 != 0 && is_has_key)
+	{
+		team_target_2_event event;
+		event.index = index_2;
+		event.index_type = index_1;
+		SEND_EVENT(&event);
+	}
+
+	refresh_match_state();
+}
+
+void QuickTeamUiLayer::on_sure_create_team()
+{
+	if(m_select_type != e_target_protect_skydoor && m_select_type != e_target_underground_aisle && m_select_type != e_target_double_practice && m_select_type != e_target_near)
+	{
+		if(m_select_index == 0)
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["select_child_item"]);
+			return;
+		}
+	}
+
+	int level_min = get_min_level();
+	TeamMgr::getInstance()->sendOwnCreatTeam(m_select_type, m_select_index, level_min, get_max_level(level_min));
+
+	CLOSE_UI(QUICK_TEAM_UI);
+}
+
+int QuickTeamUiLayer::get_min_level()
+{
+	int level_min = 1;
+
+	if(m_select_type == e_target_near)
+	{
+		level_min = 1;
+	}
+	else if(m_select_type == e_target_own_quest)
+	{
+		const s_quest_detail* quest_data = QuestMgr::getInstance()->getQuestDetail(m_select_index);
+		if(IS_VALID_PTR(quest_data))
+		{
+			level_min = quest_data->level;
+		}
+		else
+		{
+			level_min = GetFunOpenLevel(EFOL_XuanShang);
+		}
+	}
+	else if(m_select_type == e_target_limit_active)
+	{
+		DayActivityData* data = ActivityMgr::getInstance()->getDataById(m_select_index);
+		if(IS_VALID_PTR(data))
+		{
+			level_min = atoi(data->level.c_str());
+		}
+	}
+	else if(m_select_type == e_target_world_boss)
+	{
+		level_min = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	}
+	else if(m_select_type == e_target_field_boss)
+	{
+		level_min = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	}
+	else if(m_select_type == e_target_multi_instance)
+	{
+		level_min = InstanceMgr::getInstance()->getFubenLevle(m_select_index);
+	}
+	else if(m_select_type == e_target_auto_action)
+	{
+		level_min = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	}
+	else if(m_select_type == e_target_protect_skydoor)
+	{
+		level_min = InstanceMgr::getInstance()->getFubenLevle(GUARD_CUSTOMS_MAP);
+	}
+	else if(m_select_type == e_target_underground_aisle)
+	{
+		level_min = InstanceMgr::getInstance()->getFubenLevle(UNDERGROUND_PALACE_MAP);
+	}
+	else if(m_select_type == e_target_double_practice)
+	{
+		level_min = GetFunOpenLevel(EFOL_DoublePractice);
+	}
+
+	level_min = max(level_min, 1);
+	return level_min;
+}
+
+int QuickTeamUiLayer::get_max_level(int level_min)
+{
+	return role_max_level;
+}

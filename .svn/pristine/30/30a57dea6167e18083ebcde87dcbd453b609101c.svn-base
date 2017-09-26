@@ -1,0 +1,473 @@
+#include "BattlefieldUi.h"
+#include "World.h"
+#include "UiResourceMgr.h"
+#include "CfgReader.h"
+#include "UiLoader.h"
+#include "BaseDefine.h"
+#include "ItemNode.h"
+#include "UiTools.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "AnimationCache.h"
+#include "MapManager.h"
+#include "UiManager.h"
+#include "StringMgr.h"
+#include "ToolTip.h"
+#include "PackageManager.h"
+#include "GambleMgr.h"
+#include "MessageBoxUi.h"
+#include "Auto_ActionMgr.h"
+#include "ExchangeBusinessMgr.h"
+#include "VIPMgr.h"
+#include "StoreRechargeUi.h"
+#include "TCPClient.h"
+
+
+BattlefieldListItem::BattlefieldListItem()
+{
+	for(int i=0; i<NT_Num; i++)
+	{
+		CCLabelTTF *label = CCLabelTTF::create();
+		label->setFontSize(16);
+		label->setAnchorPoint(ccp(0.f, 1.f));
+		label->setTag(i);
+		label->setColor(ccc3(0xf3, 0xf8, 0xd8));
+		_node->addChild(label);
+	}
+	getLabel(NT_Name)->setPositionX(HP_Name);
+	getLabel(NT_Level)->setPositionX(HP_Level);
+	getLabel(NT_Enemy)->setPositionX(HP_Enemy);
+	getLabel(NT_Leader)->setPositionX(HP_Leader);
+	getLabel(NT_Guard)->setPositionX(HP_Guard);
+	getLabel(NT_Ranking)->setPositionX(HP_Ranking);
+	getLabel(NT_Reward)->setPositionX(HP_Reward);
+	getLabel(NT_Honor)->setPositionX(HP_Honor);
+}
+
+BattlefieldListItem::~BattlefieldListItem()
+{
+
+}
+
+BattlefieldListItem * BattlefieldListItem::getInstance()
+{
+	static BattlefieldListItem instance;
+	return &instance;
+}
+
+cocos2d::CCSize BattlefieldListItem::getContentSzie()
+{
+	return _contentSize;
+}
+
+void BattlefieldListItem::onTouch(CCTouch *touch)
+{
+
+}
+
+CCLabelTTF *BattlefieldListItem::getLabel(eNodeTag tag)
+{
+	return dynamic_cast<CCLabelTTF*>(_node->getChildByTag(tag));
+}
+
+void BattlefieldListItem::updateContent()
+{
+	float height = 0.f;
+	for (int i = NT_Name; i<NT_Num; i++)
+	{
+		CCLabelTTF *label = getLabel((eNodeTag)i);
+		if(label != NULL)
+		{
+			float tmpHeight = label->getContentSize().height;
+			if(height <tmpHeight)
+			{
+				height = tmpHeight;
+			}
+		}
+	}
+	_contentSize.height = height;
+	_contentSize.width = HP_ContentWidth;
+}
+
+void BattlefieldListItem::setData(const BattlefieldProto &data)
+{
+	_data = data;
+	for (int i = 0; i<NT_Num; i++)
+	{
+		getLabel((eNodeTag)i)->setString(getString(_data,i).c_str());
+	}
+
+	updateContent();
+}
+
+void BattlefieldListItem::onSelectChanged(bool select)
+{
+
+}
+
+std::string BattlefieldListItem::getString(const BattlefieldProto &result, int index)
+{
+	if (index == 0)
+	{
+		return result.name;
+	}
+	else if (index == 1)
+	{
+		std::ostringstream ostrlevel;
+		ostrlevel << result.level << GET_STR(77).c_str();
+		return ostrlevel.str();
+	}
+	else if (index == 2)
+	{
+		std::ostringstream ostrenemy;
+		ostrenemy << result.killNum;
+		return ostrenemy.str();
+	}
+	else if (index == 3)
+	{
+		std::ostringstream ostrleader;
+		ostrleader << result.killBoss;
+		return ostrleader.str();
+	}
+	else if (index == 4)
+	{
+		std::ostringstream ostrguard;
+		ostrguard << result.killSorder;
+		return ostrguard.str();
+	}
+	else if (index == 5)
+	{
+		std::ostringstream ostrranking;
+		ostrranking << result.ranking;
+		return ostrranking.str();
+	}
+	else if (index == 6)
+	{
+		return "\xE5\xA5\x96\xE5\x8A\xB1";
+	}
+	else if(index == 7)
+	{
+		std::ostringstream ostrhonor;
+		ostrhonor << result.score;
+		return ostrhonor.str();
+	}
+	else
+	{
+		return "";
+	}
+}
+
+//BattlefieldListItem End
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+CCNode *BattlefieldUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["BattlefieldUiLayer"] = UiNodeLoader<BattlefieldUiLayer>::loader();
+	nodeLoaders["TouchSprite"] = TouchSpriteLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("battlefieldui", nodeLoaders, _loadSpriteSheet);
+	CC_ASSERT(uiNode != NULL);
+	updateData();
+	return uiNode;
+}
+
+BattlefieldUiLayer *BattlefieldUi::getUiLayer()
+{
+	return getUiNodeByTag<BattlefieldUiLayer>(WCT_BattlefieldUi);
+}
+
+void BattlefieldUi::updateData()
+{
+	BattlefieldUiLayer *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		ui->updateDataBySelectTab();
+	}
+}
+
+BattlefieldUi::BattlefieldUi()
+{
+}
+
+BattlefieldUi::~BattlefieldUi()
+{
+}
+
+//BattlefieldUi End
+///////////////////////////////////////////////////////////////////////////////////////////////
+
+BattlefieldUiLayer::BattlefieldUiLayer()
+	: _verticalList(NULL)
+	, _content(NULL)
+	, _scrollView(NULL)
+	, _selectTab(T_NULL)
+	, _victoryLab(NULL)
+	, _mineLab(NULL)
+	, _vSp(NULL)
+{
+
+}
+
+BattlefieldUiLayer::~BattlefieldUiLayer()
+{
+	if(_verticalList != NULL)
+	{
+		delete _verticalList;
+		_verticalList = NULL;
+	}
+}
+
+cocos2d::SEL_MenuHandler BattlefieldUiLayer::onResolveCCBCCMenuItemSelector(CCObject *pTarget, const char *pSelectorName)
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler BattlefieldUiLayer::onResolveCCBCCControlSelector(CCObject *pTarget, const char *pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", BattlefieldUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onConfirmBtnPressed", BattlefieldUiLayer::onConfirmBtnPressed);
+	return NULL;
+	return NULL;
+}
+
+void BattlefieldUiLayer::onNodeLoaded(cocos2d::CCNode *pNode, cocos2d::extension::CCNodeLoader *pNodeLoader)
+{
+	_tabFrameName.push_back("battlefieldui_allcamptabn");
+	_tabFrameName.push_back("battlefieldui_mfwctabn");
+	_tabFrameName.push_back("battlefieldui_brdgtabn");
+	_tabFrameName.push_back("battlefieldui_allcamptabh");
+	_tabFrameName.push_back("battlefieldui_mfwctabh");
+	_tabFrameName.push_back("battlefieldui_brdgtabh");
+
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(NT_Frame));
+	CC_ASSERT(_frame != NULL);
+	_content = _frame->getChildByTag(NT_ScrollView);
+	CC_ASSERT(_content != NULL);
+	_scrollView = createScrollViewWithContent(_content);
+	_content->addChild(_scrollView);
+
+	_verticalList = new VerticalList<BattlefieldListItem>;
+	_verticalList->addToScrollView(_scrollView);
+	_verticalList->setMinSize(_content->getContentSize());
+	_verticalList->setEnableSelect(true);
+	_verticalList->setSelectSpriteFrame(""); // --------- 选择框
+
+	getTouchSprite(T_AllCamp)->signalTouched.connect(this, &BattlefieldUiLayer::onTabAllCampTouch);
+	getTouchSprite(T_MFWC)->signalTouched.connect(this, &BattlefieldUiLayer::onTabMFWCTouch);
+	getTouchSprite(T_BRDG)->signalTouched.connect(this, &BattlefieldUiLayer::onTabBRDGTouch);
+	setSelectTab(T_AllCamp);
+
+	_victoryLab = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_Victory));
+	_mineLab = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_MineInfo));
+	CC_ASSERT(_victoryLab!=NULL && _mineLab!=NULL);
+	std::string vs = "\xE6\x9C\xAC\xE6\xAC\xA1\xE5\xA6\x96\xE6\x9C\x88\xE6\x88\x98\xE5\x9C\xBA\xE8\x8E\xB7\xE8\x83\x9C\xE6\x96\xB9\xEF\xBC\x9A";//本次妖月战场获胜方：
+	if (BattlefieldMgr::getInstance()->getVictory() == '0')
+	{
+		vs += "\xE7\x8E\x9B\xE6\xB3\x95\xE7\x8E\x8B\xE5\x9F\x8E";//玛法王城
+	}
+	else
+	{
+		vs += "\xE7\x99\xBD\xE6\x97\xA5\xE9\x81\x93\xE8\xA7\x82";//白日道观
+	}
+	_victoryLab->setString(vs.c_str());
+	
+	// 本次战场，你总共击杀__人（敌人__/首领__/卫兵__）（排名__），获得荣誉__
+	std::ostringstream ostr;
+	ostr << "\xE6\x9C\xAC\xE6\xAC\xA1\xE6\x88\x98\xE5\x9C\xBA\xEF\xBC\x8C\xE4\xBD\xA0\xE6\x80\xBB\xE5\x85\xB1\xE5\x87\xBB\xE6\x9D\x80";
+	ostr << BattlefieldMgr::getInstance()->getTotal();
+	ostr << "\xE4\xBA\xBA\xEF\xBC\x88\xE6\x95\x8C\xE4\xBA\xBA\x20";
+	ostr << BattlefieldMgr::getInstance()->getLocalPalyerData().killNum;
+	ostr << "\x2F\xE9\xA6\x96\xE9\xA2\x86\x20";
+	ostr << BattlefieldMgr::getInstance()->getLocalPalyerData().killBoss;
+	ostr << "\x2F\xE5\x8D\xAB\xE5\x85\xB5\x20";
+	ostr << BattlefieldMgr::getInstance()->getLocalPalyerData().killSorder;
+	ostr << "\x20\xEF\xBC\x89\xEF\xBC\x88\xE6\x8E\x92\xE5\x90\x8D\xE7\xAC\xAC";
+	ostr << BattlefieldMgr::getInstance()->getLocalPalyerData().ranking;
+	ostr << "\x20\xEF\xBC\x89\xEF\xBC\x8C\xE8\x8E\xB7\xE5\xBE\x97\xE8\x8D\xA3\xE8\xAA\x89";
+	ostr << BattlefieldMgr::getInstance()->getLocalPalyerData().score;
+	_mineLab->setString(ostr.str().c_str());
+	ostr.str("");
+
+	_vSp = CCSprite::create();
+	if (BattlefieldMgr::getInstance()->getLocalPalyerData().type == BattlefieldMgr::getInstance()->getVictory())
+	{
+		_vSp->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("battlefieldui_win"));
+	}
+	else
+		_vSp->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("battlefieldui_fail"));
+
+	CCPoint cp = _frame->getChildByTag(NT_Result)->getPosition();
+	_vSp->setPosition(cp);
+	_frame->addChild(_vSp);
+}
+
+void BattlefieldUiLayer::onEnter()
+{
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+}
+
+void BattlefieldUiLayer::onExit()
+{
+	CCLayer::onExit();
+}
+
+bool BattlefieldUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (!isVisible() || !isRunning() || !hasVisibleParents())
+	{
+		return false;
+	}
+	if (isTouchOnNodeContent(_frame, pTouch))
+	{
+		_starTouchPoint = _content->convertTouchToNodeSpace(pTouch);
+		return true;
+	}
+	return false;
+}
+
+void BattlefieldUiLayer::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (isTouchOnNodeContent(_content, pTouch))
+	{
+		CCPoint pt = _content->convertTouchToNodeSpace(pTouch);
+		if (ccpDistance(pt, _starTouchPoint) < TOUCH_MOVE_DIS)
+		{
+			BattlefieldListItem *lastSelectItem = _verticalList->getSelectItem();
+			BattlefieldListItem *item = _verticalList->onTouch(pTouch);
+			if (lastSelectItem != item)
+			{
+			}
+			else
+			{
+			}
+		}
+	}
+}
+
+void BattlefieldUiLayer::onCloseBtnPressed(cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CLOSE_UI(WCT_BattlefieldUi);
+	World::getInstance()->setBattlefieldIsEnd(false);
+}
+
+void BattlefieldUiLayer::onConfirmBtnPressed(cocos2d::CCObject *pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CLOSE_UI(WCT_BattlefieldUi);
+	World::getInstance()->setBattlefieldIsEnd(false);
+}
+
+void BattlefieldUiLayer::setSelectTab(eTab tab)
+{
+	LocalPlayer *player = RoleManager::getInstance()->getLocalPlayer();
+	CC_ASSERT(player != NULL);
+	if (tab != _selectTab)
+	{
+		switch (tab)
+		{
+		case T_AllCamp:
+			{
+				break;
+			}
+		case T_MFWC:
+			{
+				break;
+			}
+		case T_BRDG:
+			{
+				break;
+			}
+		}
+		TouchSprite *curSprite = getTouchSprite(_selectTab);
+		TouchSprite *destSprite = getTouchSprite(tab);
+		if (curSprite != NULL)
+		{
+			curSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(_tabFrameName[_selectTab].c_str()));
+		}
+		if (destSprite != NULL)
+		{
+			destSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(_tabFrameName[tab+T_TabNum].c_str()));
+		}
+
+		_selectTab = tab;
+		updateDataBySelectTab();
+	}
+}
+
+TouchSprite *BattlefieldUiLayer::getTouchSprite(eTab tab)
+{
+	switch(tab)
+	{
+	case T_AllCamp:
+		return dynamic_cast<TouchSprite*>(_frame->getChildByTag(NT_AllCamp));
+	case T_MFWC:
+		return dynamic_cast<TouchSprite*>(_frame->getChildByTag(NT_MFWC));
+	case T_BRDG:
+		return dynamic_cast<TouchSprite*>(_frame->getChildByTag(NT_BRDG));
+	}
+	return NULL;
+}
+
+
+void BattlefieldUiLayer::updateDataBySelectTab()
+{
+	_verticalList->clear(); 
+	switch(_selectTab)
+	{
+	case T_AllCamp:
+		{	
+			const std::vector<BattlefieldProto> &data = BattlefieldMgr::getInstance()->getAllcampData();
+			for(std::vector<BattlefieldProto>::const_iterator iter = data.begin(); iter != data.end(); ++iter)
+			{
+				BattlefieldListItem *item = new BattlefieldListItem;
+				item->setData(*iter);
+				_verticalList->addItem(item);
+			}
+			_verticalList->updateDisplay();
+		}
+		break;
+	case T_MFWC:
+		{
+			const std::vector<BattlefieldProto> &data = BattlefieldMgr::getInstance()->getMFWCData();
+			for(std::vector<BattlefieldProto>::const_iterator iter = data.begin(); iter != data.end(); ++iter)
+			{
+				BattlefieldListItem *item = new BattlefieldListItem;
+				item->setData(*iter);
+				_verticalList->addItem(item);
+			}
+			_verticalList->updateDisplay();
+		}
+
+		break;
+	case T_BRDG:
+		{
+			const std::vector<BattlefieldProto> &data = BattlefieldMgr::getInstance()->getBRDGData();
+			for(std::vector<BattlefieldProto>::const_iterator iter = data.begin(); iter != data.end(); ++iter)
+			{
+				BattlefieldListItem *item = new BattlefieldListItem;
+				item->setData(*iter);
+				_verticalList->addItem(item);
+			}
+			_verticalList->updateDisplay();
+		}
+		break;
+	}
+
+}
+
+void BattlefieldUiLayer::onTabAllCampTouch( TouchSprite*, bool )
+{
+	setSelectTab(T_AllCamp);
+}
+
+void BattlefieldUiLayer::onTabMFWCTouch( TouchSprite*, bool )
+{
+	setSelectTab(T_MFWC);
+}
+
+void BattlefieldUiLayer::onTabBRDGTouch( TouchSprite*, bool )
+{
+	setSelectTab(T_BRDG);
+}
+

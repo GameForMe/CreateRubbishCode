@@ -1,0 +1,308 @@
+#include "ShuangXiuMgr.h"
+#include "MapManager.h"
+#include "AnimationCache.h"
+#include "BSAnimate.h"
+#include "RoleManager.h"
+#include "CfgReader.h"
+#include "UiResourceMgr.h"
+
+ShuangXiuAnim::ShuangXiuAnim()
+	: _sprite(NULL)
+	, _isRun(false)
+{
+	m_sPlayerSEName = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_27.plist";
+	
+	mpLandNode  = LandNode::create();
+	mpLandNode->retain();
+
+	_sprite = CCSprite::create();
+	//_sprite->retain();
+	mpLandNode->addChild(_sprite);
+	
+	_playerAcNode1 = GameActionNode::create();
+	_playerAcNode1->InitWithPList(m_sPlayerSEName.c_str(), "E1_27");
+	mpLandNode->addChild(_playerAcNode1);
+	//_playerAcNode1->retain();
+	_playerAcNode2 = GameActionNode::create();
+	_playerAcNode2->InitWithPList(m_sPlayerSEName.c_str(), "E1_27");
+	mpLandNode->addChild(_playerAcNode2);
+	//_playerAcNode2->retain();
+	//_sprite->setAnchorPoint(ccp(0.f, 1.0f));
+}
+
+ShuangXiuAnim::~ShuangXiuAnim()
+{
+// 	if(_sprite != NULL)
+// 	{
+// 		removeFromMap();
+// 		_sprite->release();
+// 		_sprite = NULL;
+// 		CC_SAFE_RELEASE(_playerAcNode1);
+// 		CC_SAFE_RELEASE(_playerAcNode2);
+// 	}
+		removeFromMap();
+
+		CC_ASSERT(mpLandNode->retainCount() == 1);
+		mpLandNode->release();
+		//CC_SAFE_RELEASE(_playerAcNode1);
+		//CC_SAFE_RELEASE(_playerAcNode2);
+}
+
+void ShuangXiuAnim::addToMap()
+{
+	CC_ASSERT(mpLandNode->getParent()==NULL);
+
+	CCTMXTiledMap *tiledMap = MapManager::getInstance()->getMap();
+	if(tiledMap != NULL)
+	{
+		tiledMap->addChild(mpLandNode);
+		//tiledMap->addChild(_playerAcNode1);
+		//tiledMap->addChild(_playerAcNode2);
+	}
+}
+
+void ShuangXiuAnim::removeFromMap()
+{
+	mpLandNode->removeFromParentAndCleanup(true);
+	//_sprite->removeFromParent();
+	//_playerAcNode1->removeFromParent();
+	//_playerAcNode2->removeFromParent();
+	//CCTMXTiledMap *tiledMap = MapManager::getInstance()->getMap();
+	//if(tiledMap != NULL)
+	//{
+	//	stop();
+	//	tiledMap->removeChild(_sprite);
+	//}
+}
+
+void ShuangXiuAnim::run()
+{
+	if(_isRun)
+		return;
+
+	AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_28", anims);
+	BSAnimate *animate = anims[0];
+	_sprite->runAction(CCRepeatForever::create(animate));
+
+	CCSpriteFrame* fistFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("E1_2701");
+	if (fistFrame == NULL)
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(m_sPlayerSEName.c_str());
+	_playerAcNode1->BeginAction(0.13f, true);
+	_playerAcNode2->BeginAction(0.13f, true);
+	_isRun = true;
+}
+
+void ShuangXiuAnim::stop()
+{
+	if(!_isRun)
+		return;
+
+	_sprite->stopAllActions();
+	_isRun = false;
+	AnimationCache::getInstance()->releaseSinEffect("E1_28");
+	CCSpriteFrame* fistFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("E1_2701");
+	if (fistFrame != NULL)
+		CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFramesFromFile(m_sPlayerSEName.c_str());
+}
+
+void ShuangXiuAnim::setPosition( const CCPoint &pos )
+{
+	mpLandNode->setPosition(pos);
+	_playerAcNode1->setPosition(/*_myPlayerDelegate->player1Point*/ccp(pos.x - _myPlayerDelegate->player1Point.x , pos.y - _myPlayerDelegate->player1Point.y));
+	_playerAcNode2->setPosition(ccp(pos.x - _myPlayerDelegate->player2Point.x , pos.y - _myPlayerDelegate->player2Point.y));
+
+	MapManager* map_mgr = MapManager::getInstance();
+	int new_zoder= map_mgr->getZOrderAtPoint(pos);
+	if(new_zoder != mpLandNode->getZOrder())
+		mpLandNode->setZOrder(new_zoder);
+
+	GLubyte alpha  = map_mgr->isAlpha(pos)?ALPHA_VALUE:255;
+	_sprite->setOpacity(alpha);
+	_playerAcNode1->setAnimAlphaValue(alpha);
+	 _playerAcNode2->setAnimAlphaValue(alpha);
+
+// 	if(mpLandNode->getParent() != NULL)
+// 		mpLandNode->getParent()->reorderChild(mpLandNode, MapManager::getInstance()->getZOrderAtPoint(pos));
+// 
+// 	if(MapManager::getInstance()->isAlpha(pos))
+// 	{
+// 		_sprite->setOpacity(ALPHA_VALUE);
+// 		_playerAcNode1->setAnimAlphaValue(ALPHA_VALUE);
+// 		_playerAcNode2->setAnimAlphaValue(ALPHA_VALUE);
+// 	}
+// 	else
+// 	{
+// 		_sprite->setOpacity(255);
+// 		_playerAcNode1->setAnimAlphaValue(255);
+// 		_playerAcNode2->setAnimAlphaValue(255);
+// 	}
+}
+
+void ShuangXiuAnim::resetPosition()
+{
+	setPosition(mpLandNode->getPosition());
+}
+
+void ShuangXiuAnim::setPosDelegate( shuangxiuPlayersPosDelegate* desDelegate )
+{
+	_myPlayerDelegate = desDelegate;
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+
+ShuangXiuMgr * ShuangXiuMgr::getInstance()
+{
+	static ShuangXiuMgr instance;
+	return &instance;
+}
+
+void ShuangXiuMgr::runAnimation( unsigned int roleId1, unsigned int roleId2 )
+{
+	Role *role1 = RoleManager::getInstance()->findRole(roleId1);
+	Role *role2 = RoleManager::getInstance()->findRole(roleId2);
+	_curTileMap = MapManager::getInstance()->getMap();
+
+	if(role1 != NULL && role2 != NULL && (role1->getAttribute(RA_ShuangXiu)!=0)&&(role2->getAttribute(RA_ShuangXiu)!=0))
+	{
+		std::map<unsigned int, unsigned int>::iterator iter = _roleToRole.find(roleId1);
+		if(iter == _roleToRole.end())
+		{
+			ShuangXiuAnim *anim = new ShuangXiuAnim;
+			_roleToRole[roleId1] = roleId2;
+			_roleToRole[roleId2] = roleId1;
+			_roleToAnim[roleId1] = anim;
+			_roleToAnim[roleId2] = anim;
+			float x = (role1->getPosition().x + role2->getPosition().x) / 2.0f;
+			float y = (role1->getPosition().y + role2->getPosition().y) / 2.0f;
+			this->setFistPos(role1->getPosition());
+ 			this->setSecondPos(role2->getPosition());
+			anim->setPosDelegate(this);
+// 			CCPoint role1Pos = role1->getPosition();
+// 			CCPoint role2Pos = role2->getPosition();
+// 			_shuangxiuAcNode1->setPosition(role1Pos);
+// 			_shuangxiuAcNode2->setPosition(role2Pos);
+			anim->setPosition(ccp(x, y));
+			if(!RoleManager::getInstance()->isHideOtherEffect())
+			{
+				anim->addToMap();
+				anim->resetPosition();
+				anim->run();
+// 				_curTileMap->addChild(_shuangxiuAcNode1);
+// 				_shuangxiuAcNode1->BeginAction(0.1f, true);
+// 				_curTileMap->addChild(_shuangxiuAcNode2);
+// 				_shuangxiuAcNode2->BeginAction(0.1f, true);
+			}
+		}
+
+	}
+}
+
+void ShuangXiuMgr::stopAnimation( unsigned int roleId1 )
+{
+	std::map<unsigned int, ShuangXiuAnim*>::iterator iter = _roleToAnim.find(roleId1);
+	if(iter != _roleToAnim.end())
+	{
+		delete iter->second;
+// 		_shuangxiuAcNode1->StopAction();
+// 		_shuangxiuAcNode1->removeFromParent();
+// 		_shuangxiuAcNode2->StopAction();
+// 		_shuangxiuAcNode2->removeFromParent();
+		unsigned int roleId2 = _roleToRole[roleId1];
+		_roleToRole.erase(roleId1);
+		_roleToRole.erase(roleId2);
+		_roleToAnim.erase(roleId1);
+		_roleToAnim.erase(roleId2);
+	}
+}
+
+void ShuangXiuMgr::clear()
+{
+	for(std::map<unsigned int, ShuangXiuAnim*>::iterator iter = _roleToAnim.begin(); iter != _roleToAnim.end(); ++ iter)
+	{
+		ShuangXiuAnim *anim = iter->second;
+		if(anim != NULL)
+		{
+			delete anim;
+			unsigned int roleId1 = iter->first;
+			_roleToAnim[roleId1] = NULL;
+			_roleToAnim[_roleToRole[roleId1]] = NULL;
+		}
+	}
+
+	_roleToAnim.clear();
+	_roleToRole.clear();
+}
+
+void ShuangXiuMgr::showAnim( bool visible )
+{
+	_curTileMap = MapManager::getInstance()->getMap();
+	for(std::map<unsigned int, ShuangXiuAnim*>::iterator iter = _roleToAnim.begin(); iter != _roleToAnim.end(); ++ iter)
+	{
+		ShuangXiuAnim *anim = iter->second;
+		if(anim != NULL)
+		{
+			if(visible)
+			{
+				anim->addToMap();
+				anim->resetPosition();
+				anim->run();
+// 				_curTileMap->addChild(_shuangxiuAcNode1);
+// 				_shuangxiuAcNode1->BeginAction(0.1f, true);
+// 				_curTileMap->addChild(_shuangxiuAcNode2);
+// 				_shuangxiuAcNode2->BeginAction(0.1f, true);
+			}
+			else
+			{
+				anim->removeFromMap();
+				anim->stop();
+			}
+		}
+	}
+}
+
+// GameActionNode* ShuangXiuMgr::getShuangxiuAcNode()
+// {
+// 	GameActionNode* shuangxiuSEAcNode = GameActionNode::create();
+// 	for (int i = 1; i < 99; ++i)
+// 	{
+// 		CCString* shuangxiuStr = CCString::createWithFormat("%s%02d", "E1_27", i);
+// 		if(!shuangxiuSEAcNode->AddTexture(shuangxiuStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+// 	return shuangxiuSEAcNode;
+// }
+
+ShuangXiuMgr::~ShuangXiuMgr()
+{
+// 	CC_SAFE_RELEASE(_shuangxiuAcNode1);
+// 	CC_SAFE_RELEASE(_shuangxiuAcNode2);
+//	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+}
+
+ShuangXiuMgr::ShuangXiuMgr()
+{
+// 	std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+// 	std::string sSEShuangxiu = sSEDir + "E1_27.plist";
+// 	_plist.insert(sSEShuangxiu);
+// 	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+// 	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEShuangxiu.c_str());
+// 
+// 	_shuangxiuAcNode1 = this->getShuangxiuAcNode();
+// 	_shuangxiuAcNode2 = this->getShuangxiuAcNode();
+// 	_shuangxiuAcNode1->retain();
+// 	_shuangxiuAcNode2->retain();
+
+}
+
+void ShuangXiuMgr::setFistPos( CCPoint fPoint )
+{
+	this->player1Point = fPoint;
+}
+
+void ShuangXiuMgr::setSecondPos( CCPoint sPoint )
+{
+	this->player2Point = sPoint;
+}

@@ -1,0 +1,581 @@
+/**
+ *	@file		BFPointsRankUi.cpp
+ *	@author		zhangyajie
+ *	@date		2016/05/05
+ *	@version	
+ *	@brief		血战到底积分排行榜
+ */
+#include "BFPointsRankUi.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "f_string_util.h"
+#include "CfgReader.h"
+#include "UiManager.h"
+#include "NameMgr2.h"
+#include "BloodFightMgr.h"
+#include "CommonClient.h"
+#include "GameEventDefine.h"
+#include "f_string_table.h"
+#include "ListControl.h"
+#include "PackageManager.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+BFPointsRankUi::BFPointsRankUi()
+{
+
+}
+
+BFPointsRankUi::~BFPointsRankUi()
+{
+
+}
+
+CCNode * BFPointsRankUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["BFPointsRankUiLayer"] = UiLayerLoader<BFPointsRankUiLayer>::loader();
+	nodeLoaders["ListControl"] = ListControlLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("xuezhandaodi", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+void BFPointsRankUi::refreshUIByType(e_BFRankShowType pType)
+{
+	BFPointsRankUiLayer* pUi = getUiLayer();
+	if (pUi)
+	{
+		pUi->setRankShowType(pType);
+		pUi->refresh_node();
+	}
+}
+
+BFPointsRankUiLayer * BFPointsRankUi::getUiLayer()
+{
+	return getUiNodeByTag<BFPointsRankUiLayer>(WCT_BF_PointsRank_UI);
+}
+
+// void BFPointsRankUi::refreshRoleName(int pRankIndex)
+// {
+// 	BFPointsRankUiLayer* pUi = getUiLayer();
+// 	if (pUi)
+// 	{
+// 		pUi->refreshRoleNameByIndex(pRankIndex);
+// 	}
+// }
+// void BFPointsRankUi::refreshGuildName(int pRankIndex)
+// {
+// 	BFPointsRankUiLayer* pUi = getUiLayer();
+// 	if (pUi)
+// 	{
+// 		pUi->refreshRoleGuildByIndex(pRankIndex);
+// 	}
+// }
+
+//**********************************************华丽丽的Ui分割线****************************************
+BFPointsRankUiLayer::BFPointsRankUiLayer()
+{
+	for(int i = 0; i < BF_RANK_AWARD_NUM; i++)
+	{
+		m_ft_award_des[i] = NULL;
+		m_node_award[i] = NULL;
+	}	
+	m_select_index = 0;
+	m_eShowType = BFRank_Item_Current;
+
+	m_pNodeAward = NULL;
+	m_pNodeDiMing = NULL;
+	m_pTTFRankNum = NULL;
+
+	
+}
+
+BFPointsRankUiLayer::~BFPointsRankUiLayer()
+{
+
+}
+
+cocos2d::extension::SEL_CCControlHandler BFPointsRankUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(BFPointsRankUiLayer,onClose);
+
+	return NULL;
+}
+
+cocos2d::SEL_MenuHandler BFPointsRankUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+
+	return NULL;
+}
+
+bool BFPointsRankUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(ListControl*,m_list);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_rank);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_back_node);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,m_score_node);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_pNodeAward);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_pNodeDiMing);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_node_1",CCNode*,m_node_award[0]);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_node_2",CCNode*,m_node_award[1]);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_node_3",CCNode*,m_node_award[2]);
+
+	return false;
+}
+
+void BFPointsRankUiLayer::onEnter()
+{
+	//REGISTER_EVENT(receive_battle_info_event,FMBBattleUiLayer,recive_battle_info);
+	NormalLayer::onEnter();
+}
+
+void BFPointsRankUiLayer::onExit()
+{
+	m_list->clear_list();
+	//UNREGISTER_EVENT(receive_battle_info_event,FMBBattleUiLayer,recive_battle_info);
+	NormalLayer::onExit();
+}
+
+void BFPointsRankUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	for (int i = 0; i < BF_RANK_AWARD_NUM; i++)
+	{
+		m_ft_award_des[i] = Helper::getLabelFTByParentAndTag(m_back_node, i + 1);
+	}
+	m_ft_score = Helper::getLabelFTByParentAndTag(m_score_node, 4);
+	m_ft_rank = Helper::getLabelFTByParentAndTag(m_score_node, 5);
+	m_ft_win_num = Helper::getLabelFTByParentAndTag(m_score_node, 6);
+	LabelFT * label = Helper::getLabelFTByParentAndTag(m_pNodeAward, 1);
+	label->setVisible(false);
+	m_pTTFRankNum = CCLabelBMFont::create();
+	m_pTTFRankNum->setFntFile("Art/Scene/fontNum.fnt");
+	m_pTTFRankNum->setPosition(label->getPosition());
+	m_pTTFRankNum->setString(STRING_TABLE["wing_effect_cue_3"]);
+	m_pTTFRankNum->setAnchorPoint(ccp(0.5f, 0.5f));
+	m_pTTFRankNum->setScale(0.6f);
+	m_pTTFRankNum->setAlignment(kCCTextAlignmentCenter);
+	m_pNodeAward->addChild(m_pTTFRankNum);
+	
+	Helper::getLabelFTByParentAndTag(m_score_node, 1);
+	Helper::getLabelFTByParentAndTag(m_score_node, 2);
+	Helper::getLabelFTByParentAndTag(m_score_node, 3);
+
+	m_list->set_vertical_mode(true);
+}
+
+void BFPointsRankUiLayer::setRankShowType(e_BFRankShowType pType)
+{
+	m_eShowType = pType;
+	if (m_score_node)
+		m_score_node->setVisible(pType == BFRank_Item_Current);
+	if (pType == BFRank_Item_Current)
+		refresh_mineInfo();
+}
+
+void BFPointsRankUiLayer::onClose(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	CLOSE_UI(WCT_BF_PointsRank_UI);
+}
+
+void BFPointsRankUiLayer::refresh_node()
+{
+	m_list->clear_list();
+	int t_nItemSize = BloodFightMgr::getInstance()->getBFRankItemCount();
+	int i = 0;
+	for (; i < t_nItemSize - BF_SPE_RANK_INFO_NUM; i++)
+	{
+		BFPointsRankItem* item = BFPointsRankItem::create_item();
+		item->setRankNum(i);
+		item->refresh_item();
+		item->setTag(i);
+		m_list->add_item(item);
+	}
+	int t_nIndex = -1;
+	for (; i < t_nItemSize; i++)
+	{
+		BFPointsRankItem* item = BFPointsRankItem::create_item();
+		item->setRankNum(t_nIndex--);
+		item->refresh_item();
+		item->setTag(i);
+		m_list->add_item(item);
+	}
+	m_list->scroll_to_top();
+	refresh_gift_and_info();
+}
+
+void BFPointsRankUiLayer::refresh_gift_and_info()
+{
+	BFPointsRankItem* t_item = dynamic_cast<BFPointsRankItem*>(m_list->find_item(m_select_index));
+	if (t_item == NULL)
+		return;
+	int t_nRankIndex = t_item->getRankNum();
+	if (t_nRankIndex != BF_RANK_51_100_NUM && t_nRankIndex != BF_RANK_JOIN_NUM && t_nRankIndex != BF_RANK_HIGH_WIN_NUM)
+		t_nRankIndex++;
+	BFRankAwardData pAwardInfo;
+	bool t_bIsShow = BloodFightMgr::getInstance()->getRankAwardDataByRankNum(t_nRankIndex,pAwardInfo);
+	if (t_bIsShow)
+	{
+		
+		ItemNode* t_item = NULL;
+		for ( int i = 0 ; i < BF_RANK_AWARD_NUM; i++)
+		{
+			DWORD item_id = pAwardInfo.m_nItemID[i];
+			unsigned int item_num = pAwardInfo.m_nItemNum[i];
+			m_node_award[i]->removeAllChildrenWithCleanup(true);
+			if(IS_VALID(item_id) && (item_id != 0))
+			{
+				t_item = ItemNode::create();
+				if(!IS_VALID_PTR(t_item))
+					return;
+				t_item->hideItemOpBtn();
+				t_item->setAnchorPoint(ccp(0.5,0.5));
+				t_item->setPosition(ccp(m_node_award[i]->getContentSize().width/2 ,m_node_award[i]->getContentSize().height/2));
+				m_node_award[i]->addChild(t_item);
+				t_item->setDataId(item_id);
+				t_item->setNum(item_num);
+				t_item->SetShowNum(true);
+				t_item->setClickable(true);
+				const ItemTypeData& t_data = PackageManager::getInstance()->getItemTypeData(item_id);
+				m_ft_award_des[i]->setString(t_data.name.c_str());
+			}
+			else
+			{
+				m_node_award[i]->setVisible(false);
+				m_ft_award_des[i]->setVisible(false);
+			}
+		}
+	}
+
+	string str = "";
+	switch(t_nRankIndex)
+	{
+	case 1:
+		{
+			str = BF_RANK_AWARD_ICON1;
+			CCSpriteFrame* normalSprite = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str.c_str());
+			m_rank->setDisplayFrame(normalSprite);
+			m_rank->setVisible(true);
+			m_pNodeAward->setVisible(false);
+		}
+		break;
+	case 2:
+		{
+			str = BF_RANK_AWARD_ICON2;
+			CCSpriteFrame* normalSprite = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str.c_str());
+			m_rank->setDisplayFrame(normalSprite);
+			m_rank->setVisible(true);
+			m_pNodeAward->setVisible(false);
+		}
+		
+		break;
+	case 3:
+		{
+			str = BF_RANK_AWARD_ICON3;
+			CCSpriteFrame* normalSprite = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str.c_str());
+			m_rank->setDisplayFrame(normalSprite);
+			m_rank->setVisible(true);
+			m_pNodeAward->setVisible(false);
+		}
+		break;
+	case -1:
+		{
+			m_rank->setVisible(false);
+			m_pNodeAward->setVisible(true);
+			m_pTTFRankNum->setVisible(false);
+			str = BF_RANK_AWARD_ICON51;
+			CCSpriteFrame* normalSprite = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str.c_str());
+			m_pNodeDiMing->setDisplayFrame(normalSprite);
+		}
+		break;
+	case -2:
+		{
+			m_rank->setVisible(false);
+			m_pNodeAward->setVisible(true);
+			m_pTTFRankNum->setVisible(false);
+			str = BF_RANK_AWARD_ICON_JOIN;
+			CCSpriteFrame* normalSprite = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str.c_str());
+			m_pNodeDiMing->setDisplayFrame(normalSprite);
+		}
+		break;
+	case -3:
+		{
+			m_rank->setVisible(false);
+			m_pNodeAward->setVisible(true);
+			m_pTTFRankNum->setVisible(false);
+			str = BF_RANK_AWARD_ICON_WINS;
+			CCSpriteFrame* normalSprite = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str.c_str());
+			m_pNodeDiMing->setDisplayFrame(normalSprite);
+		}
+		break;
+	default:
+		{
+			m_rank->setVisible(false);
+			m_pNodeAward->setVisible(true);
+			m_pTTFRankNum->setVisible(true);
+			safe_sprintf(str,"%d",t_nRankIndex);
+			m_pTTFRankNum->setString(str.c_str());
+			str = BF_RANK_AWARD_ICON_RANK;
+			CCSpriteFrame* normalSprite = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str.c_str());
+			m_pNodeDiMing->setDisplayFrame(normalSprite);
+			//加入文字
+		}
+		break;
+	}
+	
+}
+
+void BFPointsRankUiLayer::refresh_mineInfo()
+{
+	if (m_eShowType == BFRank_Item_Current)
+	{
+		BFLocPlayerScore pData = BloodFightMgr::getInstance()->getLocalPlayerScore();
+		//个人信息
+		string ft_str;
+		safe_sprintf(ft_str,"%d",pData.dwScore);
+		m_ft_score->setString(ft_str.c_str());
+		safe_sprintf(ft_str,"%d",pData.dwRankings);
+		m_ft_rank->setString(ft_str.c_str());
+		safe_sprintf(ft_str,"%d",pData.dwSerialWin);
+		m_ft_win_num->setString(ft_str.c_str());
+	}
+}
+bool BFPointsRankUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	CCPoint list_point = m_list->convertTouchToNodeSpace(pTouch);
+	const CCSize& list_size = m_list->getContentSize();
+	CCRect list_rect(0.0f, 0.0f, list_size.width, list_size.height);
+	if(list_rect.containsPoint(list_point))
+	{
+		for(size_t i = 0; i < m_list->count(); ++i)
+		{
+			BFPointsRankItem* item = dynamic_cast<BFPointsRankItem*>(m_list->find_item(i));
+			if(IS_VALID_PTR(item))
+			{
+				CCPoint item_point = item->convertTouchToNodeSpace(pTouch);
+				const CCSize& item_size = item->getContentSize();
+				CCRect item_rect(0.0f, 0.0f, item_size.width, item_size.height);
+				if(item_rect.containsPoint(item_point))
+				{
+					if (m_select_index != INVALID)
+					{
+						BFPointsRankItem* t_item = dynamic_cast<BFPointsRankItem*>(m_list->find_item(m_select_index));
+						t_item->changeSelectState(BFRank_Item_Null);
+					}
+					m_select_index = i;
+					item->changeSelectState(BFRank_Item_Select);
+					refresh_gift_and_info();
+					return true;
+				}
+			}
+		}
+	}
+	return true;
+}
+
+// void BFPointsRankUiLayer::refreshRoleNameByIndex(int pRankIndex)
+// {
+// 	BFPointsRankItem* item = dynamic_cast<BFPointsRankItem*>(m_list->find_item(pRankIndex));
+// 	if(IS_VALID_PTR(item))
+// 		item->refresh_role_name();
+// }
+// 
+// void BFPointsRankUiLayer::refreshRoleGuildByIndex(int pRankIndex)
+// {
+// 	BFPointsRankItem* item = dynamic_cast<BFPointsRankItem*>(m_list->find_item(pRankIndex));
+// 	if(IS_VALID_PTR(item))
+// 		item->refresh_guild_name();
+// }
+
+
+//***************************************************BFPointsRankItem**************************************************
+BFPointsRankItem::BFPointsRankItem()
+	:m_node_main(NULL)
+	,m_sprite_mine(NULL)
+	,m_sprite_select(NULL)
+	,m_eShowState(BFRank_Item_Null)
+	,m_nRankIndex(0)
+{
+
+}
+BFPointsRankItem::~BFPointsRankItem()
+{
+
+}
+
+void BFPointsRankItem::onEnter()
+{
+	CCNode::onEnter();
+}
+
+void BFPointsRankItem::onExit()
+{
+	CCNode::onExit();
+	UNREG_GUILD_NAME_CB(this,&BFPointsRankItem::refresh_guild_name);
+	UNREG_NAME_CB(this,&BFPointsRankItem::refresh_role_name);
+}
+
+SEL_MenuHandler BFPointsRankItem::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+SEL_CCControlHandler BFPointsRankItem::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+bool BFPointsRankItem::onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode)
+{
+ 	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*, m_node_main);
+ 	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*, m_sprite_mine);
+ 	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*, m_sprite_select);
+	return false;
+}
+
+void BFPointsRankItem::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+ 	for (int i = 0; i <  BF_RANK_LAB_NUM; i++)
+ 	{
+ 		m_ft_label[i] = Helper::getLabelFTByParentAndTag(m_node_main, i);
+ 	}
+	
+}
+
+void BFPointsRankItem::setRankNum(int pNum)
+{
+	m_nRankIndex = pNum;
+}
+//刷新名称
+void BFPointsRankItem::refresh_role_name(unsigned int roleid , const std::string& name)
+{
+/*	string str = BloodFightMgr::getInstance()->getRankRoleName(m_stItemInfo.dwRoleID);*/
+	if (m_ft_label[BFRank_TTF_Name] && m_stItemInfo.dwRoleID == roleid)
+	{
+		m_ft_label[BFRank_TTF_Name]->setString(name.c_str());
+	}
+}
+//刷新
+void BFPointsRankItem::refresh_guild_name(unsigned int roleid , const std::string& name)
+{
+	if (m_ft_label[BFRank_TTF_GName] && m_stItemInfo.dwGuildID == roleid)
+	{
+		m_ft_label[BFRank_TTF_GName]->setString(name.c_str());
+	}
+}
+//刷新Item数据
+void BFPointsRankItem::refresh_item()
+{
+	bool result = BloodFightMgr::getInstance()->getBFRankItemInfo(m_nRankIndex,m_stItemInfo);
+	if (!result)
+	{
+		int index = BFRank_TTF_GName;
+		switch (m_nRankIndex)
+		{
+		case BF_RANK_51_100_NUM:
+			{
+				m_ft_label[BFRank_TTF_NoneName]->setVisible(false);
+				m_ft_label[BFRank_TTF_Rank]->setString(STRING_TABLE["BF_MyRank_51_100"]);
+				m_ft_label[BFRank_TTF_Name]->setAlignment(LEFT,VCENTER);
+				m_ft_label[BFRank_TTF_Name]->setAnchorPoint(ccp(0,0.5));
+				m_ft_label[BFRank_TTF_Name]->setPositionX(m_ft_label[BFRank_TTF_Name]->getPositionX() - 40);
+				m_ft_label[BFRank_TTF_Name]->setString(STRING_TABLE["BF_MyRank_51_100_Awd"]);
+			}
+			break;
+		case BF_RANK_JOIN_NUM:
+			{
+				m_ft_label[BFRank_TTF_NoneName]->setVisible(false);
+				m_ft_label[BFRank_TTF_Rank]->setString(STRING_TABLE["BF_MyRank_Join"]);
+				m_ft_label[BFRank_TTF_Name]->setAlignment(LEFT,VCENTER);
+				m_ft_label[BFRank_TTF_Name]->setPositionX(m_ft_label[BFRank_TTF_Name]->getPositionX() - 40);
+				m_ft_label[BFRank_TTF_Name]->setAnchorPoint(ccp(0,0.5));
+				m_ft_label[BFRank_TTF_Name]->setString(STRING_TABLE["BF_MyRank_Join_Awd"]);
+			}
+			break;
+		case BF_RANK_HIGH_WIN_NUM:
+			{
+				m_ft_label[BFRank_TTF_NoneName]->setVisible(false);
+				m_ft_label[BFRank_TTF_Rank]->setString(STRING_TABLE["BF_MyRank_Wins"]);
+				m_ft_label[BFRank_TTF_Name]->setAlignment(LEFT,VCENTER);
+				m_ft_label[BFRank_TTF_Name]->setAnchorPoint(ccp(0,0.5));
+				m_ft_label[BFRank_TTF_Name]->setPositionX(m_ft_label[BFRank_TTF_Name]->getPositionX() - 40);
+				m_ft_label[BFRank_TTF_Name]->setString(STRING_TABLE["BF_MyRank_Wins_Awd"]);
+			}
+			break;
+		default:
+			{
+				string str = "";
+				safe_sprintf(str,"%d",m_nRankIndex + 1);
+				m_ft_label[BFRank_TTF_Rank]->setString(str.c_str());
+				index = BFRank_TTF_Name;
+				m_ft_label[BFRank_TTF_NoneName]->setVisible(true);
+			}
+			break;
+		}
+
+		for (int i = index ; i < BFRank_TTF_NoneName; i++)
+		{
+			m_ft_label[i]->setVisible(false);
+		}
+	}
+	else
+	{
+		LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+		if (player)
+		{
+			bool isSelf = player->getId() == m_stItemInfo.dwRoleID;
+			if (isSelf)
+			{
+				m_eShowState = BFRank_Item_Self;
+				m_sprite_mine->setVisible(true);
+			}
+		}
+
+		BloodFightMgr* pMgr = BloodFightMgr::getInstance();
+		m_ft_label[BFRank_TTF_NoneName]->setVisible(false);
+		string str = "";
+		safe_sprintf(str,"%d",m_nRankIndex + 1);
+		m_ft_label[BFRank_TTF_Rank]->setString(str.c_str());
+		str = STRING_TABLE["73"];
+		bool res = NameMgr2::getInstance()->queryName(m_stItemInfo.dwRoleID,str);
+		if (!res)
+			REG_NAME_CB(this,&BFPointsRankItem::refresh_role_name);
+/*		str = pMgr->getRankRoleName(m_stItemInfo.dwRoleID);*/
+		m_ft_label[BFRank_TTF_Name]->setString(str.c_str());
+		/*str = pMgr->getRankGuildName(m_stItemInfo.dwGuildID);*/
+		str = STRING_TABLE["73"];
+		if (m_stItemInfo.dwGuildID != -1 && m_stItemInfo.dwGuildID != 0)
+		{
+			res = NameMgr2::getInstance()->queryGuildName(m_stItemInfo.dwGuildID,str);
+			if (!res)
+				REG_GUILD_NAME_CB(this,&BFPointsRankItem::refresh_guild_name);
+		}
+		
+		m_ft_label[BFRank_TTF_GName]->setString(str.c_str());
+		safe_sprintf(str,"%d",m_stItemInfo.dwRating);
+		m_ft_label[BFRank_TTF_FNum]->setString(str.c_str());
+		safe_sprintf(str,"%d",m_stItemInfo.dwMaxSerialWin);
+		m_ft_label[BFRank_TTF_WNum]->setString(str.c_str());
+		safe_sprintf(str,"%d",m_stItemInfo.dwScore);
+		m_ft_label[BFRank_TTF_BFScore]->setString(str.c_str());
+	}
+
+}
+
+void BFPointsRankItem::changeSelectState(e_BFRankItemState pState)
+{
+	if (m_eShowState == BFRank_Item_Self)
+		return;
+	m_sprite_select->setVisible(pState == BFRank_Item_Select);
+}
+
+BFPointsRankItem* BFPointsRankItem::create_item()
+{
+	CCNodeLoaderLibrary* lib  = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string strFullPath = CFGReader::instance()->get_ui_ccbi_filepath("xuezhandaodiitem");
+	CCNode* node = reader->readNodeGraphFromFile(strFullPath.c_str());
+	BFPointsRankItem* item = dynamic_cast<BFPointsRankItem*>(node);
+	CC_ASSERT(item);
+
+	return item;
+}

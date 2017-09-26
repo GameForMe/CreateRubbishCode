@@ -1,0 +1,108 @@
+#include "BattlefieldMgr.h"
+#include "TCPClient.h"
+#include "World.h"
+#include "BattlefieldUi.h"
+#include "NameMgr2.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+
+BattlefieldMgr::BattlefieldMgr()
+{
+	//战场相关
+	TCP_CLIENT->register_net_cmd("NET_SIS_enter_battle_instance", this, &BattlefieldMgr::onEnterBattldefieldCallBack);
+	TCP_CLIENT->register_net_cmd("NET_SIS_battle_ground_end", this, &BattlefieldMgr::endBattlefield);
+	//end
+}
+
+BattlefieldMgr::~BattlefieldMgr()
+{
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_enter_battle_instance", this, &BattlefieldMgr::onEnterBattldefieldCallBack);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_battle_ground_end", this, &BattlefieldMgr::endBattlefield);
+}
+
+BattlefieldMgr * BattlefieldMgr::getInstance()
+{
+	static BattlefieldMgr instance;
+	return &instance;
+}
+
+void BattlefieldMgr::onEnterBattlefield()
+{
+	NET_SIC_enter_battle_instance cmd;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_INSIGNIFICANT, false);
+}
+
+unsigned int BattlefieldMgr::onEnterBattldefieldCallBack(s_net_cmd *cmd)
+{
+
+	if(cmd->id == message_id_crc("NET_SIS_enter_battle_instance"))
+	{
+		NET_SIS_enter_battle_instance *msg = (NET_SIS_enter_battle_instance*)cmd;
+		std::cout <<msg->dwErrorCode<< std::endl;
+	}
+	return 0;
+}
+
+unsigned int BattlefieldMgr::endBattlefield(s_net_cmd *cmd)
+{
+	_allcampData.clear();
+	_mfwcData.clear();
+	_brdgData.clear();
+	BattlefieldProto bp;
+
+	if(cmd->id == message_id_crc("NET_SIS_battle_ground_end"))
+	{
+		NET_SIS_battle_ground_end *msg = (NET_SIS_battle_ground_end*)cmd;
+		for (unsigned int  i = 0; i<msg->dwNumber; ++i)
+		{	
+			tagBattleResule br = msg->sBattleData[i];
+			bp.type = br.byType;
+			bp.level = br.dwLevel;
+			bp.id = br.dwRoleID;
+			bp.killBoss = br.dwKillBoss;
+			bp.killNum = br.dwKillNum;
+			bp.killSorder = br.dwKillSorder;
+			bp.ranking = i+1;
+			bp.score = br.dwScore;
+			
+			std::string bname;
+			if(NameMgr2::getInstance()->queryName(bp.id,bname))
+				bp.name = bname;
+			else
+				bp.name = "";
+			
+			_allcampData.push_back(bp);
+			if (bp.type == '0')
+				_mfwcData.push_back(bp);
+			else
+				_brdgData.push_back(bp);
+
+			//是否是本地玩家
+			if (RoleManager::getInstance()->getLocalPlayer()->getId() == bp.id)
+				_localPlayerData = bp;
+
+			//胜利方
+			if (bp.killBoss != 0)
+			{
+				setVictory(bp.type);
+			}
+		}
+		World::getInstance()->setBattlefieldIsEnd(true);
+	}
+
+	return 0;
+}
+
+void BattlefieldMgr::Destroy()
+{
+	_allcampData.clear();
+	_mfwcData.clear();
+	_brdgData.clear();
+	return;
+}
+
+int BattlefieldMgr::getTotal()
+{
+	return _localPlayerData.killBoss + _localPlayerData.killNum + _localPlayerData.killSorder;
+}
+

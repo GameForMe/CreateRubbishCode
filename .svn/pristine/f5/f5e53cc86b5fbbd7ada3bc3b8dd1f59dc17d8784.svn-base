@@ -1,0 +1,83 @@
+#include "UiResourceMgr.h"
+
+
+UiResourceMgr * UiResourceMgr::getInstance()
+{
+	static UiResourceMgr instance;
+	return &instance;
+}
+
+UiResourceMgr::UiResourceMgr()
+	: _releasePlistFile(false)
+{
+
+}
+
+void UiResourceMgr::retainPlistFile( const std::set<std::string> &fileNames )
+{
+#ifdef WIN32
+	CCLOG(">>>>> retainPlistFile: begin11111111111111111111111111111111111111111111");
+#endif
+	for(std::set<std::string>::const_iterator iter = fileNames.begin(); iter != fileNames.end(); ++ iter)
+	{
+		const std::string &fileName = *iter;
+		std::map<std::string, int>::iterator fileIter = _plistFiles.find(fileName);
+		if(fileIter != _plistFiles.end())
+		{
+			int refcount = fileIter->second + 1;
+			_plistFiles[fileName] = refcount;
+#ifdef WIN32
+			CCLOG(">>>>> 1retainPlistFile:%s,refcount:%d",fileName.c_str(),refcount);
+#endif
+		}
+		else
+		{
+			_plistFiles[fileName] = 1;
+#ifdef WIN32
+			CCLOG(">>>>> 1retainPlistFile:%s,refcount:%d",fileName.c_str(),1);
+#endif
+		}
+	}
+#ifdef WIN32
+	CCLOG(">>>>> retainPlistFile: end22222222222222222222222222222222222222222222222");
+#endif
+}
+
+void UiResourceMgr::releasePlistFile( const std::set<std::string> &fileNames )
+{
+	for(std::set<std::string>::const_iterator iter = fileNames.begin(); iter != fileNames.end(); ++ iter)
+	{
+		const std::string &fileName = *iter;
+		std::map<std::string, int>::iterator fileIter = _plistFiles.find(fileName);
+		if(fileIter != _plistFiles.end())
+		{
+			int refCount = fileIter->second - 1;
+			_plistFiles[fileName] = refCount;
+#ifdef WIN32
+			CCLOG(">>>>> releasePlistFile:%s,refCount:%d",fileName.c_str(),refCount);
+#endif
+			if(refCount == 0)
+			{
+				//_plistFiles.erase(fileIter);
+#ifdef WIN32
+				CCLOG(">>>>> releasePlistFile:%s",fileName.c_str());
+#endif
+				CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFramesFromFile(fileName.c_str());
+				_releasePlistFile = true;
+			}
+		}
+		else
+		{
+			CCLOG("can't find file");
+		}
+	}
+}
+
+void UiResourceMgr::update( float dt )
+{
+	if(_releasePlistFile)
+	{
+		CCTextureCache::sharedTextureCache()->removeUnusedTextures();
+		_releasePlistFile = false;
+	}
+}

@@ -1,0 +1,506 @@
+#include "SkillListItemUi.h"
+#include "CfgReader.h"
+#include "SkillUi.h"
+#include "UiManager.h"
+#include "NewPlayerGuide.h"
+#include "BSAnimate.h"
+#include "AnimationCache.h"
+#include "PackageManager.h"
+#include "UiTools.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "ShortCutUi.h"
+#include "UIUtil.h"
+#include "SkillManager.h"
+#include "LocalPlayer.h"
+#include "StringMgr.h"
+#include "Helper.h"
+SkillListItemUi::SkillListItemUi()
+	: _selectedIndex(-1)
+{
+	for(int i = 0; i < ITEMS_NUM; i ++)
+	{
+		 _items[i] = NULL;
+		 _iconNormal[i] = NULL;
+		 _iconLight[i] = NULL;
+		 _skillIcon[i] = NULL;
+		 _skillName[i] = NULL;
+		 _skillLevel[i] = NULL;
+		 _progress[i] = NULL;
+		 _progressTimer[i] = NULL;
+		 _itemMask[i] = NULL;
+		 //_itemData[i] = NULL;
+		 _skillAutoEffect[i] = NULL;
+	}
+
+
+}
+
+SkillListItemUi::~SkillListItemUi()
+{
+}
+
+bool SkillListItemUi::init()
+{
+	if(!CCLayer::init())
+		return false;
+
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("SkillListItemUiLayer", SkillListItemUiLoader::loader());
+	ccNodeLoaderLibrary->registerCCNodeLoader("TouchSprite", TouchSpriteLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode * node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "skilllistitemui.ccbi").c_str());
+	ccbReader->release();
+	if(node != NULL) {
+		addChild(node);
+		setContentSize(node->getContentSize());
+
+		for(int i = 0; i < ITEMS_NUM; i ++)
+		{
+			_items[i] = (TouchSprite *)node->getChildByTag(i);
+			_items[i]->setTouchEnable(false);
+			//_items[i]->signalTouched.connect(this, &SkillListItemUi::itemSelected);
+			CC_ASSERT(_items[i] != NULL);
+			_iconNormal[i] = (CCSprite*)_items[i]->getChildByTag(1);
+			_iconLight[i] = (CCSprite*)_items[i]->getChildByTag(2);
+			_skillIcon[i] = (CCSprite*)_items[i]->getChildByTag(3);
+			//_skillName[i] = (CCLabelTTF*)_items[i]->getChildByTag(4);
+			//_skillLevel[i] = (CCLabelTTF*)_items[i]->getChildByTag(5);
+			_skillName[i] = Helper::getLabelFTByParentAndTag(_items[i],4);
+			CC_ASSERT(_skillName[i]);
+			_skillLevel[i] = Helper::getLabelFTByParentAndTag(_items[i],5);
+			CC_ASSERT(_skillLevel[i]);
+			_progress[i] = (CCSprite*)_items[i]->getChildByTag(7);
+			_itemMask[i] = (CCSprite*)_items[i]->getChildByTag(8);
+// 			_skillCondition[i] = (CCLabelTTF*)_items[i]->getChildByTag(9);//学习条件
+// 			_skillAtive[i] = (CCLabelTTF*)_items[i]->getChildByTag(13);//主动被动
+// 			_skillLv[i] = (CCLabelTTF*)_items[i]->getChildByTag(10);//学习需要的等级(比如：16)
+// 			_skillFull[i] = (CCLabelTTF*)_items[i]->getChildByTag(11);//角色多少级(界面上显示的)
+// 			_skillNeedBook[i] = (CCLabelTTF*)_items[i]->getChildByTag(12);//是否需要技能书
+// 			mpSkillPoint[i] = (CCLabelTTF*)_items[i]->getChildByTag(15);//现实技能点数
+// 			_levelWord[i] = (CCLabelTTF*)_items[i]->getChildByTag(16);
+			_skillCondition[i] = Helper::getLabelFTByParentAndTag(_items[i],9);//学习条件
+			CC_ASSERT(_skillCondition[i]);
+			_skillAtive[i] = Helper::getLabelFTByParentAndTag(_items[i],13);//主动被动
+			CC_ASSERT(_skillAtive[i]);
+			_skillLv[i] = Helper::getLabelFTByParentAndTag(_items[i],10);//学习需要的等级(比如：16)
+			CC_ASSERT(_skillLv[i]);
+			_skillFull[i] = Helper::getLabelFTByParentAndTag(_items[i],11);//角色多少级(界面上显示的)
+			CC_ASSERT(_skillFull[i]);
+			_skillNeedBook[i] = Helper::getLabelFTByParentAndTag(_items[i],12);//是否需要技能书
+			CC_ASSERT(_skillNeedBook[i]);
+			mpSkillPoint[i] = Helper::getLabelFTByParentAndTag(_items[i],15);//现实技能点数
+			CC_ASSERT(mpSkillPoint[i]);
+			_levelWord[i] = Helper::getLabelFTByParentAndTag(_items[i],16);
+			CC_ASSERT(_levelWord[i]);
+			Helper::getLabelFTByParentAndTag(_items[i],6);
+			Helper::getLabelFTByParentAndTag(_items[i],17);
+			_progressTimer[i] = initHProgressBar(_progress[i]);
+			UIUtil::reAttachToParent(mpSkillPoint[i],_progressTimer[i],eha_center,eva_center,CCPointZero);
+			_progress[i]->setVisible(false);
+			_items[i]->addChild(_progressTimer[i], _progress[i]->getZOrder());
+		}
+
+		return true;
+	}
+	return false;
+}
+
+CCProgressTimer * SkillListItemUi::initHProgressBar( CCSprite * sprite )
+{
+	CCProgressTimer *progress = CCProgressTimer::create(sprite);
+	progress->setType(kCCProgressTimerTypeBar);
+	progress->setMidpoint(ccp(0.0, 0.0));
+	progress->setBarChangeRate(ccp(1.0, 0.0));
+	progress->setPercentage(0.0f);
+	progress->setPosition(sprite->getPosition());
+	return progress;
+}
+
+void SkillListItemUi::setCheck( int index )
+{
+	if(index == -1)
+	{
+		if(_selectedIndex != -1)
+		{
+			setCheck(_selectedIndex, false);
+			_selectedIndex = -1;
+		}
+	}
+	else
+	{
+		if(_selectedIndex != index)
+		{
+			if(_selectedIndex != -1)
+			{
+				setCheck(_selectedIndex, false);
+			}
+
+			_selectedIndex = index;
+			setCheck(_selectedIndex, true);
+			SkillManager::getInstance()->SetCurIndex(_selectedIndex);
+		}
+	}
+}
+
+void SkillListItemUi::setCheck( int index, bool check )
+{
+	_iconLight[index]->setVisible(check);
+	_iconNormal[index]->setVisible(!check);
+}
+
+void SkillListItemUi::setSkillName( int index, const char *name )
+{
+	if (index >=0 && index < ITEMS_NUM && _skillName[index])
+	{
+		_skillName[index]->setString(name);
+	}
+}
+
+void SkillListItemUi::setSkillLevel( int index, int level )
+{
+	if (index >=0 && index < ITEMS_NUM && _skillLevel[index])
+	{
+		CCString *lstr = CCString::createWithFormat("%d", level);
+		_skillLevel[index]->setString(lstr->getCString());
+	}
+	//if (level == 3 || level == 6)
+	//{
+	//	setNeedBook(index,1);//要突破，是需要技能书
+	//}
+}
+
+void SkillListItemUi::setSkillIcon( int index, const char *frameName )
+{
+	//CCSpriteFrame *frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName);
+	CCSpriteFrame *frame = PackageManager::getInstance()->getIconFrameByName(frameName);
+	CC_ASSERT(frame != NULL);
+	_skillIcon[index]->setDisplayFrame(frame);
+}
+
+void SkillListItemUi::setSkillSkill(int index,SkillItemData data)
+{
+	int dataZhi = 100;
+	if (data.maxSkill != 0)
+	{
+		dataZhi = data.curSkill * 100.0f / data.maxSkill;
+	}
+	
+	CC_ASSERT(_progressTimer[index] != NULL);
+	_progressTimer[index]->setPercentage(dataZhi);
+}
+
+void SkillListItemUi::setEnable( int index , bool enable)
+{
+	if(enable)
+	{
+		_itemMask[index]->setVisible(false);
+		if (index >=0 && index < ITEMS_NUM && _skillCondition[index])
+		{
+			_skillCondition[index]->setString(GET_STR(9114).c_str());
+		}
+		setNeedBook(index,0);//已学会，不需要技能书
+	}
+	else
+	{
+		_itemMask[index]->setVisible(true);
+		if (index >=0 && index < ITEMS_NUM && _skillCondition[index])
+		{
+			_skillCondition[index]->setString(GET_STR(9115).c_str());
+		}
+		setNeedBook(index,1);//未学会，是需要技能书
+	}
+}
+
+void SkillListItemUi::itemSelected( TouchSprite *item, bool v )
+{
+	CC_ASSERT(v == true);
+	for(int i = 0; i < ITEMS_NUM; i ++)
+	{
+		if(item == _items[i])
+		{
+			//if(!_itemMask[i]->isVisible())	//未学习的也能预览，不再做限制 by zhang 2015.10.22
+			//{
+				setCheck(i);
+				signalItemSelected.emit(_itemData[i]);
+				NewPlayerGuider::getInstance()->onSkillUiItemSelect(i);
+			//}
+		}
+	}
+}
+
+void SkillListItemUi::setData( int index, const SkillItemData& data )
+{
+	CC_ASSERT(index >= 0 && index < ITEMS_NUM);
+
+	_itemData[index] =  data;
+	setEnable(index, data.canUse);
+	setSkillName(index, data.name.c_str());
+	setSkillIcon(index, data.iconName.c_str());
+	setSkillLevel(index, data.level);
+	setSkillSkill(index,data);
+	setAtive(index,data.isAtive);//1是主动技能 0是被动技能
+	setLv(index,data.lv,data.level,data.nextLevel,data.canUse);//设置学习/修炼/突破等级
+	//setNeedBook(index,data.isNeedBook);//是否需要技能书,现在都需要技能书，所以在setEnable(index, data.canUse)里调用 by zhang 2015.09.17
+	setAutoEffect(index, data.activity);
+	setSkillPoint(index,data.curSkill,data.maxSkill);
+
+	if (SkillManager::getInstance()->getSkillCanUse(data.id))
+	{
+		if (SkillManager::getInstance()->getSkillCanUpGrade(data.id) || SkillManager::getInstance()->getSkillCanBreak(data.id))
+		{
+			if (!World::getInstance()->isHighLight(_items[index], WT_CCSPRITE, WCT_SKILLUI))
+			{
+				World::getInstance()->SetHighLight(_items[index], WT_CCSPRITE, WCT_SKILLUI, 0, true, 280, 40);
+			}
+		}else
+		{
+			if (World::getInstance()->isHighLight(_items[index], WT_CCSPRITE, WCT_SKILLUI))
+			{
+				World::getInstance()->SetHighLight(_items[index], WT_CCSPRITE, WCT_SKILLUI, 0, false);
+			}
+		}
+	}
+}
+
+void SkillListItemUi::setAtive(int index, int state)//1是主动技能 0是被动技能
+{
+	if (index >=0 && index < ITEMS_NUM && _skillAtive[index])
+	{
+		if (state == 1)
+		{
+			_skillAtive[index]->setString(CCString::createWithFormat("%s","\xE4\xB8\xBB\xE5\x8A\xA8")->getCString());
+		}
+		else
+		{
+			_skillAtive[index]->setString(CCString::createWithFormat("%s","\xE8\xA2\xAB\xE5\x8A\xA8")->getCString());
+		}
+	}
+}
+
+void SkillListItemUi::setLv(int index,int state,int level,int nextRoleLevel,bool enable)//设置学习/修炼/突破等级
+{
+	if (index >=0 && index < ITEMS_NUM && _skillLv[index])
+	{
+		int needRoleLevel = 0;
+		if (enable)
+		{
+			needRoleLevel = nextRoleLevel;
+		}
+		else
+		{
+			needRoleLevel = state;
+		}
+		if (level < 9)
+		{
+			LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+			if(lp->getLevel() < needRoleLevel)
+			{
+				_skillLv[index]->setTextColor(ccc4(255,0,0,255));
+			}
+			else
+			{
+				_skillLv[index]->setTextColor(ccc4(255,255,255,255));
+			}
+			_skillLv[index]->setString(CCString::createWithFormat("%d",needRoleLevel)->getCString());
+		}
+		else
+		{
+			_skillLv[index]->setVisible(false);
+			if (_levelWord[index])
+				_levelWord[index]->setVisible(false);
+			if (_skillFull[index])
+				_skillFull[index]->setString(GET_STR(9116).c_str());//技能已满级
+		}
+	}
+}
+
+void SkillListItemUi::setNeedBook(int index, int state)// 是否需要技能书
+{
+	if (index >=0 && index < ITEMS_NUM && _skillNeedBook[index])
+	{
+		if (state == 1)
+		{
+			_skillNeedBook[index]->setString(GET_STR(9117).c_str());//需要技能书 by zhang 2015.09.17
+		}
+		else if (state == 2)
+		{
+			_skillNeedBook[index]->setString(GET_STR(9118).c_str());//突破需要技能书
+		}
+		else
+		{
+			_skillNeedBook[index]->setString(CCString::createWithFormat("%s"," ")->getCString());
+		}
+	}
+}
+
+void SkillListItemUi::setAutoEffect( int index, bool state )
+{
+	if (state)
+	{
+		runAnimation(index);
+	}
+	else
+	{
+		stopAnimation(index);
+	}
+}
+
+
+SkillItemData * SkillListItemUi::getCheckData()
+{
+	if(_selectedIndex >=0 && _selectedIndex < ITEMS_NUM)
+		return &_itemData[_selectedIndex];
+	else
+		return NULL;
+}
+
+bool SkillListItemUi::touch( CCTouch *ptouch )
+{
+	for(int i = 0; i < ITEMS_NUM; i ++)
+	{
+		if(_items[i]->isTouched(ptouch))
+		{
+			//if(!_itemMask[i]->isVisible())
+			//{
+				AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+				setCheck(i);
+				signalItemSelected.emit(_itemData[i]);
+				NewPlayerGuider::getInstance()->onSkillUiItemSelect(i);
+				ShortCutUiLayer *layer = getUiNodeByTag<ShortCutUiLayer>(WCT_ShorCutUi);
+				if (layer && !(layer->getSkillState()) && !getSkillIsNoLearn(i))
+				{
+					layer->stopAllEffectAction();
+					layer->SkillRunEffect();
+				}
+				return true;
+			//}
+		}
+	}
+	return false;
+}
+
+short SkillListItemUi::getSkillIdUnderPoint( CCTouch *ptouch )
+{
+	for(short i = 0; i < ITEMS_NUM; i ++)
+	{
+		//if(!_itemMask[i]->isVisible())
+		//{
+			if(isTouchOnNodeContent(_iconNormal[i], ptouch))
+			{
+				return i;
+			}
+		//}
+	}
+	return -1;
+}
+
+void SkillListItemUi::runAnimation(int index)
+{
+	/*if (_skillAutoEffect[index] == NULL)
+	{
+		AnimationCache::AnimateList anims;
+		AnimationCache::createDefList(1, anims);
+		AnimationCache::getInstance()->getSinEffect(0,"jinengzhuangtai", anims);
+		BSAnimate *animste = anims[0];
+		_skillAutoEffect[index] = CCSprite::create();
+		//_skillAutoEffect[index]->setAnchorPoint(ccp(0.0f, 1.0f));
+		_skillIcon[index]->addChild(_skillAutoEffect[index]);
+		CCSize size = _skillIcon[index]->getContentSize();
+		_skillAutoEffect[index]->setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+		_skillAutoEffect[index]->runAction(CCRepeatForever::create(animste));
+	}*/
+}
+
+void SkillListItemUi::stopAnimation(int index)
+{
+	if(_skillAutoEffect[index] != NULL)
+	{
+		_skillAutoEffect[index]->stopAllActions();
+		_skillAutoEffect[index]->removeFromParent();
+		_skillAutoEffect[index] = NULL;
+	}
+}
+
+std::string SkillListItemUi::getSkillIconName( int index )
+{
+	if(index >=0 && index < ITEMS_NUM)
+	{
+		return _itemData[index].iconName;
+	}
+	return "";
+}
+
+int SkillListItemUi::getSkillId( int index )
+{
+	if(index >=0 && index < ITEMS_NUM)
+	{
+		return _itemData[index].id;
+	}
+	return -1;
+}
+
+cocos2d::CCRect SkillListItemUi::getItem0Pos(int nIdx)
+{
+	SetNodeTintTo(dynamic_cast<CCNode*>(_skillIcon[nIdx]));
+	CCPoint pt = _skillIcon[nIdx]->convertToWorldSpace(ccp(0, 0));
+	CCSize size = _skillIcon[nIdx]->getContentSize();
+	return CCRect(pt.x, pt.y, size.width, size.height);
+}
+
+void SkillListItemUi::setSkillPoint(int index, int nCur,int nMax )
+{
+	if(index >=0 && index < ITEMS_NUM && mpSkillPoint[index])
+	{
+		if (nMax == 0)
+		{
+			nCur = 0;
+		}
+		CCString* tmp = CCString::createWithFormat("%d/%d",nCur,nMax);
+		mpSkillPoint[index]->setString(tmp->getCString());
+	}
+}
+
+void SkillListItemUi::selItem( size_t index )
+{
+	//if(!_itemMask[index]->isVisible())
+	//{
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+		setCheck(index);
+		signalItemSelected.emit(_itemData[index]);
+		NewPlayerGuider::getInstance()->onSkillUiItemSelect(index);
+		ShortCutUiLayer *layer = getUiNodeByTag<ShortCutUiLayer>(WCT_ShorCutUi);
+		if (layer && !(layer->getSkillState()))
+		{
+			layer->stopAllEffectAction();
+			layer->SkillRunEffect();
+		}
+	//}
+}
+
+bool SkillListItemUi::getSkillIsNoLearn(int index)
+{
+	return _itemMask[index]->isVisible();
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler SkillListItemUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler SkillListItemUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+bool SkillListItemUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+
+void SkillListItemUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	return;
+}

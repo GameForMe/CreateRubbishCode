@@ -1,0 +1,542 @@
+#include "NPC.h"
+#include "DBMgr.h"
+#include "AnimationCache.h"
+#include "CfgReader.h"
+#include "RoleManager.h"
+#include "UiTools.h"
+#include "GuildMgr.h"
+
+unsigned int const Status1 = 2910192;
+unsigned int const  Status6 = 2910197;
+NPC::NPC(): _entity(NULL)
+	, _body(NULL)
+	, _shadow(NULL)
+	,_mStandTime(0)
+	,_mFightTime(0)
+	,_mstandlast(0)
+	,_mFightlast(0)
+	,_mIsStandLast(false)
+	,_mIsFightLast(false)
+	,_mChatLabel(NULL)
+	,_npcChat(NULL)
+	,_taskNpcHead(NULL)
+	,_mUpdateTaskTime(0)
+	,runTaskHead(false)
+{
+	_creatureType = CT_NPC;
+	CC_ASSERT(_node);
+	_node->setTag(ELN_NPC);
+	memset(_roledata , 0 , sizeof(_roledata));
+}
+
+
+NPC::~NPC()
+{
+	stopAni();
+
+	//if(_isAniLoaded)
+	//{
+	//	for(int i = 0; i < NA_NUN; i ++)
+	//	{
+	//		_anims[i]->release();
+	//	}
+	//}
+	stopTaskNpcHead();
+
+	AnimationCache::releaseDefList(_anims);
+}
+
+bool NPC::loadAnimate( unsigned int id /*= 0*/ )
+{
+	if(!_isAniLoaded)
+	{
+		//从数据库中获取数据
+		//std::string fileName;
+		//std::string creatureName;
+
+		stCreateProto const* proto = CreatureCacheData::get_singleton().getProto(id);
+		if (proto==NULL)
+		{
+			return false;
+		}
+// 		c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM CreatureInfo WHERE AnimaterId = ?1");
+// 		cmd->set_integer32(1 , id);
+// 		c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 		bool ret = false;
+// 		while(table->retrieve_row())
+// 		{
+// 			unsigned int idx = table->get_index("AnimaterFileName");
+// 			fileName = table->get_text(idx);
+// 			idx = table->get_index("CreatureName");
+// 			creatureName = table->get_text(idx);
+// 			idx = table->get_index("Level");
+// 			setLevel(table->get_integer32(idx));
+// 			ret = true;
+// 		}
+// 		c_db_manager::getSingleton()->destroy_table(table);
+// 		c_db_manager::getSingleton()->end_operation(cmd);
+// 
+// 		if(!ret)
+// 			return false;
+
+		//CC_ASSERT(!fileName.empty());
+		//CC_ASSERT(!creatureName.empty());
+
+		//载入动画
+		AnimationCache::createDefList(NA_NUN, _anims, false);
+		if (proto->strAnimatorName !="-1")//雕像不载入动画
+		{
+			AnimationCache::getInstance()->getNPCAni(id, proto->strAnimatorName, _anims);
+			_usedAnim.push_back(AnimsUsed(AT_Npc, proto->strAnimatorName));
+		}
+		_isAniLoaded = true;
+
+		//设置名字
+		setNameColor(COLOR_NPC_NAME);
+
+		std::string name = RoleManager::getInstance()->getDiaoXiangNpcName(id);
+		//如果npc是比奇城雕像
+		if( Status1 <= id && id <= Status6 )
+		{
+			if(name.empty())
+			{
+				setName(proto->strName.c_str());
+				RoleManager::getInstance()->setDiaoXiangNpcName(proto->strName,id);
+			}
+			else
+				setName(name.c_str());
+		}
+		else
+		{
+			setName(proto->strName.c_str());
+		}
+		
+	}
+
+	return true;
+}
+
+cocos2d::CCPoint NPC::getHeadPos() const
+{
+	return ccp(0.0f, 0.0f);
+}
+
+void NPC::setNpcChat(std::string desstr,int count,bool isRotation)
+{
+	if(NULL == _mChatLabel && NULL == _npcChat)
+	{
+		std::string name = "guaiwuqipao";
+		CCSpriteFrame* spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(name.c_str());
+		if (NULL == spriteFrame)
+		{
+			std::string fileName = CFGReader::instance()->get_profile_string("Art", "ICON", "") + "SingleUI/" + name + std::string(".png");
+			CCImage image;
+			image.initWithImageFile(fileName.c_str());
+			CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addUIImage(&image, name.c_str());
+			if(NULL != texture)
+				spriteFrame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+		}
+
+		if(NULL != spriteFrame)
+		{
+			CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(spriteFrame, name.c_str());
+
+			TTFConfig cfg;
+			cfg.fontFilePath = FT_FONTFACE;
+			cfg.fontSize = 12;
+			cfg.outlineSize=1;
+
+			_mChatLabel = LabelFT::createWithTTF(cfg,desstr);
+			//_mChatLabel = CCLabelTTF::create(desstr.c_str(),"Arial",12);
+			if(NULL != _mChatLabel)
+			{
+				//_mChatLabel->setColor(ccc3(255,255,255));
+				_mChatLabel->setAnchorPoint(ccp(0,0));
+				//_mChatLabel->setHorizontalAlignment(kCCTextAlignmentLeft);
+			}
+
+			_npcChat = CCScale9Sprite::createWithSpriteFrame(spriteFrame);
+			if(NULL != _npcChat && NULL != _entity)
+			{
+				_npcChat->setPosition(ccp(-38,getBoundBox().getMaxY() + 20));  
+				_npcChat->setAnchorPoint(ccp(0.5,0.5));
+				_npcChat->setZOrder(10);		
+				_npcChat->addChild(_mChatLabel);
+				_entity->addChild(_npcChat);
+			}	
+		}
+	}
+
+	if(NULL != _mChatLabel && NULL != _npcChat)
+	{
+		int posx = 0;
+		if(isRotation)
+			posx = 105;
+		else
+			posx = 10;
+
+		_mChatLabel->setString(desstr.c_str()); 
+		_npcChat->setContentSize(CCSizeMake(_mChatLabel->getContentSize().width + 20,_mChatLabel->getContentSize().height + 40));
+		if(1 == count)
+			_mChatLabel->setPosition(CCSizeMake(posx,27));
+		else if(2 == count)
+			_mChatLabel->setPosition(CCSizeMake(posx,26));
+		else if(3 == count)
+			_mChatLabel->setPosition(CCSizeMake(posx,26));
+		else if( 4 == count)
+			_mChatLabel->setPosition(CCSizeMake(posx,28));
+	}
+}
+
+void NPC::updateStandChat(RoleManager::Npctalk info,bool isRotation)
+{
+	int num = rand() % 3;
+	std::string desstr = "0";
+	int descount = 0;
+	info.GetStandString(num,desstr,descount);
+	if(!(desstr == std::string("0")))
+	{
+		 setNpcChat(desstr,descount,isRotation);
+
+		 if(NULL == _npcChat || NULL == _mChatLabel ||  NULL == _entity )
+			 return ;
+
+		_npcChat->setVisible(true);	
+	
+		_npcChat->setRotationY(360);
+		_mChatLabel->setRotationY(360);
+		_npcChat->setPosition(ccp(-38,getBoundBox().getMaxY() + 20));  
+		//旋转180度 泡泡框箭头向左
+		if(isRotation)
+		{
+			_npcChat->setRotationY(180.0f);
+			_mChatLabel->setRotationY(180.0f);
+			_npcChat->setPosition(ccp(40,getBoundBox().getMaxY() + 20));
+		}				
+	}
+}
+
+
+void NPC::update( float dt )
+{
+	//第一次进入 特例
+	if(_firstUpdate && _isAniLoaded && NULL != _stateMechine)
+	{
+		runStandAni();
+		_stateMechine->SetCurrentState(RoleStateStand::getInstance());
+		_firstUpdate = false;
+	}
+
+	if (!_node->inSceneView())
+	{
+		return;
+	}
+
+	if(_stateMechine != NULL)
+		_stateMechine->Update(dt);
+
+	//updateRealPosition();
+
+	if(-1 == _talkinfo.id )
+		return ;
+
+	if(NULL == _stateMechine || NULL == RoleStateStand::getInstance() || NULL == RoleStateAttack::getInstance())
+		return ;
+
+	if (_stateMechine->CurrentState() == RoleStateStand::getInstance())
+	{
+
+		if (_talkinfo.standtime > 0)
+		{
+			//10秒频率根据随机率更换台词
+			_mStandTime += dt;
+			if(_mStandTime > _talkinfo.standtime / 1000)
+			{
+				int num =  rand()% 100;
+				if(0 <= num && _talkinfo.standodds > num)
+				{
+					if(!MapManager::getInstance()->CheakIsRotation(getPosition()))
+						updateStandChat(_talkinfo,false);
+					else
+						updateStandChat(_talkinfo,true);
+
+					_mIsStandLast = true;
+					_mStandTime = 0;
+				}
+				/*else
+					_monsterChat->setVisible(false);*/
+				_mStandTime = 0;
+			}
+		
+			//持续3秒待机泡泡消失
+			if(_mIsStandLast)
+			{
+			   _mstandlast += dt;
+			   if(_talkinfo.displaytime / 1000 <= _mstandlast)
+			   {
+				   _mIsStandLast = false;
+				   if(NULL != _npcChat)
+					 _npcChat->setVisible(false);
+
+				   _mstandlast = 0;
+			   }
+			}
+		}
+	}
+
+	updateQuestTraceFlag(dt);
+}
+
+void NPC::initFsm()
+{
+	//std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	//_shadow = CCSprite::create((uiDir + "shade.png").c_str());
+	_shadow = CCSprite::createWithSpriteFrameName("shadow_shade");
+	_body = CCSprite::create();
+	_entity = CCNode::create();
+	_entity->addChild(_body, RZN_BODY);
+	_node->addChild(_entity, RZN_BODY);
+	//雕像不添加阴影
+	if (2910192 != _typeID && 2910193 != _typeID && 2910194 != _typeID && 2910195 != _typeID && 2910196 != _typeID && 2910197 != _typeID)
+	{
+		_node->addChild(_shadow, RZN_SHADOW);
+	}
+	_stateMechine  = new StateMachine<Role>(this);
+
+	_talkinfo = RoleManager::getInstance()->getNpctalk(getTypeID());
+
+	//_body->setAnchorPoint(ccp(0.0, 1.0));	//[bing] plist 不需要偏移
+
+	//[bing] 角色缩放15%
+	//_node->setScale(0.85f);
+	
+}
+
+void NPC::runStandAni()
+{
+	if(!_isAniLoaded)
+		return;
+
+	_body->runAction(CCRepeatForever::create(_anims[NA_STAND]));
+	//runTaskNpcHeadFinish();
+}
+
+void NPC::stopAni()
+{
+	//_node->stopAllActions();
+	_body->stopAllActions();
+}
+
+void NPC::setAlpha( bool alpha )
+{
+	if(alpha)
+		_body->setOpacity(ALPHA_VALUE);
+	else
+		_body->setOpacity(255);
+}
+
+void NPC::destroyFsm()
+{
+
+}
+
+void NPC::runTaskNpcHeadBegin()
+{
+	if ((_taskNpcHead == NULL) || (runTaskHead == false))
+	{	
+		if (_taskNpcHead != NULL)
+		{
+			stopTaskNpcHead();
+		}
+		std::string _profilePath = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_176.plist";
+		_taskNpcHead = GameActionNode::create();
+		_taskNpcHead->InitWithPList(_profilePath.c_str(), "E1_176");
+		_entity->addChild(_taskNpcHead,RZN_BODY);
+		float height = getBoundBox().getMaxY();
+		_taskNpcHead->setPosition(ccp(-3,height));
+		_taskNpcHead->BeginAction(0.2f,true);
+		runTaskHead = true;
+	}
+}
+
+void NPC::runTaskNpcHeadFinish()
+{
+	if ((_taskNpcHead == NULL) || (runTaskHead == true))
+	{
+		if (_taskNpcHead != NULL)
+		{
+			stopTaskNpcHead();
+		}
+		std::string _profilePath = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_177.plist";
+		_taskNpcHead = GameActionNode::create();
+		_taskNpcHead->InitWithPList(_profilePath.c_str(), "E1_177");
+		_entity->addChild(_taskNpcHead,RZN_BODY);
+		float height = getBoundBox().getMaxY();
+		_taskNpcHead->setPosition(ccp(-3,height));
+		_taskNpcHead->BeginAction(0.2f,true);
+		runTaskHead = false;
+	}
+}
+
+
+void NPC::stopTaskNpcHead()
+{
+	if (_taskNpcHead)
+	{
+		_taskNpcHead->StopAction(false,true);
+		_taskNpcHead = NULL;
+	}
+}
+
+void NPC::updateShowTaskNpcHead(NpcState state)
+{
+	switch (state)
+	{
+	case NoAccept:    
+		//QS_GET
+		stopTaskNpcHead();
+
+		break;
+	case CanAccept:    
+		//QS_CAN_GET
+		runTaskNpcHeadBegin();
+		//isMainTaskAccept = true;
+		break; 
+	case Finish:
+		//QS_READY_FINISH
+		runTaskNpcHeadFinish();
+		//isMainTaskAccept = true;
+		break;
+	default:
+		break;
+	}
+}
+
+void NPC::updateQuestTraceFlag(float fdt)
+{
+	//if (ccpDistance(this->getPosition(),RoleManager::getInstance()->getLocalPlayer()->getPosition()) < 600.0f)        //距离控制
+	//{
+	// 		if ((_typeID >= 1002010 && _typeID <= 1002015) || (_typeID == 2007013) || (_typeID == 2007014))                
+	// 		{
+	// 			//npc角色控制,筛选出永远都不用接任务或者完成任务的npc，不用updateShowTaskNpcHead()
+	// 			return;
+	// 		}
+	_mUpdateTaskTime += fdt;
+	if (_mUpdateTaskTime > 0.2f)            //时间控制
+	{
+		NpcState state = NoAccept;
+		s_quest_detail mainQuest = QuestMgr::getInstance()->getDetail();//主线任务
+		const s_quest_detail* everyQuest = QuestMgr::getInstance()->getQuestDetail(QuestMgr::getInstance()->getCurEveryQuestID());//每日任务
+		const s_quest_detail* huanQuest = QuestMgr::getInstance()->getQuestDetail(QuestMgr::getInstance()->getCurHuanQuestID());//环任务
+		s_quest_detail subQuest = QuestMgr::getInstance()->getSubDetail();//支线任务
+		const s_quest_detail* BiQiQuest = QuestMgr::getInstance()->getQuestDetail(QuestMgr::getInstance()->getCurBiQiQuestID());//比奇任务
+
+		int stateMain = getCurQuestState(mainQuest.qid,_typeID);
+		int stateSub = getSubQuestStateA(_typeID);  //支线
+		int stateEvery = getEveryQuestState(4,_typeID);  //每日
+		int stateBiQi = getBiQiQuestState(_typeID); //当前的比奇任务状态
+		int stateHuan = 0;        //环任务
+		if(huanQuest != NULL)
+		{
+			stateHuan = getHuanShiQuestState(huanQuest->qid,_typeID);
+		}
+		if((_typeID == mainQuest.accept_id) && (stateMain == QS_CAN_GET))//主线任务
+		{ 
+			state = CanAccept;
+		}
+		else if((_typeID == mainQuest.complete_id) && (stateMain == QS_READY_FINISH))
+		{
+			state = Finish;
+		}
+		else if((_typeID == subQuest.accept_id) && (stateSub == QS_CAN_GET))
+		{ //支线任务
+			state = CanAccept;
+		}
+		else if((_typeID == subQuest.complete_id) && (stateSub == QS_READY_FINISH))
+		{
+			state = Finish;
+		}
+		else if(everyQuest != NULL && _typeID == everyQuest->accept_id)
+		{ //日常任务
+			if(stateEvery == QS_CAN_GET)
+			{
+				state = CanAccept;
+			}
+			else if(stateEvery == QS_READY_FINISH)
+			{
+				state = Finish;
+			}
+			else
+			{
+				state = NoAccept;
+			}
+		}
+		else if(everyQuest != NULL &&_typeID == everyQuest->complete_id)
+		{
+			state = Finish;
+		}
+		else if((huanQuest != NULL && _typeID == huanQuest->accept_id)
+			||(BiQiQuest != NULL &&_typeID == BiQiQuest->accept_id))//比奇任务和环任务，因为目前比奇任务和环任务都在龙骑将军那里接取，都在龙骑将军那里完成，故而暂时放一起讨论 2015年9月15日
+		{ 
+			if((stateBiQi == QS_READY_FINISH)||(stateHuan == QS_READY_FINISH))
+			{
+				state = Finish;
+			}
+			else if((stateBiQi == QS_CAN_GET)||(stateHuan == QS_CAN_GET))
+			{
+				state = CanAccept;
+			}
+			else
+			{
+				state = NoAccept;
+			}
+		}
+		else if (_typeID == GUILD_MAP_TASK)
+		{
+			LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+			GuildMgr* guildMgr = GuildMgr::getInstance();
+			QuestMgr* questMgr = QuestMgr::getInstance();
+			if (lp && guildMgr)
+			{
+				int level = lp->getLevel();
+				int getNumber = lp->getGetNumber();
+				int maxGetNum = guildMgr->getMaxGetNum();
+				int taskMax = guildMgr->getGuildTaskMax();
+				if (questMgr->getGuildQuestState() == QS_READY_FINISH)
+				{
+					state = Finish;
+				}
+				else if (level >= PUBLISHOPENLEVEL && getNumber < maxGetNum && taskMax >0 && questMgr->getGuildQuestState() != QS_GET )
+				{
+					state = CanAccept;
+				}
+				else
+				{
+					state = NoAccept;
+				}
+			}
+		}
+		else if (_typeID == GUILD_MAP_ASSIGN)
+		{
+			LocalPlayer* localPlayer = RoleManager::getInstance()->getLocalPlayer();
+			if (localPlayer)
+			{
+				if (localPlayer->getLevel()>=PUBLISHOPENLEVEL && !localPlayer->getGuildAssign())
+				{
+					state = CanAccept;
+				}
+				else
+				{
+					state = NoAccept;
+				}
+			}
+		}
+		else
+		{
+			state = NoAccept;
+		}
+		updateShowTaskNpcHead(state);
+		_mUpdateTaskTime = 0;
+	}
+	//}		
+}

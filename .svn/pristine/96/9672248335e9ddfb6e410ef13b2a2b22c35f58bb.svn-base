@@ -1,0 +1,584 @@
+#include "EquipFusionManager.h"
+#include "PackageManager.h"
+#include "DBMgr.h"
+#include "CfgReader.h"
+#include "PackageProto.h"
+#include "TCPClient.h"
+#include "EquipFusionUi.h"
+#include "f_data_set.h"
+#include "CommonClient.h"
+#include "SecondVerifyMgr.h"
+using namespace cocos2d;
+
+EquipFusionManager * EquipFusionManager::getInstance()
+{
+	static EquipFusionManager instance;
+	return &instance;
+}
+
+void EquipFusionManager::getAllEquipDate()
+{
+	clearItemMap();
+	//f_equipment* equip = getEquipment();
+	PackageManager::ItemMap* tmpItemMap = PackageManager::getInstance()->getItemMap(EICT_Bag);
+	//int EquipNeedLv,index = 0;
+	int index =0;
+	INT64 Tmptmp;
+	
+	for (PackageManager::ItemMap::iterator iter = tmpItemMap->begin();iter != tmpItemMap->end();++iter)
+	{
+		if (iter->second->get_data()->dw_data_id == FUSION_POWDER ||//融合粉
+			iter->second->get_data()->dw_data_id == SECONDARY_FUSION_POWDER)//次级融合粉
+		{
+			EquipFusionItemMap[index] = iter->second;
+			index++;
+			//break;
+		}
+		else if(MIsEquipment(iter->second->get_item_type_id()))//装别是否是装备
+		{
+			Tmptmp = iter->second->get_item_id();			
+			f_equipment *equip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(EICT_Bag,Tmptmp));
+			if (equip != NULL)
+			{
+				EItemQuality quality = (EItemQuality)equip->get_item_quality();
+				if (quality == EIQ_Quality5)
+				{
+					continue;
+				}				
+			}
+			Tmptmp = iter->second->get_data()->dw_data_id;
+			c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Daronglujingyan WHERE id = ?1");
+			cmd->set_integer32(1 , Tmptmp);
+			c_sql_table* table = c_db_manager::getSingleton()->create_table();
+			
+			while(table->retrieve_row())
+			{				
+				EquipFusionItemMap[index] = iter->second;
+				index++;
+			}
+			c_db_manager::getSingleton()->destroy_table(table);
+			c_db_manager::getSingleton()->end_operation(cmd);			
+		}
+	}	
+}
+
+void EquipFusionManager::setEquipment(f_equipment* equip)
+{
+	equipment = equip;
+	const EquipTypeData* t_data = PackageManager::getInstance()->getEquipTypeDataPointer(equip->get_item_type_id());
+	if (t_data != NULL)
+	{
+		equipLv = t_data->level;
+		equipReferLv = t_data->referLv;
+	}
+//已完成 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 	cmd->set_integer32(1 , equip->get_item_type_id());
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("Level");
+// 		equipLv = table->get_integer32(idx);
+// 		idx = table->get_index("referLv");
+// 		equipReferLv = table->get_integer32(idx);
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+}
+
+int EquipFusionManager::getCurEquipLevel( INT64 equipId )
+{
+	int level = 0;
+	const EquipTypeData* t_data = PackageManager::getInstance()->getEquipTypeDataPointer(equipId);
+	if (t_data != NULL)
+	{
+		level = t_data->referLv;
+	}
+//已完成 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 	cmd->set_integer32(1 , equipId);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	
+// 	while(table->retrieve_row())
+// 	{
+// 		int idx = table->get_index("referLv");//等级
+// 		level = table->get_integer32(idx);
+// 	}
+// 
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	return level;
+}
+
+int getDBFieldName(int att,const equip_quality_att* qualityAtt)
+{
+	switch (att)
+	{
+	case EAA_ExAttackMin:
+		return qualityAtt->wuli_min;
+	case EAA_ExAttackMax:
+		return qualityAtt->wuli_max;
+	case EAA_InAttackMin:
+		return qualityAtt->mofa_min;
+	case EAA_InAttackMax:
+		return qualityAtt->mofa_max;
+	case EAA_ArmorEx:
+		return qualityAtt->daosu_min;
+	case EAA_ArmorIn:
+		return qualityAtt->daosu_max;
+	case EAA_ExAttack:
+		return qualityAtt->wufang_min;
+	case EAA_ExDef:
+		return qualityAtt->wufang_max;
+	case EAA_InAttack:
+		return qualityAtt->mofang_min;
+	case EAA_InDefense:
+		return qualityAtt->mofang_max;
+	case EAA_HitRate:
+		return qualityAtt->hit_rate;
+	case EAA_Dodge:
+		return qualityAtt->dodge;
+	case EAA_Crit_Rate:
+		return qualityAtt->cirt;
+	case EAA_UnCrit_Rate:
+		return qualityAtt->fan_cirt;
+	case EAA_MaxHP:
+		return qualityAtt->hp;
+	case EAA_MaxMP:
+		return qualityAtt->mp;
+
+	default:
+		CC_ASSERT("can not reach here!!");
+	}
+	return 0;
+}
+
+string EquipFusionManager::getItemAttRangeText(f_equipment * equip,int att)
+{
+	float min,max;
+	getEquipAttBaseRangeVal(equip->get_item_type_id(),equip->get_item_quality(),att,min,max);
+
+	std::stringstream ss;
+	ss<< int(min)<<"-"<<int(max);
+	return ss.str();
+}
+
+void EquipFusionManager::removeEndItem()
+{
+	EquipFusionItemMap.erase(EquipFusionItemMap.size() - 1);
+}
+
+void EquipFusionManager::clearItemMap()
+{
+/*
+	std::map<short, f_item*>::iterator iter = EquipFusionItemMap.begin();
+	while (iter != EquipFusionItemMap.end())
+	{
+		CC_SAFE_DELETE(iter->second);
+		++iter;
+	}*/
+	if (EquipFusionItemMap.size() != 0)
+	{
+		EquipFusionItemMap.clear();
+	}
+}
+
+std::map<short, f_item*> EquipFusionManager::getEquipFusionItemMap()
+{
+	getAllEquipDate();
+	return EquipFusionItemMap;
+}
+
+EquipFusionManager::EquipFusionManager()
+{
+	needStrengTimes = 1;//初始化
+
+	init();
+}
+EquipFusionManager::~EquipFusionManager()
+{
+	
+}
+
+std::string EquipFusionManager::getIconFrameName( unsigned int dataId )
+{//获取完整的icon的路径和文件名字
+	return NULL;
+}
+
+CCSpriteFrame * EquipFusionManager::getIconFrameByName( unsigned int dataId )
+{//获取每个物品的icon的sprite
+
+	return NULL;
+}
+
+void EquipFusionManager::setHoldAttr(const attr_List& list)
+{
+	mAttLists.clear();
+	if (!list.empty())
+	{
+		mAttLists.resize(list.size());
+		std::copy(list.begin(),list.end(),mAttLists.begin());
+	}
+}
+
+const EquipFusionManager::attr_List& 
+	EquipFusionManager::getHoldAttr()
+{
+	return mAttLists;
+}
+
+EquipAddAtt EquipFusionManager::ERA2EAA(ERoleAttribute eRoleAttribut)
+{
+	switch(eRoleAttribut)
+	{
+	case ERA_ExAttackMin:
+		return EAA_ExAttackMin;
+	case ERA_ExAttackMax:
+		return EAA_ExAttackMax;
+	case ERA_InAttackMin:
+		return EAA_InAttackMin;
+	case ERA_InAttackMax:
+		return EAA_InAttackMax;
+	case ERA_ArmorEx:
+		return EAA_ArmorEx;
+	case ERA_ArmorIn:
+		return EAA_ArmorIn;
+	case ERA_ExMinDefense:
+		return EAA_ExAttack;
+	case ERA_ExMaxDefense:
+		return EAA_ExDef;
+	case ERA_InMinDefense:
+		return EAA_InAttack;
+	case ERA_InMaxDefense:
+		return EAA_InDefense;
+	case ERA_HitRate:
+		return EAA_HitRate;
+	case ERA_Dodge:
+		return EAA_Dodge;
+	case ERA_Crit_Rate:
+		return EAA_Crit_Rate;
+	case ERA_UnCrit_Rate:
+		return EAA_UnCrit_Rate;
+	case ERA_MaxHP:
+		return EAA_MaxHP;
+	case ERA_MaxMP:
+		return EAA_MaxMP;
+	case ERA_HPRegainRate:
+		return EAA_HPRegainRate;
+	case ERA_MPRegainRate:
+		return EAA_MPRegainRate;
+	case ERA_Derate_Wood:
+		return EAA_DecMP;
+	case ERA_Derate_Fire:
+		return EAA_DecDerate;
+	case ERA_Derate_Water:
+		return EAA_DecDefense;
+	case ERA_Derate_Injury:
+		return EAA_RealDamage;
+	case ERA_Derate_Stunt:
+		return EAA_DecCritHarm;
+	case ERA_Derate_ExAttack:
+		return EAA_ResistRule;
+	case ERA_Derate_InAttack:
+		return EAA_ResistRate;	
+	}
+	return EAA_NULL;
+}
+
+ERoleAttribute EquipFusionManager::EAA2ERA( EquipAddAtt eRoleAttribut )
+{
+	switch(eRoleAttribut)
+	{
+	case EAA_ExAttackMin:
+		return ERA_ExAttackMin;
+	case EAA_ExAttackMax:
+		return ERA_ExAttackMax;
+	case EAA_InAttackMin:
+		return ERA_InAttackMin;
+	case EAA_InAttackMax:
+		return ERA_InAttackMax;
+	case EAA_ArmorEx:
+		return ERA_ArmorEx;
+	case EAA_ArmorIn:
+		return ERA_ArmorIn;
+	case EAA_ExAttack:
+		return ERA_ExMinDefense;
+	case EAA_ExDef:
+		return ERA_ExMaxDefense;
+	case EAA_InAttack:
+		return ERA_InMinDefense;
+	case EAA_InDefense:
+		return ERA_InMaxDefense;
+	case EAA_HitRate:
+		return ERA_HitRate;
+	case EAA_Dodge:
+		return ERA_Dodge;
+	case EAA_Crit_Rate:
+		return ERA_Crit_Rate;
+	case EAA_UnCrit_Rate:
+		return ERA_UnCrit_Rate;
+	case EAA_MaxHP:
+		return ERA_MaxHP;
+	case EAA_MaxMP:
+		return ERA_MaxMP;
+	case EAA_HPRegainRate:
+		return ERA_HPRegainRate;
+	case EAA_MPRegainRate:
+		return ERA_MPRegainRate;
+	case EAA_DecMP:
+		return ERA_Derate_Wood;
+	case EAA_DecDerate:
+		return ERA_Derate_Fire;
+	case EAA_DecDefense:
+		return ERA_Derate_Water;
+	case EAA_RealDamage:
+		return ERA_Derate_Injury;
+	case EAA_DecCritHarm:
+		return ERA_Derate_Stunt;
+	case EAA_ResistRule:
+		return ERA_Derate_ExAttack;
+	case EAA_ResistRate:
+		return ERA_Derate_InAttack;	
+	}
+	return ERA_Null;
+}
+
+void EquipFusionManager::sendEquipFusionSpecify()
+{
+	if (getEquipment() == NULL)
+		return;
+
+	NET_SIC_Equip_Fusion_Specify cmd;
+	cmd.n64_serial = getEquipment()->get_item_id();
+	/*TCP_CLIENT->send_net_cmd(&cmd,NP_INSIGNIFICANT,false);*/
+	SEND_SAFE_VERIFY_NEW_MESSAGE(cmd,NP_INSIGNIFICANT);
+}
+
+void EquipFusionManager::init()
+{
+	f_data_set dataset;
+	std::list<std::string> fields;
+	bool ret =dataset.load("Config/EquipFusion.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		tagFusionCostItemNumTable data;
+		data.assignCost = dataset.get_int("AppointValue",one.c_str(),0);
+		data.lockCost = dataset.get_int("LockValue",one.c_str(),0);
+		_funsionCostTable.push_back(data);
+	});
+}
+
+int EquipFusionManager::getFusionCost( int nLockNum,int nAssignNum )
+{
+	int nLockCost=0,nAssignCost =0;
+	CC_ASSERT((size_t)nLockNum < _funsionCostTable.size() +1);
+	CC_ASSERT((size_t)nAssignNum < _funsionCostTable.size() +1);
+
+	if (nLockNum >0)
+	{
+		nLockCost = _funsionCostTable[nLockNum-1].lockCost;
+	}
+	
+	if (nAssignNum >0)
+	{
+		nAssignCost =  _funsionCostTable[nAssignNum-1].assignCost;
+	}
+
+	return nAssignCost + nLockCost;
+}
+
+bool EquipFusionManager::getEquipAttBaseRangeVal(int item_model_id,int item_quanlity,int attType,float&  min,float& max )
+{
+//  	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipQualityAtt WHERE id = ?1");
+//  	cmd->set_integer32(1 ,item_quanlity);
+//  	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+ 	//int equipAtt[EquipFusionUiLayer::EAA_End];
+ 	int range_rate=0;
+ 	int base_val =0;
+ 
+//  	while(table->retrieve_row())
+//  	{
+//  		int idx = table->get_index(getDBFieldName(attType).c_str());
+//  		base_val = table->get_integer32(idx);
+//  
+//  		idx=table->get_index("fudong");
+//  		range_rate=table->get_integer32(idx);
+//  	}
+//  
+//  	c_db_manager::getSingleton()->destroy_table(table);
+//  	c_db_manager::getSingleton()->end_operation(cmd);
+
+	const equip_quality_att* quality_att = getEquipQualityAtt(item_quanlity);
+	if (quality_att)
+	{
+		base_val = getDBFieldName(attType,quality_att);
+		range_rate = quality_att->fudong;
+	}
+// 
+ 	float pct = getEquipAttWeightPct(item_model_id);
+// 
+ 	min = (float)base_val*(100.0f-(float)range_rate)/100.0f * pct;
+	if (min <1.0f)
+		min = 1.0f;
+	max =  (float)base_val*(100.0f+(float)range_rate)/100.0f *pct; 
+	if (max <1.0f)
+		max = 1.0f;
+
+	return true;
+}
+
+float EquipFusionManager::getEquipAttWeightPct( int item_model_id )
+{
+	float pct=0.0f;
+	int level=0;
+	const EquipTypeData* t_data = PackageManager::getInstance()->getEquipTypeDataPointer(item_model_id);
+	if (t_data != NULL)
+	{
+		level = t_data->qualityLv;
+	}
+//已完成 	c_sql_command* cmd2 = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 	cmd2->set_integer32(1 ,item_model_id);
+// 	c_sql_table* table2 = c_db_manager::getSingleton()->create_table();
+// 
+// 	while(table2->retrieve_row())
+// 	{
+// 		int idx = table2->get_index("qualityLv");
+// 		level= table2->get_integer32(idx);
+// 	}
+// 
+// 	c_db_manager::getSingleton()->destroy_table(table2);
+// 	c_db_manager::getSingleton()->end_operation(cmd2);
+	//
+// 	c_sql_command* cmd3 = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipLevelAtt WHERE id = ?1");
+// 	cmd3->set_integer32(1 , level);
+// 	c_sql_table* table3 = c_db_manager::getSingleton()->create_table();
+// 
+// 	while(table3->retrieve_row())
+// 	{
+// 		int idx = table3->get_index("Param");
+// 		pct= table3->get_double(idx);
+// 	}
+// 
+// 	c_db_manager::getSingleton()->destroy_table(table3);
+// 	c_db_manager::getSingleton()->end_operation(cmd3);
+
+	if (equip_level_att.size() <= 0)
+	{
+		initEquipLevelAtt();
+	}
+
+	auto itor = equip_level_att.find(level);
+	CC_ASSERT(itor != equip_level_att.end());
+	pct = itor->second;
+
+	return pct;
+}
+
+void EquipFusionManager::initEquipLevelAtt()
+{
+	equip_level_att.clear();
+
+	f_data_set data;
+	std::list<std::string> fields;
+
+	bool ret = data.load("Config/db/EquipLevelAtt.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		float par = 0.0f;
+		int level = 0;
+		level = data.get_int("id",one.c_str());
+		par = data.get_float("Param",one.c_str());
+
+		equip_level_att[level] = par;
+	});
+}
+
+const equip_quality_att* EquipFusionManager::getEquipQualityAtt(int qualityIndex)
+{
+	if (m_equip_quality.size()<=0)
+	{
+		initEquipQualityAtt();
+	}
+	auto itor = m_equip_quality.find(qualityIndex);
+	if (itor == m_equip_quality.end())
+	{
+		CC_ASSERT(false);
+		return NULL;
+	}
+	return &itor->second;
+}
+
+void EquipFusionManager::initEquipQualityAtt()
+{
+	f_data_set data;
+	std::list<std::string> fields;
+
+	bool ret = data.load("Config/db/EquipQualityAtt.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		equip_quality_att att;
+		att.id = data.get_int("id",one.c_str());
+		att.att = data.get_int("att_number",one.c_str());
+		att.hp = data.get_int("hp",one.c_str());
+		att.mp = data.get_int("mp",one.c_str());
+		att.wuli_min = data.get_int("wuli_min",one.c_str());
+		att.wuli_max = data.get_int("wuli_max",one.c_str());
+		att.mofa_min = data.get_int("mofa_min",one.c_str());
+		att.mofa_max = data.get_int("mofa_max",one.c_str());
+		att.daosu_min = data.get_int("daosu_min",one.c_str());
+		att.daosu_max = data.get_int("daosu_max",one.c_str());
+		att.wufang_min = data.get_int("wufang_min",one.c_str());
+		att.wufang_max = data.get_int("wufang_max",one.c_str());
+		att.mofang_min = data.get_int("mofang_min",one.c_str());
+		att.mofang_max = data.get_int("mofang_max",one.c_str());
+		att.hit_rate = data.get_int("hit_rate",one.c_str());
+		att.dodge = data.get_int("dodge",one.c_str());
+		att.cirt = data.get_int("cirt",one.c_str());
+		att.fan_cirt = data.get_int("fan_cirt",one.c_str());
+		att.fudong = data.get_int("fudong",one.c_str());
+
+		m_equip_quality[att.id] = att;
+	});
+}
+
+const equip_reinforcement* EquipFusionManager::getEquipReinforcement(int reinIndex)
+{
+	if (m_equip_rein.size()<=0)
+	{
+		initEquipReinforcement();
+	}
+	auto itor = m_equip_rein.find(reinIndex);
+	if (itor == m_equip_rein.end())
+	{
+		CC_ASSERT(false);
+		return NULL;
+	}
+	return &itor->second;
+}
+
+void EquipFusionManager::initEquipReinforcement()
+{
+	f_data_set data;
+	std::list<std::string> fields;
+
+	bool ret = data.load("Config/db/EquipReinforcementPro.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		equip_reinforcement rein;
+		rein.idx = data.get_int("id",one.c_str());
+		rein.stuffId = data.get_dword("StuffId",one.c_str());
+		rein.num = data.get_int("Num",one.c_str());
+		rein.levelUp = data.get_int("LvUpPro",one.c_str());
+
+		m_equip_rein[rein.idx] = rein;
+	});
+}
+

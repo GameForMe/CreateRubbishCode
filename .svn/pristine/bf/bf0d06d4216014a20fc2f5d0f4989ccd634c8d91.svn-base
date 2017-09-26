@@ -1,0 +1,149 @@
+#include "ZumaMgr.h"
+#include "Base.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ToolTip.h"
+#include "TeamMgr.h"
+#include "WorldPacket.h"
+#include "CommonMsgDefine.h"
+#include "TCPClient.h"
+#include "CmdAdapter.h"
+#include "World.h"
+#include "MiniMapUi.h"
+#include "InstanceProto.h"
+#include "NPCTalkUi.h"
+
+
+ZumaMgr* ZumaMgr::m_pZumaMgr = NULL;
+ZumaMgr::ZumaMgr(void)
+{
+	Init();
+}
+
+ZumaMgr::~ZumaMgr(void)
+{
+	Destroy();
+}
+
+void ZumaMgr::Init()
+{
+	TCP_CLIENT->register_net_cmd("NET_SIS_Zuma_Stone", this, &ZumaMgr::onServerZumaStone);
+}
+
+void ZumaMgr::Destroy()
+{
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Zuma_Stone", this, &ZumaMgr::onServerZumaStone);
+}
+
+ZumaMgr* ZumaMgr::getInstance()
+{
+	if (m_pZumaMgr == NULL)
+	{
+		m_pZumaMgr = new ZumaMgr;
+	}
+	return m_pZumaMgr;
+}
+
+void ZumaMgr::gotoFuben(unsigned int npcId)
+{
+	if (isCanGotoFuben(npcId))
+	{
+		//关闭对话界面
+		NPCTalkUi* ui = World::getInstance()->getNPCDialog();
+		if(ui)
+		{
+			ui->show(false);
+		}
+		//unsigned int nMapID = ZUMA_FUBEN_COMMON_MAP_ONE;
+
+		unsigned int map[4] = {ZUMA_FUBEN_COMMON_MAP_ONE,ZUMA_FUBEN_COMMON_MAP_TWO,ZUMA_FUBEN_COMMON_MAP_THREE,ZUMA_FUBEN_COMMON_MAP_FOUR};
+		int num = rand()%4;
+		unsigned int nMapID = map[num];
+
+		WorldPacket SIC_Msg(NET_C2G_ENTER_FUBEN);		//组装消息头
+		SIC_Msg << (unsigned char)8;			//类型 1 = 进入副本 2 = 扫荡 3 = 扫荡10次 4 = 进入多人副本
+		SIC_Msg << nMapID;
+		TCP_CLIENT->send_net_cmd((const s_net_cmd*)SIC_Msg.contents(), NP_NORMAL, false);		//发送z
+		return ;
+	}
+}
+
+bool ZumaMgr::isCanGotoFuben(unsigned int npcId)
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if (!player)
+		return false;
+// 	unsigned char zumaCount = player->getRoleDayClearInfoTwo(ERDCT_ZUMA_FUBEN_COUNT);
+// 	if (zumaCount >= ONE_DAY_ZUMA_FUNBEN_COUNT)
+// 	{
+// 		ToolTip::getInstance()->push("\xE4\xBB\x8A\xE6\x97\xA5\xE7\xA5\x96\xE7\x8E\x9B\xE9\x98\x81\xE5\x89\xAF\xE6\
+// 		\x9C\xAC\xE6\x8C\x91\xE6\x88\x98\xE6\xAC\xA1\xE6\x95\xB0\xE5\xB7\xB2\xE8\xBE\xBE\xE4\xB8\x8A\xE9\x99\x90");
+// 		return false;
+// 	}
+	if (!(TeamMgr::getInstance()->is_team_leader(player->getId())))
+	{
+		ToolTip::getInstance()->push("\xE8\xAF\xB7\xE6\x89\xBE\xE9\x98\x9F\xE9\x95\xBF\xE5\xB8\xA6\xE4\xBD\xA0\xE8\xBF\x9B\xE5\x85\xA5");
+		return false;
+	}
+	else
+	{
+		if (!(TeamMgr::getInstance()->isAllProfessionInTeam()))
+		{
+			ToolTip::getInstance()->push("\xE9\x98\x9F\xE5\x91\x98\xE8\x87\xB3\xE5\xB0\x91\xE6\x9C\x89\x31\xE5\x90\x8D\
+						\xE6\x88\x98\xE5\xA3\xAB\xE3\x80\x81\xE6\xB3\x95\xE5\xB8\x88\xE3\x80\x81\xE9\x81\x93\xE5\xA3\xAB\xE6\x89\x8D\xE5\x8F\xAF\xE8\xBF\x9B\xE5\x85\xA5");
+			return false;
+		}
+	}
+
+	return true;
+}
+
+unsigned int ZumaMgr::crc32(const wchar_t* sz_buffer_)
+{
+	unsigned char* p_data = (unsigned char*)sz_buffer_;
+	if( !(*p_data || *(p_data+1)) ) 
+		return (unsigned int)-1;
+
+	unsigned int n_result = *p_data++ << 24;
+	n_result |= *p_data++ << 16;
+	if( *p_data || *(p_data+1) )
+	{
+		n_result |= *p_data++ << 8;
+		n_result |= *p_data++;
+	}
+	n_result = ~ n_result;
+	int n_count = 0;
+	while( (n_count&1) ? true : (*p_data || *(p_data+1)) )
+	{
+		n_result = (n_result << 8 | *p_data) ^ crc32_table[n_result >> 24];
+		++p_data;
+		++n_count;
+	}
+	return ~n_result;
+}
+
+char ZumaMgr::getStoneState()
+{
+	return m_pStoneState;
+}
+
+unsigned int ZumaMgr::onServerZumaStone( s_net_cmd *cmd )
+{
+	NET_SIS_Zuma_Stone* msg = (NET_SIS_Zuma_Stone*)cmd;
+	if (!msg)
+		return 0;
+	m_pStoneState = msg->stoneState;
+	RoleHeadUi* ui = World::getInstance()->getRoleHeadUi();
+	if (ui)
+	{
+		ui->showZumaStoneState(msg->stoneState);
+	}
+
+	return 0;
+}
+
+void ZumaMgr::sendUpdateZumaStone()
+{
+	NET_SIC_Zuma_Stone send;
+	TCP_CLIENT->send_net_cmd(&send, NP_NORMAL , false);
+}

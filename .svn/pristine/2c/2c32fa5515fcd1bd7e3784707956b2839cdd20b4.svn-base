@@ -1,0 +1,223 @@
+#include "LoginGiftUi.h"
+#include "World.h"
+#include "UiResourceMgr.h"
+#include "CfgReader.h"
+#include "UiLoader.h"
+#include "BaseDefine.h"
+#include "ItemNode.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "DBMgr.h"
+#include "PackageManager.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ItemTip.h"
+#include "EquipTipUi.h"
+#include "BaseDefine.h"
+#include "GongfaTip.h"
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+#include "wzolJni.h"
+#endif
+
+CCNode * LoginGiftUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["LoginGiftUiFrame"] = UiSpriteLoader<LoginGiftUiFrame>::loader();
+	CCNode *uiNode = readUiFromCCBI("logingiftui", nodeLoaders, _loadSpriteSheet);
+	if(uiNode != NULL)
+	{
+		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+		uiNode->setPosition(ccp(winSize.width / 2.0f , winSize.height / 2.0f + 25.0f));
+	}
+	return uiNode;
+}
+
+LoginGiftUiFrame * LoginGiftUi::getUiLayer()
+{
+	return getUiNodeByTag<LoginGiftUiFrame>(WCT_LoginGiftUi);
+}
+
+void LoginGiftUi::updateData()
+{
+	LoginGiftUiFrame *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		ui->updateDisplay();
+	}
+}
+
+void LoginGiftUi::setLoginGift( unsigned int* gift )
+{
+	LoginGiftUiFrame *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		ui->setLoginGift(gift);
+	}
+}
+
+void LoginGiftUi::setGiftNum( int* num)
+{
+	LoginGiftUiFrame *ui = getUiLayer();
+	if(ui != NULL)
+	{
+		ui->setGiftNum(num);
+	}
+}
+
+//////////////////////////////////////////////////
+
+
+LoginGiftUiFrame::LoginGiftUiFrame()
+{
+
+}
+
+LoginGiftUiFrame::~LoginGiftUiFrame()
+{
+
+}
+
+cocos2d::SEL_MenuHandler LoginGiftUiFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler LoginGiftUiFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", LoginGiftUiFrame::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onConfirmBtnPressed", LoginGiftUiFrame::onConfirmBtnPressed);
+	return NULL;
+}
+
+void LoginGiftUiFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+
+	for(int i = NT_ItemBegin; i < NT_ItemEnd; i ++)
+	{
+		CCNode* n = this->getChildByTag(i);
+		CC_ASSERT(n != NULL);
+		_itemPos[i] = n->getPosition();
+
+		ItemNode * node = ItemNode::create();
+		node->setPosition(_itemPos[i]);
+		node->setTag(NT_ItemNodeBegin + i);
+		node->setBlank();
+		addChild(node,1);
+	}
+
+	_selectSprite = CCSprite::createWithSpriteFrameName("logingiftui_selectrect");
+	this->addChild(_selectSprite,0);
+	_selectSprite->setVisible(false);
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+
+}
+
+void LoginGiftUiFrame::onExit()
+{
+	CCSprite::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+
+}
+
+bool LoginGiftUiFrame::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint framePoint = this->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = this->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		int index = getItemUnderPoint(framePoint);
+		if (index >= NT_ItemBegin && index < NT_ItemNum)
+		{
+			//CCSize size = CCDirector::sharedDirector()->getWinSize();
+			setItemSelect(index);
+//  			if(MIsEquipment(m_loginGift[index]))
+//  			{
+//  				const ItemTypeData &typeData =PackageManager::getInstance()->getItemTypeData(m_loginGift[index]);
+//  				ePackageItemType eItemType = typeData.type;
+//  				if (PIT_Kungfu == eItemType)
+//  				{
+// 					//功法ui显示; 
+// 					GongfaTip::getInstace()->open();
+// 					GongfaTip::getInstace()->setPosition(_itemPos[index]);
+// 					GongfaTip::getInstace()->setData(m_loginGift[index]);
+// 				}
+// 				else
+// 				{
+// 					EquipTipUi *ui = EquipTipUi::create();
+// 					ui->showUi(_itemPos[index], m_loginGift[index]);
+// 					//ui->showEquipBtn();
+// 					ui->getIndex(index);
+// 				}
+// 			}
+// 			else
+// 			{
+// 				ItemTip::getInstace()->open();
+// 				ItemTip::getInstace()->setPosition(_itemPos[index]);
+// 				ItemTip::getInstace()->setDataId(m_loginGift[index]);
+// 				ItemTip::getInstace()->hideOpBtn();
+// 			}
+		}
+		return true;
+	}
+	return false;
+}
+
+void LoginGiftUiFrame::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_LoginGiftUi);
+}
+
+void LoginGiftUiFrame::onConfirmBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_LoginGiftUi);
+}
+
+void LoginGiftUiFrame::updateDisplay()
+{
+
+	for (int i = NT_ItemBegin; i < NT_ItemEnd ;  i++)
+	{
+		if ( (unsigned int)INVALID == m_loginGift[i] || 0 == m_loginGift[i])
+			break;
+		ItemNode * node =dynamic_cast<ItemNode *>(getChildByTag(NT_ItemNodeBegin + i));
+		CC_ASSERT(node != NULL);
+ 		node->stopAnimation();
+ 		node->setDataId(m_loginGift[i]);
+ 		node->setPosition(_itemPos[i]);
+ 		node->setNum(m_giftNum[i]); //显示礼包中某些物品所需个数;
+ 		//node->runAnimation("qianghua15");
+ 		node->setVisible(true);
+	}
+}
+
+
+bool LoginGiftUiFrame::setItemSelect( int index )
+{
+	if (index < NT_ItemBegin || index > NT_ItemNum)
+		return false;
+	_selectSprite->setPosition(_itemPos[index]);
+	if (!_selectSprite->isVisible())
+		_selectSprite->setVisible(true);
+
+	_selectindex = index;
+	return true;
+}
+
+int LoginGiftUiFrame::getItemUnderPoint( const CCPoint &point )
+{
+	for(int i =NT_ItemBegin ; i <NT_ItemNum; i ++)
+	{
+		float x = _itemPos[i].x;
+		float y = _itemPos[i].y;
+		CCRect rect(x - ITEMNODE_CONTENTWIDTH / 2, y - ITEMNODE_CONTENTHEIGHT / 2, ITEMNODE_CONTENTWIDTH, ITEMNODE_CONTENTHEIGHT);
+		if(rect.containsPoint(point))
+		{
+			return i;
+		}
+	}
+	return -1;
+}
+
+

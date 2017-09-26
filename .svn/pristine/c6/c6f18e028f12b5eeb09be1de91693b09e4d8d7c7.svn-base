@@ -1,0 +1,818 @@
+#include "RewardQuestMgr.h"
+#include "CmdAdapter.h"
+#include "QuestProto.h"
+#include "TCPClient.h"
+#include "Base.h"
+#include "ToolTip.h"
+#include "DBMgr.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "RewardQuestUi.h"
+#include "UiManager.h"
+#include "World.h"
+#include "TaskTraceUi.h"
+#include "Auto_ActionMgr.h"
+#include "ToolTip.h"
+#include "ExchangeBusinessMgr.h"
+#include "StringMgr.h"
+#include "boost/lexical_cast.hpp"
+#include "InstanceMgr.h"
+#include "GameEventDefine.h"
+#include "ReceiveRewardUi.h"
+#include "RewardGotoItem.h"
+#include "f_string_util.h"
+#include "WorldLevelMgr.h"
+using namespace boost;
+
+RewardQuestMgr* RewardQuestMgr::m_pQuestMgr = NULL;
+RewardQuestMgr::RewardQuestMgr()
+	:m_pInit(false)
+	,_rewardQuest(NULL)
+	,_isNoneAcceptQuest(false)
+	,_isDataFreshed(true)
+{
+	
+}
+
+RewardQuestMgr::~RewardQuestMgr()
+{
+	//destroy();
+	
+}
+
+void RewardQuestMgr::init()
+{
+	if(m_pInit == false)
+	{
+		TCP_CLIENT->register_net_cmd("NET_SIS_Accept_Reward_Quest" , this ,		&RewardQuestMgr::onServerAccept);
+		TCP_CLIENT->register_net_cmd("NET_SIS_Complete_Reward_Quest" , this ,	&RewardQuestMgr::onServerComplete);
+		TCP_CLIENT->register_net_cmd("NET_SIS_Abandon_Reward_Quest" , this ,	&RewardQuestMgr::onServerAbandon);
+		TCP_CLIENT->register_net_cmd("NET_SIS_Update_Reward_Quest" , this ,		&RewardQuestMgr::onServerQuestState);
+		TCP_CLIENT->register_net_cmd("NET_SIS_Update_Reward_Quest_List" , this , &RewardQuestMgr::onServerUpdateQuestList);
+
+		for (int i = 0;i < RewardQuestUpdateNum; ++i)
+		{
+			RewardQuestProto* quest = new RewardQuestProto;
+			m_pQuestList.push_back(quest);
+		}
+		m_pInit = true;
+		_rewardQuest = NULL;
+		initQuestMap();
+	}
+}
+
+void RewardQuestMgr::destroy()
+{
+	if(m_pInit)
+	{
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_Accept_Reward_Quest" , this ,		&RewardQuestMgr::onServerAccept);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_Complete_Reward_Quest" , this ,	&RewardQuestMgr::onServerComplete);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_Abandon_Reward_Quest" , this ,	&RewardQuestMgr::onServerAbandon);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_Update_Reward_Quest" , this ,		&RewardQuestMgr::onServerQuestState);
+		TCP_CLIENT->unregister_net_cmd("NET_SIS_Update_Reward_Quest_List" , this , &RewardQuestMgr::onServerUpdateQuestList);
+
+		for (REWARDQUESTLIST::iterator iter = m_pQuestList.begin();iter != m_pQuestList.end();++iter)
+		{
+			RewardQuestProto* quest = (*iter);
+			CC_SAFE_DELETE(quest);
+		}
+		m_pQuestList.clear();
+		m_pAllQuestMap.clear();
+		_rewardQuest = NULL;
+		m_pInit = false;
+	}
+}
+
+RewardQuestMgr* RewardQuestMgr::getInstance()
+{
+	if (m_pQuestMgr == NULL)
+	{
+		m_pQuestMgr = new RewardQuestMgr;
+	}
+	return m_pQuestMgr;
+}
+
+void RewardQuestMgr::sendAcceptQuest( unsigned int questId )
+{
+	std::map<unsigned short,AllRewardQuestProto>::iterator iter = m_pAllQuestMap.find(questId);
+	if (iter != m_pAllQuestMap.end())
+	{
+		LocalPlayer* pLoc = RoleManager::getInstance()->getLocalPlayer();
+		//int helpLimit = pLoc->getRoleDayClearInfoTwo(ERDCT_Help_Reward_Quest_Num);
+// 		if (iter->second.type == ERQT_Help && helpLimit >= CFG(int,"Type4_limit",3))
+// 		{
+// 			string t_str = "";
+// 			safe_sprintf(t_str,STRING_TABLE["E_CanTakeQuest_FAILED_Help_Accept_Limit"],helpLimit);
+// 			ToolTip::getInstance()->push(t_str);
+// 			return;
+// 		}
+
+		if (pLoc->getLevel() >= iter->second.accept_level)
+		{
+			NET_SIC_Accept_Reward_Quest cmd;
+			cmd.questId = questId;
+			TCP_CLIENT->send_net_cmd(&cmd , NP_INSIGNIFICANT , false);
+		}
+		else
+		{
+			string t_str = "";
+			safe_sprintf(t_str,STRING_TABLE["Reward_Quest_Not_Enough_LV"],iter->second.accept_level);
+			ToolTip::getInstance()->push(t_str);
+		}
+	}
+}
+
+void RewardQuestMgr::sendCompleteQuest( unsigned int questId )
+{
+	NET_SIC_Complete_Reward_Quest cmd;
+	cmd.questId = questId;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_INSIGNIFICANT , false);
+}
+
+void RewardQuestMgr::sendAbandonQuest( unsigned int questId )
+{
+	NET_SIC_Abandon_Reward_Quest cmd;
+	cmd.questId = questId;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_INSIGNIFICANT , false);
+}
+
+void RewardQuestMgr::sendUpdateQuestState()
+{
+	NET_SIC_Update_Reward_Quest cmd;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_INSIGNIFICANT , false);
+}
+
+void RewardQuestMgr::sendUpdateQuestList(unsigned int type )
+{
+	NET_SIC_Update_Reward_Quest_List cmd;
+	cmd.type = type;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_INSIGNIFICANT , false);
+}
+
+unsigned int RewardQuestMgr::onServerAccept( s_net_cmd *cmd )
+{
+	NET_SIS_Accept_Reward_Quest* msg = (NET_SIS_Accept_Reward_Quest*)cmd;
+	if (msg == NULL)
+		return 0;
+
+	_isDataFreshed = false;
+
+	switch (msg->dwError)
+	{
+	case E_Success:
+		{
+			_isNoneAcceptQuest = false;
+			m_pQuestData.questId = msg->questId;
+			//读表
+			GET_UI(RewardQuestUi,WCT_RewardQuestUi)->CreateGotoItem();
+			GET_UI(RewardQuestUi,WCT_RewardQuestUi)->updateGotoData(msg->questId,0);
+			RewardQuestProto rewardQuest ;
+			rewardQuest.questId = msg->questId;
+			findRewardQusetInfo(rewardQuest);
+			GET_UI(RewardQuestUi,WCT_RewardQuestUi)->updateDetail(&rewardQuest);
+			string strDesc = replaceStr(rewardQuest.title.c_str(),GET_STR(9257).c_str(),"");
+			World::getInstance()->getTaskTraceUi()->appendTask(rewardQuest.questId,rewardQuest.title.c_str(),strDesc.c_str(), 0, rewardQuest.needNum, false);
+			RewardQuestUiLayer* rQuestUiLayer = GET_UI(RewardQuestUi,WCT_RewardQuestUi)->getUiLayer();
+			if(rQuestUiLayer != NULL)
+			{
+				rQuestUiLayer->setGiveupButton(true);
+				CCNode* node = rQuestUiLayer->getFrame()->getChildByTag(REWARD_ALREADY_ACCEPT);
+				if(node != NULL)
+				{
+					node->setVisible(true);
+				}
+			}
+			if (ERQT_Help == rewardQuest.type)
+			{
+				string t_str = "";
+				LocalPlayer* pLoc = RoleManager::getInstance()->getLocalPlayer();
+				safe_sprintf(t_str,STRING_TABLE["E_CanTakeQuest_FAILED_Help_Success"],CFG(int,"Type4_limit",3) - pLoc->getRoleDayClearInfoTwo(ERDCT_Help_Reward_Quest_Num));
+				ToolTip::getInstance()->push(t_str);
+			}
+			break;
+		}
+	case E_CanTakeQuest_FAILED_Not_Enough://领取失败，该悬赏任务已被领取完
+		{
+			ToolTip::getInstance()->push("\xE9\xA2\x86\xE5\x8F\x96\xE5\xA4\xB1\xE8\xB4\xA5\xEF\xBC\x8C\xE8\xAF\xA5\xE6\x82\xAC\xE8\xB5\x8F\xE4\xBB\xBB\xE5\x8A\xA1\xE5\xB7\xB2\xE8\xA2\xAB\xE9\xA2\x86\xE5\xAE\x8C");
+			break;
+		}
+	case E_CanTakeQuest_FAILED_Have_Quest://请完成当前任务再接受下一任务
+		{
+			ToolTip::getInstance()->push("\xE8\xAF\xB7\xE5\xAE\x8C\xE6\x88\x90\xE5\xBD\x93\xE5\x89\x8D\xE4\xBB\xBB\xE5\x8A\xA1\xE5\x86\x8D\xE6\x8E\xA5\xE5\x8F\x97\xE4\xB8\x8B\xE4\xB8\x80\xE4\xBB\xBB\xE5\x8A\xA1");
+			break;
+		}
+	case E_CanTakeQuest_FAILED_Not_Find://没有发现该悬赏任务
+		{
+			ToolTip::getInstance()->push("\xE6\x9C\xAA\xE5\x8F\x91\xE7\x8E\xB0\xE8\xAF\xA5\xE6\x82\xAC\xE8\xB5\x8F\xE4\xBB\xBB\xE5\x8A\xA1");
+			break;
+		}
+	case E_CanTakeQuest_FAILED_Not_Accept_Num://今日领取悬赏任务次数已达上限
+		{
+			ToolTip::getInstance()->push("\xE4\xBB\x8A\xE6\x97\xA5\xE9\xA2\x86\xE5\x8F\x96\xE6\x82\xAC\xE8\xB5\x8F\xE4\xBB\xBB\xE5\x8A\xA1\xE6\xAC\xA1\xE6\x95\xB0\xE5\xB7\xB2\xE8\xBE\xBE\xE4\xB8\x8A\xE9\x99\x90");
+			break;
+		}
+	case E_CanTakeQuest_FAILED_NotEnough_Level://等级不足
+		{
+			ToolTip::getInstance()->push("\xE7\xAD\x89\xE7\xBA\xA7\xE4\xB8\x8D\xE8\xB6\xB3");
+			break;
+		}
+	case E_CanTakeQuest_FAILED_Not_Get_Num://领取帮派任务时，没有足够的领取次数
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["E_CanTakeQuest_FAILED_Not_Get_Num"]);
+			break;
+		}
+	case E_CanTakeQuest_FAILED_Not_Enough_Mission://领取帮派任务时，没有足够的任务内存	
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["E_CanTakeQuest_FAILED_Not_Enough_Mission"]);
+			break;
+		}
+	case E_CanTakeQuest_FAILED_Help_Accept_Limit://今日帮带任务领取次数已达上限
+		{
+			string t_str = "";
+			safe_sprintf(t_str,STRING_TABLE["E_CanTakeQuest_FAILED_Help_Accept_Limit"],CFG(int,"Type4_limit",3));
+			ToolTip::getInstance()->push(t_str);
+			break;
+		}
+
+	}
+	return 0;
+}
+
+unsigned int RewardQuestMgr::onServerComplete( s_net_cmd *cmd )
+{
+	NET_SIS_Complete_Reward_Quest* msg = (NET_SIS_Complete_Reward_Quest*)cmd;
+	if (msg == NULL)
+		return 0;
+	switch (msg->dwError)
+	{
+	case E_Success:
+		{
+			World::getInstance()->getTaskTraceUi()->erase(m_pQuestData.questId );
+			RewardQuestProto rewardQuest ;
+			rewardQuest.questId = m_pQuestData.questId;
+			findRewardQusetInfo(rewardQuest);
+			m_pQuestData.questId = RewardQuestNull;
+			m_pQuestData.completeNum = RewardQuestNull;
+			m_pQuestData.needNum = RewardQuestNull;
+			RewardQuestUiLayer* uiLayer = GET_UI(RewardQuestUi,WCT_RewardQuestUi)->getUiLayer();
+			if(uiLayer != NULL)
+			{
+				uiLayer->removeGotoItem();
+				uiLayer->setDescribeLabel(true);
+				uiLayer->setGiveupButton(false);
+				CCSprite* rewardFrame = uiLayer->getFrame();
+				if(rewardFrame != NULL)
+				{
+					CCNode* node = rewardFrame->getChildByTag(REWARD_ALREADY_ACCEPT);
+					if(node != NULL)
+					{
+						node->setVisible(false);
+					}
+				}
+			}
+			if(rewardQuest.exp > 0)
+			{
+				ReceiveRewardUiMgr::GetInstance()->setItemData(rewardQuest.expId, rewardQuest.exp);
+			}
+			if(rewardQuest.liQuan > 0)
+			{
+				ReceiveRewardUiMgr::GetInstance()->setItemData(rewardQuest.liQuanId, rewardQuest.liQuan);
+			}
+			if(rewardQuest.GoldNum > 0)
+			{
+				ReceiveRewardUiMgr::GetInstance()->setItemData(rewardQuest.goldId, rewardQuest.GoldNum);
+			}
+			ReceiveRewardUiMgr::GetInstance()->openRewardUi();
+			break;
+		}
+	case E_CanTakeQuest_FAILED_Not_Complete://未达到完成该任务的条件
+		{
+			ToolTip::getInstance()->push("\xE6\x9C\xAA\xE8\xBE\xBE\xE5\x88\xB0\xE5\xAE\x8C\xE6\x88\x90\xE8\xAF\xA5\xE4\xBB\xBB\xE5\x8A\xA1\xE7\x9A\x84\xE6\x9D\xA1\xE4\xBB\xB6");
+			break;
+		}
+	case E_CanTakeQuest_FAILED_Not_Accept://没有领取过该任务
+		{
+			ToolTip::getInstance()->push("\xE6\xB2\xA1\xE6\x9C\x89\xE9\xA2\x86\xE5\x8F\x96\xE8\xBF\x87\xE8\xAF\xA5\xE4\xBB\xBB\xE5\x8A\xA1");
+			break;
+		}
+	}
+	return 0;
+}
+
+unsigned int RewardQuestMgr::onServerAbandon( s_net_cmd *cmd )
+{
+	NET_SIS_Abandon_Reward_Quest* msg = (NET_SIS_Abandon_Reward_Quest*)cmd;
+	if (msg == NULL)
+		return 0;
+	switch (msg->dwError)
+	{
+	case E_Success:
+		{
+			World::getInstance()->getTaskTraceUi()->erase(m_pQuestData.questId );
+			m_pQuestData.questId = RewardQuestNull;
+			m_pQuestData.completeNum = RewardQuestNull;
+			m_pQuestData.needNum = RewardQuestNull;
+			RewardQuestUiLayer* uiLayer = GET_UI(RewardQuestUi,WCT_RewardQuestUi)->getUiLayer();
+			if(uiLayer != NULL)
+			{
+				uiLayer->removeGotoItem();
+				uiLayer->setGiveupButton(false);
+				uiLayer->setDescribeLabel(true);
+				uiLayer->updateDetail(getFirstReward());
+				CCSprite* rewardFrame = uiLayer->getFrame();
+				if(rewardFrame != NULL)
+				{
+					CCNode* node = rewardFrame->getChildByTag(REWARD_ALREADY_ACCEPT);
+					if(node != NULL)
+					{
+						node->setVisible(false);
+					}
+				}
+			}
+			break;
+		}
+	case E_CanTakeQuest_FAILED_Not_Accept://没有领取过该任务
+		{
+			ToolTip::getInstance()->push("\xE6\xB2\xA1\xE6\x9C\x89\xE9\xA2\x86\xE5\x8F\x96\xE8\xBF\x87\xE8\xAF\xA5\xE4\xBB\xBB\xE5\x8A\xA1");
+			break;
+		}
+	}
+	return 0;
+}
+
+unsigned int RewardQuestMgr::onServerQuestState( s_net_cmd *cmd )
+{
+	NET_SIS_Update_Reward_Quest* msg = (NET_SIS_Update_Reward_Quest*)cmd;
+	if (msg == NULL)
+		return 0;
+	if (msg->questId == RewardQuestNull)
+	{
+		_isNoneAcceptQuest = true;
+		GET_UI(RewardQuestUi,WCT_RewardQuestUi)->updateGotoData(msg->questId,0);
+		return 0;
+	}
+	else if (m_pQuestData.questId == msg->questId)
+	{
+		m_pQuestData.completeNum = msg->completeNum;
+		RewardQuestProto rewardQuest ;
+		rewardQuest.questId = msg->questId;
+		findRewardQusetInfo(rewardQuest);
+		GET_UI(RewardQuestUi,WCT_RewardQuestUi)->updateGotoData(msg->questId,msg->completeNum);
+		GET_UI(RewardQuestUi,WCT_RewardQuestUi)->updateDetail(&rewardQuest);
+
+		string strDesc = replaceStr(rewardQuest.title.c_str(),GET_STR(9257).c_str(),"");
+		World::getInstance()->getTaskTraceUi()->appendTask(rewardQuest.questId,rewardQuest.title.c_str(),strDesc.c_str(),m_pQuestData.completeNum,rewardQuest.needNum, false);
+		World::getInstance()->getTaskTraceUi()->modifyTaskInfo(m_pQuestData.questId , m_pQuestData.completeNum , false);
+		if(IS_UI_OPEN(WCT_RewardQuestUi))
+		{
+			GET_UI(RewardQuestUi,WCT_RewardQuestUi)->getUiLayer()->updateDetail(&rewardQuest);
+			GET_UI(RewardQuestUi,WCT_RewardQuestUi)->getUiLayer()->setGiveupButton(true);
+		}
+		if(m_pQuestData.completeNum == rewardQuest.needNum)
+		{
+			if(IS_UI_OPEN(WCT_RewardQuestUi))
+			{
+				GET_UI(RewardQuestUi,WCT_RewardQuestUi)->getUiLayer()->setGiveupButton(false);
+			}
+			LocalPlayer * lp = RoleManager::getInstance()->getLocalPlayer();
+			lp->setAttackMonsterId(0);
+			ChangeMonsterName evt;
+			SEND_EVENT(&evt);
+		}
+	}
+	else if (m_pQuestData.questId == RewardQuestNull)
+	{
+		m_pQuestData.questId = msg->questId;
+		m_pQuestData.completeNum = msg->completeNum;
+		GET_UI(RewardQuestUi,WCT_RewardQuestUi)->updateGotoData(msg->questId,msg->completeNum);
+		RewardQuestProto rewardQuest ;
+		rewardQuest.questId = msg->questId;
+		findRewardQusetInfo(rewardQuest);
+		string strDesc = replaceStr(rewardQuest.title.c_str(),GET_STR(9257).c_str(),"");
+		World::getInstance()->getTaskTraceUi()->appendTask(rewardQuest.questId,rewardQuest.title.c_str(),strDesc.c_str(),m_pQuestData.completeNum,rewardQuest.needNum, false);
+		if(IS_UI_OPEN(WCT_RewardQuestUi))
+		{
+			GET_UI(RewardQuestUi,WCT_RewardQuestUi)->getUiLayer()->updateDetail(&rewardQuest);
+			GET_UI(RewardQuestUi,WCT_RewardQuestUi)->getUiLayer()->setGiveupButton(true);
+		}
+	}
+	_isNoneAcceptQuest = false;
+	return 0;
+}
+
+unsigned int RewardQuestMgr::onServerUpdateQuestList( s_net_cmd *cmd )
+{
+	NET_SIS_Update_Reward_Quest_List* msg = (NET_SIS_Update_Reward_Quest_List*)cmd;
+	if (msg == NULL)
+		return 0;
+	REWARDQUESTLIST::iterator iter = m_pQuestList.begin();
+	for(int i = 0; i< msg->num; ++i,++iter)
+	{
+		if (iter == m_pQuestList.end())
+			break;
+		RewardQuestProto* quest = (*iter);
+		if (quest == NULL)
+			continue;
+		quest->questId = msg->data[i].questId;
+		findRewardQusetInfo(*quest);
+		quest->acceptAmount = msg->data[i].completeNum;
+		quest->amount = msg->data[i].needNum;
+	}
+	//排序
+	m_pQuestList.sort(RewardQuestMgr::compare);
+	std::list<RewardQuestProto*>::const_iterator iterQuest = m_pQuestList.begin();
+	if(_rewardQuest == NULL)
+	{
+		_rewardQuest = (*iterQuest);
+		if(IS_UI_OPEN(WCT_RewardQuestUi))
+		{
+			GET_UI(RewardQuestUi,WCT_RewardQuestUi)->getUiLayer()->updateDetail(_rewardQuest);
+		}
+	}
+	if (msg->restTime == RewardUpdateTime)
+	{
+		_isDataFreshed = true;
+	}
+	if(IS_UI_OPEN(WCT_RewardQuestUi))
+	{
+		GET_UI(RewardQuestUi,WCT_RewardQuestUi)->updateData(msg->restTime);
+	}
+
+	return 0;
+}
+
+void RewardQuestMgr::setCurrentQuestData()
+{
+	_isNoneAcceptQuest = true;
+	m_pQuestData.questId = RewardQuestNull;
+	m_pQuestData.completeNum = RewardQuestNull;
+	m_pQuestData.needNum = RewardQuestNull;
+}
+
+RewardQuestProto *RewardQuestMgr::getFirstReward()
+{
+	return _rewardQuest;
+}
+void RewardQuestMgr::findRewardQusetInfo( RewardQuestProto& quest )
+{
+	if (&quest ==NULL)
+		return;
+	int playerLevel = RoleManager::getInstance()->getLocalPlayer()->getLevel();
+	std::map<unsigned short,AllRewardQuestProto>::iterator iter = m_pAllQuestMap.find(quest.questId);
+	if (iter == m_pAllQuestMap.end())
+	{
+		return;
+	}
+	AllRewardQuestProto temp = iter->second;
+	quest.questId		= temp.questId;
+	quest.questGrade	= temp.questGrade;
+	quest.type			= temp.type;
+	quest.amount		= temp.amount;
+	quest.fighting		= temp.fighting;
+	quest.title			= temp.title;
+	quest.target		= temp.target;
+	quest.needNum		= temp.needNum;
+	quest.attactId		= temp.attactId;
+	quest.NPCId			= temp.NPCId;
+	quest.explainStr	= temp.explainStr;
+	quest.number		= temp.number;
+	if(playerLevel <= 40)
+	{
+		quest.exp		= temp.exp[0];
+		quest.liQuan	= temp.liQuan[0];
+		quest.GoldNum	= temp.GoldNum[0];
+	}
+	else if(playerLevel > 40 && playerLevel <= 45)
+	{
+		quest.exp		= temp.exp[1];
+		quest.liQuan	= temp.liQuan[1];
+		quest.GoldNum	= temp.GoldNum[1];
+	}
+	else if(playerLevel > 45 && playerLevel <= 50)
+	{
+		quest.exp		= temp.exp[2];
+		quest.liQuan	= temp.liQuan[2];
+		quest.GoldNum	= temp.GoldNum[2];
+	}
+	else if(playerLevel > 50 && playerLevel <= 55)
+	{
+		quest.exp		= temp.exp[3];
+		quest.liQuan	= temp.liQuan[3];
+		quest.GoldNum	= temp.GoldNum[3];
+	}
+	else if(playerLevel > 55 && playerLevel <= 60)
+	{
+		quest.exp		= temp.exp[4];
+		quest.liQuan	= temp.liQuan[4];
+		quest.GoldNum	= temp.GoldNum[4];
+	}
+	else if(playerLevel > 60 && playerLevel <= 65)
+	{
+		quest.exp		= temp.exp[5];
+		quest.liQuan	= temp.liQuan[5];
+		quest.GoldNum	= temp.GoldNum[5];
+	}
+	else if(playerLevel > 65 && playerLevel <= 70)
+	{
+		quest.exp		= temp.exp[6];
+		quest.liQuan	= temp.liQuan[6];
+		quest.GoldNum	= temp.GoldNum[6];
+	}
+	else 
+	{
+		quest.exp		= temp.exp[7];
+		quest.liQuan	= temp.liQuan[7];
+		quest.GoldNum	= temp.GoldNum[7];
+	}
+	quest.exp           = quest.exp * WorldLevelMgr::getInstance()->getWorldLevelAddedExpPercentByType(E_ADDED_QUEST_EXP_PER)/100;
+	quest.expId         = temp.expId;
+	quest.goldId        = temp.goldId;
+	quest.liQuanId      = temp.liQuanId;
+}
+
+//有可领取份数优先、任务等级优先
+bool RewardQuestMgr::compare( const RewardQuestProto* quest1,const RewardQuestProto* quest2 )
+{
+	//bool compareGood = true;
+	if (quest1->acceptAmount >= quest1->amount)
+	{
+		if(quest2->acceptAmount < quest2->amount)
+		{
+			return false;
+		}
+	}
+	else
+	{
+		if(quest2->acceptAmount >= quest2->amount)
+		{
+			return true;
+		}
+	}
+	if (quest1->questGrade == quest2->questGrade)
+	{
+		return (quest1->amount - quest1->acceptAmount) < (quest2->amount - quest2->acceptAmount);
+	}
+	return quest1->questGrade < quest2->questGrade;
+}
+
+std::list<RewardQuestProto*> RewardQuestMgr::getQuestList()
+{
+	return m_pQuestList;
+}
+
+PathInfo RewardQuestMgr::getRolePathInfo(int roleId)
+{
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM CreatureInfo WHERE AnimaterId = ?1");
+// 	cmd->set_integer32(1 ,roleId);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	PathInfo rolePathInfo;
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("xpos");
+// 		rolePathInfo.x= table->get_integer32(idx);
+// 		idx = table->get_index("ypos");
+// 		rolePathInfo.y = table->get_integer32(idx);
+// 		idx = table->get_index("map");
+// 		rolePathInfo.mapTag = table->get_text(idx);	
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	PathInfo rolePathInfo;
+	stCreateProto const* proto  = RoleManager::getInstance()->getCreatureProto(roleId);
+	CC_ASSERT(proto);
+	rolePathInfo.x = proto->nPosX;
+	rolePathInfo.y = proto->nPosY;
+	rolePathInfo.mapTag = proto->strMapName;
+
+	return rolePathInfo;
+}
+
+// PathInfo RewardQuestMgr::getBossPathInfo(int roleId)
+// {
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM ActivityInfo WHERE attack_id = ?1");
+// 	cmd->set_integer32(1 ,roleId);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	PathInfo rolePathInfo;
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("x");
+// 		rolePathInfo.x= table->get_integer32(idx);
+// 		idx = table->get_index("y");
+// 		rolePathInfo.y = table->get_integer32(idx);
+// 		idx = table->get_index("mapid");
+// 		rolePathInfo.mapTag = table->get_integer32(idx);	
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+// 	return rolePathInfo;
+// }
+
+void RewardQuestMgr::runToNPC(int roleID)
+{
+	PathInfo rolePathInfo = RewardQuestMgr::getInstance()->getRolePathInfo(roleID);
+	if(std::string("0") != rolePathInfo.mapTag && !rolePathInfo.mapTag.empty())
+	{
+		std::string str2 = rolePathInfo.mapTag.substr(1,rolePathInfo.mapTag.length());
+		int mapid = lexical_cast<int>(str2);
+		//gx add
+		LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+		if (!lp)
+			return;
+
+		stCreateProto const* proto = RoleManager::getInstance()->getCreatureProto(roleID);
+		if(proto == NULL)
+		{
+			return;
+		}
+
+		//检查当前场景是否为副本 
+		if( InstanceMgr::getInstance()->IsPlayerInInstanceMap() )
+		{
+			//副本中不可寻路
+			ToolTip::getInstance()->push(GET_STR(9254));
+			return;
+		}
+
+		//玩家状态检查 gx add
+
+		if (lp->isInRoleStateAny(RA_ShuangXiu))
+		{
+			ToolTip::getInstance()->push(GET_STR(2101));
+			return;
+		}
+		if (lp->isInRoleStateAny(RA_Stall))
+		{
+			ToolTip::getInstance()->push(GET_STR(2102));
+			return;
+		}
+		if (lp->isInRoleStateAny(RA_Exchange))
+		{
+			ExchangeBusinessMgr::getInstance()->CancleExchange();
+			return;
+		}
+
+		if (AutoActionMgr::getInstance()->Get_Auto_Action())
+		{
+			AutoActionMgr::getInstance()->Set_Auto_Action(false);
+		}
+
+		if (!lp->getAutoRunState())
+		{
+			lp->setAutoRunState(true);
+		}
+		if (!lp->getRunSELastState())
+			lp->setRunSEOutMap(true);
+
+		std::string animFile = proto->strAnimatorName;
+
+		animFile = animFile.substr(0, 1);
+		bool isNpc = animFile == "N"?true:false;
+
+		RoleHeadUi *ui = World::getInstance()->getRoleHeadUi();
+		if (ui)
+		{
+			CC_ASSERT(NULL != ui);
+			CC_ASSERT(NULL != ui->GetRoleUI());
+			lp->SetisMouseClick(false);
+			ui->GetRoleUI()->SetMapidStr(rolePathInfo.mapTag);
+			ui->GetRoleUI()->SetQuestPosx(rolePathInfo.x);
+			ui->GetRoleUI()->SetQuestPosy(rolePathInfo.y);
+			if(isNpc)
+				ui->GetRoleUI()->SetNpcId(roleID);
+			else
+				ui->GetRoleUI()->SetNpcId(-1);
+
+			AutoActionMgr::getInstance()->setCurrentQuestID(INVALID,AutoActionMgr::TraceTarget(roleID,isNpc));
+		}
+		RoleManager::getInstance()->getLocalPlayer()->runPathTo(ccp(rolePathInfo.x, rolePathInfo.y), mapid);
+	}
+}
+
+void RewardQuestMgr::initQuestMap()
+{
+	m_pAllQuestMap.clear();
+	c_sql_command *cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM Wangted" );
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		AllRewardQuestProto quest;
+		int idx = table->get_index("id");
+		quest.questId = table->get_integer32(idx);
+		idx = table->get_index("Level");
+		quest.questGrade = table->get_integer32(idx);
+		idx = table->get_index("Type");
+		quest.type = table->get_integer32(idx);
+		idx = table->get_index("Amount");
+		quest.amount = table->get_integer32(idx);
+		idx = table->get_index("Fighting");
+		quest.fighting = table->get_integer32(idx);
+		idx = table->get_index("Title");
+		quest.title = table->get_text(idx);
+		idx = table->get_index("Target");
+		quest.target = table->get_text(idx);
+		idx = table->get_index("Charge");
+		quest.needNum = table->get_integer32(idx);
+		idx = table->get_index("Attackid");
+		quest.attactId = table->get_integer32(idx);
+		idx = table->get_index("NPCID");
+		quest.NPCId = table->get_integer32(idx);
+		idx = table->get_index("Text");
+		quest.explainStr = table->get_text(idx);
+		idx = table->get_index("Num");
+		quest.number = table->get_integer32(idx);
+		idx = table->get_index("Exp40");
+		quest.exp[0] = table->get_integer32(idx);
+		idx = table->get_index("Bindlijuan1");
+		quest.liQuan[0] = table->get_integer32(idx);
+		idx = table->get_index("Gold1");
+		quest.GoldNum[0] = table->get_integer32(idx);
+		idx = table->get_index("Exp45");
+		quest.exp[1] = table->get_integer32(idx);
+		idx = table->get_index("Bindlijuan2");
+		quest.liQuan[1] = table->get_integer32(idx);
+		idx = table->get_index("Gold2");
+		quest.GoldNum[1] = table->get_integer32(idx);
+		idx = table->get_index("Exp50");
+		quest.exp[2] = table->get_integer32(idx);
+		idx = table->get_index("Bindlijuan3");
+		quest.liQuan[2] = table->get_integer32(idx);
+		idx = table->get_index("Gold3");
+		quest.GoldNum[2] = table->get_integer32(idx);
+		idx = table->get_index("Exp55");
+		quest.exp[3] = table->get_integer32(idx);
+		idx = table->get_index("Bindlijuan4");
+		quest.liQuan[3] = table->get_integer32(idx);
+		idx = table->get_index("Gold4");
+		quest.GoldNum[3] = table->get_integer32(idx);
+		idx = table->get_index("Exp60");
+		quest.exp[4] = table->get_integer32(idx);
+		idx = table->get_index("Bindlijuan5");
+		quest.liQuan[4] = table->get_integer32(idx);
+		idx = table->get_index("Gold5");
+		quest.GoldNum[4] = table->get_integer32(idx);
+		idx = table->get_index("Exp65");
+		quest.exp[5] = table->get_integer32(idx);
+		idx = table->get_index("Bindlijuan6");
+		quest.liQuan[5] = table->get_integer32(idx);
+		idx = table->get_index("Gold6");
+		quest.GoldNum[5] = table->get_integer32(idx);
+		idx = table->get_index("Exp70");
+		quest.exp[6] = table->get_integer32(idx);
+		idx = table->get_index("Bindlijuan7");
+		quest.liQuan[6] = table->get_integer32(idx);
+		idx = table->get_index("Gold7");
+		quest.GoldNum[6] = table->get_integer32(idx);
+		idx = table->get_index("Exp100");
+		quest.exp[7] = table->get_integer32(idx);
+		idx = table->get_index("Bindlijuan8");
+		quest.liQuan[7] = table->get_integer32(idx);
+		idx = table->get_index("Gold8");
+		quest.GoldNum[7] = table->get_integer32(idx);
+		idx = table->get_index("xsexp");
+		quest.expId = table->get_integer32(idx);
+		idx = table->get_index("xsgold");
+		quest.goldId = table->get_integer32(idx);
+		idx = table->get_index("xslijuan");
+		quest.liQuanId = table->get_integer32(idx);
+		idx = table->get_index("Accept_level");
+		quest.accept_level = table->get_integer32(idx);
+		m_pAllQuestMap.insert(std::make_pair(quest.questId,quest));
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+}
+
+bool RewardQuestMgr::isShowRedPoint()
+{
+	auto iter = m_pQuestList.begin();
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	bool isHasCanAcceptQuest = false;
+	while (iter != m_pQuestList.end())
+	{
+		unsigned int fighting = 0;
+		int number = 0;
+		if (lp)
+		{
+			fighting = RoleManager::getInstance()->getLocalPlayer()->getAttribute(RA_BATTLE_POINT);
+			number = RoleManager::getInstance()->getLocalPlayer()->getRoleDayClearInfoTwo(ERDCT_Reward_Quest_Num);
+		}
+		if (fighting >= (*iter)->fighting && number < 10 && getIsNoneAcceptQuest())
+		{
+			isHasCanAcceptQuest = true;
+		}
+		iter++;
+	}
+	return _isDataFreshed && _isNoneAcceptQuest && isHasCanAcceptQuest;
+}
+
+AllRewardQuestProto* RewardQuestMgr::get_one_reward_quest_data(short quest_id)
+{
+	std::map<unsigned short,AllRewardQuestProto>::iterator iter = m_pAllQuestMap.find(quest_id);
+	if(iter == m_pAllQuestMap.end())
+	{
+		return NULL;
+	}
+
+	return &iter->second;
+}

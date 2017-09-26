@@ -1,0 +1,171 @@
+#include "TeammateHeadView.h"
+#include "CommonClient.h"
+#include "BaseDefine.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "UiInterface.h"
+#include "RoleEquipUi.h"
+#include "AvatarAtt.h"
+#include "InviteListView.h"
+
+USING_NS_CC;
+USING_NS_CC_EXT;
+
+TeammateHeadView::TeammateHeadView()
+	:mpClass(NULL)
+	,mpBattleScore(NULL)
+	,mpName(NULL)
+	,mpLv(NULL)
+	,mpEnableRoot(NULL)
+	,m_no_root(NULL)
+	,m_match_cue(NULL)
+	,m_add_button(NULL)
+	,mdwID(INVALID)
+	,mpOffline(NULL)
+	,m_display_node(NULL)
+{
+
+}
+
+TeammateHeadView::~TeammateHeadView()
+{
+
+}
+
+TeammateHeadView* TeammateHeadView::createFormCCBI( const char* szFilename,CCObject* pOwner,UiInterface* holder )
+{
+	CCNodeLoaderLibrary* lib = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+
+	std::string uiFile =CFGReader::instance()->get_ui_ccbi_filepath(szFilename);
+	CCNode* node = reader->readNodeGraphFromFile(uiFile.c_str(),pOwner);
+	CC_ASSERT(node);
+	TeammateHeadView* head = dynamic_cast<TeammateHeadView*>(node);
+	holder->mergeSheet(reader->getLoadedSpriteSheet());
+	return head;
+}
+
+cocos2d::extension::SEL_CCControlHandler TeammateHeadView::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeammateHeadView,onAdd);
+
+	return NULL;
+}
+
+bool TeammateHeadView::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,mpClass);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,mpBattleScore);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,mpName);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,mpLv);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,mpEnableRoot);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_no_root);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_match_cue);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*,m_add_button);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mpOnline",CCNode*,mpOffline);
+
+	return false;
+}
+
+void TeammateHeadView::onAdd(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	if(m_add_button->isVisible() && m_no_root->isVisible())
+	{
+		CCNode* node = UiMgr::getInstance()->getCurScene()->getChildByTag(message_id_crc("InviteListView"));
+		if(node)
+		{
+			InviteListView* view = dynamic_cast<InviteListView*>(node);
+			view->popShow();
+		}
+		else
+		{
+			InviteListView* view = InviteListView::createFormCCBI("yaoqing", NULL);
+			CC_ASSERT(view);
+			view->popShow();
+			UiMgr::getInstance()->getCurScene()->addChild(view, WZ_POPUI);
+		}
+	}
+}
+
+void TeammateHeadView::setData( unsigned int dwID,const char* name,int nClass,int nLv, int nScore,bool bMale )
+{
+	mdwID = dwID;
+	//名称
+	GET_FT_REPLACER(mpName)->setString(name);
+	//等级
+	std::stringstream ss;
+	ss<<nLv;
+	GET_FT_REPLACER(mpLv)->setString(ss.str().c_str());
+	//分数
+	ss.str("");
+	ss<<nScore;
+	GET_FT_REPLACER(mpBattleScore)->setString(ss.str().c_str());
+	//
+	mpEnableRoot->setVisible(true);
+	m_no_root->setVisible(false);
+
+	setClass(nClass,bMale);
+}
+
+void TeammateHeadView::setEmpty(bool is_match)
+{
+	mdwID = INVALID;
+	mpEnableRoot->setVisible(false);
+	m_no_root->setVisible(true);
+	m_match_cue->setVisible(is_match);
+	m_add_button->setVisible(!is_match);
+}
+
+void TeammateHeadView::setClass( int nClass,bool bMale )
+{
+	switch (nClass)
+	{
+	case RT_Warrior:// 战士
+		{
+			mpClass->initWithSpriteFrameName("duiwu_zhan");
+		}
+		break;
+	case RT_Mage:// 法师
+		{
+			mpClass->initWithSpriteFrameName("duiwu_fa");
+		}
+		break;
+	case RT_Taoist://道士
+		{
+			mpClass->initWithSpriteFrameName("duiwu_dao");
+		}
+		break;
+	}
+}
+
+void TeammateHeadView::refreshOnLineState( bool bOnline )
+{
+	mpOffline->setVisible(!bOnline);
+}
+
+void TeammateHeadView::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	REPLACE_TTF_WITH_FT(mpBattleScore);
+	REPLACE_TTF_WITH_FT(mpName);
+	REPLACE_TTF_WITH_FT(mpLv);
+
+	Helper::getLabelFTByParentAndTag(mpEnableRoot, 6);
+
+	m_display_node = RoleDisplayNode::create();
+	CCNode* node = mpEnableRoot->getChildByTag(0);
+	node->addChild(m_display_node);
+	CC_ASSERT(m_display_node);
+}
+
+void TeammateHeadView::update_display(ePlayerDisplayAttr attr, unsigned int id)
+{
+	m_display_node->setAttrabute(attr, id);
+}
+
+void TeammateHeadView::load_animate()
+{
+	m_display_node->setRoleId(mdwID);
+	m_display_node->loadAnimate();
+}

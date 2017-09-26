@@ -1,0 +1,340 @@
+#include "BroadCastUi.h"
+#include "World.h"
+#include "CfgReader.h"
+#include "BaseDefine.h"
+#include "UiResourceMgr.h"
+#include "UiTools.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "StringMgr.h"
+#include "Helper.h"
+#include "CheckButton.h"
+#include "UsefulFunction.h"
+#include "ChatMgr.h"
+#include "TeamMgr.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+
+BroadCastUi * BroadCastUi::getInstace()
+{
+	static BroadCastUi instance;
+	return &instance;
+}
+
+BroadCastUi::BroadCastUi()
+	: _signalBtnPressed(NULL)
+{
+
+}
+
+BroadCastUi::~BroadCastUi()
+{
+
+}
+
+void BroadCastUi::open()
+{
+	if(isOpen())
+		return;
+
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+		ccNodeLoaderLibrary->registerCCNodeLoader("BroadCastUiLayer", BroadCastUiLoader::loader());
+		ccNodeLoaderLibrary->registerCCNodeLoader("CheckButton", CheckButtonLoader::loader());
+		cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+		CCNode *node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "duiwuguangbo.ccbi").c_str());
+		_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+		UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+		ccbReader->release();
+		if(node != NULL) {
+			scene->addChild(node, WZ_POPUI, BroadCast_UI);
+			setAllChildernButtonPriority(node, -1);
+		}
+	}
+}
+
+void BroadCastUi::close()
+{
+	if(!isOpen())
+		return;
+	BroadCastUiLayer *uiNode = getUiLayer();
+	if(uiNode != NULL)
+	{
+		uiNode->SetAnroindKeyBoardClose();
+	}
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		scene->removeChildByTag(BroadCast_UI);
+	}
+
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+
+	if(_signalBtnPressed != NULL)
+	{
+		delete _signalBtnPressed;
+		_signalBtnPressed = NULL;
+	}
+
+}
+
+bool BroadCastUi::isOpen()
+{
+	return (getUiLayer() != NULL);
+}
+
+BroadCastUiLayer * BroadCastUi::getUiLayer()
+{
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		BroadCastUiLayer *uiNode = dynamic_cast<BroadCastUiLayer*>(scene->getChildByTag(BroadCast_UI));
+		if(uiNode != NULL)
+			return uiNode;
+	}
+
+	return NULL;
+}
+
+void BroadCastUi::setMessage( const std::string &msg )
+{
+	BroadCastUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setText(msg);
+	}
+}
+
+void BroadCastUi::setPlaceHolder( const std::string &text )
+{
+	BroadCastUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setPlaceHolder(text);
+	}
+}
+
+c_signal<void, bool, std::string> * BroadCastUi::getBtnSignal()
+{
+	if(_signalBtnPressed == NULL)
+		_signalBtnPressed = new c_signal<void, bool, std::string>;
+
+	return _signalBtnPressed;
+}
+
+void BroadCastUi::emitBtnSignal( bool isOk, const std::string &str )
+{
+	if(_signalBtnPressed != NULL)
+		_signalBtnPressed->emit(isOk, str);
+}
+
+void BroadCastUi::setEnableEdit( bool enable )
+{
+	BroadCastUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->_enableEdit = enable;
+	}
+}
+
+//param maxInputNum 最多可以输入多少个汉字，一个utf8汉字为3字节
+void BroadCastUi::setMaxInputNum( int maxInputNum )
+{
+	BroadCastUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setMaxInputNum(maxInputNum * 3);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler BroadCastUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler BroadCastUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBroadcast", BroadCastUiLayer::onBroadcast);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onClose", BroadCastUiLayer::onClose);
+	return NULL;
+}
+
+void BroadCastUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_curInputNum = 0;
+	_maxInputNum = 150;
+	_enableEdit = true;
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(NT_Frame));
+	CC_ASSERT(_frame != NULL);
+
+	m_send_world = dynamic_cast<CheckButton*>(_frame->getChildByTag(4));
+	CC_ASSERT(m_send_world);
+	m_send_world->setCheck(false);
+	m_send_world->setTouchProprity(-1);
+
+	m_send_guild = dynamic_cast<CheckButton*>(_frame->getChildByTag(5));
+	CC_ASSERT(m_send_guild);
+	m_send_guild->setCheck(true);
+	m_send_guild->setTouchProprity(-1);
+
+	Helper::getLabelFTByParentAndTag(_frame, 2);
+	Helper::getLabelFTByParentAndTag(_frame, 3);
+
+	CCNode *textNode = _frame->getChildByTag(NT_Input);
+	_inputText = createInputWithContent(textNode);
+	_inputText->setDimensions(textNode->getContentSize());
+	_inputText->setVerticalAlignment(kCCVerticalTextAlignmentTop);
+	_inputText->setDelegate(this);
+	CC_ASSERT(_inputText != NULL);
+	_frame->addChild(_inputText);
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -1, true);
+}
+
+void BroadCastUiLayer::onExit()
+{
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool BroadCastUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(_enableEdit)
+	{
+		CCNode *node = _frame->getChildByTag(NT_Input);
+		if(node != NULL)
+		{
+			CCPoint pt = node->convertTouchToNodeSpace(pTouch);
+			const CCSize &frameSize = node->getContentSize();
+			CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+			if(frameRect.containsPoint(pt))
+			{
+				_inputText->attachWithIME();
+			}
+		}
+	}
+	return true;
+}
+
+void BroadCastUiLayer::onBroadcast( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);//vv
+	
+	bool is_send_guild = m_send_guild->isCheckd();
+	bool is_send_world = m_send_world->isCheckd();
+
+	if(!is_send_guild && !is_send_world)
+	{
+		UsefulFunction::show_string_cur("broadcast_no_select_cue");
+		return;
+	}
+
+	std::string text = get_last_text(_inputText->getString());
+
+	if(is_send_guild)
+	{
+		ChatMgr::getInstance()->Send_Chat(text,ESCC_Guild);
+	}
+
+	if(is_send_world)
+	{
+		ChatMgr::getInstance()->Send_Chat(text,ESCC_World);
+	}
+
+	BroadCastUi::getInstace()->close();
+}
+
+std::string BroadCastUiLayer::get_last_text(std::string str)
+{
+// 	if (str.size() <= 0)
+// 		return "";
+	TeamMgr* mgr = TeamMgr::getInstance();
+	//bool bFull = mgr->is_team_full();
+	unsigned int id = RoleManager::getInstance()->getLocalPlayer()->getId();
+
+	std::stringstream token;
+	token<<"<tid="<<id<<" na="<<GET_STR(9029)<<"/>";
+
+	int nCur = mgr->is_inteam()?(1+mgr->get_teammate_num()):0;
+
+	std::stringstream num;
+	num<<"("<<nCur<<"\\"<<MAX_TEAM_NUM<<")";
+
+	std::string toChat;
+	safe_sprintf(toChat,(str + "%s%s").c_str(),token.str(),num.str());
+
+	return toChat;
+}
+
+void BroadCastUiLayer::setPlaceHolder( const std::string &text )
+{
+	CCString *str = CCString::createWithFormat("%d", _maxInputNum / 3);
+	_inputText->setPlaceHolder(replaceStr(text, "**", str->getCString()).c_str());
+}
+
+void BroadCastUiLayer::setText( const std::string &text )
+{
+	_inputText->setString(text.c_str());
+	_inputText->setColor(ccc3(0xfe, 0xf8, 0xd8));
+}
+
+void BroadCastUiLayer::onClose( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);//vv
+	BroadCastUi::getInstace()->emitBtnSignal(false, _inputText->getString());
+	BroadCastUi::getInstace()->close();
+}
+
+//当用户启动虚拟键盘是的回调
+bool BroadCastUiLayer::onTextFieldAttachWithIME( CCTextFieldTTF *pSender )
+{
+	return false;
+	//return true; 不启动
+}
+
+//当用户进行输入是的回调函数
+bool BroadCastUiLayer::onTextFieldInsertText( CCTextFieldTTF *pSender, const char* text, int nLen )
+{
+	CCLog("TextField Insert text:%s, nLen:%d, _curInputNum:%d", text, nLen, _curInputNum);
+
+	if (_curInputNum < _maxInputNum)
+	{
+		_curInputNum += nLen;
+		CCLog("TextField Insert _curInputNum:%d", _curInputNum);
+		return false;
+	}else
+	{
+		CCLog("TextField Insert _curInputNum:%d", _curInputNum);
+		return true;
+	}
+	//return true; 不输入文字
+}
+
+//当用户关闭虚拟键盘时的回调
+bool BroadCastUiLayer::onTextFieldDetachWithIME( CCTextFieldTTF * sender )
+{
+	return false;
+	//return true; 不关闭虚拟键盘
+}
+
+//当用户删除文字时的回调
+bool BroadCastUiLayer::onTextFieldDeleteBackward( CCTextFieldTTF *pSender, const char* text, int nLen )
+{
+	CCLog("TextField Delete text:%s, nLen:%d", text, nLen);
+	if (_curInputNum >= nLen)
+	{
+		_curInputNum -= nLen;
+		CCLog("TextField Delete _curInputNum:%d", _curInputNum);
+	}else
+	{
+		_curInputNum = 0;
+	}
+	return false;
+	//return true; 不删除
+}

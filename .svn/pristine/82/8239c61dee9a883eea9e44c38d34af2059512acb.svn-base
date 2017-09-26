@@ -1,0 +1,603 @@
+#include "SecondVerifyTipUi.h"
+#include "Helper.h"
+#include "f_string_util.h"
+#include "LabelEx.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "ToolTip.h"
+#include "f_string_table.h"
+
+SecondVerifyTipUiLayer::SecondVerifyTipUiLayer()
+{
+	m_pMainFrame = NULL;
+	for (int i = 0; i < NUM_SV_TIP_NODE_COUNT; i++)
+	{
+		m_arrNodeTips[i] = NULL;
+	}
+}
+SecondVerifyTipUiLayer::~SecondVerifyTipUiLayer()
+{
+
+}
+
+SecondVerifyTipUiLayer* SecondVerifyTipUiLayer::CreateVerifyTip()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["SecondVerifyTipUiLayer"] = UiLayerLoader<SecondVerifyTipUiLayer>::loader();
+	nodeLoaders["LabelEx"] = LabelExLoader::loader();
+	std::set<string> t_loadSpriteSheet;
+	CCNode *uiNode = readUiFromCCBI("anquansuoitem", nodeLoaders, t_loadSpriteSheet);
+	SecondVerifyTipUiLayer* t_layer = dynamic_cast<SecondVerifyTipUiLayer*>(uiNode);
+	CC_ASSERT(t_layer);
+	//t_layer->setLoadSpriteSheet(t_loadSpriteSheet);
+
+	return t_layer;
+}
+
+bool SecondVerifyTipUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (isTouchOnNodeContent(m_pMainFrame,pTouch))
+	{
+		return true;
+	}
+	SecondVerifyMgr::getInstance()->closeVerifyTipUI();
+	return false;
+}
+
+void SecondVerifyTipUiLayer::onTipUiBgBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)//所有出发外部逻辑的按钮
+{
+	CCNode* t_node = dynamic_cast<CCNode*>(pSender);
+	e_TipTouchBgBtnTag pType = (e_TipTouchBgBtnTag)t_node->getTag();
+	switch (m_eCurrentState)
+	{
+	case SV_Tip_SetPwd:
+		handleSetPwdNodeTouchEvent(pType);
+		break;
+	case SV_Tip_SetSafeQes:
+		handleSetSafeQesNodeTouchEvent(pType);
+		break;
+	case SV_Tip_ResetPwd:
+		handleResetPwdNodeTouchEvent(pType);
+		break;
+	case SV_Tip_ForceUnlock:
+		break;
+	case SV_Tip_VerifyPwd:
+		handleVerifyPwdNodeTouchEvent(pType);
+		break;
+	case SV_Tip_LockedSys:
+		break;
+	case SV_Tip_CancelForceUnlock:
+		break;
+	}
+}
+
+SEL_MenuHandler SecondVerifyTipUiLayer::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+SEL_CCControlHandler SecondVerifyTipUiLayer::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	string str = "";
+	for ( int i = 1 ; i <= NUM_SV_TIP_NODE_COUNT; i++)
+	{
+		safe_sprintf(str,"onCancelBtnPressed%d",i);
+		CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, str.c_str(), SecondVerifyTipUiLayer::onCancelBtnPressed);
+		safe_sprintf(str,"onAssignBtnPressed%d",i);
+		CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, str.c_str(), SecondVerifyTipUiLayer::onAssignBtnPressed);
+	}
+	for (int i = 1; i <= 8; i++)
+	{
+		safe_sprintf(str,"onTipUiBgBtnPressed%d",i);
+		CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, str.c_str(), SecondVerifyTipUiLayer::onTipUiBgBtnPressed);
+	}
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onForgortPwdBtnPressed", SecondVerifyTipUiLayer::onForgortPwdBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", SecondVerifyTipUiLayer::onCloseBtnPressed);
+	return NULL;
+}
+
+bool SecondVerifyTipUiLayer::onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode)
+{
+	return false;
+}
+
+void SecondVerifyTipUiLayer::setLoadSpriteSheet(std::set<std::string> pSheet)
+{
+
+}
+
+void SecondVerifyTipUiLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	m_pMainFrame = getChildByTag(0);
+	for ( int i = 0; i < NUM_SV_TIP_NODE_COUNT ; i++)
+	{
+		m_arrNodeTips[i] = m_pMainFrame->getChildByTag(i);
+	}
+	// 设置界面
+	Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_SetPwd], 1);
+	Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_SetPwd], 2);
+	Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_SetPwd], 5);
+	m_stNodeSetPwd.m_pFtNewPwd = Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_SetPwd],9);
+	m_stNodeSetPwd.m_pFtConfirmNewPwd = Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_SetPwd],10);
+	m_stNodeSetPwd.m_pNewPwdInputFrame = m_arrNodeTips[SV_Tip_SetPwd]->getChildByTag(Tip_Btn_SetPwd_NewPwd);
+	m_stNodeSetPwd.m_pConfirmNewPwdInputFrame = m_arrNodeTips[SV_Tip_SetPwd]->getChildByTag(Tip_Btn_SetPwd_ConfirmPwd);
+
+
+	//设置安全界面
+	Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_SetSafeQes], 1);
+	Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_SetSafeQes], 2);
+	Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_SetSafeQes], 5);
+	Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_SetSafeQes], 6);
+	m_setNodeSetSafeQes.m_pInputFatherFrame = m_arrNodeTips[SV_Tip_SetSafeQes]->getChildByTag(Tip_Btn_SetQues_Father);
+	m_setNodeSetSafeQes.m_pFieldFatherName= createInputWithContent(m_setNodeSetSafeQes.m_pInputFatherFrame,16,true,kCCTextAlignmentCenter);
+	m_arrNodeTips[SV_Tip_SetSafeQes]->addChild(m_setNodeSetSafeQes.m_pFieldFatherName);
+	m_setNodeSetSafeQes.m_pFieldFatherName->setDelegate(this);
+
+	m_setNodeSetSafeQes.m_pInputMotherFrame = m_arrNodeTips[SV_Tip_SetSafeQes]->getChildByTag(Tip_Btn_SetQues_Mather);
+	m_setNodeSetSafeQes.m_pFieldMotherName = createInputWithContent(m_setNodeSetSafeQes.m_pInputMotherFrame,16,true,kCCTextAlignmentCenter);
+	m_arrNodeTips[SV_Tip_SetSafeQes]->addChild(m_setNodeSetSafeQes.m_pFieldMotherName);
+	m_setNodeSetSafeQes.m_pFieldMotherName->setDelegate(this);
+
+	//重置密码界面
+	Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_ResetPwd], 1);
+	Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_ResetPwd], 2);
+	Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_ResetPwd], 3);
+
+	m_setNodeResetPwd.m_pOldPwdFrame		= m_arrNodeTips[SV_Tip_ResetPwd]->getChildByTag(Tip_Btn_ResetPwd_OldPwd);
+	m_setNodeResetPwd.m_pNewPwdFrame		= m_arrNodeTips[SV_Tip_ResetPwd]->getChildByTag(Tip_Btn_ResetPwd_NewPwd);
+	m_setNodeResetPwd.m_pConfirmPwdFrame	= m_arrNodeTips[SV_Tip_ResetPwd]->getChildByTag(Tip_Btn_ResetPwd_ConfirmPwd);
+
+	m_setNodeResetPwd.m_pFtOldPwd = Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_ResetPwd], 11);
+	m_setNodeResetPwd.m_pFtNewPwd = Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_ResetPwd], 12);
+	m_setNodeResetPwd.m_pFtConfirmNewPwd = Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_ResetPwd], 13);
+
+	//强制解锁界面
+	m_setNodeForceUnlock.m_pFtUnlockDes = Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_ForceUnlock], 1);
+
+	//验证密码界面
+	Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_VerifyPwd], 1);
+	//m_setNodeVerifyPwd.m_pFtTryNumDes = Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_VerifyPwd], 2);
+	m_setNodeVerifyPwd.m_pExTryNumDes = dynamic_cast<LabelEx*>(m_arrNodeTips[SV_Tip_VerifyPwd]->getChildByTag(7));
+	m_setNodeVerifyPwd.m_pFtInputPwd = Helper::getLabelFTByParentAndTag(m_arrNodeTips[SV_Tip_VerifyPwd], 8);
+	m_setNodeVerifyPwd.m_pInputFrame = m_arrNodeTips[SV_Tip_VerifyPwd]->getChildByTag(Tip_Btn_VerifyPwd_Pwd);
+	
+	//系统锁冻结界面
+	m_setNodeLockedSys.m_pLockedDes = dynamic_cast<LabelEx*>(m_arrNodeTips[SV_Tip_LockedSys]->getChildByTag(5));
+
+	//强制解除冻结界面
+	m_setForceUnlockSys.m_pUnLockedDes = dynamic_cast<LabelEx*>(m_arrNodeTips[SV_Tip_CancelForceUnlock]->getChildByTag(5));
+
+	m_pKeypadDelegate = new StrNumPadPwdDelegate();
+}
+
+void SecondVerifyTipUiLayer::clearNumPadDelegateAndUi()
+{
+	StrNumPadMgr::getInstance()->close();
+	CC_SAFE_DELETE(m_pKeypadDelegate);
+
+}
+
+void SecondVerifyTipUiLayer::onEnter()
+{
+	NormalLayer::onEnter();
+	this->scheduleUpdate();
+	setTouchPriority(-2);
+	setAllChildernButtonPriority(this,-3);
+}
+
+void SecondVerifyTipUiLayer::onExit()
+{
+	clearNumPadDelegateAndUi();
+	this->unscheduleUpdate();
+	NormalLayer::onExit();
+	
+}
+
+void SecondVerifyTipUiLayer::update(float delta)
+{
+	if (m_eCurrentState == SV_Tip_LockedSys)
+	{
+		int t_time = SecondVerifyMgr::getInstance()->getSysLockedSurplusTime();
+		refreshSysLockedDes(t_time);
+	}
+}
+
+void SecondVerifyTipUiLayer::onCancelBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	if (m_eCurrentState == SV_Tip_SetSafeQes)
+	{
+		SecondVerifyMgr::getInstance()->openVerifyTipUIByType(SV_Tip_SetPwd);
+		return;
+	}
+	SecondVerifyMgr::getInstance()->closeVerifyTipUI();
+}
+void SecondVerifyTipUiLayer::onCloseBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	SecondVerifyMgr::getInstance()->closeVerifyTipUI();
+}
+
+void SecondVerifyTipUiLayer::onAssignBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	switch (m_eCurrentState)
+	{
+	case SV_Tip_SetPwd:
+		handleSetPwdNodeConfirmBtnPressed();
+		break;
+	case SV_Tip_SetSafeQes:
+		handleSetSafeQesNodeConfirmBtnPressed();
+		break;
+	case SV_Tip_ResetPwd:
+		handleResetPwdNodeConfirmBtnPressed();
+		break;
+	case SV_Tip_ForceUnlock:
+		handleForceUnlockNodeConfirmBtnPressed();
+		break;
+	case SV_Tip_VerifyPwd:
+		handleVerifyPwdNodeConfirmBtnPressed();
+		break;
+	case SV_Tip_LockedSys:
+		handleLockedSysNodeConfirmBtnPressed();
+		break;
+	case SV_Tip_CancelForceUnlock:
+		handleForceUnlockSysNodeConfirmBtnPressed();
+		break;
+	}
+}
+
+void SecondVerifyTipUiLayer::onForgortPwdBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	SecondVerifyMgr::getInstance()->openVerifyTipUIByType(SV_Tip_ForceUnlock);
+}
+
+void SecondVerifyTipUiLayer::initUIBySVTipType(e_SVTipType ptype)
+{
+	m_eCurrentState = ptype;
+	m_arrNodeTips[SV_Tip_SetPwd]->setVisible(SV_Tip_SetPwd == ptype);
+	m_arrNodeTips[SV_Tip_SetSafeQes]->setVisible(SV_Tip_SetSafeQes == ptype);
+	m_arrNodeTips[SV_Tip_ResetPwd]->setVisible(SV_Tip_ResetPwd == ptype);
+	m_arrNodeTips[SV_Tip_ForceUnlock]->setVisible(SV_Tip_ForceUnlock == ptype);
+	m_arrNodeTips[SV_Tip_VerifyPwd]->setVisible(SV_Tip_VerifyPwd == ptype);
+	m_arrNodeTips[SV_Tip_LockedSys]->setVisible(SV_Tip_LockedSys == ptype);
+	m_arrNodeTips[SV_Tip_CancelForceUnlock]->setVisible(SV_Tip_CancelForceUnlock == ptype);
+
+	switch (m_eCurrentState)
+	{
+	case SV_Tip_SetPwd:
+		{
+			m_stNodeSetPwd.m_pFtNewPwd->setString(STRING_TABLE["second_verify_input_pwd"]);
+			m_stNodeSetPwd.m_pFtConfirmNewPwd->setString(STRING_TABLE["second_verify_input_pwd"]);
+			m_stNodeSetPwd.m_pFtNewPwd->setColor(ccc3(155,155,155));
+			m_stNodeSetPwd.m_pFtConfirmNewPwd->setColor(ccc3(155,155,155));
+			m_stNodeSetPwd.m_sConfirmPwd = "";
+			m_stNodeSetPwd.m_sRealNewPwd = "";
+		}
+		break;
+	case SV_Tip_SetSafeQes:
+		{
+			m_setNodeSetSafeQes.m_pFieldFatherName->setPlaceHolder(STRING_TABLE["second_verify_input_name"]);
+			m_setNodeSetSafeQes.m_pFieldFatherName->setColor(ccc3(0xfe, 0xf8, 0xd8));
+			m_setNodeSetSafeQes.m_pFieldMotherName->setPlaceHolder(STRING_TABLE["second_verify_input_name"]);
+			m_setNodeSetSafeQes.m_pFieldMotherName->setColor(ccc3(0xfe, 0xf8, 0xd8));
+		}
+		break;
+	case SV_Tip_ResetPwd:
+		{
+			m_setNodeResetPwd.m_pFtOldPwd->setString(STRING_TABLE["second_verify_input_pwd"]);
+			m_setNodeResetPwd.m_pFtNewPwd->setString(STRING_TABLE["second_verify_input_pwd"]);
+			m_setNodeResetPwd.m_pFtConfirmNewPwd->setString(STRING_TABLE["second_verify_input_pwd"]);
+			m_setNodeResetPwd.m_pFtOldPwd->setColor(ccc3(155,155,155));
+			m_setNodeResetPwd.m_pFtNewPwd->setColor(ccc3(155,155,155));
+			m_setNodeResetPwd.m_pFtConfirmNewPwd->setColor(ccc3(155,155,155));
+			m_setNodeResetPwd.m_sOldPwd = "";
+			m_setNodeResetPwd.m_sNewPwd = "";
+			m_setNodeResetPwd.m_sConfirmPwd = "";
+		}
+		break;
+	case SV_Tip_ForceUnlock:
+		break;
+	case SV_Tip_VerifyPwd:
+		{
+			m_setNodeVerifyPwd.m_pFtInputPwd->setString(STRING_TABLE["second_verify_input_pwd"]);
+			m_setNodeVerifyPwd.m_pFtInputPwd->setColor(ccc3(155,155,155));
+			m_setNodeVerifyPwd.m_sRealPwd = "";
+			refreshVerifyFaildNum(SecondVerifyMgr::getInstance()->getInputErrrorCount());
+		}
+		break;
+	case SV_Tip_LockedSys:
+		break;
+	case SV_Tip_CancelForceUnlock:
+		{
+			refreshForceUnlockSysDes();
+		}
+		break;
+	}
+	
+}
+
+void SecondVerifyTipUiLayer::refreshUIByVerifyState()
+{
+	SecondVerifyState t_state = SecondVerifyMgr::getInstance()->getSecondVerifyState();
+	switch (t_state)
+	{
+	case SV_Verify_Seted:
+		{
+			if (m_eCurrentState == SV_Tip_SetSafeQes || m_eCurrentState == SV_Tip_CancelForceUnlock)
+			{
+				SecondVerifyMgr::getInstance()->closeVerifyTipUI();
+			}
+			else if (m_eCurrentState == SV_Tip_VerifyPwd)
+			{
+				initUIBySVTipType(SV_Tip_VerifyPwd);
+			}
+			else if (m_eCurrentState == SV_Tip_ResetPwd)
+			{
+				m_setNodeResetPwd.m_pFtOldPwd->setString(STRING_TABLE["second_verify_input_pwd"]);
+				m_setNodeResetPwd.m_pFtOldPwd->setColor(ccc3(155,155,155));
+				m_setNodeResetPwd.m_sOldPwd = "";
+			}
+		}
+		break;
+	case SV_Verify_Success:
+		{
+			if (m_eCurrentState == SV_Tip_VerifyPwd)
+			{
+				SecondVerifyMgr::getInstance()->closeVerifyTipUI();
+			}
+			else if (m_eCurrentState == SV_Tip_ResetPwd)
+			{
+				m_setNodeResetPwd.m_pFtOldPwd->setString(STRING_TABLE["second_verify_input_pwd"]);
+				m_setNodeResetPwd.m_pFtOldPwd->setColor(ccc3(155,155,155));
+				m_setNodeResetPwd.m_sOldPwd = "";
+			}
+			break;
+		}
+	case SV_Verify_ForceAndSysLocked:
+	case SV_Verify_SysLocked:
+		{
+			if (m_eCurrentState == SV_Tip_VerifyPwd || m_eCurrentState == SV_Tip_ResetPwd)
+				SecondVerifyMgr::getInstance()->openVerifyTipUIByType(SV_Tip_LockedSys);
+		}
+		break;
+	case SV_Verify_ForceUnLock:
+		{
+			if (m_eCurrentState == SV_Tip_ForceUnlock)
+				SecondVerifyMgr::getInstance()->closeVerifyTipUI();
+			else if (m_eCurrentState == SV_Tip_VerifyPwd)
+				initUIBySVTipType(SV_Tip_VerifyPwd);
+		}
+		
+		break;
+	}
+	refreshVerifyFaildNum(SecondVerifyMgr::getInstance()->getInputErrrorCount());
+	refreshForceUnlockSysDes();
+}
+
+void SecondVerifyTipUiLayer::refreshVerifyFaildNum(int num)
+{
+	string t_str = "";
+	safe_sprintf(t_str,STRING_TABLE["second_verify_try_des"],SECOND_VERIFY_TRY_TIMES - num);
+	//m_setNodeVerifyPwd.m_pFtTryNumDes->setString(t_str.c_str());
+	m_setNodeVerifyPwd.m_pExTryNumDes->set_text(t_str.c_str());
+}
+
+void SecondVerifyTipUiLayer::refreshSysLockedDes(int pSecond)
+{
+	string t_str = "";
+	int t_min = pSecond / 60;
+	int t_second = (pSecond % 3600) % 60;
+	safe_sprintf(t_str,STRING_TABLE["second_verify_syslocked_des"],t_min,t_second);
+	m_setNodeLockedSys.m_pLockedDes->set_text(t_str);
+}
+
+void SecondVerifyTipUiLayer::refreshForceUnlockSysDes()
+{
+	tagDWORDTime t_successTime = SecondVerifyMgr::getInstance()->getSuccessForceUnlockTime();
+	tagDWORDTime t_currTime = ServerTime::getInstance()->cal_current_server_dword_time();
+	unsigned int t_second = CalcTimeDiff(t_successTime,t_currTime);
+	if (t_second == (unsigned int) -1) t_second = 0;
+
+	int t_day = t_second / 24 / 3600;	
+	int t_hour = (t_second % (24 * 3600)) / 3600;
+	int t_min = (t_second % 3600)/ 60;
+
+	string t_str = "";
+	safe_sprintf(t_str,STRING_TABLE["second_verify_force_unlocksys_des"],t_day,t_hour,t_min);
+	m_setForceUnlockSys.m_pUnLockedDes->set_text(t_str);
+}
+
+bool SecondVerifyTipUiLayer::onTextFieldAttachWithIME( CCTextFieldTTF *pSender )
+{
+	return false;
+	//return true; 不启动
+}
+
+//当用户进行输入是的回调函数
+bool SecondVerifyTipUiLayer::onTextFieldInsertText( CCTextFieldTTF *pSender, const char* text, int nLen )
+{ 
+	if (strcmp(text," ") == 0) return true;
+
+ 	if (pSender->getCharCount() < MAX_NAME_CHAR_COUNT)
+ 	{
+		return false;
+ 	}
+	else if (strcmp(text,"\n") == 0 && pSender->getCharCount() == MAX_NAME_CHAR_COUNT)
+	{
+		return false;
+	}
+	else
+ 	{
+ 		ToolTip::getInstance()->push(STRING_TABLE["second_verify_question_length_error"]);
+ 		return true;
+ 	}
+}
+
+//当用户关闭虚拟键盘时的回调
+bool SecondVerifyTipUiLayer::onTextFieldDetachWithIME( CCTextFieldTTF * sender )
+{
+	return false;
+	//return true; 不关闭虚拟键盘
+}
+
+//当用户删除文字时的回调
+bool SecondVerifyTipUiLayer::onTextFieldDeleteBackward( CCTextFieldTTF *pSender, const char* text, int nLen )
+{
+// 	if (m_nCurInputNum >= nLen)
+// 	{
+// 		m_nCurInputNum -= nLen;
+// 	}else
+// 	{
+// 		m_nCurInputNum = 0;
+// 	}
+	return false;
+	//return true; 不删除
+}
+
+
+void SecondVerifyTipUiLayer::handleSetPwdNodeTouchEvent(e_TipTouchBgBtnTag pType)
+{
+	if (Tip_Btn_SetPwd_NewPwd ==  pType)
+	{
+		//弹出数字界面
+		m_pKeypadDelegate->setPwdState(true);
+		m_pKeypadDelegate->setTargetLabel(m_stNodeSetPwd.m_pFtNewPwd,&m_stNodeSetPwd.m_sRealNewPwd,STRING_TABLE["second_verify_input_pwd"]);
+		StrNumPadMgr::getInstance()->open();
+		StrNumPadMgr::getInstance()->refreshRandNumNodePos();
+		StrNumPadMgr::getInstance()->attachToDelegate(m_pKeypadDelegate);
+		StrNumPadMgr::getInstance()->setPositionByContent(m_stNodeSetPwd.m_pNewPwdInputFrame);
+	}
+	else if (Tip_Btn_SetPwd_ConfirmPwd ==  pType)
+	{
+		m_pKeypadDelegate->setPwdState(true);
+		m_pKeypadDelegate->setTargetLabel(m_stNodeSetPwd.m_pFtConfirmNewPwd,&m_stNodeSetPwd.m_sConfirmPwd,STRING_TABLE["second_verify_input_pwd"]);//弹出小数字界面
+		StrNumPadMgr::getInstance()->open();
+		StrNumPadMgr::getInstance()->refreshRandNumNodePos();
+		StrNumPadMgr::getInstance()->attachToDelegate(m_pKeypadDelegate);
+		StrNumPadMgr::getInstance()->setPositionByContent(m_stNodeSetPwd.m_pConfirmNewPwdInputFrame);
+	}
+}
+
+void SecondVerifyTipUiLayer::handleSetSafeQesNodeTouchEvent(e_TipTouchBgBtnTag pType)
+{
+	if ( Tip_Btn_SetQues_Mather ==  pType)
+	{
+		m_setNodeSetSafeQes.m_pFieldMotherName->attachWithIME();
+	}
+	else if (Tip_Btn_SetQues_Father ==  pType)
+	{
+		m_setNodeSetSafeQes.m_pFieldFatherName->attachWithIME();
+	}
+}
+
+void SecondVerifyTipUiLayer::handleResetPwdNodeTouchEvent(e_TipTouchBgBtnTag pType)
+{
+	m_pKeypadDelegate->setPwdState(true);
+	StrNumPadMgr::getInstance()->open();
+	StrNumPadMgr::getInstance()->refreshRandNumNodePos();
+
+	if (Tip_Btn_ResetPwd_OldPwd ==  pType)
+	{
+		m_pKeypadDelegate->setTargetLabel(m_setNodeResetPwd.m_pFtOldPwd,&m_setNodeResetPwd.m_sOldPwd,STRING_TABLE["second_verify_input_pwd"]);
+		StrNumPadMgr::getInstance()->attachToDelegate(m_pKeypadDelegate);
+		StrNumPadMgr::getInstance()->setPositionByContent(m_setNodeResetPwd.m_pOldPwdFrame);
+	}
+	else if (Tip_Btn_ResetPwd_NewPwd ==  pType)
+	{
+		m_pKeypadDelegate->setTargetLabel(m_setNodeResetPwd.m_pFtNewPwd,&m_setNodeResetPwd.m_sNewPwd,STRING_TABLE["second_verify_input_pwd"]);
+		StrNumPadMgr::getInstance()->attachToDelegate(m_pKeypadDelegate);
+		StrNumPadMgr::getInstance()->setPositionByContent(m_setNodeResetPwd.m_pNewPwdFrame);
+	}
+	else if (Tip_Btn_ResetPwd_ConfirmPwd ==  pType)
+	{
+		m_pKeypadDelegate->setTargetLabel(m_setNodeResetPwd.m_pFtConfirmNewPwd,&m_setNodeResetPwd.m_sConfirmPwd,STRING_TABLE["second_verify_input_pwd"]);
+		StrNumPadMgr::getInstance()->attachToDelegate(m_pKeypadDelegate);
+		StrNumPadMgr::getInstance()->setPositionByContent(m_setNodeResetPwd.m_pConfirmPwdFrame);
+	}
+}
+
+void SecondVerifyTipUiLayer::handleVerifyPwdNodeTouchEvent(e_TipTouchBgBtnTag pType)
+{
+	m_pKeypadDelegate->setPwdState(true);
+	m_pKeypadDelegate->setTargetLabel(m_setNodeVerifyPwd.m_pFtInputPwd,&m_setNodeVerifyPwd.m_sRealPwd,STRING_TABLE["second_verify_input_pwd"]);
+	StrNumPadMgr::getInstance()->open();
+	StrNumPadMgr::getInstance()->refreshRandNumNodePos();
+	StrNumPadMgr::getInstance()->attachToDelegate(m_pKeypadDelegate);
+	StrNumPadMgr::getInstance()->setPositionByContent(m_setNodeVerifyPwd.m_pInputFrame);
+}
+
+
+void SecondVerifyTipUiLayer::handleSetPwdNodeConfirmBtnPressed()
+{
+	string t_str = m_stNodeSetPwd.m_sRealNewPwd;
+	if (t_str.length() != 6)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["second_verify_pwd_length_error"]);
+		return;
+	}
+
+	if (t_str.compare(m_stNodeSetPwd.m_sConfirmPwd) == 0)
+	{
+		SecondVerifyMgr::getInstance()->openVerifyTipUIByType(SV_Tip_SetSafeQes);
+	}
+	else
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["second_verify_pwd_not_equal"]);
+	}
+}
+
+void SecondVerifyTipUiLayer::handleSetSafeQesNodeConfirmBtnPressed()
+{
+	int t_fatherLen = m_setNodeSetSafeQes.m_pFieldFatherName->getCharCount();
+	int t_motherLen = m_setNodeSetSafeQes.m_pFieldMotherName->getCharCount();
+	bool isValidLen = t_fatherLen >= MIN_NAME_CHAR_COUNT && t_motherLen >= MIN_NAME_CHAR_COUNT 
+		&& t_fatherLen <= MAX_NAME_CHAR_COUNT && t_motherLen <= MAX_NAME_CHAR_COUNT;
+
+	if (isValidLen)
+	{
+		SetSVData pData;
+		pData.m_sPwd1 = m_stNodeSetPwd.m_sRealNewPwd;
+		pData.m_sPwd2 = m_stNodeSetPwd.m_sConfirmPwd;
+		pData.m_sFatherName = m_setNodeSetSafeQes.m_pFieldFatherName->getString();
+		pData.m_sMotherName = m_setNodeSetSafeQes.m_pFieldMotherName->getString();
+		SecondVerifyMgr::getInstance()->send_request_set_verify(pData);
+	}
+	else
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["second_verify_question_length_error"]);
+	}
+}
+
+void SecondVerifyTipUiLayer::handleResetPwdNodeConfirmBtnPressed()
+{
+	ResetSVPwdData pData;
+	pData.oldPwd = m_setNodeResetPwd.m_sOldPwd;
+	pData.newPwd1 = m_setNodeResetPwd.m_sNewPwd;
+	pData.newPwd2 = m_setNodeResetPwd.m_sConfirmPwd;
+	SecondVerifyMgr::getInstance()->send_request_reset_verify_pwd(pData);
+}
+
+void SecondVerifyTipUiLayer::handleForceUnlockNodeConfirmBtnPressed()
+{
+	SecondVerifyMgr::getInstance()->send_request_force_unlock();
+}
+
+void SecondVerifyTipUiLayer::handleVerifyPwdNodeConfirmBtnPressed()
+{
+	if (m_setNodeVerifyPwd.m_sRealPwd.length() != MAX_PWD_NUM_COUNT)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["second_verify_pwd_length_error"]);
+		return;
+	}
+	SecondVerifyMgr::getInstance()->send_request_verify_pwd(m_setNodeVerifyPwd.m_sRealPwd);
+}
+
+void SecondVerifyTipUiLayer::handleLockedSysNodeConfirmBtnPressed()
+{
+	SecondVerifyMgr::getInstance()->closeVerifyTipUI();
+}
+
+void SecondVerifyTipUiLayer::handleForceUnlockSysNodeConfirmBtnPressed()
+{
+	SecondVerifyMgr::getInstance()->send_Request_cancel_force_unlock();
+}
+

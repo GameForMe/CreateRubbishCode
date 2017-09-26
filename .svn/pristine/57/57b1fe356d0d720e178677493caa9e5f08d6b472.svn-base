@@ -1,0 +1,542 @@
+#include "ConcernMgr.h"
+#include "World.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "TCPClient.h"
+#include "RoleHeadUi.h"
+#include "PackageProto.h"
+#include "ToolTip.h"
+#include "ChatMgr.h"
+#include "StringMgr.h"
+
+
+ConcernMgr* ConcernMgr::m_pConcernMgr = NULL;
+
+ConcernMgr::ConcernMgr()
+{
+	//Init();
+}
+
+ConcernMgr::~ConcernMgr()
+{
+	//Destroy();
+}
+
+ConcernMgr* ConcernMgr::getInstance()
+{
+	if (m_pConcernMgr == NULL)
+		m_pConcernMgr = new ConcernMgr();
+	return m_pConcernMgr;
+}
+
+void ConcernMgr::Init()
+{
+	m_pConcernMap.clear();
+	m_pIntervalTime = 0.0;
+
+	TCP_CLIENT->register_net_cmd("NET_SIS_ChongZhi_HongBao_Be_Grab" , this , &ConcernMgr::onServerRechargeBeGrab);
+}
+
+void ConcernMgr::Destroy()
+{
+	m_pConcernMap.clear();
+
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_ChongZhi_HongBao_Be_Grab" , this , &ConcernMgr::onServerRechargeBeGrab);
+}
+
+void ConcernMgr::addData( unsigned int roleId,enumConcernType type,BYTE sex,BYTE vipLevel,const char* name,int count /*= 0*/ )
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if (roleId == player->getId())
+		return;
+	int size = m_pConcernMap.size();
+	ConcernData data = {roleId,type,sex,vipLevel,name,count};
+	if(type == ECT_friend)
+	{
+		data.time = 10.0f;
+	}
+	else
+	{
+		data.time = 6.0f;
+	}
+	if (size < 3)
+	{
+		m_pConcernMap.push_back(data);
+	}
+	else
+	{
+		//m_pConcernMap.pop_front();
+		m_pConcernMap.erase(m_pConcernMap.begin());
+		m_pConcernMap.push_back(data);
+	}
+}
+
+void ConcernMgr::delBackData()
+{
+	int size = m_pConcernMap.size();
+	if (size > 0)
+	{
+		m_pConcernMap.pop_back();
+	}
+}
+
+ConcernData ConcernMgr::getBackData(bool isDel)
+{
+	int size = m_pConcernMap.size();
+	ConcernData data = {(unsigned int)-1,ECT_NoConcern,0,0,"",0,0.0};
+	if (size > 0)
+	{
+		data = m_pConcernMap.back();
+		if (isDel)
+		{
+			m_pConcernMap.pop_back();
+		}
+	}
+	return data;
+}
+
+ConcernData ConcernMgr::getMidData(bool isDel)
+{
+	int size = m_pConcernMap.size();
+	ConcernData data = {(unsigned int)-1,ECT_NoConcern,0,0,"",0,0.0};
+	if (size < 2)
+		return data;
+	if (size == 2)
+	{
+		data = m_pConcernMap.front();
+		if (isDel)
+		{
+			//m_pConcernMap.pop_front();
+			m_pConcernMap.erase(m_pConcernMap.begin());
+		}
+		return data;
+	}
+	if (size == 3)
+	{
+		int count = 1;
+		for (std::vector<ConcernData>::iterator iter = m_pConcernMap.begin();iter != m_pConcernMap.end();++iter,++count)
+		{
+			if (count == 2)
+			{
+				data = (*iter);
+				if (isDel)
+					m_pConcernMap.erase(iter);
+				break;
+			}
+		}
+	}
+	return data;
+}
+
+int ConcernMgr::getSize()
+{
+	return m_pConcernMap.size();
+}
+
+void ConcernMgr::update( float dt )
+{
+	int size = m_pConcernMap.size();
+	if (size <= 0)
+		return;
+	m_pIntervalTime += dt;
+	if (m_pIntervalTime < 0.5f)
+		return;
+	for (std::vector<ConcernData>::iterator iter = m_pConcernMap.begin();iter != m_pConcernMap.end();++iter)
+	{
+		iter->time -= m_pIntervalTime;
+	}
+	for (int i = 0;i < size; ++i)
+	{
+		bool del = false;
+		for (std::vector<ConcernData>::iterator iter = m_pConcernMap.begin();iter != m_pConcernMap.end();++iter)
+		{
+			if (iter->time <= 0.0)
+			{
+				m_pConcernMap.erase(iter);
+				int newSize = m_pConcernMap.size();
+				if (newSize > 0)
+				{
+					ConcernData date = m_pConcernMap.back();
+					RoleHeadUi* ui = World::getInstance()->getRoleHeadUi();
+					if (ui)
+						ui->updateConcern(date.type);
+				}
+				else
+				{
+					RoleHeadUi* ui = World::getInstance()->getRoleHeadUi();
+					if (ui)
+						ui->updateConcern(ECT_NoConcern);
+				}
+				del = true;
+				break;
+			}
+		}
+		if (!del)
+		{
+			break;
+		}
+	}
+	m_pIntervalTime = 0;
+}
+
+unsigned int ConcernMgr::onServerRechargeBeGrab(s_net_cmd *cmd)
+{
+	NET_SIS_ChongZhi_HongBao_Be_Grab* msg =(NET_SIS_ChongZhi_HongBao_Be_Grab*)cmd;
+	if (msg)
+	{
+		wchar_t tempName[X_SHORT_NAME] = {0};
+		memcpy(tempName, msg->name, sizeof(tempName));
+		char temp[512];
+		memset(temp, 0, sizeof(char) * 512);
+		Utf16ToUtf8(tempName, temp, 512, 0);
+		addData(msg->dw_role_id,ECT_hongbao,msg->sex,msg->vipLevel,temp);
+		RoleHeadUi* ui = World::getInstance()->getRoleHeadUi();
+		if (ui)
+			ui->showConcern(ECT_hongbao);
+	}
+	return 0;
+}
+
+void ConcernMgr::delayDestroy()
+{
+	m_pConcernMap.clear();
+}
+
+
+
+//////////////////////////////////////////////////////////////////////////
+
+CelebrateMgr* CelebrateMgr::m_pCelebrateMgr = NULL;
+CelebrateMgr::CelebrateMgr()
+{
+	
+}
+
+CelebrateMgr::~CelebrateMgr()
+{
+	
+}
+
+CelebrateMgr* CelebrateMgr::getInstance()
+{
+	if (m_pCelebrateMgr == NULL)
+		m_pCelebrateMgr = new CelebrateMgr();
+	return m_pCelebrateMgr;
+}
+
+void CelebrateMgr::Init()
+{
+	m_pCelebrateMap.clear();
+	m_pIntervalTime = 10.0f;
+	m_pCelebrateCanShow = true;
+	m_pCelebrateIsShow = false;
+	m_pCanGrabHongBao = true;
+	//TCP_CLIENT->register_net_cmd("NET_SIS_HearSayChannel_Yuanbao" , this , &CelebrateMgr::onServerAddYuanbao);
+	//TCP_CLIENT->register_net_cmd("NET_SIS_HearSayChannel_Level" , this , &CelebrateMgr::onServerLevelUp);
+	TCP_CLIENT->register_net_cmd("NET_SIS_ChongZhi_HongBao" , this , &CelebrateMgr::onServerGrabRecharge);
+}
+
+void CelebrateMgr::Destroy()
+{
+	m_pCelebrateMap.clear();
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_HearSayChannel_Yuanbao" , this , &CelebrateMgr::onServerAddYuanbao);
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_HearSayChannel_Level" , this , &CelebrateMgr::onServerGrabRecharge);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_ChongZhi_HongBao" , this , &CelebrateMgr::onServerGrabRecharge);
+}
+
+void CelebrateMgr::addData( NET_SIS_HearSayChannel* msg  )
+{
+	if (!msg)
+		return;
+	//LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	/*if (msg->stData.dwRoleID == player->getId())
+		return;*/
+	HearSayCelebrateData data;
+	data.hearSay = msg->stData;
+	wchar_t tempName[X_SHORT_NAME] = {0};
+	memcpy(tempName, msg->cBuffer, sizeof(tempName));
+	char temp[128];
+	memset(temp, 0, sizeof(char) * 128);
+	Utf16ToUtf8(tempName, temp, 128, 0);
+	data.name = temp;
+	int size = m_pCelebrateMap.size();
+	if (size < 100)
+	{
+		m_pCelebrateMap.push_back(data);
+	}
+	else
+	{
+		//m_pCelebrateMap.pop_front();
+		m_pCelebrateMap.erase(m_pCelebrateMap.begin());
+		m_pCelebrateMap.push_back(data);
+	}
+}
+
+void CelebrateMgr::addData(unsigned int roleId,unsigned int yuanbao)
+{
+	//LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	//if (roleId == player->getId())
+	//	return;
+	//int size = m_pCelebrateMap.size();
+	//HearSayChannel data = {roleId,yuanbao,0,0,0,0,EHST_ADD_YUANBAO};
+	//if (size < 100)
+	//{
+	//	m_pCelebrateMap.push_back(data);
+	//}
+	//else
+	//{
+	//	m_pCelebrateMap.pop_front();
+	//	m_pCelebrateMap.push_back(data);
+	//}
+}
+
+void CelebrateMgr::delBackData()
+{
+	int size = m_pCelebrateMap.size();
+	if (size > 0)
+	{
+		m_pCelebrateMap.pop_back();
+	}
+}
+
+void CelebrateMgr::delFrontData()
+{
+	int size = m_pCelebrateMap.size();
+	if (size > 0)
+	{
+		//m_pCelebrateMap.pop_front();
+		m_pCelebrateMap.erase(m_pCelebrateMap.begin());
+	}
+}
+
+HearSayCelebrateData* CelebrateMgr::getBackData()
+{
+	int size = m_pCelebrateMap.size();
+	if (size > 0)
+	{
+		return &(m_pCelebrateMap.back());
+	}
+	return NULL;
+}
+
+HearSayCelebrateData* CelebrateMgr::getFrontData()
+{
+	int size = m_pCelebrateMap.size();
+	if (size > 0)
+	{
+		return &(m_pCelebrateMap.front());
+	}
+	return NULL;
+}
+
+void CelebrateMgr::update( float dt )
+{
+	if (!m_pCelebrateCanShow)
+		return;
+	m_pIntervalTime += dt;
+	////////////////5ÃëºóÒþ²Ø1Ãë
+	if (m_pIntervalTime >= 5.0f && m_pIntervalTime < 6.0f)
+	{
+		if (m_pCelebrateIsShow == false)
+			return;
+		RoleHeadUi* ui = World::getInstance()->getRoleHeadUi();
+		if (ui)
+		{
+			ui->showCelebrate(false);
+			m_pCelebrateIsShow = false;
+		}
+	}
+	if (m_pIntervalTime < 6.0f)
+		return;
+	int size = m_pCelebrateMap.size();
+	RoleHeadUi* ui = World::getInstance()->getRoleHeadUi();
+	if (size <= 0)
+	{
+		if (ui)
+		{
+			if (m_pCelebrateIsShow == false)
+				return;
+			ui->showCelebrate(false);
+			m_pCelebrateIsShow = false;
+		}
+		return;
+	}
+	HearSayCelebrateData data = m_pCelebrateMap.front();
+	if (ui)
+	{
+		ui->showCelebrate(&(data.hearSay),data.name);
+		m_pCelebrateIsShow = true;
+	}
+	//m_pCelebrateMap.pop_front();
+	m_pCelebrateMap.erase(m_pCelebrateMap.begin());
+	m_pIntervalTime = 0;
+}
+
+void CelebrateMgr::SysMsgSetCelebrateShow(bool isShow)
+{
+	m_pCelebrateCanShow = isShow;
+}
+
+void CelebrateMgr::Parse_EquipIdent_To_String(NET_SIS_HearSayChannel* msg)
+{
+	if (!msg || !(IS_VALID(msg->stData.dwRoleID)) || !(IS_VALID(msg->stData.dwParam0)))
+		return;
+	if (msg->stData.dwParam1 == 0 || msg->stData.dwParam1 == 1)
+	{
+		addData(msg);
+	}
+}
+
+void CelebrateMgr::Parse_RideUp_To_String(NET_SIS_HearSayChannel* msg)
+{
+	if (!msg || !(IS_VALID(msg->stData.dwRoleID)))
+		return;
+	if (msg->stData.dwParam0 >= 2)
+	{
+		addData(msg);
+	}
+}
+
+void CelebrateMgr::Parse_EquipStrength_To_String(NET_SIS_HearSayChannel* msg)
+{
+	if (!msg || !(IS_VALID(msg->stData.dwRoleID)) || !(IS_VALID(msg->stData.dwParam0)))
+		return;
+	if (msg->stData.dwParam1 == 5 || msg->stData.dwParam1 == 9 || msg->stData.dwParam1 == 13 || msg->stData.dwParam1 == 16)
+	{
+		addData(msg);
+	}
+}
+
+void CelebrateMgr::Parse_Kungfu_To_String(NET_SIS_HearSayChannel* msg)
+{
+	if (!msg || !(IS_VALID(msg->stData.dwRoleID)))
+		return;
+	if (msg->stData.dwParam0 >= 6)
+	{
+		addData(msg);
+		return;
+	}
+}
+
+void CelebrateMgr::Parse_Get_Recharge_Reward_String(NET_SIS_HearSayChannel* msg)
+{
+	if (!msg || !(IS_VALID(msg->stData.dwRoleID)) || !(IS_VALID(msg->stData.dwParam0)))
+		return;
+	addData(msg);
+}
+
+void CelebrateMgr::Parse_EquipFusion_To_String( NET_SIS_HearSayChannel* msg )
+{
+	if (!msg || !(IS_VALID(msg->stData.dwRoleID)) || !(IS_VALID(msg->stData.dwParam0)))
+		return;
+
+	if (msg->stData.dwParam0 == EIQ_Quality5 || msg->stData.dwParam0 == EIQ_Quality4)
+	{
+		addData(msg);
+	}
+}
+
+unsigned int CelebrateMgr::onServerAddYuanbao(s_net_cmd *cmd)
+{
+	//NET_SIS_HearSayChannel_Yuanbao* msg = (NET_SIS_HearSayChannel_Yuanbao*)cmd;
+	//if (msg)
+	//{
+	//	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	//	if (msg->dwRoleID == player->getId())
+	//		return 0;
+	//	int size = m_pCelebrateMap.size();
+	//	HearSayChannel data = {msg->dwRoleID,msg->yuanbao,msg->vipLevel,msg->isVipLevelUp,0,0,EHST_ADD_YUANBAO};
+	//	if (size < 100)
+	//	{
+	//		m_pCelebrateMap.push_back(data);
+	//	}
+	//	else
+	//	{
+	//		m_pCelebrateMap.pop_front();
+	//		m_pCelebrateMap.push_back(data);
+	//	}
+	//}
+	return 0;
+}
+
+unsigned int CelebrateMgr::onServerLevelUp( s_net_cmd *cmd )
+{
+	//NET_SIS_HearSayChannel_Level* msg = (NET_SIS_HearSayChannel_Level*)cmd;
+	//if (msg)
+	//{
+	//	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	//	if (msg->dwRoleID == player->getId())
+	//		return 0;
+	//	int size = m_pCelebrateMap.size();
+	//	HearSayChannel data = {msg->dwRoleID,msg->level,0,0,0,0,EHST_ROLE_LEVELUP};
+	//	if (size < 100)
+	//	{
+	//		m_pCelebrateMap.push_back(data);
+	//	}
+	//	else
+	//	{
+	//		m_pCelebrateMap.pop_front();
+	//		m_pCelebrateMap.push_back(data);
+	//	}
+	//}
+	return 0;
+}
+
+unsigned int CelebrateMgr::onServerGrabRecharge( s_net_cmd *cmd )
+{
+	NET_SIS_ChongZhi_HongBao* msg = (NET_SIS_ChongZhi_HongBao*)cmd;
+	if (msg)
+	{
+		LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+		if (msg->dw_role_id != player->getId())
+		{
+			if (msg->yuanbao != -1 && msg->yuanbao > 0)
+			{
+				CelebrateMgr::getInstance()->setCanGrabHongBao(false);
+				//CCString* str = CCString::createWithFormat("\xE6\x81\xAD\xE5\x96\x9C\xE4\xBD\xA0\xE6\x8A\xA2\xE5\x88\xB0\xE7\xBA\xA2\xE5\x8C\x85\xEF\xBC\x8C\xE8\x8E\xB7\xE5\xBE\x97%d\xE9\x92\xBB\xE7\x9F\xB3",msg->yuanbao);
+				//ToolTip::getInstance()->push(str->getCString());
+				if (msg->isFirst)
+				{
+					int type = rand()%4;
+					ostringstream oss;
+					if (0 == type)
+						oss<<"\xE5\x9C\x9F\xE8\xB1\xAA\xEF\xBC\x8C\xE6\x88\x91\xE4\xBB\xAC\xE5\x8F\xAF\xE4\xBB\xA5\xE5\x81\x9A\xE6\x9C\x8B\xE5\x8F\x8B\xE5\x90\x97\xEF\xBC\x9F";
+					else if (1 == type)
+						oss<<"\xE4\xBD\xA0\xE9\x80\xA0\xE5\x90\x97\xEF\xBC\x9F\xE6\x88\x91\xE5\xB0\xB1\xE5\x96\x9C\xE6\xAC\xA2\xE4\xBD\xA0\xE8\xBF\x99\xE6\xAC\xBE\xE7\x9A\x84\xE3\x80\x82";
+					else if(2 == type)
+						oss<<"\xE6\xA3\x92\xE6\xA3\x92\xE5\x93\x92\xEF\xBC\x8C\xE8\xAE\xA9\xE7\xBA\xA2\xE5\x8C\x85\xE9\xA3\x9E\xE8\xB5\xB7\xE6\x9D\xA5\xE3\x80\x82";
+					else if(3 == type)
+						oss<<"\xE5\x9C\x9F\xE8\xB1\xAA\xEF\xBC\x8C\xE4\xB8\x8D\xE8\xA6\x81\xE8\xB5\xB0\xEF\xBC\x8C\xE6\x8A\x8A\xE7\xBA\xA2\xE5\x8C\x85\xE7\x95\x99\xE4\xB8\x8B\xE3\x80\x82";
+					ChatMgr::getInstance()->Send_Chat(oss.str(), ESCC_SiLiao, msg->dw_role_id);
+				}
+			}
+			else if (msg->yuanbao == 0)
+			{
+				ToolTip::getInstance()->push(GET_STR(9425));
+			}
+			else if (msg->yuanbao == INVALID)
+			{
+				ToolTip::getInstance()->push(GET_STR(9426));
+			}
+		}
+	}
+	return 0;
+}
+
+void CelebrateMgr::delayDestroy()
+{
+	m_pCelebrateMap.clear();
+	m_pIntervalTime = 10.0f;
+	m_pCelebrateCanShow = true;
+	m_pCelebrateIsShow = false;
+}
+
+bool CelebrateMgr::isCanGrabHongBao()
+{
+	return m_pCanGrabHongBao;
+}
+
+void CelebrateMgr::setCanGrabHongBao( bool isCan )
+{
+	m_pCanGrabHongBao = isCan;
+}

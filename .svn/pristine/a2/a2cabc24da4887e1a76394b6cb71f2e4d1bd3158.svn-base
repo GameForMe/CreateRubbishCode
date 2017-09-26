@@ -1,0 +1,274 @@
+#include "BoundingUi.h"
+#include "BoundingUi.h"
+//#include "AudioPlayer.h"
+#include "CfgReader.h"
+#include "CrossSceneUI.h"
+#include "Login.h"
+#include "RegisterUi.h"
+#include "UiTools.h"
+#include "UiManager.h"
+
+using namespace cocos2d::extension;
+
+//test
+//#include "AnimationCache.h"
+//#include "Player.h"
+//
+//class LoginInputDelegate : public CCTextFieldDelegate
+//{
+//public:
+//	LoginInputDelegate()
+//		: _pwd(false)
+//
+//	virtual bool onTextFieldInsertText(CCTextFieldTTF * sender, const char * text, int nLen)
+//	{
+//
+//	}
+//
+//	virtual bool onTextFieldDeleteBackward(CCTextFieldTTF * sender, const char * delText, int nLen)
+//	{
+//
+//	}
+//	
+//private:
+//	bool _pwd;
+//	std::string str;
+//};
+
+bool BoundingUi::init()
+{
+	_username = NULL;
+	_password = NULL;
+
+	//AudioPlayer::getSigletonPtr()->playerMusic(AM_BACKGROUND);
+
+	if(!CCLayer::init())
+		return false;
+
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("BoundingUiLoaderLayer", BoundingUiLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode * node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "boundingui.ccbi").c_str());
+	ccbReader->release();
+	if(node != NULL) {
+		setPositionX(getPositionX() + UiMgr::getInstance()->getOffsetX());
+		setPositionY(getPositionY() + UiMgr::getInstance()->getOffsetY());
+
+		addChild(node);
+		node->setTag(0);
+		_usernameNode = node->getChildByTag(1);
+		_pwdNode = node->getChildByTag(2);
+
+		CC_ASSERT(_usernameNode != NULL && _pwdNode != NULL);
+		_usernameLength = _usernameNode->getContentSize().width;
+		_pwdLength = _pwdNode->getContentSize().width;
+
+		ccColor3B textColor;
+		textColor.r = 0;
+		textColor.g = 0;
+		textColor.b = 0;
+
+		if(_usernameNode != NULL)
+		{
+			//const CCSize &size = userNode->getContentSize();
+			//const CCPoint &pos = userNode->getPosition();
+			//_username = CCTextFieldTTF::textFieldWithPlaceHolder("", size, kCCTextAlignmentLeft, "Simhei", size.height - 4);
+			//_username->setPosition(pos);
+			//_username->setAnchorPoint(ccp(0.5f, 0.5f));
+			//_username->setContentSize(size);
+			//_username->setColor(textColor);
+			//_username->setVerticalAlignment(kCCVerticalTextAlignmentCenter);
+			_username = createInputWithContent(_usernameNode, 15, false);
+			addChild(_username);
+		}
+		if(_pwdNode != NULL)
+		{
+			//const CCSize &size = passwordNode->getContentSize();
+			//const CCPoint &pos = passwordNode->getPosition();
+			//_password = CCTextFieldTTF::textFieldWithPlaceHolder("", size, kCCTextAlignmentLeft, "Simhei", size.height - 4);
+			//_password->setPosition(pos);
+			//_password->setAnchorPoint(ccp(0.5f, 0.5f));
+			//_password->setContentSize(size);
+			//_password->setColor(textColor);
+			//_password->setVerticalAlignment(kCCVerticalTextAlignmentCenter);
+			_password = createInputWithContent(_pwdNode, 15, false);
+			//_password->setSecureTextEntry(true);
+			addChild(_password);
+		}
+		((BoundingLoaderLayer *)node)->signalonBoundingBtnPressed.connect(this, &BoundingUi::onBoudingBtnPressed);
+		((BoundingLoaderLayer *)node)->signalonBackBtnPressed.connect(this, &BoundingUi::onBackBtnPressed);
+		//test
+		//((CCTextFieldTTF*)_username)->setString("test225");
+		//((CCTextFieldTTF*)_password)->setString("111111");
+
+		return true;
+	}
+	return false;
+}
+
+bool BoundingUi::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (!isVisible() || !isRunning() || !hasVisibleParents())
+	{
+		return false;
+	}
+	if(isTouchOnNodeContent(_usernameNode, pTouch))
+	{
+		_username->attachWithIME();
+		return true;
+	}
+	else if(isTouchOnNodeContent(_pwdNode, pTouch))
+	{
+		_password->attachWithIME();
+		return true;
+	}
+
+	return false;
+}
+
+void BoundingUi::onEnter()
+{
+//	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0,false);
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+	schedule(SEL_SCHEDULE(&BoundingUi::update), 0.2);
+}
+
+void BoundingUi::onExit()
+{
+//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+	unschedule(SEL_SCHEDULE(&BoundingUi::update));
+}
+
+
+void BoundingUi::onBoudingBtnPressed()
+{
+	//绑定账号;
+	signalonBoundingBtnPressed.emit();
+}
+
+
+void BoundingUi::onBackBtnPressed()
+{
+	signalonBackBtnPressed.emit();
+}
+
+
+const char * BoundingUi::getUserName()
+{
+	CC_ASSERT(_username != NULL);
+	return _username->getString();
+} 
+
+const char * BoundingUi::getPassword()
+{
+	CC_ASSERT(_password != NULL);
+	return _password->getString();
+}
+
+void BoundingUi::update( float dt )
+{
+	CCControlButton *btn = static_cast<CCControlButton*>(getChildByTag(0)->getChildByTag(3));
+	if(_password->getCharCount() == 0 ||
+		_username->getCharCount() == 0)
+	{
+		btn->setEnabled(false);
+	}
+	else
+	{
+		btn->setEnabled(true);
+	}
+
+	if(_password->getCharCount() != 0 && !_password->isSecureTextEntry())
+	{
+		std::string pwd = _password->getString();
+		_password->setSecureTextEntry(true);
+		_password->setString(pwd.c_str());
+	}
+
+	//显示设置字体大小
+	//if(_username->getContentSize().width > _usernameLength)
+	//{
+	//	float fontSize = _username->getFontSize();
+	//	if(fontSize > 5)
+	//	{
+	//		_username->setFontSize(fontSize - 5);
+	//	}
+	//}
+
+	//if(_password->getContentSize().width > _pwdLength)
+	//{
+	//	float fontSize = _password->getFontSize();
+	//	if(fontSize > 5)
+	//	{
+	//		_password->setFontSize(fontSize - 5);
+	//	}
+	//}
+}
+
+void BoundingUi::setUserName( const std::string &userName )
+{
+	_username->setString(userName.c_str());
+}
+
+void BoundingUi::setPassword( const std::string &password )
+{
+	_password->setString(password.c_str());
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler BoundingLoaderLayer ::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL; 
+}
+
+cocos2d::extension::SEL_CCControlHandler BoundingLoaderLayer ::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBoundingBtnPressed", BoundingLoaderLayer ::onBoundingBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBackBtnPressed", BoundingLoaderLayer ::onBackBtnPressed);
+	return NULL;
+}
+
+bool BoundingLoaderLayer ::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+
+void BoundingLoaderLayer ::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	//_test = CCSprite::create();
+	//addChild(_test);
+	//_test->setAnchorPoint(ccp(0.f, 1.0f));
+	//_test->setPosition(ccp(400, 240));
+
+	//std::vector<BSAnimation*>animation = AnimationCache::getInstance()->getPlayerAnis(0, "female");
+	//_testAnim = BSAnimate::create(animation[PA_ATTACK]);
+	//_testAnim->retain();
+
+	return;
+}
+
+void BoundingLoaderLayer ::onBoundingBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//绑定账号;
+	signalonBoundingBtnPressed.emit();
+}
+
+void BoundingLoaderLayer ::onBackBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	signalonBackBtnPressed.emit();
+}
+
+
+BoundingLoaderLayer ::~BoundingLoaderLayer ()
+{
+
+}
+
+BoundingLoaderLayer ::BoundingLoaderLayer ()
+{
+
+}

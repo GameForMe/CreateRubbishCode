@@ -1,0 +1,3365 @@
+#include "BusinessUi.h"
+#include "World.h"
+#include "UiTools.h"
+#include "UiLoader.h"
+#include "ItemNode.h"
+#include "KaifuHuodongMgr.h"
+#include "Helper.h"
+#include "StringMgr.h"
+#include "QuestMgr.h"
+#include "GameEventDefine.h"
+#include "TCPClient.h"
+#include "f_string_table.h"
+#include "DropDragDelegate.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ToolTip.h"
+#include "WorldPacket.h"
+#include "BossPKMgr.h"
+#include "CommonMsgDefine.h"
+#include "RewardQuestMgr.h"
+#include "ListControl.h"
+#include "CommonClient.h"
+#include "GongFa2Tip.h"
+#include "UIUtil.h"
+#include "PlacardManager.h"
+
+BusinessUi::BusinessUi()
+{
+
+}
+
+BusinessUi::~BusinessUi()
+{
+
+}
+
+CCNode * BusinessUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["KaifuhuodongUiLayer"] = UiNodeLoader<BusinessUiLayer>::loader();
+	nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("huodongzhongxin", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+BusinessUiLayer * BusinessUi::getUiLayer()
+{
+	return getUiNodeByTag<BusinessUiLayer>(WCT_BusinessUi);
+}
+
+void BusinessUi::updateData()
+{
+	BusinessUiLayer * pLayer = getUiLayer();
+	if (pLayer)
+	{
+		pLayer->updateData();
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+BusinessUiLayer::BusinessUiLayer()
+	:m_SelectItem(NULL)
+	,m_leichongLayer(NULL)
+	,m_leixiaoLayer(NULL)
+	,m_xianshiLayer(NULL)
+	,m_nowSelectNodeTag(INVALID)
+	,m_guoguanLayer(NULL)
+	,m_xilianLayer(NULL)
+	,m_loadSprite(NULL)
+{
+
+}
+
+BusinessUiLayer::~BusinessUiLayer()
+{
+	if(m_verticalList != NULL)
+	{
+		m_verticalList->clear();
+		delete m_verticalList;
+		m_verticalList = NULL;
+	}
+}
+
+cocos2d::SEL_MenuHandler BusinessUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler BusinessUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", BusinessUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onhelpBtnPressed", BusinessUiLayer::onhelpBtnPressed);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onokBtnPressed", BusinessUiLayer::onokBtnPressed);
+	return NULL;
+}
+
+void BusinessUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_pMainNode = getChildByTag(Business_Frame);
+	CC_ASSERT(m_pMainNode != NULL);
+	m_pBiaoQian = m_pMainNode->getChildByTag(Business_LeftFrame);
+	m_pRightMainNode = m_pMainNode->getChildByTag(Business_RightFrame);
+
+	//m_descFrame = dynamic_cast<FrameSprite*>(m_pMainNode->getChildByTag(Business_DescFrame));
+	//m_descFrame->retain();
+	//m_descFrame->removeFromParent();
+
+	m_BiaoQianScrol = CCScrollView::create(CCSize(m_pBiaoQian->getContentSize().width, m_pBiaoQian->getContentSize().height - 5));//向下调整位置
+	m_pBiaoQian->addChild(m_BiaoQianScrol);
+
+	m_BiaoQianContainer = CCNode::create();
+	m_BiaoQianContainer->setContentSize(m_pBiaoQian->getContentSize());
+
+	m_BiaoQianScrol->setContainer(m_BiaoQianContainer);
+	m_BiaoQianScrol->setTouchEnabled(true);
+	m_BiaoQianScrol->setBounceable(true);
+	m_BiaoQianScrol->setContentSize(m_BiaoQianContainer->getContentSize());
+	m_BiaoQianScrol->setDirection(kCCScrollViewDirectionVertical);
+	m_BiaoQianScrol->setContentOffset(m_BiaoQianScrol->minContainerOffset());
+
+	m_verticalList = new VerticalList<BusinessItem>;
+	m_verticalList->addToScrollView(m_BiaoQianScrol);
+	m_verticalList->setMinSize(m_pBiaoQian->getContentSize());
+	m_verticalList->setEnableSelect(true);
+
+	addDesNode();
+	selectDesNode(Business_DesNULL);
+	setLoadingImage();
+	m_loadSprite->setVisible(true);
+	//updateData();
+}
+
+void BusinessUiLayer::onEnter()
+{
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	//setAllChildernButtonEnable(this,0);
+	//setAllChildernButtonEnable(this,true);
+	setAllChildernButtonPriority(this,0);
+	CCLayer::onEnter();
+	//REGISTER_EVENT(CLEARLIST,BusinessUiLayer,updateAllData);
+	REGISTER_EVENT(CHANGEBUSINESSRANKLIST,BusinessUiLayer,updateAllItem);
+}
+
+void BusinessUiLayer::onExit()
+{
+	CCLayer::onExit();
+	//UNREGISTER_EVENT(CLEARLIST,BusinessUiLayer,updateAllData);
+	UNREGISTER_EVENT(CHANGEBUSINESSRANKLIST,BusinessUiLayer,updateAllItem);
+	//CC_SAFE_RELEASE(m_descFrame);
+}
+
+void BusinessUiLayer::updateAllItem(CHANGEBUSINESSRANKLIST* trans)
+{
+	updateData();
+	m_loadSprite->setVisible(false);
+}
+
+void BusinessUiLayer::setLoadingImage()
+{
+	if (NULL == m_pMainNode)
+	{
+		return;
+	}
+	CCSize size = m_pMainNode->getContentSize();
+	if (NULL == m_loadSprite )
+	{
+		m_loadSprite = CCSprite::create("Art/ICON/SingleUI/loading.png");
+		m_loadSprite->setPosition(ccp(size.width/2,size.height/2));
+		m_loadSprite->setAnchorPoint(ccp(0.5,0.5));
+
+		CCRotateBy* rotate = CCRotateBy::create(2,360);
+		m_loadSprite->runAction(CCRepeatForever::create(rotate));
+		m_loadSprite->setVisible(false);
+		m_pMainNode->addChild(m_loadSprite);
+	}
+}
+
+bool BusinessUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (!isVisible() || !hasVisibleParents() || !isRunning())
+	{
+		return false;
+	}
+	if (isTouchOnNodeContent(m_pMainNode, pTouch))
+	{
+		m_touchBegin = m_pMainNode->convertTouchToNodeSpace(pTouch);
+		return true;
+	}
+	m_touchBegin = ccp(0.f, 0.f);
+
+	return true;
+}
+
+void BusinessUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint touchEndPoint = m_pMainNode->convertTouchToNodeSpace(pTouch);
+	if(ccpDistance(m_touchBegin, touchEndPoint) <= TOUCH_MOVE_DIS)
+	{
+		if (isTouchOnNodeContent(m_pBiaoQian, pTouch))
+		{
+			m_verticalList->onTouch(pTouch);
+		} 
+
+	}
+}
+
+void BusinessUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_BusinessUi);
+}
+
+void BusinessUiLayer::onhelpBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	PlacardManager::getInstance()->open_placard_node(13);
+	//GongFaHelp * help=GongFaHelp::openUi();
+	//help->setData(STRING_TABLE["huodongzhongxin_help_text"]);
+	//help->titleChangeFrame("help_huodongshuoming");
+}
+
+// void BusinessUiLayer::onokBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+// {
+// // 	CC_ASSERT(m_descFrame != NULL);
+// // 	m_descFrame->setTouchEnable(false);
+// // 	m_descFrame->removeFromParent();
+// // 	m_descFrame->setVisible(false);
+// 	//	DropDragDelegate::getInstance()->addDropLayer(this);
+// }
+
+void BusinessUiLayer::updateData()
+{
+	m_verticalList->clear();
+	const std::list<SPacket_YunYing_Activity>& activityList = KaifuHuodongMgr::getInstance()->getYunyingActList();
+	std::map<int,YunYing_Rank_Act>& rankList =KaifuHuodongMgr::getInstance()->getYunyingRankMap();
+	std::map<int,YunYing_Rank_Act>::iterator rankIt = rankList.begin();
+	if(activityList.size() <= 0 && rankList.size()<=0 )
+	{
+		selectDesNode(Business_DesNULL);
+		return;
+	}
+
+	auto it = activityList.begin();
+	for (; it != activityList.end(); it++)
+	{
+		const SPacket_YunYing_Activity* temp = &(*it);
+		BusinessItem* item = new BusinessItem;
+		item->setData(temp, this);
+		item->updateDataListItem();
+		m_verticalList->addItem(item);
+	}
+// 	m_verticalList->setSelectItem(0);
+// 	m_verticalList->updateDisplay();
+// 	m_BiaoQianScrol->setContentOffset(m_BiaoQianScrol->minContainerOffset());	
+//}
+
+ 	for (; rankIt!=rankList.end();++rankIt)
+ 	{
+ 		YunYing_Rank_Act temp=(*rankIt).second;
+ 		BusinessItem* item = new BusinessItem;
+ 		item->setData(temp, this);
+ 		item->updateDataListItem();
+ 		m_verticalList->addItem(item);
+ 	}
+// 	if (m_verticalList->getItem(m_verticalList->getSelect()) == NULL)
+// 	{
+// 		m_verticalList->setSelectItem(0);
+// 	}
+// 	if ( -1 == m_verticalList->getSelect() )
+// 	{
+// 		m_verticalList->setSelectItem(0);
+// 	}
+	m_verticalList->setSelectItem(0);
+	m_verticalList->updateDisplay();
+	m_BiaoQianScrol->setContentOffset(m_BiaoQianScrol->minContainerOffset());
+}
+
+void BusinessUiLayer::updateAllData(CLEARLIST* rec)
+{
+	m_loadSprite->setVisible(true);
+}
+
+void BusinessUiLayer::setSelectActivity(int m_iId, BusinessItem* item)
+{
+	SPacket_YunYing_Activity* pPackageInfo = KaifuHuodongMgr::getInstance()->getYunyingPacketActivity(m_iId);
+	m_SelectItem = item;
+	if(pPackageInfo != NULL && m_SelectItem)
+	{
+		m_SelectItem->updateDataListItem();
+	}
+	SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(m_iId);
+	if(pInfo != NULL)
+	{
+		if(pInfo->actType == EOSAT_Activity_Shop)
+		{
+			m_nowSelectNodeTag = Business_DesTypeXianshi;
+		}
+		else if(IsActRank(pInfo->actType))
+		{
+			m_nowSelectNodeTag = Business_DesTypeLeiXiao;
+		}
+		else if (pInfo->actType == EOSAT_Activity_Text)
+		{
+			m_nowSelectNodeTag = Business_DesTypeWenzi;
+		}
+		else if (pInfo->actType == EOSAT_Activity_Login)
+		{
+			m_nowSelectNodeTag = Business_DesTypeLeiLogin;
+		}
+		else if (pInfo->actType == EOSAT_Activity_KillBoos)
+		{
+			m_nowSelectNodeTag = Business_DesTypeGuoGuan;
+		}
+		else if (pInfo->actType == EOSAT_Activity_XiLian)
+		{
+			m_nowSelectNodeTag = Business_DesTypeXiLian;
+		}
+		else if (pInfo->actType == EOSAT_Activity_XuanShang)
+		{
+			m_nowSelectNodeTag = Business_DesTypeGuoGuan;
+		}
+		else if (pInfo->actType == EOSAT_Activity_GuanQia)
+		{
+			m_nowSelectNodeTag = Business_DesTypeGuoGuan;
+		}
+		else
+		{
+			if ( 4 == pInfo->score_clear )
+			{
+				m_nowSelectNodeTag = Business_DesTypeLeiLogin;
+			}
+			else
+			{
+				m_nowSelectNodeTag = Business_DesTypeLeiChong;
+			}
+		}
+		selectDesNode(m_nowSelectNodeTag);
+		updateSelItemData(m_nowSelectNodeTag, m_iId);
+	}
+}
+
+void BusinessUiLayer::updateReceiveRewardBtnState()
+{
+	if (m_SelectItem)
+	{
+		m_SelectItem->updateDataListItem();
+		if(m_nowSelectNodeTag == Business_DesTypeXianshi)
+		{
+			m_xianshiLayer->updateItemState();
+		}
+		else if (m_nowSelectNodeTag == Business_DesTypeLeiLogin)
+		{
+			m_leiloginLayer->updateItemState();
+		} 
+		else if (m_nowSelectNodeTag == Business_DesTypeGuoGuan)
+		{
+			m_guoguanLayer->updateItemState();
+		}
+		else if (m_nowSelectNodeTag == Business_DesTypeXiLian)
+		{
+			m_xilianLayer->updateItemState();
+		}
+		else
+		{
+			m_leichongLayer->updateItemState();
+		}
+	}
+}
+
+void BusinessUiLayer::addDesNode()
+{
+	std::string ccbName;
+	std::string ccbNodeName;
+	CCPoint rightPos = m_pRightMainNode->convertToWorldSpace(ccp(0.f, 0.f));
+	for(int ccbIdx = Business_DesTypeLeiChong; ccbIdx <= Business_DesTypeXiLian; ++ccbIdx)
+	{
+		if(ccbIdx == Business_DesTypeLeiChong)
+		{
+			ccbName = "huodongzhongxinleichong";
+			ccbNodeName = "huodongzhongxinleichongUiLayer";
+		}
+		else if(ccbIdx == Business_DesTypeLeiXiao)
+		{
+			ccbName = "huodongzhongxinleixiao";
+			ccbNodeName = "huodongzhongxinleixiaoUiLayer";
+		}
+		else if (ccbIdx == Business_DesTypeWenzi)
+		{
+			ccbName = "huodongzhongwenzi";
+			ccbNodeName = "huodongzhongwenziUiLayer";
+		}
+		else if (ccbIdx == Business_DesTypeLeiLogin)
+		{
+			ccbName = "huodongzhongxinleichong";
+			ccbNodeName = "huodongzhongxinleichongUiLayer";
+		}
+		else if (ccbIdx == Business_DesTypeGuoGuan)
+		{
+			ccbName = "huodongzhongxinguoguan";
+			ccbNodeName = "huodongzhongxinguoguanUiLayer";
+		}
+		else if (ccbIdx == Business_DesTypeXiLian)
+		{
+			ccbName = "huodongzhongxinxilian";
+			ccbNodeName = "huodongzhongxinxilianUiLayer";
+		}
+		else
+		{
+			ccbName = "huodongzhongxinxianshi";
+			ccbNodeName = "huodongzhongxinxianshiUiLayer";
+		}
+		if(!ccbName.empty() && !ccbNodeName.empty() && m_pMainNode != NULL)
+		{
+			std::string strFullPath  = CFGReader::instance()->get_ui_ccbi_filepath(ccbName);
+
+			CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+			if(ccbIdx == Business_DesTypeLeiChong)
+			{
+				ccNodeLoaderLibrary->registerCCNodeLoader(ccbNodeName.c_str(), UiLayerLoader<BusinessLeichongLayer>::loader());
+			}
+			else if(ccbIdx == Business_DesTypeLeiXiao)
+			{
+				ccNodeLoaderLibrary->registerCCNodeLoader(ccbNodeName.c_str(), UiLayerLoader<BusinessLeixiaoRankLayer>::loader());
+				ccNodeLoaderLibrary->registerCCNodeLoader("ListControl", ListControlLoader::loader());
+			}
+			else if(ccbIdx == Business_DesTypeWenzi)
+			{
+				ccNodeLoaderLibrary->registerCCNodeLoader(ccbNodeName.c_str(), UiLayerLoader<BusinessWenziLayer>::loader());
+			}
+			else if (ccbIdx == Business_DesTypeLeiLogin)
+			{
+				ccNodeLoaderLibrary->registerCCNodeLoader(ccbNodeName.c_str(), UiLayerLoader<BusinessLeiLoginLayer>::loader());
+			}
+			else if (ccbIdx == Business_DesTypeGuoGuan)
+			{
+				ccNodeLoaderLibrary->registerCCNodeLoader(ccbNodeName.c_str(), UiLayerLoader<BusinessGuoGuanLayer>::loader());
+			}
+			else if (ccbIdx == Business_DesTypeXiLian)
+			{
+				ccNodeLoaderLibrary->registerCCNodeLoader(ccbNodeName.c_str(), UiLayerLoader<BusinessXiLianLayer>::loader());
+			}
+			else
+			{
+				ccNodeLoaderLibrary->registerCCNodeLoader(ccbNodeName.c_str(), UiLayerLoader<BusinessXianshiLayer>::loader());
+			}
+			cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+			CCNode * node = ccbReader->readNodeGraphFromFile(strFullPath.c_str());
+
+			if(node != NULL)
+			{
+				if(ccbIdx == Business_DesTypeLeiChong)
+				{
+					m_leichongLayer = dynamic_cast<BusinessLeichongLayer*>(node);
+					m_leichongLayer->setMainBottomPos(rightPos);
+					this->addChild(m_leichongLayer, 2, Business_DesTypeLeiChong);
+				}
+				else if(ccbIdx == Business_DesTypeLeiXiao)
+				{
+					m_leixiaoLayer = dynamic_cast<BusinessLeixiaoRankLayer*>(node);
+					m_leixiaoLayer->setMainBottomPos(rightPos);
+					this->addChild(m_leixiaoLayer, 2, Business_DesTypeLeiXiao);
+				}
+				else if (ccbIdx == Business_DesTypeWenzi)
+				{
+					m_wenziLayer = dynamic_cast<BusinessWenziLayer*>(node);
+					m_wenziLayer->setMainBottomPos(rightPos);
+					this->addChild(m_wenziLayer,2,Business_DesTypeWenzi);
+				}
+				else if (ccbIdx == Business_DesTypeLeiLogin)
+				{
+					m_leiloginLayer=dynamic_cast<BusinessLeiLoginLayer*>(node);
+					m_leiloginLayer->setMainBottomPos(rightPos);
+					this->addChild(m_leiloginLayer, 2, Business_DesTypeLeiLogin);
+				}
+				else if (ccbIdx == Business_DesTypeGuoGuan)
+				{
+					m_guoguanLayer = dynamic_cast<BusinessGuoGuanLayer*>(node);
+					m_guoguanLayer->setMainBottomPos(rightPos);
+					this->addChild(m_guoguanLayer, 2, Business_DesTypeGuoGuan);
+				}
+				else if (ccbIdx == Business_DesTypeXiLian)
+				{
+					m_xilianLayer = dynamic_cast<BusinessXiLianLayer*>(node);
+					m_xilianLayer->setMainBottomPos(rightPos);
+					this->addChild(m_xilianLayer, 2, Business_DesTypeXiLian);
+				}
+				else
+				{
+					m_xianshiLayer = dynamic_cast<BusinessXianshiLayer*>(node);
+					m_xianshiLayer->setMainBottomPos(rightPos);
+					this->addChild(m_xianshiLayer, 2, Business_DesTypeXianshi);
+				}
+			}
+			ccbReader->release();
+		}
+	}
+}
+
+void BusinessUiLayer::selectDesNode(int typeIdx)
+{
+	m_leichongLayer->setVisibleAndTouch(typeIdx == Business_DesTypeLeiChong);
+	m_leixiaoLayer->setVisibleAndTouch(typeIdx == Business_DesTypeLeiXiao);
+	m_xianshiLayer->setVisibleAndTouch(typeIdx == Business_DesTypeXianshi);
+	m_wenziLayer->setVisibleAndTouch(typeIdx == Business_DesTypeWenzi);
+	m_leiloginLayer->setVisibleAndTouch(typeIdx == Business_DesTypeLeiLogin);
+	m_guoguanLayer->setVisibleAndTouch(typeIdx == Business_DesTypeGuoGuan);
+	m_xilianLayer->setVisibleAndTouch(typeIdx == Business_DesTypeXiLian);
+}
+
+void BusinessUiLayer::updateSelItemData(int typeIdx, int m_iId)
+{
+	if(typeIdx == Business_DesTypeLeiChong)
+	{
+		m_leichongLayer->updateShowData(m_iId);
+	}
+	else if(typeIdx == Business_DesTypeLeiXiao)
+	{
+		m_leixiaoLayer->updateShowData(m_iId);
+	}
+	else if (typeIdx == Business_DesTypeWenzi)
+	{
+		m_wenziLayer->updateShowData(m_iId);
+	}
+	else if (typeIdx == Business_DesTypeLeiLogin)
+	{
+		m_leiloginLayer->updateShowData(m_iId);
+	}
+	else if (typeIdx == Business_DesTypeGuoGuan)
+	{
+		m_guoguanLayer->updateShowData(m_iId);
+	}
+	else if (typeIdx == Business_DesTypeXiLian)
+	{
+		m_xilianLayer->updateShowData(m_iId);
+	}
+	else
+	{
+		m_xianshiLayer->updateShowData(m_iId);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+BusinessItem::BusinessItem()
+{
+	m_pLayer = NULL;
+	_marginH = 7.0f;
+	m_data=0;
+}
+
+BusinessItem::~BusinessItem()
+{
+
+}
+
+void BusinessItem::onTouch(CCTouch *touck)
+{
+
+}
+
+void BusinessItem::onSelectChanged(bool select)
+{
+	CCSpriteFrame* spFrame;
+	if(!select){
+		spFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("huodongzhongxin_tongyongbtnn");
+	}else{
+		spFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("huodongzhongxin_tongyongbtnh");
+	}
+	if(spFrame)
+		m_titleSP->setDisplayFrame(spFrame);
+
+	if(select && m_pLayer){
+		m_pLayer->setSelectActivity(m_data, this);
+	}
+}
+
+CCSize BusinessItem::getContentSize()
+{
+	if(m_titleSP){
+		return CCSize(m_titleSP->getContentSize().width, m_titleSP->getContentSize().height * 0.95);
+	}
+
+	return CCSize(0.f, 0.f);
+}
+
+void BusinessItem::setData(const YunYing_Rank_Act &data, BusinessUiLayer* layer)
+{
+	m_data =data.nActID;
+	m_pLayer = layer;
+
+	CCSpriteFrame* spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("huodongzhongxin_tongyongbtnn");
+	CC_ASSERT(spriteFrame);
+	m_titleSP = CCSprite::createWithSpriteFrame(spriteFrame);
+
+	_node->setContentSize(m_titleSP->getContentSize());
+	_node->setAnchorPoint(ccp(0,1.0f));
+
+	UIUtil::childNodeAlign(_node,m_titleSP,eha_center,eva_center,CCPointZero);
+
+	TTFConfig configTemp;
+	configTemp.fontFilePath = FT_FONTFACE;
+	configTemp.fontSize = 18;
+	configTemp.outlineSize = 1;
+
+	m_titleLab = LabelFT::createWithTTF(configTemp, "");
+
+	SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(m_data);
+	if(pInfo && m_titleLab){
+		m_titleLab->setString(pInfo->name.c_str());
+	}
+	UIUtil::childNodeAlign(_node,m_titleLab,eha_center,eva_center,CCPointZero);
+}
+
+void BusinessItem::setData(const SPacket_YunYing_Activity* data, BusinessUiLayer* layer)
+{
+	m_data = (*data).m_iId;
+	m_pLayer = layer;
+
+	CCSpriteFrame* spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("huodongzhongxin_tongyongbtnn");
+	CC_ASSERT(spriteFrame);
+	m_titleSP = CCSprite::createWithSpriteFrame(spriteFrame);
+
+	_node->setContentSize(m_titleSP->getContentSize());
+	_node->setAnchorPoint(ccp(0,1.0f));
+	UIUtil::childNodeAlign(_node,m_titleSP,eha_center,eva_center,CCPointZero);
+
+	TTFConfig configTemp;
+	configTemp.fontFilePath = FT_FONTFACE;
+	configTemp.fontSize = 18;
+	configTemp.outlineSize = 1;
+
+	m_titleLab = LabelFT::createWithTTF(configTemp, "");
+
+	SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(m_data);
+	if(m_titleSP && pInfo)
+	{
+		E_Activity_Recommend actRecommend = pInfo->reconmmend;
+		if(actRecommend > EAR_Not && actRecommend < EAR_End)
+		{
+			CCSprite* actTypeSP = CCSprite::create();
+			CCSpriteFrame* actTypeFrame;
+			if(actRecommend == EAR_Recommend) //三种类型，1推荐，2超值，3限时
+			{
+				actTypeFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("huodongzhongxin_tuijian");
+			}
+			else if(actRecommend == EAR_ChaoZhi)
+			{
+				actTypeFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("huodongzhongxin_chaozhi");
+			}
+			else
+			{
+				actTypeFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("huodongzhongxin_xianshi");
+			}
+			if(actTypeFrame)
+			{
+				actTypeSP->setDisplayFrame(actTypeFrame);
+				UIUtil::childNodeAlign(_node,actTypeSP,eha_left,eva_top,CCPointZero);
+			}
+		}
+	}
+	if(pInfo && m_titleLab){
+		m_titleLab->setString(pInfo->name.c_str());
+	}
+	UIUtil::childNodeAlign(_node,m_titleLab,eha_center,eva_center,CCPointZero);
+}
+
+float BusinessItem::getItemHeight()
+{
+	return (ListItem::getItemHeight() * 0.95);
+}
+
+void BusinessItem::updateDataListItem()
+{
+	SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(m_data);
+	SPacket_YunYing_Activity* pPacketInfo = KaifuHuodongMgr::getInstance()->getYunyingPacketActivity(m_data);
+	if (pInfo && pPacketInfo){
+		for (size_t i = 0;i < pInfo->m_ActivityItem_VecProto.size();i++) {
+			if (pPacketInfo->byData[i].m_iValue == 1){
+				//可以领取
+				World::getInstance()->SetHighLight(m_titleSP, WT_CCSPRITE, WCT_BusinessUi, 0, true, 120, 22);
+				return;
+			}
+		}
+		World::getInstance()->SetHighLight(m_titleSP, WT_CCSPRITE, WCT_BusinessUi, 0, false, 120, 22);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+BusinessLeichongLayer::BusinessLeichongLayer()
+	:m_iId(INVALID)
+	,m_contentNode(NULL)
+	,m_isVisible(true)
+	,m_smallNode(NULL)
+{
+
+}
+
+BusinessLeichongLayer::~BusinessLeichongLayer()
+{
+	if(m_verticalList != NULL)
+	{
+		m_verticalList->clear();
+		delete m_verticalList;
+		m_verticalList = NULL;
+	}
+	if(m_contentNode != NULL)
+	{
+		m_contentNode->release();
+		m_contentNode = NULL;
+	}
+}
+
+SEL_MenuHandler BusinessLeichongLayer::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+SEL_CCControlHandler BusinessLeichongLayer::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onchongzhiBtnPressed", BusinessLeichongLayer::onchongzhiBtnPressed);
+
+	return NULL;
+}
+
+void BusinessLeichongLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	m_frame = this->getChildByTag(BLC_Frame);
+	CC_ASSERT(m_frame != NULL);
+	m_bottomNode = m_frame->getChildByTag(BLC_Node);
+	m_smallNode = m_frame->getChildByTag(BLC_SmallNode);
+	m_btnNode = m_frame->getChildByTag(BLC_LeiChongNode);
+	//字体替换
+	m_actTimeStr   = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLC_ActTimeStr)));
+	m_actTimeStr->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+	m_actTimeShow  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLC_ActTimeShow)));
+	m_actTimeShow->setTextColor(ccc4(0xff, 0xec, 0xc8, 0xff));
+	m_actDesStr    = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLC_DesStr)));
+	m_actDesStr->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+	m_actDesShow   = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLC_DesShow)));
+	m_actDesShow->setTextColor(ccc4(0x00, 0xff, 0x00, 0xff));
+	m_leichongStr  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_btnNode->getChildByTag(BLC_LeiChongStr)));
+	m_leichongStr->setTextColor(ccc4(0xee, 0xc7, 0x8f, 0xff));
+	m_leichongNums = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_btnNode->getChildByTag(BLC_LeiChongNums)));
+	m_leichongNums->setTextColor(ccc4(0x00, 0xff, 0x00, 0xff));
+
+	m_scrollView = CCScrollView::create(m_smallNode->getContentSize());
+	m_smallNode->addChild(m_scrollView);
+
+	m_contentNode = CCNode::create();
+	m_contentNode->setContentSize(m_smallNode->getContentSize());
+	m_contentNode->retain();
+
+	m_scrollView->setContainer(m_contentNode);
+	m_scrollView->setTouchEnabled(true);
+	m_scrollView->setBounceable(true);
+	m_scrollView->setContentSize(m_contentNode->getContentSize());
+	m_scrollView->setDirection(kCCScrollViewDirectionVertical);
+	m_scrollView->setContentOffset(m_scrollView->minContainerOffset());
+
+	m_verticalList = new VerticalList<BusinessLeiItem>;
+	m_verticalList->addToScrollView(m_scrollView);
+	m_verticalList->setMinSize(m_contentNode->getContentSize());
+	//m_verticalList->setItemOffsetY(-75.f);
+	m_verticalList->setEnableSelect(true);
+
+	//	m_scrollView->setTouchPriority(-2);
+}
+
+void BusinessLeichongLayer::onEnter()
+{
+	setTouchPriority(0);
+	setTouchEnabled(true);
+	//  	setAllChildernButtonEnable(m_frame,false);
+	//  	setAllChildernButtonEnable(m_frame,true);
+	setAllChildernButtonPriority(this,0);
+	CCLayer::onEnter();
+}
+
+void BusinessLeichongLayer::onExit()
+{
+	CCLayer::onExit();
+}
+
+bool BusinessLeichongLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (!isVisible() || !hasVisibleParents() || !isRunning())
+	{
+		return false;
+	}
+	// 	CCNode* scrContainer = m_scrollView->getContainer();
+	// 	CCPoint scrConPos = scrContainer->getPosition();
+	// 	CCSize scrConSize = m_contentNode->getContentSize();
+	// 	CCPoint itemPos;
+	// 	CCSize itemSize;
+	// 	for(int itemIdx = 0; itemIdx < m_verticalList->getItemCount(); ++itemIdx){
+	// 		BusinessLeiItem* leiItem = m_verticalList->getItem(itemIdx);
+	// 		itemPos = leiItem->getPosition();
+	// 		itemSize = leiItem->getContentSize();
+	// 		if((itemPos.y + scrConPos.y + itemSize.height*0.4) < 0 || (itemPos.y + scrConPos.y + itemSize.height*0.3) > scrConSize.height){
+	// 			leiItem->setTouchCanUse(false);
+	// 		}else{
+	// 			leiItem->setTouchCanUse(true);
+	// 		}
+	// 	}
+
+	if(isTouchOnNodeContent(m_frame, pTouch))
+	{
+		if(isTouchOnNodeContent(m_smallNode, pTouch))
+		{
+			return false;
+		}
+		else
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void BusinessLeichongLayer::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+
+}
+
+void BusinessLeichongLayer::onchongzhiBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);//开启充值活动界面
+}
+
+void BusinessLeichongLayer::setMainBottomPos(CCPoint botPos)
+{
+	CCPoint pos = this->convertToNodeSpace(botPos);
+	m_frame->setPosition(pos);
+}
+
+void BusinessLeichongLayer::updateShowData(int id)
+{
+	if(m_frame == NULL)
+		return;
+	//m_iId = id;
+
+	SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(id);
+	SPacket_YunYing_Activity* pPacketInfo = KaifuHuodongMgr::getInstance()->getYunyingPacketActivity(id);
+
+	if(pInfo && pPacketInfo)
+	{
+		m_iId = id;
+		m_verticalList->clear();
+
+		tagDWORDTime beginTime = pPacketInfo->beginTime;
+		tagDWORDTime endTime = pPacketInfo->endTime;
+		CCString* str = CCString::createWithFormat("20%02d\xE5\xB9\xB4%02d\xE6\x9C\x88%02d\xE6\x97\xA5%02d\xE7\x82\xB9-20%02d\xE5\xB9\xB4%02d\xE6\x9C\x88%02d\xE6\x97\xA5%02d\xE7\x82\xB9", 
+			beginTime.year, beginTime.month, beginTime.day, beginTime.hour, endTime.year, endTime.month, endTime.day, endTime.hour);
+		m_actTimeShow->setString(str->getCString());
+		std::string desShowStr = pInfo->describe;
+		m_actDesShow->setString(desShowStr.c_str());
+		if(pPacketInfo->m_Value[0] >= 100000)
+		{
+			str = CCString::createWithFormat("%d%s",pPacketInfo->m_Value[0] / 10000,GET_STR(9033).c_str());
+		}
+		else
+		{
+			str = CCString::createWithFormat("%d", pPacketInfo->m_Value[0]);
+		}
+		m_leichongNums->setString(str->getCString());
+		int actType = pInfo->actType;
+		std::string strShow = "";
+		if(actType == EOSAT_Activity_Consume){
+			strShow = GET_STR(9629);//消费额度
+		}else if(actType == EOSAT_Activity_Bill){
+			strShow = GET_STR(9628);//充值额度
+		}
+		if(!strShow.empty()){
+			strShow += ":";
+			m_leichongStr->setString(strShow.c_str());
+		}
+
+		for(size_t itemIdx = 0; itemIdx < pInfo->m_ActivityItem_VecProto.size(); ++itemIdx)
+		{
+			BusinessLeiItem* itemTemp = new BusinessLeiItem;
+			itemTemp->updataData(m_iId, itemIdx);
+			m_verticalList->addItem(itemTemp);
+		}
+	}
+	m_verticalList->updateDisplay();
+	m_scrollView->setContentOffset(m_scrollView->minContainerOffset());
+	m_scrollView->update_child_touch_clip_rect();
+}
+
+void BusinessLeichongLayer::setVisibleAndTouch(bool isShow)
+{
+	if(m_isVisible == isShow)
+		return;
+
+	m_isVisible = isShow;
+	this->setVisible(isShow);
+	m_scrollView->setVisible(isShow);
+	int zOrder = m_isVisible == true ? 2 : 1;
+	this->setZOrder(zOrder);
+	for(int itemIdx = 0; itemIdx < m_verticalList->getItemCount(); ++itemIdx){
+		m_verticalList->getItem(itemIdx)->setVisibleAndTouch(isShow);
+	}
+}
+
+void BusinessLeichongLayer::updateItemState()
+{
+	if(!IS_VALID(m_iId))
+		return;
+
+	for(int itemIdx = 0; itemIdx < m_verticalList->getItemCount(); ++itemIdx){
+		m_verticalList->getItem(itemIdx)->updateItemState();
+	}
+
+	SPacket_YunYing_Activity* pPacketInfo = KaifuHuodongMgr::getInstance()->getYunyingPacketActivity(m_iId);
+	if(pPacketInfo)
+	{
+		if(pPacketInfo->m_Value[0] >= 100000)
+		{
+			CCString* str = CCString::createWithFormat("%d%s",pPacketInfo->m_Value[0] / 10000,GET_STR(9033).c_str());
+			m_leichongNums->setString(str->getCString());
+		}
+		else
+		{
+			CCString* str = CCString::createWithFormat("%d", pPacketInfo->m_Value[0]);
+			m_leichongNums->setString(str->getCString());
+		}
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+BusinessLeixiaoRankLayer::BusinessLeixiaoRankLayer()
+	:m_isVisible(true)
+	,m_id(INVALID)
+	,m_conterNode(NULL)
+	,m_conterStr1(NULL)
+	,m_conterStr2(NULL)
+	,m_conterStr3(NULL)
+	,m_list(NULL)
+{
+
+}
+
+BusinessLeixiaoRankLayer::~BusinessLeixiaoRankLayer()
+{
+	if ( 0 != m_list->count())
+	{
+		m_list->clear_list();
+	}
+}
+
+SEL_MenuHandler BusinessLeixiaoRankLayer::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+SEL_CCControlHandler BusinessLeixiaoRankLayer::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onshangchengBtnPressed", BusinessLeixiaoRankLayer::onshangchengBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onchongzhiBtnPressed", BusinessLeixiaoRankLayer::onchongzhiBtnPressed);
+
+	return NULL;
+}
+
+bool BusinessLeixiaoRankLayer::onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode)
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(ListControl*, m_list);
+	return false;
+}
+
+void BusinessLeixiaoRankLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	m_frame = this->getChildByTag(BLX_Frame);
+	CC_ASSERT(m_frame != NULL);
+
+	//字体替换
+	m_actTimeStr  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLX_ActTimeStr)));
+	m_actTimeStr->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+
+	m_actTimeShow = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLX_ActTimeShow)));
+	m_actTimeShow->setTextColor(ccc4(0xff, 0xec, 0xc8, 0xff));
+
+	m_actDesStr   = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLX_DesStr)));
+	m_actDesStr->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+
+	m_actDesShow  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLX_DesShow)));
+	m_actDesShow->setTextColor(ccc4(0x00, 0xff, 0x00, 0xff));
+
+	m_actRankStr  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLX_RankStr)));
+	m_actRankStr->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+
+	m_actRankNums = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLX_RankNums)));
+	m_actRankNums->setTextColor(ccc4(0x00, 0xff, 0x00, 0xff));
+
+	m_leixiaoStr  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLX_LeixiaoStr)));
+	m_leixiaoStr->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+
+	m_leixiaoNums = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLX_LeixiaoNums)));
+	m_leixiaoNums->setTextColor(ccc4(0x00, 0xff, 0x00, 0xff));
+
+	m_tiaojianLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLX_TiaojianLabel)));
+	m_tiaojianLabel->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+
+	m_tiaojianDesc = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLX_TiaojianDesc)));
+	m_tiaojianDesc->setTextColor(ccc4(0x00, 0xff, 0x00, 0xff));
+
+	m_showSprite  = dynamic_cast<CCSprite*>(m_frame->getChildByTag(BLX_ImageSprite));
+
+	m_tiaojianImage = dynamic_cast<CCSprite*>(m_frame->getChildByTag(BLX_TiaojianImage));
+
+	CCNode* scNode = m_frame->getChildByTag(BLX_ShangchengNode);
+	if(scNode){
+		//商城按钮上的文字字体替换
+		Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(scNode->getChildByTag(1)));
+	}
+	CCNode* czNode = m_frame->getChildByTag(BLX_ChongzhiNode);
+	if(czNode){
+		//充值按钮上的文字字体替换
+		Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(czNode->getChildByTag(1)));
+	}
+
+	m_conterNode = m_frame->getChildByTag(BLX_CenterTopNode);
+	m_conterStr1 = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_conterNode->getChildByTag(BLX_CenterTopStr1)));
+	m_conterStr2 = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_conterNode->getChildByTag(BLX_CenterTopStr2)));
+	m_conterStr3 = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_conterNode->getChildByTag(BLX_CenterTopStr3)));
+
+}
+
+void BusinessLeixiaoRankLayer::onEnter()
+{
+	//	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -2, false);
+	setTouchPriority(0);
+	setTouchEnabled(true);
+	//  	setAllChildernButtonEnable(this,false);
+	//  	setAllChildernButtonEnable(this,true);
+	setAllChildernButtonPriority(this, 0);
+	CCLayer::onEnter();
+	REGISTER_EVENT(CLEARLIST,BusinessLeixiaoRankLayer,clearList);
+}
+
+void BusinessLeixiaoRankLayer::onExit()
+{
+	CCLayer::onExit();
+	UNREGISTER_EVENT(CLEARLIST,BusinessLeixiaoRankLayer,clearList);
+}
+
+void BusinessLeixiaoRankLayer::clearList(CLEARLIST* trans)
+{
+	m_list->clear_list();
+}
+
+bool BusinessLeixiaoRankLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (!isVisible() || !hasVisibleParents() || !isRunning())
+	{
+		return false;
+	}
+	if (isTouchOnNodeContent(m_frame, pTouch))
+	{
+		if (isTouchOnNodeContent(m_conterNode, pTouch))
+		{
+			return true;
+		}
+		if(isTouchOnNodeContent(m_list, pTouch))
+		{
+			return false;
+		}
+		return true;
+	}
+	return false;
+}
+
+void BusinessLeixiaoRankLayer::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+
+}
+
+void BusinessLeixiaoRankLayer ::onshangchengBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	OPEN_UI(WCT_STOREUI);
+}
+
+void BusinessLeixiaoRankLayer::onchongzhiBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);//开启充值活动界面
+}
+
+void BusinessLeixiaoRankLayer::setMainBottomPos(CCPoint botPos)
+{
+	CCPoint pos = this->convertToNodeSpace(botPos);
+	m_frame->setPosition(pos);
+}
+
+void BusinessLeixiaoRankLayer::updateShowData(int id)
+{
+	if(m_frame == NULL )
+		return;
+
+	SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(id);
+	YunYing_Rank_Act* pPacketInfo = KaifuHuodongMgr::getInstance()->getYunYingRankAct(id);
+	if(pInfo && pPacketInfo)
+	{
+		m_id = id;
+		m_list->clear_list();
+		tagDWORDTime beginTime = pPacketInfo->dwBeginTime;
+		tagDWORDTime endTime = pPacketInfo->dwEndTime;
+		CCString* str = CCString::createWithFormat("20%02d\xE5\xB9\xB4%02d\xE6\x9C\x88%02d\xE6\x97\xA5%02d\xE7\x82\xB9-20%02d\xE5\xB9\xB4%02d\xE6\x9C\x88%02d\xE6\x97\xA5%02d\xE7\x82\xB9", 
+			beginTime.year, beginTime.month, beginTime.day, beginTime.hour, endTime.year, endTime.month, endTime.day, endTime.hour);
+		m_actTimeShow->setString(str->getCString());
+		std::string desShowStr = pInfo->describe;
+		m_actDesShow->setString(desShowStr.c_str());
+
+		std::string strTitle = "";
+		if ( pPacketInfo->nState == EAS_Activity_Process )
+		{
+			strTitle = pInfo->title;
+		}
+		else if ( pPacketInfo->nState == EAS_Activity_Show)
+		{
+			strTitle = pInfo->showTitle;
+		}
+
+		int firstIndex = strTitle.find_first_of("*");
+		int secondIndex = strTitle.find_last_of("*");
+		if ( firstIndex!=std::string::npos && secondIndex!=std::string::npos && firstIndex!=secondIndex)
+		{
+			m_conterStr1->setVisible(true);
+			m_conterStr2->setVisible(true);
+			m_conterStr3->setVisible(true);
+			std::string topStr1=pInfo->title.substr(0,firstIndex);
+			std::string topStr2=pInfo->title.substr(firstIndex+1,secondIndex-firstIndex-1);
+			std::string topStr3=pInfo->title.substr(secondIndex+1,strTitle.length());
+			m_conterStr1->setString(topStr1);
+			m_conterStr1->setTextColor(ccc4(0xee, 0xc7, 0x8f, 0xff));
+			m_conterStr2->setString(topStr2);
+			m_conterStr2->setTextColor(ccc4(0x00, 0xff, 0x00, 0xff));
+			m_conterStr3->setString(topStr3);
+			m_conterStr3->setTextColor(ccc4(0xee, 0xc7, 0x8f, 0xff));
+			m_conterStr3->setAnchorPoint(m_conterStr2->getAnchorPoint());
+			float len = m_conterStr1->getContentSize().width+m_conterStr2->getContentSize().width+m_conterStr3->getContentSize().width;
+			m_conterStr1->setPositionX((m_conterNode->getContentSize().width-len)/2);
+			m_conterStr2->setPosition(ccp(m_conterStr1->getPositionX()+m_conterStr1->getContentSize().width,m_conterStr1->getPositionY()));
+			m_conterStr3->setPosition(ccp(m_conterStr2->getPositionX()+m_conterStr2->getContentSize().width,m_conterStr2->getPositionY()));
+		}
+		else
+		{
+			m_conterStr1->setVisible(false);
+			m_conterStr2->setVisible(false);
+			m_conterStr3->setVisible(true);
+			m_conterStr3->setString(strTitle);
+			m_conterStr3->setAnchorPoint(ccp(0.5,0.5));
+			m_conterStr3->setPositionX(m_conterNode->getPositionX());
+		}
+
+		setViewLabelString();
+
+		size_t num = pPacketInfo->nCount;
+// 		for (int i=0; i<num;++i)
+// 		{
+// 			BusinessRankItemNode* item =BusinessRankItemNode::createItem();
+// 			SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(m_id);
+// 			NET_SIS_YunYing_Activity_Rank_Item* rankItem = KaifuHuodongMgr::getInstance()->getYunyingRankItem(m_id,i);
+// 			item->updateData(pInfo,rankItem,i);
+// 			m_list->add_item(item);
+// 		}
+
+		m_list->add_items_sync(num, boost::bind(&BusinessLeixiaoRankLayer::createItem,this,_1,_2));
+		m_list->scroll_to_top();
+	}
+}
+
+BusinessRankItemNode* BusinessLeixiaoRankLayer::createItem(ListControl* list, size_t id)
+{
+	BusinessRankItemNode* item = BusinessRankItemNode::createItem();
+	SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(m_id);
+	NET_SIS_YunYing_Activity_Rank_Item* rankItem=KaifuHuodongMgr::getInstance()->getYunyingRankItem(m_id,id);
+	if (pInfo == NULL && rankItem == NULL)
+	{
+		return NULL;
+	}
+	item->updateData(pInfo,rankItem,id);
+	return item;
+}
+
+void BusinessLeixiaoRankLayer::setViewLabelString()
+{
+	SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(m_id);
+	YunYing_Rank_Act* pPacketInfo = KaifuHuodongMgr::getInstance()->getYunYingRankAct(m_id);
+	if(pInfo && pPacketInfo)
+	{
+		if (pPacketInfo->nOrder!=0)
+		{
+			m_actRankNums->setString(CCString::createWithFormat("%s%d%s",STRING_TABLE["di"],pPacketInfo->nOrder,STRING_TABLE["ming"])->getCString());
+		}
+		else
+		{
+			m_actRankNums->setString(STRING_TABLE["have_zero_score"]);
+		}
+
+		std::string numStr;
+		if (pPacketInfo->nMinScore<100000)
+		{
+			numStr=CCString::createWithFormat("%d",pPacketInfo->nMinScore)->getCString();
+		}
+		else if (pPacketInfo->nMinScore>=100000 && pPacketInfo->nMinScore<100000000)
+		{
+			numStr=CCString::createWithFormat("%d%s",pPacketInfo->nMinScore/10000,STRING_TABLE["yuanbao_wan"])->getCString();
+		}
+		else if (pPacketInfo->nMinScore>=100000000)
+		{
+			numStr=CCString::createWithFormat("%d%s",pPacketInfo->nMinScore/100000000,STRING_TABLE["yuanbao_yi"])->getCString();
+		}
+
+		CCSpriteFrame* spFrame;
+		switch(pInfo->actType)
+		{
+		case EOSAT_Activity_Rank_Consume:
+			m_showSprite->setVisible(true);
+			m_tiaojianImage->setVisible(true);
+			spFrame=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("huodongzhongxin_yuanbao");
+			m_showSprite->setDisplayFrame(spFrame);
+			m_tiaojianImage->setDisplayFrame(spFrame);
+			m_leixiaoStr->setString(STRING_TABLE["my_xiaohao"]);
+			m_tiaojianDesc->setString(STRING_TABLE["xiaohao_minScore_1"]+numStr);
+			setNormalBottomLabel(pPacketInfo->nScore);
+			break;
+		case EOSAT_Activity_Rank_Bill:
+			m_showSprite->setVisible(true);
+			m_tiaojianImage->setVisible(true);
+			spFrame=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("huodongzhongxin_yuanbao");
+			m_showSprite->setDisplayFrame(spFrame);
+			m_tiaojianImage->setDisplayFrame(spFrame);
+			m_leixiaoStr->setString(STRING_TABLE["my_chongzhi"]);
+			m_tiaojianDesc->setString(STRING_TABLE["chongzhi_minScore_1"]+numStr);
+			setNormalBottomLabel(pPacketInfo->nScore);
+			break;
+		case EOSAT_Activity_Rank_RecvFlower:
+			m_showSprite->setVisible(true);
+			m_tiaojianImage->setVisible(true);
+			spFrame=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("huodongzhongxin_hua");
+			m_showSprite->setDisplayFrame(spFrame);
+			m_tiaojianImage->setDisplayFrame(spFrame);
+			m_leixiaoStr->setString(STRING_TABLE["my_songhua"]);
+			m_tiaojianDesc->setString(STRING_TABLE["shouhua_minScore_1"]+numStr);
+			setNormalBottomLabel(pPacketInfo->nScore);
+			break;
+		case  EOSAT_Activity_Rank_JJC:
+			m_showSprite->setVisible(false);
+			m_tiaojianImage->setVisible(false);
+			m_leixiaoStr->setString(STRING_TABLE["my_jingjichang"]);
+			m_tiaojianDesc->setString(STRING_TABLE["shenglichangci_minScore_1"]+numStr);
+			setNormalBottomLabel(pPacketInfo->nScore);
+			break;
+		case EOSAT_Activity_Rank_Level:
+			m_showSprite->setVisible(false);
+			m_tiaojianImage->setVisible(false);
+			m_leixiaoStr->setString(STRING_TABLE["my_dengji"]);
+			m_tiaojianDesc->setString(STRING_TABLE["dengji_minScore_1"]+numStr);
+			setNormalBottomLabel(pPacketInfo->nScore);
+			break;
+		case EOSAT_Activity_Rank_Fight:
+			m_showSprite->setVisible(false);
+			m_tiaojianImage->setVisible(false);
+			m_leixiaoStr->setString(STRING_TABLE["my_zhandouli"]);
+			m_tiaojianDesc->setString(STRING_TABLE["zhandouli_minScore_1"]+numStr);
+			setNormalBottomLabel(pPacketInfo->nScore);
+			break;
+		case EOSAT_Activity_Rank_RideLevel:
+			m_showSprite->setVisible(false);
+			m_tiaojianImage->setVisible(false);
+			m_leixiaoStr->setString(STRING_TABLE["my_zuoqidengji"]);
+			setZuoQiBottomLabel(pPacketInfo->nMinScore,pPacketInfo->nScore);
+			break;
+		case EOSAT_Activity_Rank_MoHun:
+			m_showSprite->setVisible(false);
+			m_tiaojianImage->setVisible(false);
+			m_leixiaoStr->setString(STRING_TABLE["my_mohun"]);
+			setMoHunBottomLabel(pPacketInfo->nMinScore,pPacketInfo->nScore);
+			break;
+		default:
+			break;
+		}
+	}
+}
+
+void BusinessLeixiaoRankLayer::setVisibleAndTouch(bool isShow)
+{
+	if(m_isVisible == isShow)
+		return;
+
+	m_isVisible = isShow;
+	this->setVisible(isShow);
+	int zOrder = m_isVisible == true ? 2 : 1;
+	this->setZOrder(zOrder);
+	m_list->setTouchEnabled(isShow);
+	if (!isShow)
+	{
+		if ( 0!=m_list->count())
+		{
+			m_list->clear_list();
+		}
+	}
+}
+
+void BusinessLeixiaoRankLayer::setNormalBottomLabel(int score)
+{
+	if (score<100000)
+	{
+		m_leixiaoNums->setString(CCString::createWithFormat("%d",score)->getCString());
+	}
+	else if (score>=100000 && score<100000000)
+	{
+		m_leixiaoNums->setString(CCString::createWithFormat("%d%s",score/10000,STRING_TABLE["yuanbao_wan"])->getCString());
+	}
+	else if (score>=100000000)
+	{
+		m_leixiaoNums->setString(CCString::createWithFormat("%d%s",score/100000000,STRING_TABLE["yuanbao_yi"])->getCString());
+	}
+	m_leixiaoNums->setPositionX(m_leixiaoStr->getPositionX()+m_leixiaoStr->getContentSize().width/2+m_leixiaoNums->getContentSize().width/2);
+}
+
+void BusinessLeixiaoRankLayer::setZuoQiBottomLabel(int limit,int score)
+{
+	std::string tiaoJianDesc = CCString::createWithFormat("ZuoQiRank_%d",limit+1)->getCString();
+	m_tiaojianDesc->setString(STRING_TABLE[tiaoJianDesc.c_str()]);
+	if ( score<0 )
+	{
+		score = 0;
+	}
+	else if ( score >=0 && score <maxZuoQiScore)
+	{
+		score++;
+	}
+	else if ( score >= maxZuoQiScore )
+	{
+		score = maxZuoQiScore;
+	}
+	std::string numLabel = CCString::createWithFormat("ZuoQiRank_%d",score)->getCString();
+	m_leixiaoNums->setString(STRING_TABLE[numLabel.c_str()]);
+	m_leixiaoNums->setPositionX(m_leixiaoStr->getPositionX()+m_leixiaoStr->getContentSize().width/2+m_leixiaoNums->getContentSize().width/2);
+}
+
+void BusinessLeixiaoRankLayer::setMoHunBottomLabel(int limit,int score)
+{
+	std::string tiaoJianDesc = CCString::createWithFormat("MoHunRank_%d",limit)->getCString();
+	m_tiaojianDesc->setString(STRING_TABLE[tiaoJianDesc.c_str()]);
+	if ( score<0 )
+	{
+		score = 0;
+	}
+	else if ( score>maxMoHunScore)
+	{
+		score = maxMoHunScore;
+	}
+	std::string numLabel = CCString::createWithFormat("MoHunRank_%d",score)->getCString();
+	m_leixiaoNums->setString(STRING_TABLE[numLabel.c_str()]);
+	m_leixiaoNums->setPositionX(m_leixiaoStr->getPositionX()+m_leixiaoStr->getContentSize().width/2+m_leixiaoNums->getContentSize().width/2);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+BusinessXianshiLayer::BusinessXianshiLayer()
+	:m_iId(INVALID)
+	,m_iIdItem(INVALID)
+	,m_isVisible(true)
+{
+
+}
+
+BusinessXianshiLayer::~BusinessXianshiLayer()
+{
+
+}
+
+SEL_MenuHandler BusinessXianshiLayer::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+SEL_CCControlHandler BusinessXianshiLayer::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "ongoumaiBtnPressed", BusinessXianshiLayer::ongoumaiBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onchongzhiBtnPressed", BusinessXianshiLayer::onchongzhiBtnPressed);
+
+	return NULL;
+}
+
+void BusinessXianshiLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	m_frame = this->getChildByTag(BXS_Frame);
+	CC_ASSERT(m_frame != NULL);
+	m_bottomNode = m_frame->getChildByTag(BXS_Node);
+	//字体替换
+	m_actTimeStr  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BXS_ActTimeStr)));
+	m_actTimeStr->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+
+	m_actTimeShow = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BXS_ActTimeShow)));
+	m_actTimeShow->setTextColor(ccc4(0xff, 0xec, 0xc8, 0xff));
+
+	m_actDesStr   = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BXS_DesStr)));
+	m_actDesStr->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+
+	m_actDesShow  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BXS_DesShow)));
+	m_actDesShow->setTextColor(ccc4(0x00, 0xff, 0x00, 0xff));
+
+	m_centerTopStr= Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BXS_CenterTopStr)));
+	m_centerTopStr->setTextColor(ccc4(0xd8, 0xb2, 0x96, 0xff));
+	m_costYBNums  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BXS_CostYBNums)));
+	m_costYBNums->setTextColor(ccc4(0x00, 0xff, 0x00, 0xff));
+	m_goumaiBtn   = dynamic_cast<CCControlButton*>(m_frame->getChildByTag(BXS_GouMaiBtn));
+	m_chongzhiBtn = dynamic_cast<CCControlButton*>(m_frame->getChildByTag(BXS_ChongzhiBtn));
+
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BXS_KeGouMaiLabe)));
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BXS_KeGouMaiCi)));
+	m_canBuyNums  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BXS_KeGouMaiNum)));
+
+	//放置物品的NODE中心点
+	m_botItemNode = CCNode::create();
+	m_botItemNode->setAnchorPoint(ccp(0.f, 0.5f));
+	m_botItemNode->setContentSize(CCSize(1.f, 1.f));
+	m_bottomNode->addChild(m_botItemNode, 1);
+
+	// 	setAllChildernButtonPriority(this, -3);
+}
+
+void BusinessXianshiLayer::onEnter()
+{
+	//	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -2, false);
+	setTouchPriority(0);
+	setTouchEnabled(true);
+	//  	setAllChildernButtonEnable(this,false);
+	//  	setAllChildernButtonEnable(this,true);
+	setAllChildernButtonPriority(this, 0);
+	CCLayer::onEnter();
+}
+
+void BusinessXianshiLayer::onExit()
+{
+	CCLayer::onExit();
+}
+
+bool BusinessXianshiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (!isVisible() || !hasVisibleParents() || !isRunning())
+	{
+		return false;
+	}
+	if(isTouchOnNodeContent(m_frame, pTouch)){
+		if(isTouchOnNodeContent(m_botItemNode, pTouch)){
+			for(int index = 0; index < MAX_Activity_Reward; ++index){
+				CCNode* itemNodeTemp = m_botItemNode->getChildByTag(index);
+				if(itemNodeTemp != NULL){
+					if(isTouchOnNodeContent(itemNodeTemp, pTouch)){
+						((ItemNode*)itemNodeTemp)->ccTouchBegan(pTouch, pEvent);
+						return true;
+					}
+				}
+			}
+		}
+		return true;
+	}
+
+	return false;
+}
+
+void BusinessXianshiLayer::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if(isTouchOnNodeContent(m_frame, pTouch)){
+		if(isTouchOnNodeContent(m_botItemNode, pTouch)){
+			for(int index = 0; index < MAX_Activity_Reward; ++index){
+				CCNode* itemNodeTemp = m_botItemNode->getChildByTag(index);
+				if(itemNodeTemp != NULL){
+					if(isTouchOnNodeContent(itemNodeTemp, pTouch)){
+						((ItemNode*)itemNodeTemp)->ccTouchEnded(pTouch, pEvent);
+					}
+				}
+			}
+		}
+	}
+}
+
+void BusinessXianshiLayer::ongoumaiBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	bool sendGetReward = KaifuHuodongMgr::getInstance()->getYunyingReward(m_iId, 0);
+	m_goumaiBtn->setEnabled(!sendGetReward);//成功发送领取后，设置为不可点击
+}
+
+void BusinessXianshiLayer::onchongzhiBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);//开启充值活动界面
+}
+
+void BusinessXianshiLayer::setMainBottomPos(CCPoint botPos)
+{
+	CCPoint pos = this->convertToNodeSpace(botPos);
+	m_frame->setPosition(pos);
+}
+
+void BusinessXianshiLayer::updateShowData(int id)
+{
+	if(m_frame == NULL )
+		return;
+	//m_iId = id;
+
+	SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(id);
+	SPacket_YunYing_Activity* pPacketInfo = KaifuHuodongMgr::getInstance()->getYunyingPacketActivity(id);
+	if(pInfo && pPacketInfo)
+	{
+		m_iId = id;
+		m_iIdItem = pPacketInfo->byData[0].m_iID;//限时购买只有一个SPacket_ActTarget
+		m_botItemNode->removeAllChildrenWithCleanup(true);
+
+		tagDWORDTime beginTime = pPacketInfo->beginTime;
+		tagDWORDTime endTime = pPacketInfo->endTime;
+		CCString* str = CCString::createWithFormat("20%02d\xE5\xB9\xB4%02d\xE6\x9C\x88%02d\xE6\x97\xA5%02d\xE7\x82\xB9-20%02d\xE5\xB9\xB4%02d\xE6\x9C\x88%02d\xE6\x97\xA5%02d\xE7\x82\xB9", 
+			beginTime.year, beginTime.month, beginTime.day, beginTime.hour, endTime.year, endTime.month, endTime.day, endTime.hour);
+		m_actTimeShow->setString(str->getCString());
+		std::string desShowStr = pInfo->describe;
+		m_actDesShow->setString(desShowStr.c_str());
+		m_centerTopStr->setString((pInfo->title).c_str());
+		if(pPacketInfo->byData[0].m_iExtra >= 100000)
+		{
+			str = CCString::createWithFormat("%d%s",pPacketInfo->byData[0].m_iExtra,GET_STR(9033).c_str());
+		}
+		else
+		{
+			str = CCString::createWithFormat("%d", pPacketInfo->byData[0].m_iExtra);
+		}
+		m_costYBNums->setString(str->getCString());
+
+		int itemCount = 0;
+		for(int itemIdx = 0; itemIdx < MAX_Activity_Reward; ++itemIdx)
+		{
+			if(pInfo->m_ActivityItem_VecProto[0].reward[itemIdx] > 0 && pInfo->m_ActivityItem_VecProto[0].m_Num[itemIdx] > 0)
+			{
+				++itemCount;
+			}
+		}
+
+		//显示购买存储一个物品数据，在页面中间显示,物品间距为10
+		for(int itemIdx = 0; itemIdx < itemCount; ++itemIdx)
+		{
+			if (pInfo->m_ActivityItem_VecProto[0].reward[itemIdx] > 0 && pInfo->m_ActivityItem_VecProto[0].m_Num[itemIdx] > 0)
+			{
+				ItemNode * node = ItemNode::create();
+				node->init();
+				node->setDataId(pInfo->m_ActivityItem_VecProto[0].reward[itemIdx]);
+				CCSize itemSize = node->getContentSize();
+				if(itemIdx == 0){
+					//添加第一个物品时确定底框大小,设置底框位置
+					m_botItemNode->setContentSize(CCSize((itemSize.width + 10) * itemCount - 10, itemSize.height + 10));
+					m_botItemNode->setPosition(ccp(
+						(m_bottomNode->getContentSize().width - m_botItemNode->getContentSize().width) * 0.5, 
+						m_bottomNode->getContentSize().height * 0.8));
+				}
+				node->setPosition(ccp((itemSize.width * (0.5f + itemIdx) + 10 * itemIdx), 0.f));
+				if (pPacketInfo->byData[0].m_iValue == 2){//已领取不显示动画
+					node->stopAnimation();
+				}else{
+					node->runAnimation("E1_201");
+				}
+				node->setNum(pInfo->m_ActivityItem_VecProto[0].m_Num[itemIdx]);
+				if (pInfo->m_ActivityItem_VecProto[0].m_Num[itemIdx] == 1){//默认的为1不显示，这里强制显示
+					node->SetShowNum(true);
+				}
+				node->setClickable(true,1);
+				node->hideItemOpBtn();
+				m_botItemNode->addChild(node, 1, itemIdx);
+			}
+		}
+		updateItemState();
+	}
+}
+
+void BusinessXianshiLayer::setVisibleAndTouch(bool isShow)
+{
+	if(m_isVisible == isShow)
+		return;
+
+	m_isVisible = isShow;
+	this->setVisible(isShow);
+	int zOrder = m_isVisible == true ? 2 : 1;
+	this->setZOrder(zOrder);
+	for(int index = 0; index < MAX_Activity_Reward; ++index){
+		CCNode* itemNodeTemp = m_botItemNode->getChildByTag(index);
+		if(itemNodeTemp != NULL){
+			((ItemNode*)itemNodeTemp)->setClickable(isShow,1);
+		}
+	}
+}
+
+void BusinessXianshiLayer::updateItemState()
+{
+	if(!IS_VALID(m_iId))
+		return;
+	SPacket_YunYing_Activity* pPacketInfo = KaifuHuodongMgr::getInstance()->getYunyingPacketActivity(m_iId);
+
+	m_canBuyNums->setString(CCString::createWithFormat("%d",pPacketInfo->m_Value[1])->getCString());
+
+	if(pPacketInfo)
+	{
+		if (pPacketInfo->byData[0].m_iValue == 2)
+		{
+			m_goumaiBtn->setEnabled(false);
+			m_goumaiBtn->setGray();
+			World::getInstance()->SetHighLight(m_goumaiBtn, WT_CCCONTROLBUTTON, WCT_BusinessUi, 0, false, 0, 0);
+		}
+		else if (pPacketInfo->byData[0].m_iValue == 1)
+		{
+			World::getInstance()->SetHighLight(m_goumaiBtn, WT_CCCONTROLBUTTON, WCT_BusinessUi, 0, true, 0, 0);
+			m_goumaiBtn->setEnabled(true);
+			m_goumaiBtn->delGray();
+		}
+		else if (pPacketInfo->byData[0].m_iValue == 0)
+		{
+			World::getInstance()->SetHighLight(m_goumaiBtn, WT_CCCONTROLBUTTON, WCT_BusinessUi, 0, false, 0, 0);
+			m_goumaiBtn->setEnabled(true);
+			m_goumaiBtn->delGray();
+		}
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+BusinessWenziLayer::BusinessWenziLayer()
+	:m_id(INVALID)
+	,m_idItem(INVALID)
+	,m_isVisible(true)
+	,btnName("")
+{
+
+}
+
+BusinessWenziLayer::~BusinessWenziLayer()
+{
+
+}
+
+SEL_MenuHandler BusinessWenziLayer::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+SEL_CCControlHandler BusinessWenziLayer::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onqianwangBtnPressed" ,BusinessWenziLayer::onGoToBtnPressed);
+	return NULL;
+}
+
+void BusinessWenziLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	frameNode=this->getChildByTag(BWZ_Frame);
+	CC_ASSERT(frameNode!=NULL);
+
+	actTimeStr=Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(frameNode->getChildByTag(BWZ_TimeStr)));
+	actTimeStr->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+
+	actTimeShow=Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(frameNode->getChildByTag(BWZ_TimeShow)));
+	actTimeShow->setTextColor(ccc4(0xff, 0xec, 0xc8, 0xff));
+
+	actDesStr=Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(frameNode->getChildByTag(BWZ_DesStr)));
+	actDesStr->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+
+	actDesShow=Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(frameNode->getChildByTag(BWZ_DesShow)));
+	actDesShow->setTextColor(ccc4(0x00, 0xff, 0x00, 0xff));
+
+	descLabel=Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(frameNode->getChildByTag(BWZ_ShowLabel)));
+
+	goToBtn=dynamic_cast<CCControlButton*>(frameNode->getChildByTag(BWZ_GoToBtn));
+
+	//	setAllChildernButtonPriority(this, -3);
+}
+
+void BusinessWenziLayer::onEnter()
+{
+	//	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -2, false);
+	setTouchPriority(0);
+	setTouchEnabled(true);
+	//  	setAllChildernButtonEnable(this,false);
+	//  	setAllChildernButtonEnable(this,true);
+	setAllChildernButtonPriority(this, 0);
+	CCLayer::onEnter();
+}
+
+void BusinessWenziLayer::onExit()
+{
+	CCLayer::onExit();
+}
+bool BusinessWenziLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (!isVisible() || !hasVisibleParents() || !isRunning())
+	{
+		return false;
+	}
+	if (isTouchOnNodeContent(frameNode,pTouch))
+	{
+		return true;
+	}
+	return false;
+}
+
+void BusinessWenziLayer::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+
+}
+
+void BusinessWenziLayer::onGoToBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	int firstDevNum=btnName.find_first_of(":");
+	std::string firstStr=btnName.substr(0,firstDevNum);
+	std::string secondStr=btnName.substr(firstDevNum+1,btnName.length());
+	if (firstStr == "NPCID")
+	{
+		QuestMgr::getInstance()->onSelectRunNpc(CCString::create(secondStr)->uintValue());
+		CLOSE_UI(WCT_BusinessUi);
+	}
+	else
+	{
+		SELECTPAGE sel;
+		WorldPacket C2G_Msg(NET_C2G_REQUEST_BOSS_LIST);
+		switch(CCString::create(secondStr)->intValue())
+		{
+		case 1://技能            
+			OPEN_UI(WCT_SKILLUI);
+			break;
+		case 2://锻造-锻造
+			if (RoleManager::getInstance()->getLocalPlayer()->getLevel() < GetFunOpenLevel(EFOL_DuanZao))
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["level_not_duanzao"]);
+			}
+			else
+			{
+				OPEN_UI(WCT_ForgingDecomUI);
+				sel.num=0;
+			}
+			break;
+		case 3://锻造-分解           
+			if (RoleManager::getInstance()->getLocalPlayer()->getLevel() < GetFunOpenLevel(EFOL_DuanZao))
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["level_not_duanzao"]);
+			}
+			else
+			{
+				OPEN_UI(WCT_ForgingDecomUI);
+				sel.num=1;
+			}
+			break;
+		case 4://坐骑
+			if (RoleManager::getInstance()->getLocalPlayer()->getLevel() < GetFunOpenLevel(EFOL_Ride))
+			{
+				ToolTip::getInstance()->push(GET_STR(2198));
+			}
+			else
+			{
+				OPEN_UI(WCT_MountUi);
+			}
+			break;
+		case 5://挂机
+			if (RoleManager::getInstance()->getLocalPlayer()->getLevel() < GetFunOpenLevel(EFOL_GuaJi))
+			{
+				ToolTip::getInstance()->push(GET_STR(9563));
+			}
+			else
+			{
+				OPEN_UI(WCT_GuiJiUi);
+			}
+			break;
+		case 6://BOSS-世界BOSS 关闭
+			break;
+		case 7://BOSS-野外BOSS
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);
+			BossPKMgr::getInstance()->setOpenBossUi(true);
+			break;
+		case 8://战役-普通
+			if (RoleManager::getInstance()->getLocalPlayer()->getLevel() < GetFunOpenLevel(EFOL_SingleInstance))
+			{
+				ToolTip::getInstance()->push(GET_STR(9212));
+			}
+			else
+			{
+				OPEN_UI(WCT_FubenUI);
+				sel.num=0;
+			}
+			break;
+		case 9://战役-精英
+			if (RoleManager::getInstance()->getLocalPlayer()->getLevel() < GetFunOpenLevel(EFOL_SingleInstance))
+			{
+				ToolTip::getInstance()->push(GET_STR(9212));
+			}
+			else
+			{
+				OPEN_UI(WCT_FubenUI);
+				sel.num=1;
+			}
+			break;
+		case 10://竞技场
+			if (RoleManager::getInstance()->getLocalPlayer()->getLevel() < GetFunOpenLevel(EFOL_JJC))
+			{
+				ToolTip::getInstance()->push(GET_STR(2373));
+			}
+			else
+			{
+				OPEN_UI(WCT_ARENAMAINUI);
+			}
+			break;
+		case 11://悬赏
+			if (RoleManager::getInstance()->getLocalPlayer()->getLevel() < GetFunOpenLevel(EFOL_XuanShang))
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["level_not_xuanshang"]);
+			}
+			else
+			{
+				RewardQuestMgr::getInstance()->sendUpdateQuestState();
+				RewardQuestMgr::getInstance()->sendUpdateQuestList(0);
+				OPEN_UI(WCT_RewardQuestUi);
+			}
+			break;
+		case 12://龙卫宝藏
+			if (RoleManager::getInstance()->getLocalPlayer()->getLevel() < GetFunOpenLevel(EFOL_LongWeiBaoZang))
+			{
+				ToolTip::getInstance()->push(GET_STR(9635));
+			}
+			else
+			{
+				OPEN_UI(WCT_LongWeiDesUi);
+			}
+			break;
+		case 13:
+			OPEN_UI(WCT_HuoyueUi);//今日目标-限时活动
+			sel.num=1;
+			break;
+		case 14:
+			OPEN_UI(WCT_HuoyueUi);//今日目标-日常活动
+			sel.num=0;
+			break;
+		case 15:
+			OPEN_UI(WCT_STOREUI);//商城-热卖
+			sel.num=0;
+			break;
+		case 16:
+			OPEN_UI(WCT_STOREUI);//商城-常用
+			sel.num=1;
+			break;
+		case 17:
+			OPEN_UI(WCT_STOREUI);//商城-装扮
+			sel.num=2;
+			break;
+		case 18:
+			OPEN_UI(WCT_STOREUI);//商城-钻石
+			sel.num=3;
+			break;
+		case 19:
+			OPEN_UI(WCT_ChongZhiActivityFarmeUI);//充值
+			break;
+		case 20:
+			OPEN_UI(WCT_CangJingGeUi);//藏经阁
+			break;
+		default:
+			break;
+		}
+		SEND_EVENT(&sel);
+	}
+}
+
+void BusinessWenziLayer::setMainBottomPos(CCPoint pos)
+{
+	frameNode->setPosition(this->convertToNodeSpace(pos));
+}
+
+void BusinessWenziLayer::updateShowData(int id)
+{
+	if (frameNode==NULL )
+	{
+		return;
+	}
+	
+	SPacket_YunYing_Activity* pPacketInfo = KaifuHuodongMgr::getInstance()->getYunyingPacketActivity(id);
+	SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(id);
+
+	if ( pPacketInfo && pInfo)
+	{
+		m_id=id;
+		tagDWORDTime beginTime = pPacketInfo->beginTime;
+		tagDWORDTime endTime = pPacketInfo->endTime;
+		CCString* str = CCString::createWithFormat("20%02d\xE5\xB9\xB4%02d\xE6\x9C\x88%02d\xE6\x97\xA5%02d\xE7\x82\xB9-20%02d\xE5\xB9\xB4%02d\xE6\x9C\x88%02d\xE6\x97\xA5%02d\xE7\x82\xB9", 
+			beginTime.year, beginTime.month, beginTime.day, beginTime.hour, endTime.year, endTime.month, endTime.day, endTime.hour);
+		actTimeShow->setString(str->getCString());
+		std::string titleShowStr = pInfo->title;
+		actDesShow->setString(titleShowStr.c_str());
+
+		std::string descStr=pInfo->describe;
+		descLabel->setString(descStr.c_str());
+
+		btnName=pInfo->m_ActivityItem_VecProto[0].btnName;
+		if ( btnName== "0" )
+		{
+			goToBtn->setVisible(false);
+		}
+		else
+		{
+			goToBtn->setVisible(true);
+		}
+	}
+}
+
+void BusinessWenziLayer::setVisibleAndTouch(bool isShow)
+{
+	if(m_isVisible == isShow)
+		return;
+
+	m_isVisible = isShow;
+	this->setVisible(isShow);
+	int zOrder = m_isVisible == true ? 2 : 1;
+	this->setZOrder(zOrder);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+BusinessLeiLoginLayer::BusinessLeiLoginLayer()
+	:m_iId(INVALID)
+	,m_contentNode(NULL)
+	,m_isVisible(true)
+{
+
+}
+
+BusinessLeiLoginLayer::~BusinessLeiLoginLayer()
+{
+	if(m_verticalList != NULL)
+	{
+		m_verticalList->clear();
+		delete m_verticalList;
+		m_verticalList = NULL;
+	}
+	if(m_contentNode != NULL)
+	{
+		m_contentNode->release();
+		m_contentNode = NULL;
+	}
+}
+
+SEL_MenuHandler BusinessLeiLoginLayer::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+SEL_CCControlHandler BusinessLeiLoginLayer::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onchongzhiBtnPressed", BusinessLeichongLayer::onchongzhiBtnPressed);
+
+	return NULL;
+}
+
+void BusinessLeiLoginLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	m_frame = this->getChildByTag(BLL_Frame);
+	CC_ASSERT(m_frame != NULL);
+	m_bottomNode = m_frame->getChildByTag(BLL_Node);
+	m_btnNode = m_frame->getChildByTag(BLL_LeiChongNode);
+	m_btnNode->setVisible(false);
+	//字体替换
+	m_actTimeStr   = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLL_ActTimeStr)));
+	m_actTimeStr->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+	m_actTimeShow  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLL_ActTimeShow)));
+	m_actTimeShow->setTextColor(ccc4(0xff, 0xec, 0xc8, 0xff));
+	m_actDesStr    = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLL_DesStr)));
+	m_actDesStr->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+	m_actDesShow   = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BLL_DesShow)));
+	m_actDesShow->setTextColor(ccc4(0x00, 0xff, 0x00, 0xff));
+
+	m_scrollView = CCScrollView::create(m_bottomNode->getContentSize());
+	m_bottomNode->addChild(m_scrollView);
+
+	m_contentNode = CCNode::create();
+	m_contentNode->setContentSize(m_bottomNode->getContentSize());
+	m_contentNode->retain();
+
+	m_scrollView->setContainer(m_contentNode);
+	m_scrollView->setTouchEnabled(true);
+	m_scrollView->setBounceable(true);
+	m_scrollView->setContentSize(m_contentNode->getContentSize());
+	m_scrollView->setDirection(kCCScrollViewDirectionVertical);
+	m_scrollView->setContentOffset(m_scrollView->minContainerOffset());
+
+	m_verticalList = new VerticalList<BusinessLeiItem>;
+	m_verticalList->addToScrollView(m_scrollView);
+	m_verticalList->setMinSize(m_contentNode->getContentSize());
+	//m_verticalList->setItemOffsetY(-75.f);
+	m_verticalList->setEnableSelect(true);
+
+	// 	setAllChildernButtonPriority(m_frame, -3);
+	// 	m_scrollView->setTouchPriority(-2);
+}
+
+void BusinessLeiLoginLayer::onEnter()
+{
+	//	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -2, false);
+	setTouchPriority(0);
+	setTouchEnabled(true);
+	//  	setAllChildernButtonEnable(this,false);
+	//  	setAllChildernButtonEnable(this,true);
+	setAllChildernButtonPriority(this, 0);
+	CCLayer::onEnter();
+}
+
+void BusinessLeiLoginLayer::onExit()
+{
+	CCLayer::onExit();
+	//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool BusinessLeiLoginLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (!isVisible() || !hasVisibleParents() || !isRunning())
+	{
+		return false;
+	}
+	if(isTouchOnNodeContent(m_frame, pTouch))
+	{
+		if(isTouchOnNodeContent(m_bottomNode, pTouch))
+		{
+			return false;
+		}
+		else
+		{
+			return true;
+		}
+	}
+	// 	CCNode* scrContainer = m_scrollView->getContainer();
+	// 	CCPoint scrConPos = scrContainer->getPosition();
+	// 	CCSize scrConSize = m_contentNode->getContentSize();
+	// 	CCPoint itemPos;
+	// 	CCSize itemSize;
+	// 	for(int itemIdx = 0; itemIdx < m_verticalList->getItemCount(); ++itemIdx){
+	// 		BusinessLeiItem* leiItem = m_verticalList->getItem(itemIdx);
+	// 		itemPos = leiItem->getPosition();
+	// 		itemSize = leiItem->getContentSize();
+	// 		if((itemPos.y + scrConPos.y + itemSize.height*0.4) < 0 || (itemPos.y + scrConPos.y + itemSize.height*0.3) > scrConSize.height){
+	// 			leiItem->setTouchCanUse(false);
+	// 		}else{
+	// 			leiItem->setTouchCanUse(true);
+	// 		}
+	// 	}
+	return false;
+}
+
+void BusinessLeiLoginLayer::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+
+}
+
+void BusinessLeiLoginLayer::setMainBottomPos(CCPoint botPos)
+{
+	CCPoint pos = this->convertToNodeSpace(botPos);
+	m_frame->setPosition(pos);
+}
+
+void BusinessLeiLoginLayer::updateShowData(int id)
+{
+	if(m_frame == NULL )
+		return;
+	//m_iId = id;
+	SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(id);
+	SPacket_YunYing_Activity* pPacketInfo = KaifuHuodongMgr::getInstance()->getYunyingPacketActivity(id);
+	if(pInfo && pPacketInfo)
+	{
+		m_iId = id;
+		m_verticalList->clear();
+
+		tagDWORDTime beginTime = pPacketInfo->beginTime;
+		tagDWORDTime endTime = pPacketInfo->endTime;
+		CCString* str = CCString::createWithFormat("20%02d\xE5\xB9\xB4%02d\xE6\x9C\x88%02d\xE6\x97\xA5%02d\xE7\x82\xB9-20%02d\xE5\xB9\xB4%02d\xE6\x9C\x88%02d\xE6\x97\xA5%02d\xE7\x82\xB9", 
+			beginTime.year, beginTime.month, beginTime.day, beginTime.hour, endTime.year, endTime.month, endTime.day, endTime.hour);
+		m_actTimeShow->setString(str->getCString());
+
+		m_actDesShow->setString(pInfo->describe.c_str());
+
+		for(size_t itemIdx = 0; itemIdx < pInfo->m_ActivityItem_VecProto.size(); ++itemIdx)
+		{
+			BusinessLeiItem* itemTemp = new BusinessLeiItem;
+			itemTemp->updataData(m_iId, itemIdx);
+			m_verticalList->addItem(itemTemp);
+		}
+	}
+	m_verticalList->updateDisplay();
+	m_scrollView->setContentOffset(m_scrollView->minContainerOffset());
+	m_scrollView->update_child_touch_clip_rect();
+}
+
+void BusinessLeiLoginLayer::setVisibleAndTouch(bool isShow)
+{
+	if(m_isVisible == isShow)
+		return;
+
+	m_isVisible = isShow;
+	this->setVisible(isShow);
+	m_scrollView->setVisible(isShow);
+	int zOrder = m_isVisible == true ? 2 : 1;
+	this->setZOrder(zOrder);
+	// 	if(m_isVisible){
+	// 		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -2, false);
+	// 	}else{
+	// 		CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	// 	}
+	for(int itemIdx = 0; itemIdx < m_verticalList->getItemCount(); ++itemIdx){
+		m_verticalList->getItem(itemIdx)->setVisibleAndTouch(isShow);
+	}
+}
+
+void BusinessLeiLoginLayer::updateItemState()
+{
+	if(!IS_VALID(m_iId))
+		return;
+
+	for(int itemIdx = 0; itemIdx < m_verticalList->getItemCount(); ++itemIdx){
+		m_verticalList->getItem(itemIdx)->updateItemState();
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+BusinessGuoGuanLayer::BusinessGuoGuanLayer()
+	:m_iId(INVALID)
+	,m_contentNode(NULL)
+	,m_isVisible(true)
+	,m_actDesShow(NULL)
+	,m_actDesStr(NULL)
+	,m_actTimeShow(NULL)
+	,m_actTimeStr(NULL)
+	,m_frame(NULL)
+	,m_bottomNode(NULL)
+	,m_qianWangStr(NULL)
+	,m_verticalList(NULL)
+{
+}
+
+BusinessGuoGuanLayer::~BusinessGuoGuanLayer()
+{
+	if(m_verticalList != NULL)
+	{
+		m_verticalList->clear();
+		delete m_verticalList;
+		m_verticalList = NULL;
+	}
+	if(m_contentNode != NULL)
+	{
+		m_contentNode->release();
+		m_contentNode = NULL;
+	}
+}
+
+SEL_MenuHandler BusinessGuoGuanLayer::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+SEL_CCControlHandler BusinessGuoGuanLayer::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onqianwangBtnPressed", BusinessGuoGuanLayer::onqianwangBtnPressed);
+
+	return NULL;
+}
+
+void BusinessGuoGuanLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	m_frame = this->getChildByTag(BGG_Frame);
+	CC_ASSERT(m_frame != NULL);
+	m_bottomNode = m_frame->getChildByTag(BGG_Node);
+
+	//字体替换
+	m_actTimeStr   = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BGG_ActTimeStr)));
+	m_actTimeStr->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+	m_actTimeShow  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BGG_ActTimeShow)));
+	m_actTimeShow->setTextColor(ccc4(0xff, 0xec, 0xc8, 0xff));
+	m_actDesStr    = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BGG_DesStr)));
+	m_actDesStr->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+	m_actDesShow   = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BGG_DesShow)));
+	m_actDesShow->setTextColor(ccc4(0x00, 0xff, 0x00, 0xff));
+
+	m_qianWangStr  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BGG_BtnLabel)));
+
+
+	m_scrollView = CCScrollView::create(m_bottomNode->getContentSize());
+	m_scrollView->setPosition(m_bottomNode->getPosition());
+	m_frame->addChild(m_scrollView);
+
+	m_contentNode = CCNode::create();
+	m_contentNode->setContentSize(m_bottomNode->getContentSize());
+	m_contentNode->retain();
+
+	m_scrollView->setContainer(m_contentNode);
+	m_scrollView->setTouchEnabled(true);
+	m_scrollView->setBounceable(true);
+	m_scrollView->setContentSize(m_contentNode->getContentSize());
+	m_scrollView->setDirection(kCCScrollViewDirectionVertical);
+	m_scrollView->setContentOffset(m_scrollView->minContainerOffset());
+
+	m_verticalList = new VerticalList<BusinessLeiItem>;
+	m_verticalList->addToScrollView(m_scrollView);
+	m_verticalList->setMinSize(m_contentNode->getContentSize());
+	//m_verticalList->setItemOffsetY(-75.f);
+	m_verticalList->setEnableSelect(true);
+}
+
+void BusinessGuoGuanLayer::onEnter()
+{
+	setTouchPriority(0);
+	setTouchEnabled(true);
+	setAllChildernButtonPriority(this,0);
+	CCLayer::onEnter();
+}
+
+void BusinessGuoGuanLayer::onExit()
+{
+	CCLayer::onExit();
+}
+
+bool BusinessGuoGuanLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (!isVisible() || !hasVisibleParents() || !isRunning())
+	{
+		return false;
+	}
+	if(isTouchOnNodeContent(m_frame, pTouch))
+	{
+		if(isTouchOnNodeContent(m_bottomNode, pTouch))
+		{
+			return false;
+		}
+		else
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void BusinessGuoGuanLayer::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+
+}
+
+void BusinessGuoGuanLayer::onqianwangBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	//OPEN_UI(WCT_ChongZhiActivityFarmeUI);//开启充值活动界面
+	SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(m_iId);
+	if(pInfo != NULL)
+	{
+		if (pInfo->actType == EOSAT_Activity_KillBoos)
+		{
+			WorldPacket C2G_Msg(NET_C2G_REQUEST_BOSS_LIST);
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);
+			BossPKMgr::getInstance()->setOpenBossUi(true);
+		}
+		else if (pInfo->actType == EOSAT_Activity_XuanShang)
+		{
+			if (RoleManager::getInstance()->getLocalPlayer()->getLevel() < GetFunOpenLevel(EFOL_XuanShang))
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["level_not_xuanshang"]);
+			}
+			else
+			{
+				RewardQuestMgr::getInstance()->sendUpdateQuestState();
+				RewardQuestMgr::getInstance()->sendUpdateQuestList(0);
+				OPEN_UI(WCT_RewardQuestUi);
+			}
+		}
+		else if (pInfo->actType == EOSAT_Activity_GuanQia)
+		{
+			if (RoleManager::getInstance()->getLocalPlayer()->getLevel() < GetFunOpenLevel(EFOL_SingleInstance))
+			{
+				ToolTip::getInstance()->push(GET_STR(9212));
+			}
+			else
+			{
+				OPEN_UI(WCT_FubenUI);
+			}
+		}
+	}
+}
+
+void BusinessGuoGuanLayer::setMainBottomPos(CCPoint botPos)
+{
+	CCPoint pos = this->convertToNodeSpace(botPos);
+	m_frame->setPosition(pos);
+}
+
+void BusinessGuoGuanLayer::updateShowData(int id)
+{
+	if(m_frame == NULL )
+		return;
+	//m_iId = id;
+	SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(id);
+	SPacket_YunYing_Activity* pPacketInfo = KaifuHuodongMgr::getInstance()->getYunyingPacketActivity(id);
+
+	if(pInfo && pPacketInfo)
+	{
+		m_iId = id;
+		m_verticalList->clear();
+
+		tagDWORDTime beginTime = pPacketInfo->beginTime;
+		tagDWORDTime endTime = pPacketInfo->endTime;
+		CCString* str = CCString::createWithFormat("20%02d\xE5\xB9\xB4%02d\xE6\x9C\x88%02d\xE6\x97\xA5%02d\xE7\x82\xB9-20%02d\xE5\xB9\xB4%02d\xE6\x9C\x88%02d\xE6\x97\xA5%02d\xE7\x82\xB9", 
+			beginTime.year, beginTime.month, beginTime.day, beginTime.hour, endTime.year, endTime.month, endTime.day, endTime.hour);
+		m_actTimeShow->setString(str->getCString());
+		std::string desShowStr = pInfo->describe;
+		m_actDesShow->setString(desShowStr.c_str());
+
+		for(size_t itemIdx = 0; itemIdx < pInfo->m_ActivityItem_VecProto.size(); ++itemIdx)
+		{
+			BusinessLeiItem* itemTemp = new BusinessLeiItem;
+			itemTemp->updataData(m_iId, itemIdx);
+			m_verticalList->addItem(itemTemp);
+		}
+	}
+	m_verticalList->updateDisplay();
+	m_scrollView->setContentOffset(m_scrollView->minContainerOffset());
+	m_scrollView->update_child_touch_clip_rect();
+}
+
+void BusinessGuoGuanLayer::setVisibleAndTouch(bool isShow)
+{
+	if(m_isVisible == isShow)
+		return;
+
+	m_isVisible = isShow;
+	this->setVisible(isShow);
+	m_scrollView->setVisible(isShow);
+	int zOrder = m_isVisible == true ? 2 : 1;
+	this->setZOrder(zOrder);
+	for(int itemIdx = 0; itemIdx < m_verticalList->getItemCount(); ++itemIdx){
+		m_verticalList->getItem(itemIdx)->setVisibleAndTouch(isShow);
+	}
+}
+
+void BusinessGuoGuanLayer::updateItemState()
+{
+	if(!IS_VALID(m_iId))
+		return;
+
+	for(int itemIdx = 0; itemIdx < m_verticalList->getItemCount(); ++itemIdx){
+		m_verticalList->getItem(itemIdx)->updateItemState();
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////
+
+BusinessXiLianLayer::BusinessXiLianLayer()
+	:m_iId(INVALID)
+	,m_contentNode(NULL)
+	,m_isVisible(true)
+	,m_actDesShow(NULL)
+	,m_actDesStr(NULL)
+	,m_actTimeShow(NULL)
+	,m_actTimeStr(NULL)
+	,m_frame(NULL)
+	,m_bottomNode(NULL)
+	,m_numStr(NULL)
+	,m_verticalList(NULL)
+	,m_titleStr(NULL)
+{
+}
+
+BusinessXiLianLayer::~BusinessXiLianLayer()
+{
+	if(m_verticalList != NULL)
+	{
+		m_verticalList->clear();
+		delete m_verticalList;
+		m_verticalList = NULL;
+	}
+	if(m_contentNode != NULL)
+	{
+		m_contentNode->release();
+		m_contentNode = NULL;
+	}
+}
+
+SEL_MenuHandler BusinessXiLianLayer::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+SEL_CCControlHandler BusinessXiLianLayer::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+void BusinessXiLianLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	m_frame = this->getChildByTag(BXL_Frame);
+	CC_ASSERT(m_frame != NULL);
+	m_bottomNode = m_frame->getChildByTag(BXL_Node);
+
+	//字体替换
+	m_actTimeStr   = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BXL_ActTimeStr)));
+	m_actTimeStr->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+	m_actTimeShow  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BXL_ActTimeShow)));
+	m_actTimeShow->setTextColor(ccc4(0xff, 0xec, 0xc8, 0xff));
+	m_actDesStr    = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BXL_DesStr)));
+	m_actDesStr->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+	m_actDesShow   = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_frame->getChildByTag(BXL_DesShow)));
+	m_actDesShow->setTextColor(ccc4(0x00, 0xff, 0x00, 0xff));
+
+	CCNode* bottomSprite = dynamic_cast<CCNode*>(m_frame->getChildByTag(BXL_BottomSprite));
+	m_numStr = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(bottomSprite->getChildByTag(BXL_LabelShow)));
+	m_titleStr = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(bottomSprite->getChildByTag(BXL_LabelTitle)));
+	m_titleStr->setTextColor(ccc4(0xff, 0xec, 0x4b, 0xff));
+
+	m_scrollView = CCScrollView::create(m_bottomNode->getContentSize());
+	m_scrollView->setPosition(m_bottomNode->getPosition());
+	m_frame->addChild(m_scrollView);
+
+	m_contentNode = CCNode::create();
+	m_contentNode->setContentSize(m_bottomNode->getContentSize());
+	m_contentNode->retain();
+
+	m_scrollView->setContainer(m_contentNode);
+	m_scrollView->setTouchEnabled(true);
+	m_scrollView->setBounceable(true);
+	m_scrollView->setContentSize(m_contentNode->getContentSize());
+	m_scrollView->setDirection(kCCScrollViewDirectionVertical);
+	m_scrollView->setContentOffset(m_scrollView->minContainerOffset());
+
+	m_verticalList = new VerticalList<BusinessLeiItem>;
+	m_verticalList->addToScrollView(m_scrollView);
+	m_verticalList->setMinSize(m_contentNode->getContentSize());
+	//m_verticalList->setItemOffsetY(-75.f);
+	m_verticalList->setEnableSelect(true);
+}
+
+void BusinessXiLianLayer::onEnter()
+{
+	setTouchPriority(0);
+	setTouchEnabled(true);
+	setAllChildernButtonPriority(this,0);
+	CCLayer::onEnter();
+}
+
+void BusinessXiLianLayer::onExit()
+{
+	CCLayer::onExit();
+}
+
+bool BusinessXiLianLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (!isVisible() || !hasVisibleParents() || !isRunning())
+	{
+		return false;
+	}
+	if(isTouchOnNodeContent(m_frame, pTouch))
+	{
+		if(isTouchOnNodeContent(m_bottomNode, pTouch))
+		{
+			return false;
+		}
+		else
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void BusinessXiLianLayer::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+
+}
+
+void BusinessXiLianLayer::setMainBottomPos(CCPoint botPos)
+{
+	CCPoint pos = this->convertToNodeSpace(botPos);
+	m_frame->setPosition(pos);
+}
+
+void BusinessXiLianLayer::updateShowData(int id)
+{
+	if(m_frame == NULL )
+		return;
+	//m_iId = id;
+	SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(id);
+	SPacket_YunYing_Activity* pPacketInfo = KaifuHuodongMgr::getInstance()->getYunyingPacketActivity(id);
+
+	if(pInfo && pPacketInfo)
+	{
+		m_iId = id;
+		m_verticalList->clear();
+
+		tagDWORDTime beginTime = pPacketInfo->beginTime;
+		tagDWORDTime endTime = pPacketInfo->endTime;
+		CCString* str = CCString::createWithFormat("20%02d\xE5\xB9\xB4%02d\xE6\x9C\x88%02d\xE6\x97\xA5%02d\xE7\x82\xB9-20%02d\xE5\xB9\xB4%02d\xE6\x9C\x88%02d\xE6\x97\xA5%02d\xE7\x82\xB9", 
+			beginTime.year, beginTime.month, beginTime.day, beginTime.hour, endTime.year, endTime.month, endTime.day, endTime.hour);
+		m_actTimeShow->setString(str->getCString());
+		std::string desShowStr = pInfo->describe;
+		m_actDesShow->setString(desShowStr.c_str());
+
+		str = CCString::createWithFormat(STRING_TABLE["ci"], pPacketInfo->m_Value[0]);
+		m_numStr->setString(str->getCString());
+		m_titleStr->setString(STRING_TABLE["woyixilian"]);
+
+		for(size_t itemIdx = 0; itemIdx < pInfo->m_ActivityItem_VecProto.size(); ++itemIdx)
+		{
+			BusinessLeiItem* itemTemp = new BusinessLeiItem;
+			itemTemp->updataData(m_iId, itemIdx);
+			m_verticalList->addItem(itemTemp);
+		}
+	}
+	m_verticalList->updateDisplay();
+	m_scrollView->setContentOffset(m_scrollView->minContainerOffset());
+	m_scrollView->update_child_touch_clip_rect();
+}
+
+void BusinessXiLianLayer::setVisibleAndTouch(bool isShow)
+{
+	if(m_isVisible == isShow)
+		return;
+
+	m_isVisible = isShow;
+	this->setVisible(isShow);
+	m_scrollView->setVisible(isShow);
+	int zOrder = m_isVisible == true ? 2 : 1;
+	this->setZOrder(zOrder);
+	for(int itemIdx = 0; itemIdx < m_verticalList->getItemCount(); ++itemIdx){
+		m_verticalList->getItem(itemIdx)->setVisibleAndTouch(isShow);
+	}
+}
+
+void BusinessXiLianLayer::updateItemState()
+{
+	if(!IS_VALID(m_iId))
+		return;
+
+	for(int itemIdx = 0; itemIdx < m_verticalList->getItemCount(); ++itemIdx){
+		m_verticalList->getItem(itemIdx)->updateItemState();
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////
+
+BusinessLeiItem::BusinessLeiItem()
+{
+	m_busLeiItemNode = NULL;
+	m_itemBG = NULL;
+	createItem();
+}
+
+BusinessLeiItem::~BusinessLeiItem()
+{
+	if(m_busLeiItemNode != NULL){
+		m_busLeiItemNode->removeFromParentAndCleanup(true);
+		m_busLeiItemNode = NULL;
+	}
+}
+
+CCSize BusinessLeiItem::getContentSize()
+{
+	if(m_itemBG != NULL){
+		return m_itemBG->getContentSize();
+	}
+
+	return CCSize(0.f, 0.f);
+}
+
+float BusinessLeiItem::getItemHeight()
+{
+	if(m_itemBG != NULL){
+		return m_itemBG->getContentSize().height;
+	}
+
+	return 0;
+}
+
+void BusinessLeiItem::createItem()
+{
+	std::string strFullPath  = CFGReader::instance()->get_ui_ccbi_filepath("kaifuhuodong1");
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("Tian7leUiLayer", UiLayerLoader<BusinessLeiItemNode>::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode * node = ccbReader->readNodeGraphFromFile(strFullPath.c_str());
+
+	if(node != NULL){
+		m_busLeiItemNode = dynamic_cast<BusinessLeiItemNode*>(node);
+		m_itemBG = node->getChildByTag(0);
+		m_busLeiItemNode->setContentSize(m_itemBG->getContentSize());
+		m_busLeiItemNode->ignoreAnchorPointForPosition(false);
+		UIUtil::childNodeAlign(m_busLeiItemNode,m_itemBG,eha_center,eva_center,CCPointZero,true);
+		_node->setContentSize(m_itemBG->getContentSize());
+		_node->setAnchorPoint(ccp(0.5,0.5));
+		UIUtil::childNodeAlign(_node,m_busLeiItemNode,eha_center,eva_center,CCPointZero);
+	}
+
+	ccbReader->release();
+}
+
+void BusinessLeiItem::updataData(int m_iId, int index)
+{
+	if(m_busLeiItemNode){
+		m_busLeiItemNode->updateData(m_iId, index);
+	}
+}
+
+void BusinessLeiItem::setVisibleAndTouch(bool isShow)
+{
+	if(m_busLeiItemNode){
+		m_busLeiItemNode->setVisibleAndTouch(isShow);
+	}
+}
+
+void BusinessLeiItem::setTouchCanUse(bool canUse)
+{
+	if(m_busLeiItemNode){
+		m_busLeiItemNode->setTouchCanUse(canUse);
+	}
+}
+
+void BusinessLeiItem::updateItemState()
+{
+	if(m_busLeiItemNode){
+		m_busLeiItemNode->updateItemState();
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+BusinessLeiItemNode::BusinessLeiItemNode()
+	: m_iId(INVALID)
+	, m_index(INVALID)
+	, m_isVisible(true)
+{
+
+}
+
+BusinessLeiItemNode::~BusinessLeiItemNode()
+{
+
+}
+
+SEL_MenuHandler BusinessLeiItemNode::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+SEL_CCControlHandler BusinessLeiItemNode::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onlingquBtnPressed", BusinessLeiItemNode::onlingquBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onlingqu1BtnPressed", BusinessLeiItemNode::onlingquBtnPressed);
+	return NULL;
+}
+
+void BusinessLeiItemNode::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	m_bottomNode = this->getChildByTag(0);
+	if(m_bottomNode == NULL)
+		return;
+
+	m_itemBotNode = m_bottomNode->getChildByTag(0)->getChildByTag(0);//放置item的node 三个及以下
+	m_lingquBtn = dynamic_cast<CCControlButton*>(m_bottomNode->getChildByTag(1));
+	m_firstStr = dynamic_cast<CCLabelTTF*>(m_bottomNode->getChildByTag(2));
+	m_secondStr = m_bottomNode->getChildByTag(3);
+	m_lingquBtn1 = dynamic_cast<CCControlButton*>(m_bottomNode->getChildByTag(4));
+	canGetTitle=Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_bottomNode->getChildByTag(5)));
+	canGetTitle->setTextColor(ccc4(0x00, 0xff, 0x00, 0xff));
+	m_strPos = m_firstStr->getPosition();
+	m_firstStr->removeFromParentAndCleanup(true);
+	m_secondStr->removeFromParentAndCleanup(true);
+
+	// 	int a = m_lingquBtn->getTouchPriority();
+	// 
+	// 	setAllChildernButtonPriority(this, -1);
+	// 	int b = m_lingquBtn->getTouchPriority();
+}
+
+void BusinessLeiItemNode::onEnter()
+{
+	//	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -1, false);
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	//  	setAllChildernButtonEnable(this,false);
+	//  	setAllChildernButtonEnable(this,true);
+	setAllChildernButtonPriority(this, 1);
+	CCLayer::onEnter();
+}
+
+void BusinessLeiItemNode::onExit()
+{
+	CCLayer::onExit();
+	//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool BusinessLeiItemNode::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (!isVisible() || !hasVisibleParents() || !isRunning())
+	{
+		return false;
+	}
+	if(isTouchOnNodeContent(m_bottomNode, pTouch)){
+		if(isTouchOnNodeContent(m_itemBotNode, pTouch)){
+			for(int itemNodeIdx = 0; itemNodeIdx < MAX_Activity_Reward; ++itemNodeIdx)
+			{
+				CCNode* itemNodeTemp = m_itemBotNode->getChildByTag(itemNodeIdx);
+				if(itemNodeTemp != NULL){
+					if(isTouchOnNodeContent(itemNodeTemp, pTouch) && itemNodeTemp->isVisible() == true){
+						return false;
+					}
+				}
+			}
+		}
+		return true;
+	}
+
+	return false;
+}
+
+void BusinessLeiItemNode::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+
+}
+
+void BusinessLeiItemNode::onlingquBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	bool sendGetReward = KaifuHuodongMgr::getInstance()->getYunyingReward(m_iId, m_index);
+	m_lingquBtn->setEnabled(!sendGetReward);//成功发送领取后，设置为不可点击
+	m_lingquBtn1->setEnabled(!sendGetReward);
+}
+
+void BusinessLeiItemNode::updateData(int id, int index)
+{
+	if(m_bottomNode == NULL)
+		return;
+
+	m_iId = id;
+	m_index = index;
+	if(!IS_VALID(m_iId) || !IS_VALID(m_index))
+		return;
+
+	SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(m_iId);
+	SPacket_YunYing_Activity* pPacketInfo = KaifuHuodongMgr::getInstance()->getYunyingPacketActivity(m_iId);
+	if (pInfo && pPacketInfo)
+	{
+		int count = 0;
+		for (int itemIndex = 0; itemIndex < MAX_Activity_Reward; ++itemIndex)
+		{
+			if (pInfo->m_ActivityItem_VecProto[index].reward[itemIndex] > 0 && pInfo->m_ActivityItem_VecProto[index].m_Num[itemIndex] > 0)
+			{
+				ItemNode * node = ItemNode::create();
+				node->init();
+				node->setPosition((count + 1) * 60, 30);
+				node->setDataId(pInfo->m_ActivityItem_VecProto[index].reward[itemIndex]);
+				if (pPacketInfo->byData[index].m_iValue == 2){//已领取不显示动画
+					node->stopAnimation();
+				}else{
+					node->runAnimation("E1_201");
+				}
+				node->setNum(pInfo->m_ActivityItem_VecProto[index].m_Num[itemIndex]);
+				if (pInfo->m_ActivityItem_VecProto[index].m_Num[itemIndex] == 1){//默认的为1不显示，这里强制显示
+					node->SetShowNum(true);
+				}
+				node->setClickable(true,0);
+				node->hideItemOpBtn();
+				m_itemBotNode->addChild(node, 1, itemIndex);
+				count++;
+			}
+		}
+		std::string showItemStr = pInfo->m_ActivityItem_VecProto[index].btnName;
+		int fenZi;
+		int fenMu;
+		bool isShowLabel;
+		if ( 4 == pInfo->score_clear )
+		{
+			fenZi = pPacketInfo->m_Value[1];
+			fenMu = pInfo->m_ActivityItem_VecProto[index]._value;
+			isShowLabel = true;
+		}
+		else if (pInfo->actType == EOSAT_Activity_XuanShang)
+		{
+			SXuanShangItemScore xuanShangItem(pPacketInfo->byData[index].m_iExtra);
+			fenZi = xuanShangItem.nScore;
+			fenMu = xuanShangItem.nTarget;
+			isShowLabel = true;
+		}
+		else
+		{
+			fenZi = pPacketInfo->m_Value[1];
+			fenMu = pInfo->m_ActivityItem_VecProto[index]._value;
+			isShowLabel = false;
+		}
+		createItemStr(showItemStr,fenZi,fenMu,isShowLabel);
+		updateItemState();
+	}
+}
+
+void BusinessLeiItemNode::createItemStr(std::string showStr,int payYBNum,int shouldPayYBNum,bool isShowLabel)
+{
+	if(showStr.empty())
+		return;
+	if (isShowLabel)
+	{
+		canGetTitle->setVisible(true);
+		m_lingquBtn->setVisible(false);
+		m_lingquBtn1->setVisible(true);
+		canGetTitle->setString(CCString::createWithFormat("%d/%d",payYBNum,shouldPayYBNum)->getCString());
+	}
+	else
+	{
+		canGetTitle->setVisible(false);
+		m_lingquBtn->setVisible(true);
+		m_lingquBtn1->setVisible(false);
+	}	
+
+	std::string baseStr = showStr;
+
+	TTFConfig configTemp;
+	configTemp.fontFilePath = FT_FONTFACE;
+	configTemp.fontSize = m_firstStr->getFontSize();
+	configTemp.outlineSize = 1;
+
+	int baseStrTag = 100;
+	CCPoint labPos = ccp(m_strPos.x - 60, m_strPos.y);
+
+	int firstIndex = baseStr.find_first_of("|");
+	if ( firstIndex != std::string::npos )
+	{
+		float height;
+		std::string beforeStr = baseStr.substr(0,firstIndex);
+		labPos.y=m_bottomNode->getContentSize().height/2;
+		for (int i=0 ; i<2 ; ++i)
+		{
+			int firstIdx = beforeStr.find_first_of("*");
+			int secondIdx = beforeStr.find_last_of("*");
+			std::string firstStr  = beforeStr.substr(0, firstIdx);
+			std::string secondStr = beforeStr.substr(firstIdx + 1, secondIdx - firstIdx - 1);
+			std::string thirdStr  = beforeStr.substr(secondIdx + 1, beforeStr.length());
+			for(int labIdx = 0; labIdx < 3; ++labIdx)
+			{
+				LabelFT* tempLab = LabelFT::createWithTTF(configTemp, "");
+				tempLab->setAnchorPoint(ccp(0.f, 0.0f));
+				tempLab->setPosition(labPos);
+				m_bottomNode->addChild(tempLab, 2, baseStrTag + labIdx);
+				if(labIdx == 0)
+				{
+					tempLab->setString(firstStr.c_str());
+					tempLab->setTextColor(ccc4(0xee, 0xc7, 0x8f, 0xff));
+				}
+				else if(labIdx == 1)
+				{
+					tempLab->setString(secondStr.c_str());
+					tempLab->setTextColor(ccc4(0x00, 0xff, 0x00, 0xff));
+				}
+				else
+				{
+					tempLab->setString(thirdStr.c_str());
+					tempLab->setTextColor(ccc4(0xee, 0xc7, 0x8f, 0xff));
+				}
+				labPos = ccp(labPos.x + tempLab->getContentSize().width, labPos.y);
+				height = tempLab->getContentSize().height;
+			}
+			labPos.y-=height;//labPos = ccp(m_strPos.x - 60, m_strPos.y);
+			labPos.x = m_strPos.x - 60;
+			beforeStr = baseStr.substr(firstIndex+1,baseStr.length());
+		}
+	}
+	else
+	{
+		int firstIdx = baseStr.find_first_of("*");
+		int secondIdx = baseStr.find_last_of("*");
+		if(firstIdx != std::string::npos && secondIdx != std::string::npos && firstIdx != secondIdx)
+		{
+			std::string firstStr  = baseStr.substr(0, firstIdx);
+			std::string secondStr = baseStr.substr(firstIdx + 1, secondIdx - firstIdx - 1);
+			std::string thirdStr  = baseStr.substr(secondIdx + 1, baseStr.length());
+			for(int labIdx = 0; labIdx < 3; ++labIdx)
+			{
+				LabelFT* tempLab = LabelFT::createWithTTF(configTemp, "");
+				tempLab->setAnchorPoint(ccp(0.f, 0.5f));
+				tempLab->setPosition(labPos);
+				m_bottomNode->addChild(tempLab, 2, baseStrTag + labIdx);
+				if(labIdx == 0)
+				{
+					tempLab->setString(firstStr.c_str());
+					tempLab->setTextColor(ccc4(0xee, 0xc7, 0x8f, 0xff));
+				}
+				else if(labIdx == 1)
+				{
+					tempLab->setString(secondStr.c_str());
+					tempLab->setTextColor(ccc4(0x00, 0xff, 0x00, 0xff));
+				}
+				else
+				{
+					tempLab->setString(thirdStr.c_str());
+					tempLab->setTextColor(ccc4(0xee, 0xc7, 0x8f, 0xff));
+				}
+				labPos = ccp(labPos.x + tempLab->getContentSize().width, labPos.y);
+			}
+		}
+		else
+		{
+			LabelFT* tempStrLab = LabelFT::createWithTTF(configTemp, "");
+			tempStrLab->setString(baseStr.c_str());
+			tempStrLab->setAnchorPoint(ccp(0.f, 0.5f));
+			tempStrLab->setTextColor(ccc4(0xee, 0xc7, 0x8f, 0xff));
+			tempStrLab->setPosition(labPos);
+			if (tempStrLab->getContentSize().width>m_itemBotNode->getPositionX())
+			{
+				tempStrLab->setDimensions(m_itemBotNode->getPositionX(),tempStrLab->getContentSize().height*2);
+			}
+			m_bottomNode->addChild(tempStrLab, 2, baseStrTag);
+		}
+	}
+}
+
+void BusinessLeiItemNode::setVisibleAndTouch(bool isShow)
+{
+	if(m_isVisible == isShow)
+		return;
+	if(!IS_VALID(m_iId) || !IS_VALID(m_index))
+		return;
+	SPacket_YunYing_Activity* pPacketInfo = KaifuHuodongMgr::getInstance()->getYunyingPacketActivity(m_iId);
+	
+	if (pPacketInfo)
+	{
+		m_isVisible = isShow;
+		this->setVisible(isShow);
+		// 	if(m_isVisible){
+		// 		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -1, false);
+		// 	}else{
+		// 		CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+		// 	}
+		m_lingquBtn->setTouchEnabled(isShow);
+		m_lingquBtn->setHighlighted(false);
+		m_lingquBtn->setEnabled(pPacketInfo->byData[m_index].m_iValue == 1);
+
+		m_lingquBtn1->setTouchEnabled(isShow);
+		m_lingquBtn1->setHighlighted(false);
+		m_lingquBtn1->setEnabled(pPacketInfo->byData[m_index].m_iValue == 1);
+
+
+		for(int itemNodeIdx = 0; itemNodeIdx < MAX_Activity_Reward; ++itemNodeIdx)
+		{
+			CCNode* itemNodeTemp = m_itemBotNode->getChildByTag(itemNodeIdx);
+			if(itemNodeTemp != NULL){
+				((ItemNode*)itemNodeTemp)->setClickable(isShow,1);
+			}
+		}
+	}
+}
+
+void BusinessLeiItemNode::setTouchCanUse(bool canUse)
+{
+	if(m_lingquBtn->isTouchEnabled() != canUse){
+		m_lingquBtn->setTouchEnabled(canUse);
+		m_lingquBtn->setHighlighted(false);
+		m_lingquBtn1->setTouchEnabled(canUse);
+		m_lingquBtn1->setHighlighted(false);
+		for(int itemNodeIdx = 0; itemNodeIdx < MAX_Activity_Reward; ++itemNodeIdx)
+		{
+			CCNode* itemNodeTemp = m_itemBotNode->getChildByTag(itemNodeIdx);
+			if(itemNodeTemp != NULL){
+				((ItemNode*)itemNodeTemp)->setClickable(canUse,1);
+			}
+		}
+	}
+}
+
+void BusinessLeiItemNode::updateItemState()
+{
+	if(!IS_VALID(m_iId) || !IS_VALID(m_index))
+		return;
+
+	SPacket_YunYing_Activity* pPacketInfo = KaifuHuodongMgr::getInstance()->getYunyingPacketActivity(m_iId);
+	SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(m_iId);
+
+	if ( pPacketInfo && pInfo)
+	{
+		for (int itemIndex = 0; itemIndex < MAX_Activity_Reward; ++itemIndex)
+		{
+			if (pInfo->m_ActivityItem_VecProto[m_index].reward[itemIndex] > 0 && pInfo->m_ActivityItem_VecProto[m_index].m_Num[itemIndex] > 0)
+			{
+				ItemNode * node = dynamic_cast<ItemNode*>(m_itemBotNode->getChildByTag(itemIndex));
+				if (pPacketInfo->byData[m_index].m_iValue == 2) //已领取不显示动画
+				{
+					node->stopAnimation();
+				}
+				else
+				{
+					node->runAnimation("E1_201");
+				}
+				if (pInfo->m_ActivityItem_VecProto[m_index].m_Num[itemIndex] == 1) //默认的为1不显示，这里强制显示
+				{
+					node->SetShowNum(true);
+				}
+			}
+		}
+		CCSpriteFrame* frameN = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("kaifuhuodong_lingqubtnn1");
+		CCSpriteFrame* frameH = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("kaifuhuodong_lingqubtnd");
+		CCSpriteFrame* afterLingqu = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("huodongzhongxin_yiling");
+		if (frameN && frameH && m_lingquBtn)//已经领取了
+		{
+			if (pPacketInfo->byData[m_index].m_iValue == 2)
+			{
+				if (4==pInfo->score_clear)
+				{
+					m_lingquBtn1->setEnabled(false);
+					m_lingquBtn1->setVisible(false);
+					canGetTitle->setVisible(false);
+					canGetTitle->setString(CCString::createWithFormat("%d/%d",pPacketInfo->m_Value[1],pInfo->m_ActivityItem_VecProto[m_index]._value)->getCString());
+					if (m_bottomNode->getChildByTag(201)==NULL)
+					{
+						CCSprite* afterLingquSP = CCSprite::createWithSpriteFrame(afterLingqu);
+						afterLingquSP->setPosition(m_lingquBtn1->getPosition());
+						m_bottomNode->addChild(afterLingquSP, 2, 201);
+					}
+					World::getInstance()->SetHighLight(m_lingquBtn1, WT_CCCONTROLBUTTON, WCT_BusinessUi, 0, false, 0, 0);
+				}
+				else if ( pInfo->actType == EOSAT_Activity_XuanShang)
+				{
+					m_lingquBtn1->setEnabled(false);
+					m_lingquBtn1->setVisible(false);
+					canGetTitle->setVisible(false);
+					SXuanShangItemScore xuanShangItem(pPacketInfo->byData[m_index].m_iExtra);
+					canGetTitle->setString(CCString::createWithFormat("%d/%d",xuanShangItem.nScore,xuanShangItem.nTarget)->getCString());
+					if (m_bottomNode->getChildByTag(201)==NULL)
+					{
+						CCSprite* afterLingquSP = CCSprite::createWithSpriteFrame(afterLingqu);
+						afterLingquSP->setPosition(m_lingquBtn1->getPosition());
+						m_bottomNode->addChild(afterLingquSP, 2, 201);
+					}
+					World::getInstance()->SetHighLight(m_lingquBtn1, WT_CCCONTROLBUTTON, WCT_BusinessUi, 0, false, 0, 0);
+				}
+				else
+				{
+					m_lingquBtn->setEnabled(false);
+					m_lingquBtn->setVisible(false);
+					if(m_bottomNode->getChildByTag(201) == NULL){
+						CCSprite* afterLingquSP = CCSprite::createWithSpriteFrame(afterLingqu);
+						afterLingquSP->setPosition(m_lingquBtn->getPosition());
+						m_bottomNode->addChild(afterLingquSP, 2, 201);
+					}
+					World::getInstance()->SetHighLight(m_lingquBtn, WT_CCCONTROLBUTTON, WCT_BusinessUi, 0, false, 0, 0);
+				}
+
+			}
+			else if (pPacketInfo->byData[m_index].m_iValue == 1)
+			{
+				if (4==pInfo->score_clear)
+				{
+					if (m_bottomNode->getChildByTag(201)!=NULL)
+					{
+						m_bottomNode->removeChildByTag(201);
+						m_lingquBtn1->setVisible(true);
+						canGetTitle->setVisible(true);
+					}
+					canGetTitle->setString(CCString::createWithFormat("%d/%d",pPacketInfo->m_Value[1],pInfo->m_ActivityItem_VecProto[m_index]._value)->getCString());
+					World::getInstance()->SetHighLight(m_lingquBtn1, WT_CCCONTROLBUTTON,WCT_BusinessUi, 0, true, 0, 0);
+					m_lingquBtn1->setEnabled(true);
+				}
+				else if ( pInfo->actType == EOSAT_Activity_XuanShang)
+				{
+					if (m_bottomNode->getChildByTag(201)!=NULL)
+					{
+						m_bottomNode->removeChildByTag(201);
+						m_lingquBtn1->setVisible(true);
+						canGetTitle->setVisible(true);
+					}
+					SXuanShangItemScore xuanShangItem(pPacketInfo->byData[m_index].m_iExtra);
+					canGetTitle->setString(CCString::createWithFormat("%d/%d",xuanShangItem.nScore,xuanShangItem.nTarget)->getCString());
+					World::getInstance()->SetHighLight(m_lingquBtn1, WT_CCCONTROLBUTTON,WCT_BusinessUi, 0, true, 0, 0);
+					m_lingquBtn1->setEnabled(true);
+				}
+				else
+				{
+					if(m_bottomNode->getChildByTag(201) != NULL){
+						m_bottomNode->removeChildByTag(201);
+						m_lingquBtn->setVisible(true);
+					}
+					World::getInstance()->SetHighLight(m_lingquBtn, WT_CCCONTROLBUTTON, WCT_BusinessUi, 0, true, 0, 0);
+					m_lingquBtn->setEnabled(true);
+				}
+			}
+			else if (pPacketInfo->byData[m_index].m_iValue == 0)
+			{
+				if (4==pInfo->score_clear)
+				{
+					if (m_bottomNode->getChildByTag(201)!=NULL)
+					{
+						m_bottomNode->removeChildByTag(201);
+						m_lingquBtn1->setVisible(true);
+						canGetTitle->setVisible(true);
+					}
+					canGetTitle->setString(CCString::createWithFormat("%d/%d",pPacketInfo->m_Value[1],pInfo->m_ActivityItem_VecProto[m_index]._value)->getCString());
+					World::getInstance()->SetHighLight(m_lingquBtn1, WT_CCCONTROLBUTTON,WCT_BusinessUi, 0, false, 0, 0);
+					m_lingquBtn1->setEnabled(false);
+				}
+				else if ( pInfo->actType == EOSAT_Activity_XuanShang)
+				{
+					if (m_bottomNode->getChildByTag(201)!=NULL)
+					{
+						m_bottomNode->removeChildByTag(201);
+						m_lingquBtn1->setVisible(true);
+						canGetTitle->setVisible(true);
+					}
+					SXuanShangItemScore xuanShangItem(pPacketInfo->byData[m_index].m_iExtra);
+					canGetTitle->setString(CCString::createWithFormat("%d/%d",xuanShangItem.nScore,xuanShangItem.nTarget)->getCString());
+					World::getInstance()->SetHighLight(m_lingquBtn1, WT_CCCONTROLBUTTON,WCT_BusinessUi, 0, false, 0, 0);
+					m_lingquBtn1->setEnabled(false);
+				}
+				else
+				{
+					if(m_bottomNode->getChildByTag(201) != NULL){
+						m_bottomNode->removeChildByTag(201);
+						m_lingquBtn->setVisible(true);
+					}
+					World::getInstance()->SetHighLight(m_lingquBtn, WT_CCCONTROLBUTTON, WCT_BusinessUi, 0, false, 0, 0);
+					m_lingquBtn->setEnabled(false);
+				}
+
+			}
+		}
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+BusinessRankItemNode::BusinessRankItemNode()
+{
+
+}
+
+BusinessRankItemNode::~BusinessRankItemNode()
+{
+
+}
+
+SEL_MenuHandler BusinessRankItemNode::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+SEL_CCControlHandler BusinessRankItemNode::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+BusinessRankItemNode* BusinessRankItemNode::createItem()
+{
+	std::string strFullPath  = CFGReader::instance()->get_ui_ccbi_filepath("huodongzhongxinleichongitem");
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("hondongzhongxinleichongitemUiLayer", UiNodeLoader<BusinessRankItemNode>::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode * node = ccbReader->readNodeGraphFromFile(strFullPath.c_str());
+	BusinessRankItemNode* item = dynamic_cast<BusinessRankItemNode*>(node);
+	CC_ASSERT(item);
+	return item;
+}
+
+void BusinessRankItemNode::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	m_bottomNode = this->getChildByTag(0);
+	if(m_bottomNode == NULL)
+		return;
+	this->setContentSize(m_bottomNode->getContentSize());
+	m_itemBotNode = m_bottomNode->getChildByTag(0)->getChildByTag(0);//放置item的node 放两个及以下
+	m_itemBotNode ->setPositionX(m_itemBotNode->getPositionX()-20);
+	//名次
+	m_roleRankLab = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_bottomNode->getChildByTag(2)));
+	//姓名
+	m_nameLab = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_bottomNode->getChildByTag(3)));
+	//消耗： （需替换文字字体）
+	m_costStrLab = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_bottomNode->getChildByTag(4)));
+	//消耗元宝数量
+	m_costNumLab = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_bottomNode->getChildByTag(5)));
+
+	m_showSprite = dynamic_cast<CCSprite*>(m_bottomNode->getChildByTag(6));
+
+	//	setAllChildernButtonPriority(this, 0);
+}
+
+void BusinessRankItemNode::onEnter()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, false);
+	// 	setTouchPriority(1);
+	// 	setTouchEnabled(true);
+	//  	setAllChildernButtonEnable(this,false);
+	//  	setAllChildernButtonEnable(this,true);
+	/*	setAllChildernButtonPriority(this, 1);*/
+	//	CCLayer::onEnter();
+	CCNode::onEnter();
+}
+
+void BusinessRankItemNode::onExit()
+{
+	CCNode::onExit();
+	//	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool BusinessRankItemNode::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (!isVisible() || !hasVisibleParents() || !isRunning())
+	{
+		return false;
+	}
+	if(isTouchOnNodeContent(m_bottomNode, pTouch)){
+		return true;
+	}
+
+	return false;
+}
+
+void BusinessRankItemNode::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+
+}
+
+void BusinessRankItemNode::updateData(SProtoYunYingActivity* pInfo, NET_SIS_YunYing_Activity_Rank_Item* item, size_t index)
+{
+	if(m_bottomNode == NULL)
+		return;
+	// 	SProtoYunYingActivity* pInfo = KaifuHuodongMgr::getInstance()->getYunyingActivity(id);
+	// 	NET_SIS_YunYing_Activity_Rank_Item* item=KaifuHuodongMgr::getInstance()->getYunyingRankItem(id,index);
+	if (item!=NULL)
+	{
+		m_roleRankLab->setString(CCString::createWithFormat("%s%d%s",STRING_TABLE["di"],index+1,STRING_TABLE["ming"])->getCString());
+
+		char vStr[128];
+		memset(vStr, 0, sizeof(char) * 128);
+		Utf16ToUtf8((item->szRoleName), vStr, 128, 0);
+		m_nameLab->setString(vStr);
+
+		CCSpriteFrame* spFrame;
+		switch(pInfo->actType)
+		{
+		case EOSAT_Activity_Rank_Consume:
+			m_showSprite->setVisible(true);
+			spFrame=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("huodongzhongxin_yuanbao");
+			m_showSprite->setDisplayFrame(spFrame);
+			m_costStrLab->setString(STRING_TABLE["xiaohao"]);
+			setNormalRankNumLab(item->nScore);
+			break;
+		case EOSAT_Activity_Rank_Bill:
+			m_showSprite->setVisible(true);
+			spFrame=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("huodongzhongxin_yuanbao");
+			m_showSprite->setDisplayFrame(spFrame);
+			m_costStrLab->setString(STRING_TABLE["chongzhi"]);
+			setNormalRankNumLab(item->nScore);
+			break;
+		case EOSAT_Activity_Rank_RecvFlower:
+			m_showSprite->setVisible(true);
+			spFrame=CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("huodongzhongxin_hua");
+			m_showSprite->setDisplayFrame(spFrame);
+			m_costStrLab->setString(STRING_TABLE["songhua"]);
+			setNormalRankNumLab(item->nScore);
+			break;
+		case  EOSAT_Activity_Rank_JJC:
+			m_showSprite->setVisible(false);
+			m_costStrLab->setString(STRING_TABLE["jingjichang"]);
+			m_costNumLab->setPositionX(m_costNumLab->getPositionX()+25);
+			setNormalRankNumLab(item->nScore);
+			break;
+		case EOSAT_Activity_Rank_Level:
+			m_showSprite->setVisible(false);
+			m_costStrLab->setString(STRING_TABLE["dengji"]);
+			m_costNumLab->setPositionX(m_costNumLab->getPositionX()+25);
+			setNormalRankNumLab(item->nScore);
+			break;
+		case EOSAT_Activity_Rank_Fight:
+			m_showSprite->setVisible(false);
+			m_costStrLab->setString(STRING_TABLE["zhandouli"]);
+			m_costNumLab->setPositionX(m_costNumLab->getPositionX()+25);
+			setNormalRankNumLab(item->nScore);
+			break;
+		case EOSAT_Activity_Rank_RideLevel:
+			m_showSprite->setVisible(false);
+			m_costStrLab->setString(STRING_TABLE["zuoqidengji"]);
+			m_costNumLab->setPositionX(m_costNumLab->getPositionX()+25);
+			setZuoQiRankNumLab(item->nScore);
+			break;
+		case EOSAT_Activity_Rank_MoHun:
+			m_showSprite->setVisible(false);
+			m_costStrLab->setString(STRING_TABLE["mohun"]);
+			m_costNumLab->setPositionX(m_costNumLab->getPositionX()+25);
+			setMoHunRankNumLab(item->nScore);
+			break;
+		default:
+			break;
+		}
+	}
+	int count = 0;
+	for (int itemIndex = 0; itemIndex < MAX_Activity_Reward; ++itemIndex)
+	{
+		if (item->dwReward[itemIndex] > 0 && item->nRewardCount[itemIndex] > 0)
+		{
+			ItemNode * node = ItemNode::create();
+			node->init();
+			node->setPosition((count+1 )* 60, 30);
+			node->setDataId(item->dwReward[itemIndex]);
+			node->runAnimation("E1_201");
+			node->setNum(item->nRewardCount[itemIndex]);
+			if (item->nRewardCount[itemIndex]== 1)    //默认的为1不显示，这里强制显示
+			{
+				node->SetShowNum(true);
+			}
+			node->setClickable(true,1);
+			node->hideItemOpBtn();
+			m_itemBotNode->addChild(node, 1, itemIndex);
+			count++;
+		}
+	}
+}
+
+void BusinessRankItemNode::setNormalRankNumLab(int level)
+{
+	if (level<0)
+	{
+		level = 0;
+	}
+	if (level<100000)
+	{
+		m_costNumLab->setString(CCString::createWithFormat("%d",level)->getCString());
+	}
+	else if (level>=100000 && level<100000000)
+	{
+		m_costNumLab->setString(CCString::createWithFormat("%d%s",level/10000,STRING_TABLE["yuanbao_wan"])->getCString());
+	}
+	else if (level>=100000000)
+	{
+		m_costNumLab->setString(CCString::createWithFormat("%d%s",level/100000000,STRING_TABLE["yuanbao_yi"])->getCString());
+	}
+}
+
+void BusinessRankItemNode::setZuoQiRankNumLab(int level)
+{
+	if ( level<0 )
+	{
+		level = 0;
+	}
+	else if (level>=0 && level<maxZuoQiScore)
+	{
+		level ++;
+	}
+	else if ( level>=maxZuoQiScore )
+	{
+		level = maxZuoQiScore;
+	}
+	std::string zuoQiLevel = CCString::createWithFormat("ZuoQiRank_%d",level)->getCString();
+	m_costNumLab->setString(STRING_TABLE[zuoQiLevel.c_str()]);
+	m_costStrLab->setPositionX(m_costStrLab->getPositionX()+18*1.0);
+	m_costNumLab->setPositionX(m_costStrLab->getPositionX()+m_costStrLab->getContentSize().width/2);
+}
+void BusinessRankItemNode::setMoHunRankNumLab(int level)
+{
+	if ( level<0 )
+	{
+		level = 0;
+	}
+	else if ( level>maxMoHunScore )
+	{
+		level = maxMoHunScore;
+	}
+	std::string moHunLevel = CCString::createWithFormat("MoHunRank_%d",level)->getCString();
+	m_costNumLab->setString(STRING_TABLE[moHunLevel.c_str()]);
+	m_costStrLab->setPositionX(m_costStrLab->getPositionX()+18*1.0);
+	m_costNumLab->setPositionX(m_costStrLab->getPositionX()+m_costStrLab->getContentSize().width/2);
+}

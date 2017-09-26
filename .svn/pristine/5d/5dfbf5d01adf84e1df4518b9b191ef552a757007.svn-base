@@ -1,0 +1,729 @@
+#include "SelectRole.h"
+#include "SelectRoleUi.h"
+#include "AppDelegate.h"
+#include "TCPClient.h"
+#include "SelectRoleViewNode.h"
+#include "CmdAdapter.h"
+#include "World.h" 
+#include "MapManager.h"
+#include "LoginProto.h"
+#include "CrossSceneUI.h"
+#include "CreateRole.h"
+#include "RoleManager.h"
+#include "Login.h"
+#include "ClientUpdate.h"
+#include "LocalPlayer.h"
+#include "MapManager.h"
+#include "Phyx.h"
+#include "CfgReader.h"
+#include "SocialMgr.h"
+#include "MovingBackground.h"
+#include "QuestMgr.h"
+#include "VIPMgr.h"
+#include "PackageManager.h"
+#include "ServerListUi.h"
+#include "TeamMgr.h"
+#include "MiniMapUi.h"
+#include "SkillAnimManager.h"
+#include "InstanceMgr.h"
+#include "InstanceMgr.h"
+#include "StringMgr.h"
+#include "RoleDefine.h"
+#include "WorldLevelMgr.h"
+#if ENABLE_GOTYE==1
+#include "voice/VoiceMgr.h"
+#endif
+//#include "QuickConfig.h"
+/*
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_WIN32)
+#include <vld.h>
+#endif
+*/
+#include "GambleMgr.h"
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+#include "wzolJni.h"
+#endif
+
+NET_SIS_get_role_init_state_att *g_roleStateMsg = NULL;
+
+SelectRole * SelectRole::getInstance()
+{
+	static SelectRole selectRole;
+	return &selectRole;
+}
+
+SelectRole::SelectRole()
+	: _movingBack(NULL)
+	,_sumRolePage(0)
+	,_nowRolePage(0)
+	,_userLevel("")
+	,_selectRoleUi(NULL)
+{
+
+}
+
+SelectRole::~SelectRole()
+{
+	_roleCreateTimeMap.clear();
+}
+
+void SelectRole::onChangeServerBtnPressed()
+{
+	if (!ClientUpdate::getInstance()->sceneTransationDidFinished())
+	{
+		return;
+	}
+
+#ifdef WIN32
+	//返回服务器列表; ssb
+	Login::getInstance()->open();
+	CCDirector::sharedDirector()->replaceScene(Login::getInstance()->getScene());
+	//Login::getInstance()->loginBtnPressed();
+	ClientUpdate::getInstance()->setJoinGame(false);
+	clearRole();
+#endif
+
+#if (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID || CC_TARGET_PLATFORM == CC_PLATFORM_IOS)
+	Login::getInstance()->open(false);
+	CCDirector::sharedDirector()->replaceScene(Login::getInstance()->getScene());
+	ClientUpdate::getInstance()->setJoinGame(false);
+	clearRole();
+	//应对新修改的登录流程  add by lpf 20151103
+	Login::getInstance()->resetLoginState();
+
+//#ifdef _USE_SDK
+//	logoutGameSDK();
+//#endif
+
+	//ClientUpdate::getInstance()->gotoSelectServer();
+#endif
+	AudioPlayer::getSigletonPtr()->playerMusic(LOGIN_RUN);
+}
+
+void SelectRole::setrolebody(GameActionNode* index,int Tag /*=0*/, float xScale /*=0.0f*/,float yScale/*=0.0f*/)
+{
+	//_selectRoleUi->updateRolePhoto(index);
+	_movingBack->setRoleAnim(index,0.1,true,Tag,xScale,yScale);
+}
+
+void SelectRole::onBeginGameBtnPressed()
+{
+	//[bing] 选好角色进入游戏
+	int roleId = roleInfos->roleInfo[roleIndex].roleId;
+	// 	CC_ASSERT(roleId != -1);
+	int roleLevel = roleInfos->roleInfo[roleIndex].roleLevel;
+	// 	CC_ASSERT(roleLevel != -1);
+	std::string roleName = roleInfos->roleInfo[roleIndex].roleName;
+	// 	CC_ASSERT(!roleName.empty());
+	if(roleId != -1 && roleLevel != -1 && !roleName.empty())
+	{
+		char tempChar[10] = {0};
+		sprintf(tempChar, "%d", roleLevel);
+		_userLevel = _userLevel + tempChar;
+		NET_SIC_select_role selectRole;
+		selectRole.dw_role_id = roleId;
+		TCP_CLIENT->send_net_cmd(&selectRole, NP_CRITICAL, false);
+		CrossSceneUI::getInstance()->open(1);
+		//CrossSceneUI::getInstance()->setPec(25);
+		CrossSceneUI::getInstance()->setPecAction(10,20);
+		//CrossSceneUI::getInstance()->setMessage();
+		//QuestMgr::getInstance()->init();
+		//	UiMgr::getInstance()->init();
+		//CrossSceneUI::getInstance()->getUiLayer()->setPec(rand()%100);
+//		World::getInstance()->SetRoleHeadTouch();
+	}else
+	{
+		ClientUpdate::getInstance()->safeReplaceToCreateRoleScene();
+	}
+}
+
+void SelectRole::onCreateNewBtnPressed()
+{
+	ClientUpdate::getInstance()->safeReplaceToCreateRoleScene();
+}
+
+void SelectRole::onBackBtnPressed()
+{
+
+	_nowRolePage--;
+	if (_nowRolePage == 1)
+	{
+		_selectRoleUi->_backBtn->setVisible(false);
+		if (_sumRolePage == 1)
+		{
+			_selectRoleUi->_nextBtn->setVisible(false);
+		}
+		else
+		{
+			_selectRoleUi->_nextBtn->setVisible(true);
+		}
+	}
+	if (_nowRolePage < 1)
+	{
+		return;
+	}
+	if (1 < _nowRolePage && _nowRolePage < _sumRolePage)
+	{
+		_selectRoleUi->_nextBtn->setVisible(true);
+		_selectRoleUi->_backBtn->setVisible(true);
+	}
+	size_t totalNum = _roleInfoVector.size();
+	_selectRoleUi->removeRoleView();
+	for (size_t index = 3*(_nowRolePage-1);index < 3 * (_nowRolePage -1) + 3;index++)
+	{
+		if(index >= totalNum || index < 0)
+			return;//防止异常
+		//_selectRoleUi->addRoleView(_roleInfoVector[index]);
+	}
+}
+
+void SelectRole::onNextBtnPressed()
+{
+	_nowRolePage++;
+	if (_nowRolePage == _sumRolePage)
+	{
+		_selectRoleUi->_nextBtn->setVisible(false);
+		_selectRoleUi->_backBtn->setVisible(true);
+	}
+	if (_nowRolePage > _sumRolePage)
+	{
+		return;
+	}
+	if (1 < _nowRolePage && _nowRolePage < _sumRolePage)
+	{
+		_selectRoleUi->_nextBtn->setVisible(true);
+		_selectRoleUi->_backBtn->setVisible(true);
+	}
+	size_t totalNum = _roleInfoVector.size();
+	_selectRoleUi->removeRoleView();
+	for (size_t index = 3*(_nowRolePage-1);index < 3 * (_nowRolePage -1) + 3;index++)
+	{
+		if(index >= totalNum || index < 0)
+			return;//防止异常
+		//_selectRoleUi->addRoleView(_roleInfoVector[index]);
+	}
+}
+
+
+void SelectRole::addRole(RoleInfo roleInfo)
+{
+	_selectRoleUi->addRoleView(roleInfo);
+	_roleInfoVector.push_back(roleInfo);
+
+	this->addRoleCreatTime(roleInfo.id, roleInfo.roleCreateTime);
+}
+
+void SelectRole::clearRole()
+{
+	_roleInfoVector.clear();
+}
+
+unsigned int SelectRole::onSelectRole( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_select_role"))
+	{
+		NET_SIS_select_role* selectRole = (NET_SIS_select_role*)cmd;
+		if(selectRole->dw_error_code == E_Success)
+		{
+            ServerZone::Zone zone;
+            ServerZone::Server server;
+            if (!ServerListUi::getInstance()->getCurDataForLogin(zone, server))
+            {
+                server.serial = 1000;
+            }
+            std::stringstream yy_account;
+            yy_account << server.serial;
+            yy_account << selectRole->dw_role_id;
+#if ENABLE_GOTYE==1
+            VoiceMgr::getSingleton()->process(YYS_LOGIN, YY_CPLOGIN, yy_account.str());
+#endif
+            
+            RoleManager::getInstance()->init();	
+			RoleManager::getInstance()->getLocalPlayer()->setId(selectRole->dw_role_id);
+			int roleCreateUTCTime = getRoleCreateTime(selectRole->dw_role_id);
+			RoleManager::getInstance()->getLocalPlayer()->setRoleCreateTime(roleCreateUTCTime);
+			//[bing] 记录一下LP的charid
+			TCP_CLIENT->SetLPCharID(selectRole->dw_role_id);
+			//CrossSceneUI::getInstance()->setPec(50);
+			CrossSceneUI::getInstance()->setPecAction(20,30);
+			TeamMgr::getInstance()->Init_Signal();//gx add 2013.10.31防止退回选择后，再次进入游戏后无法显示组队信息;
+
+#ifdef _USE_SDK
+			extern int g_zoneid;  
+			extern std::string g_zonename;
+			extern std::string g_zonenum;
+			extern std::string g_areaName;
+
+			auto iter = _roleInfoVector.begin();
+			while(iter != _roleInfoVector.end())
+			{
+				if (iter->id == selectRole->dw_role_id)
+				{
+					WzolJni *jni = WzolJni::getInstance();
+					int roleCreateUTCTime = getRoleCreateTime(iter->id);
+					string roleInfo;
+					roleInfo += "roleId=" + jni->toString(iter->id);
+					std::string tempRoleName = convertName(iter->name);
+					roleInfo += "\troleName=" + tempRoleName;
+					roleInfo += "\troleLevel=" + jni->toString(iter->level);
+					roleInfo += "\tzoneId=" + jni->toString(g_zoneid);
+					roleInfo += "\tzoneName=" + g_zonename;
+					roleInfo += "\troleCTime=" + jni->toString(roleCreateUTCTime);
+					std::stringstream ss;
+					ss<<g_zoneid<<"_"<<(iter->id);
+					std::string lastRoleUpgradeUTCTime = CCUserDefault::sharedUserDefault()->getStringForKey(ss.str().c_str(), "");
+					if (lastRoleUpgradeUTCTime.empty() || !isAllNum(lastRoleUpgradeUTCTime)) 
+					{
+						lastRoleUpgradeUTCTime += jni->toString(roleCreateUTCTime);
+					}
+					roleInfo += "\troleLevelMTime=" + lastRoleUpgradeUTCTime;
+					roleInfo += "\ttype=loginRole";
+
+					jni->callPlatform(WHAT_SUBMITROLEINFO, roleInfo);
+
+					CCLog("submitroleinfo  SelectRole::onSelectRole()---------------%s", roleInfo.c_str());
+				}
+				iter++;
+			}
+#endif
+		}
+// 		if(selectRole->dw_error_code == E_Success)
+// 			_selectRoleProperty.id = selectRole->dw_role_id;
+	}
+	return 0;
+}
+
+unsigned int SelectRole::onGotoNewMap( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_goto_new_map"))
+	{
+		NET_SIS_goto_new_map *newMap = (NET_SIS_goto_new_map *)cmd;
+
+		LocalPlayer *player = RoleManager::getInstance()->getLocalPlayer();
+		player->setAttribute(RA_POSX, newMap->nPos[0]);
+		player->setAttribute(RA_POSY, newMap->nPos[2]);
+		player->setAttribute(RA_DIRX, newMap->nDir[0]);
+		player->setAttribute(RA_DIRY, newMap->nDir[2]);
+		//player->setCurLine(newMap->lineId);
+		MapManager::getInstance()->setCurLine(newMap->lineId);
+		MapManager::getInstance()->changeMap(newMap->dwMapID);
+		RoleHeadUi* roleHeadUi = World::getInstance()->getRoleHeadUi();
+		if (roleHeadUi)
+			roleHeadUi->setShowLine(newMap->lineId);
+
+		NET_SIC_get_role_init_state getRoleInit;
+		getRoleInit.eType = ERIT_Att;
+		TCP_CLIENT->send_net_cmd(&getRoleInit, NP_CRITICAL, false);
+		//CrossSceneUI::getInstance()->open(1);
+		//CrossSceneUI::getInstance()->setPec(75);
+		CrossSceneUI::getInstance()->setPecAction(30,40);
+
+		////////////进入祖玛阁副本，显示石头
+		if (InstanceMgr::getInstance()->isInZumaCommonMap(newMap->dwMapID))
+		{
+			InstanceMgr::getInstance()->sendUpdateZumaStone();
+			World::getInstance()->addStoneAnim(true);
+		}	
+		else
+		{
+			World::getInstance()->addStoneAnim(false);
+		}
+		if (ZUMA_FUBEN_BOSS_MAP == newMap->dwMapID || UNDERGROUND_FANE_MAP == newMap->dwMapID)
+		{
+			World::getInstance()->addDiceAnim(true);
+		}
+		else
+		{
+			World::getInstance()->addDiceAnim(false);
+		}
+		World::getInstance()->fubenCountDown(cmd);
+	}
+
+	RoleHeadUi* roleui = World::getInstance()->getRoleHeadUi();
+	if(NULL != roleui)
+		roleui->setShoeEnabled(true);
+
+	MapManager::getInstance()->SetISetEnabled(true);
+	AudioPlayer::getSigletonPtr()->stopAllSoundEffect();
+
+	return 0;
+}
+
+unsigned int SelectRole::onRoleInitStateAtt( s_net_cmd *cmd )
+{
+	CCLog("---------------- SelectRole::onRoleInitStateAtt 1");
+
+	//添加mainui资源
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	std::string mainuiList = uiDir + std::string("ccbResources/rendui.plist");
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(mainuiList.c_str());
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(std::string(uiDir + "shadow.plist").c_str());
+	//CrossSceneUI::getInstance()->setPec(100);
+	NET_SIS_get_role_init_state_att *roleState = (NET_SIS_get_role_init_state_att*)cmd;
+	char* netData = new char[roleState->size];
+	memset(netData, 0, sizeof(roleState->size));
+	//g_roleStateMsg = (NET_SIS_get_role_init_state_att *)netData;
+	//*g_roleStateMsg = *roleState;
+
+	memcpy((void*)netData,(void*)roleState,sizeof(char)*roleState->size);
+
+	if (g_roleStateMsg)
+	{
+		delete [](char*)g_roleStateMsg;
+	}
+	g_roleStateMsg =  (NET_SIS_get_role_init_state_att *)netData;
+	//_selectRoleProperty.roleType = (RoleType)roleState->eClassType;
+	//_selectRoleProperty.sex = (int)roleState->Avatar.bySex;
+	//_selectRoleProperty.battleMode = (int)roleState->ePKState;
+	LocalPlayer *player = RoleManager::getInstance()->getLocalPlayer();
+	player->initBloodUi();
+	player->setAttribute(RA_ROLETYPE, (RoleType)roleState->eClassType);
+	player->setAttribute(RA_SEX, (int)roleState->Avatar.bySex);
+	player->setAttribute(RA_BATTLEMODE, (int)roleState->ePKState);
+	player->setAttribute(RA_HP, roleState->nAtt[ERA_HP]);
+	player->setAttribute(RA_MP, roleState->nAtt[ERA_MP]);
+	player->setAttribute(RA_MaxHP, roleState->nAtt[ERA_MaxHP]);
+	player->setAttribute(RA_MaxMP, roleState->nAtt[ERA_MaxMP]);
+	player->setAttribute(RA_WalkSpeed, ROLE_BASE_SPEED * roleState->nAtt[ERA_Speed_XZ]);
+	player->setAttribute(RA_RideSpeed, ROLE_BASE_SPEED * roleState->nAtt[ERA_Speed_Mount]);
+	player->setAttribute(RA_DEAD, roleState->dwState & (0x1 << ES_Dead));
+	player->setAttribute(RA_HITRATE, roleState->nAtt[ERA_HitRate]);
+	player->setAttribute(RA_DODGE, roleState->nAtt[ERA_Dodge]);
+	player->setAttribute(RA_CRIT_RATE, roleState->nAtt[ERA_Crit_Rate]);
+	player->setAttribute(RA_UNCRIT_RATE, roleState->nAtt[ERA_UnCrit_Rate]);
+	player->setAttribute(RA_ExAttackMin, roleState->nAtt[ERA_ExAttackMin]);
+	player->setAttribute(RA_ExAttackMax, roleState->nAtt[ERA_ExAttackMax]);
+	player->setAttribute(RA_InAttackMin, roleState->nAtt[ERA_InAttackMin]);
+	player->setAttribute(RA_InAttackMax, roleState->nAtt[ERA_InAttackMax]);
+	player->setAttribute(RA_ArmorEx, roleState->nAtt[ERA_ArmorEx]);
+	player->setAttribute(RA_ArmorIn, roleState->nAtt[ERA_ArmorIn]);
+	player->setAttribute(RA_ExMinDefense, roleState->nAtt[ERA_ExMinDefense]);
+	player->setAttribute(RA_ExMaxDefense, roleState->nAtt[ERA_ExMaxDefense]);
+	player->setAttribute(RA_InMinDefense, roleState->nAtt[ERA_InMinDefense]);
+	player->setAttribute(RA_InMaxDefense, roleState->nAtt[ERA_InMaxDefense]);
+	player->setAttribute(RA_Luck, roleState->nAtt[ERA_Luck]);
+	player->setAttribute(RA_PKVALUE, roleState->iPKValue);
+	player->setAttribute(RA_Knowledge, roleState->nAtt[ERA_Knowledge]);//声望
+	player->setAttribute(RA_Jinengdian, roleState->nAtt[ERA_TalentPoint]);
+	player->setAttribute(RA_BATTLE_POINT , roleState->nEquipRating);//战斗力
+	player->setAttribute(RA_MEILI_POINT,(int)roleState->nMeiLi);//魅力值
+	player->setAttribute(RA_RONGYU_POINT,roleState->n32CurExploits);//荣誉点
+	player->setAttribute(RA_RideState, roleState->n64RoleState & ERS_Mount);
+	player->setAttribute(RA_BattleMode, roleState->n64RoleState & ERS_Combat);
+	if((roleState->n64RoleState & ERS_IsGrayName) != 0)
+	{
+		player->setAttribute(RA_IsGrayName,1);
+	}
+	else
+	{
+		player->setAttribute(RA_IsGrayName,0);
+	}
+	player->setAttribute(RA_TiLiZhi, roleState->nAtt[ERA_TiLi]);	//[bing] 体力值
+
+	player->setAttribute(RA_Derate_Wood, roleState->nAtt[ERA_Derate_Wood]);   // 风伤害减免 modify 2016.3.28 噬魔：攻击附带消耗敌人魔法值
+	player->setAttribute(RA_Derate_Fire, roleState->nAtt[ERA_Derate_Fire]);   // 火伤害减免 modify 2016.3.28 破盾：攻击穿透敌人的魔法盾，造成额外百分比伤害（不超过没有魔法盾的伤害）
+	player->setAttribute(RA_Derate_Water, roleState->nAtt[ERA_Derate_Water]);  // 雷伤害减免 modify 2016.3.28 腐蚀：攻击附带减低敌人物防和魔防百分比
+	player->setAttribute(RA_Derate_Injury, roleState->nAtt[ERA_Derate_Injury]);// 内损伤害减免 modify 2016.3.28 真伤：攻击附加真实伤害
+	player->setAttribute(RA_Derate_InAttack, roleState->nAtt[ERA_Derate_InAttack]);  // 远程伤害减免 modify 2016.3.28 抵抗：进入抵抗状态后，减免百分比伤害
+
+	player->setGuild(roleState->dwGuildID);
+	player->setLevel(roleState->nLevel);
+	player->setCurLevelExp(roleState->nCurLevelExp);
+	SocialMgr::getInstance()->SetSpouseID(roleState->dwSpouseID);
+	PackageManager::getInstance()->setTotalChargeYuanBao(roleState->n_total_recharge);//初始化总充值元宝数
+	player->updateCurMaxExp();
+	//add by XSea 2014.11.21 是否显示行会名
+	bool isShowRoleName = RoleManager::getInstance()->getIsShowSelfRoleName();
+	player->setVIPLevel(roleState->nVIPLevel, isShowRoleName);//gx is fuck
+	player->setVIPExp(roleState->dwVIPExp);		//【Ji：】 add
+	player->setLocVIPLevel(roleState->nVIPLevel);		//【Ji：】 add
+	player->setSilverBoxTime(roleState->dwSilverBoxTime);		//【Ji：】 add
+	player->setGoldBoxTime(roleState->dwGoldBoxTime);			//【Ji：】 add
+	player->setFusion_Exp(roleState->m_Fusion_Exp);
+	player->setInstanceData(roleState->nInstanceData);//gx add
+	player->setRedZuiFlag(roleState->dwRedZuiFlag);//gx add
+	player->setRedLip(player->getRedZuiFlag()); //ssb add
+	//player->setEnemyId(roleState->enemyId);
+//	QuestMgr::getInstance()->setEveryANum(GET_VIP_DETAIL(player->getVIPLevel(),XIULUOSHILIAN_ADD));				//【Ji：】
+//	QuestMgr::getInstance()->setEveryBNum(GET_VIP_DETAIL(player->getVIPLevel(),MOWUSHOULIE_ADD));				//【Ji：】
+	player->loadLocalPlayerTitleData();//gx add
+	for (int i = 0; i < 3; i++)
+	{
+		player->setCurTille(i, roleState->dwActTitleID[i]);
+	}
+
+	player->setSignLevel(roleState->n_sign_level);
+	player->initSelectRideLv();
+
+	WorldLevelMgr::getInstance()->refersh_world_lv(roleState->nWorldLevel);
+	GambleMgr::getInstance()->updateBless(roleState->nGongFaBenison);
+	GambleMgr::getInstance()->updateGongFaRealm(roleState->nAtt[ERA_GongFa]);
+	//外观属性
+	for(int i = 0; i < X_AVATAR_ELEMENT_NUM; i ++)
+	{
+		player->setDisplayAttr((ePlayerDisplayAttr)roleState->AvatarEquip.AvatarEquip[i].byDisplayPos, roleState->AvatarEquip.AvatarEquip[i].dw_data_id);
+	}
+
+	//player->setFashion(roleState->DisplaySet.bFashionDisplay);
+	player->sync_display_flag_from_display_set_data(roleState->DisplaySet);
+
+	CCLog("---------------- SelectRole::onRoleInitStateAtt 2");
+
+	World::getInstance()->setLoginEnterSceneFlagUpdate();
+	return 0;
+
+	//MapManager::getInstance()->openMap();
+	//CCLog("---------------- SelectRole::onRoleInitStateAtt 3");
+	//World::getInstance()->open();
+	//CCLog("---------------- SelectRole::onRoleInitStateAtt 4");
+	//CCDirector::sharedDirector()->replaceScene(World::getInstance()->getScene());  //Legend
+	//CCLog("---------------- SelectRole::onRoleInitStateAtt 5");
+
+	////LocalPlayer Buff
+	//RoleHeadUi *roleHeadUi = World::getInstance()->getRoleHeadUi();
+
+	//CCLog("---------------- SelectRole::onRoleInitStateAtt 6");
+
+	//CC_ASSERT(roleHeadUi != NULL);
+	//for(int i = 0; i < roleState->nBuffNum; i ++)
+	//{
+	//	const tagBuffMsgInfo &buffInfo = roleState->Buff[i];
+	//	player->addBufferId(buffInfo.dwBuffTypeID);
+	//	roleHeadUi->setBuffCD(buffInfo.dwBuffTypeID, buffInfo.nPersistTimeLeft, buffInfo.nMaxPersistTime);
+	//	SkillAnimManager::getInstance()->useBuffer(buffInfo.dwBuffTypeID, player->getId(), player->getId());
+	//}
+
+	//CCLog("---------------- SelectRole::onRoleInitStateAtt 7");
+
+	//player->initFsm();
+
+	//CCLog("---------------- SelectRole::onRoleInitStateAtt 8");
+
+	//player->loadAnimate();
+
+	//CCLog("---------------- SelectRole::onRoleInitStateAtt 9");
+
+	//player->addToMap();
+	//MapManager::getInstance()->enterMapRemind(MapManager::getInstance()->getCurMapId());
+	//CrossSceneUI::getInstance()->close();
+
+	//MiniMapUi *mUi = World::getInstance()->getMiniMapUi();
+	//if(mUi)
+	//{
+	//	if(roleState->nLevel >= 34)
+	//		mUi->SetXiaoMiBtnVisible(true);
+	//	else
+	//		mUi->SetXiaoMiBtnVisible(false);
+	//}
+
+	//CCLog("---------------- SelectRole::onRoleInitStateAtt 10");
+
+	//return 0;
+}
+
+void SelectRole::close()
+{
+	CrossSceneUI::getInstance()->close();
+
+	CC_SAFE_DELETE(roleInfos);
+
+
+	if(_movingBack != NULL)
+	{
+		delete _movingBack;
+		_movingBack = NULL;
+	}
+
+	_selectRoleUi->signalBeginGameBtn.disconnect(this, &SelectRole::onBeginGameBtnPressed);
+	_selectRoleUi->signalChangeServerBtn.disconnect(this, &SelectRole::onChangeServerBtnPressed);
+	_selectRoleUi->signalCreateRoleBtn.disconnect(this, &SelectRole::onCreateNewBtnPressed);
+	//CC_SAFE_RELEASE(_selectRoleUi);
+
+	_scene->release();
+	_scene = NULL;
+
+	//std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	//std::string pListFile = uiDir + "ccbResources/selectrole.plist";
+	//CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFramesFromFile(pListFile.c_str());
+	CCTextureCache::sharedTextureCache()->removeUnusedTextures();
+
+/*
+	std::string uiDir2 = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	std::string pListFile2 = uiDir2 + "ccbResources/createroleui.plist";
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFramesFromFile(pListFile2.c_str());
+	CCTextureCache::sharedTextureCache()->removeUnusedTextures();*/
+
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_select_role", this, &SelectRole::onSelectRole);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_goto_new_map", this, &SelectRole::onGotoNewMap);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_role_init_state_att", this, &SelectRole::onRoleInitStateAtt);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_enter_instance" , this , &SelectRole::OnSeverGotoInstancemap);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Synchronize_Line", this, &SelectRole::onServerSynchronizeLine);
+}
+
+void SelectRole::open()
+{
+	CC_SAFE_DELETE(roleInfos);
+	ClientUpdate::getInstance()->_currentScene = ST_SELECTROLESCENE;
+
+	roleInfos = new RoleInfoUiAttrs;
+
+	//CC_SAFE_RELEASE(_selectRoleUi);
+	_selectRoleUi = SelectRoleUi::create();
+	
+	getScene();
+
+	_movingBack = new MovingBackGround();
+	_movingBack->addToParent(_scene);
+
+	_scene->addChild(_selectRoleUi);
+
+	_selectRoleUi->signalBeginGameBtn.connect(this, &SelectRole::onBeginGameBtnPressed);
+	_selectRoleUi->signalChangeServerBtn.connect(this, &SelectRole::onChangeServerBtnPressed);
+	_selectRoleUi->signalCreateRoleBtn.connect(this, &SelectRole::onCreateNewBtnPressed);
+
+	//_selectRoleUi->signalBackBtn.connect(this, &SelectRole::onBackBtnPressed);
+	//_selectRoleUi->signalNextBtn.connect(this, &SelectRole::onNextBtnPressed);
+	AudioPlayer::getSigletonPtr()->playerMusic(SOUND_SELLECTROLE);//选择角色界面和创建角色界面的背景音乐
+	_nowRolePage = 1;
+	onRolePage();
+
+	TCP_CLIENT->register_net_cmd("NET_SIS_select_role", this, &SelectRole::onSelectRole);
+	TCP_CLIENT->register_net_cmd("NET_SIS_goto_new_map", this, &SelectRole::onGotoNewMap);
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_role_init_state_att", this, &SelectRole::onRoleInitStateAtt);
+	TCP_CLIENT->register_net_cmd("NET_SIS_enter_instance" , this , &SelectRole::OnSeverGotoInstancemap);
+	TCP_CLIENT->register_net_cmd("NET_SIS_Synchronize_Line", this, &SelectRole::onServerSynchronizeLine);
+
+	ClientUpdate::getInstance()->setJoinGame();
+
+#if defined _WIN32 && defined _DEBUG
+	bool bEnable = CFG(int,"enable_menu",0)==1;
+
+	if (bEnable)
+	{
+		struct menu_def
+		{
+			const char* szText;
+			SEL_MenuHandler handler;
+		}menu_array[]=
+		{
+			{"test",menu_selector(SelectRole::dumpTexture)},
+			{NULL,NULL},
+		};
+
+		CCMenu* menu = CCMenu::create();
+		_scene->addChild(menu);
+		menu->setPosition(CCPointZero);
+		//menu->setHandlerPriority(1);
+
+		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+		for (int i = 0; menu_array[i].szText != NULL  ; i++)
+		{
+			CCLabelTTF* label = CCLabelTTF::create(menu_array[i].szText,FONT_NAME,24);
+			CCMenuItemLabel* mi = CCMenuItemLabel::create(label,this,menu_array[i].handler);
+			menu->addChild(mi);
+			mi->setPosition(ccp(winSize.width -50,winSize.height - (260+30*(i+1))));
+		}
+	}
+#endif
+}
+
+void SelectRole::initWithRoleExistInfo()
+{
+		for(std::vector<RoleInfo>::iterator iter = _roleInfoVector.begin(); iter != _roleInfoVector.end(); ++iter)
+		{
+			const RoleInfo &info = *iter;
+			_selectRoleUi->addRoleView(info);
+		}
+}
+
+void SelectRole::onRolePage()
+{
+	int veclength = _roleInfoVector.size();
+	if ( 0 == veclength % 3)
+	{
+		_sumRolePage = veclength / 3;
+	}
+	else
+	{
+		_sumRolePage = veclength / 3 + 1;
+	}
+	if ( veclength > 3 )
+	{
+		//_selectRoleUi->_nextBtn->setVisible(true);
+	}
+}
+
+unsigned int SelectRole::OnSeverGotoInstancemap( s_net_cmd *cmd )
+{
+	return InstanceMgr::getInstance()->OnSeverGotoInstancemap(cmd);
+}
+
+unsigned int SelectRole::onServerSynchronizeLine( s_net_cmd *cmd )
+{
+	MapManager::getInstance()->onServerSynchronizeLine(cmd);
+	return 0;
+}
+
+const char* SelectRole::getRoleJob( unsigned int roleId )
+{
+	if (!_roleInfoVector.empty())
+	{
+		auto iter = _roleInfoVector.begin();
+		while(iter != _roleInfoVector.end())
+		{
+			if (iter->id != roleId)
+			{
+				iter++;
+				continue;
+			}
+			switch(iter->type)
+			{
+			case RTE_MWARRIOR:
+			case RTE_WWARRIOR:
+				return GET_STR(8).c_str();
+				break;
+			case RTE_MMASTER:
+			case RTE_WMASTER:
+				return GET_STR(9).c_str();
+				break;
+			case RTE_MTAOIST:
+			case RTE_WTAOIST:
+				return GET_STR(10).c_str();
+				break;
+			default:
+				break;
+			}
+			iter++;
+		}
+	}
+	return "";
+}
+
+void SelectRole::dumpTexture( CCObject* pSender )
+{
+	CCTextureCache::sharedTextureCache()->dumpCachedTextureInfo();
+}
+
+int SelectRole::getRoleCreateTime( unsigned int roleId )
+{
+	std::map<unsigned int, tagDWORDTime>::iterator it;
+	it = _roleCreateTimeMap.find(roleId);
+	if (it == _roleCreateTimeMap.end())
+		return 0;
+
+	tagDWORDTime roleCreateTime = it->second;
+	int roleCreateUTCTime = DwordTime2UTCTime(roleCreateTime);
+	return roleCreateUTCTime;
+}
+
+void SelectRole::addRoleCreatTime( unsigned int roleId, tagDWORDTime td )
+{
+	auto iter = _roleCreateTimeMap.find(roleId);
+	if (iter == _roleCreateTimeMap.end())
+	{
+		_roleCreateTimeMap.insert(std::make_pair(roleId, td));
+	}else{
+		iter->second = td;
+	}
+}

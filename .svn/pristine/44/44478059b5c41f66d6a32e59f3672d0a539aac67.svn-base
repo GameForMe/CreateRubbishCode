@@ -1,0 +1,245 @@
+#include "NpcduihuanUi.h"
+#include "World.h"
+#include "CfgReader.h"
+#include "BaseDefine.h"
+#include "ShopMgr.h"
+#include "PackageManager.h"
+#include "UiResourceMgr.h"
+#include "UiTools.h"
+#include "ItemTip.h"
+#include "UiManager.h"
+#include "UiLoader.h"
+#include "BuySetUi.h"
+#include "EquipTipUi.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "DBMgr.h"
+#include "ShopProtocol.h"
+#include "TCPClient.h"
+#include "ExchangeMgr.h"
+CCNode * NPCduihuanUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["NpcduihuanUiLayer"] = UiLayerLoader<NpcduihuanUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("npcduihuan", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+NpcduihuanUiLayer * NPCduihuanUi::getUiLayer()
+{
+	return getUiNodeByTag<NpcduihuanUiLayer>(WCT_NPCduihuaUi);
+}
+
+void NPCduihuanUi::setType( int _type )
+{
+	NpcduihuanUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setType(_type);
+	}
+}
+
+void NPCduihuanUi::updateJifen()
+{
+	NpcduihuanUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateJifen();
+	}
+}
+
+cocos2d::SEL_MenuHandler NpcduihuanUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler NpcduihuanUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", NpcduihuanUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onDuihuan1BtnPressed", NpcduihuanUiLayer::onDuihuan1BtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onDuihuan2BtnPressed", NpcduihuanUiLayer::onDuihuan2BtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onDuihuan3BtnPressed", NpcduihuanUiLayer::onDuihuan3BtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onDuihuan4BtnPressed", NpcduihuanUiLayer::onDuihuan4BtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onDuihuan5BtnPressed", NpcduihuanUiLayer::onDuihuan5BtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onDuihuan6BtnPressed", NpcduihuanUiLayer::onDuihuan6BtnPressed);
+	return NULL;
+}
+
+void NpcduihuanUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_frame=(CCSprite*)getChildByTag(0);
+	for (int i=1;i<7;i++)
+	{
+		CCSprite *item=(CCSprite*)_frame->getChildByTag(i);
+		item->setVisible(false);
+	}
+	jifenTtf=(CCLabelTTF*)_frame->getChildByTag(7);
+		setAllChildernButtonPriority(this, 0);
+		updateJifen();
+}
+
+void NpcduihuanUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	DropDragDelegate::getInstance()->addDropLayer(this);
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this,1, true);
+}
+
+void NpcduihuanUiLayer::onExit()
+{
+	CCLayer::onExit();
+	DropDragDelegate::getInstance()->removeDropLayer(this);
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+void NpcduihuanUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_NPCduihuaUi);
+}
+
+void NpcduihuanUiLayer::onDuihuan1BtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setMessage(1);
+}
+void NpcduihuanUiLayer::onDuihuan2BtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setMessage(2);
+}
+
+void NpcduihuanUiLayer::onDuihuan3BtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setMessage(3);
+}
+
+void NpcduihuanUiLayer::onDuihuan4BtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setMessage(4);
+}
+
+void NpcduihuanUiLayer::onDuihuan5BtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setMessage(5);
+}
+
+void NpcduihuanUiLayer::onDuihuan6BtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setMessage(6);
+}
+
+void NpcduihuanUiLayer::selectTable( int type )
+{
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM NpcduihuanData WHERE type = ?1");
+	cmd->set_integer32(1, type);
+	int idex=0;
+	m_map_npcduihuan_data.clear();
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		NpcduihuaProto npcdata;
+		unsigned int idx = table->get_index("type_id");
+		npcdata.type_id = table->get_integer32(idx);
+		idx=table->get_index("item_id");
+		npcdata.item_id=table->get_integer32(idx);
+		idx=table->get_index("name");
+		npcdata.name=table->get_text(idx);
+		idx=table->get_index("jifen");
+		npcdata.jifen=table->get_integer32(idx);
+		idex++;
+		m_map_npcduihuan_data.insert(std::make_pair(idex, npcdata));
+		//m_map_npcduihuan_data.push_back(npcdata);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+}
+
+void NpcduihuanUiLayer::updateList()
+{
+	//int idex=0;
+	int size=m_map_npcduihuan_data.size();
+	for (int i=1;i<=size;i++)
+	//for(NPCDuiHuanNItemList::iterator iter = m_map_npcduihuan_data.begin(); iter != m_map_npcduihuan_data.end(); ++ iter)
+	{
+		std::map<unsigned int, NpcduihuaProto>::iterator pIter=m_map_npcduihuan_data.find(i);
+		//idex++;
+		NpcduihuaProto item = pIter->second;
+		CCSprite *sprite=(CCSprite*)_frame->getChildByTag(i);
+		sprite->setVisible(true);
+		CCLabelTTF *name=(CCLabelTTF*)sprite->getChildByTag(1);
+		name->setString(item.name.c_str());
+		CCLabelTTF *jifen=(CCLabelTTF*)sprite->getChildByTag(2);
+		jifen->setString(CCString::createWithFormat("%d",item.jifen)->getCString());
+		ItemNode *node=ItemNode::create();
+		//node->setPosition(ccp(0.0f,0.0f));
+		node->setTag(i);
+		node->setDataId(item.item_id);
+		node->setClickable(true);
+		node->hideItemOpBtn();
+		sprite->getChildByTag(3)->addChild(node);
+	}
+}
+
+bool NpcduihuanUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_frame, pTouch))
+		return true;
+	return false;
+}
+
+void NpcduihuanUiLayer::setMessage( int _typeid )
+{
+	ExchangeMgr::getInstance()->setIndex(_typeid);
+	std::map<unsigned int, NpcduihuaProto>::iterator pIter=m_map_npcduihuan_data.find(_typeid);
+	//idex++;
+	NpcduihuaProto item = pIter->second;
+	NET_SIC_produce cmd;
+	cmd.dwNPCID = _npcSID;
+	cmd.dwFormulaID = item.type_id;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+}
+
+void NpcduihuanUiLayer::setType( int _type )
+{
+	type=_type;
+	selectTable(type);
+	updateList();
+	if (type==1)
+	{
+		_npcSID=2000000003;
+	}
+	else
+	{
+		_npcSID=2000000002;
+	}
+}
+
+short NpcduihuanUiLayer::getItemBegin( CCTouch &touch, eGetResult &result )
+{
+	return -1;
+}
+
+short NpcduihuanUiLayer::getItemEnd( CCTouch &touch, eGetResult &result, EItemConType src, short itemIndex )
+{
+	return -1;
+}
+
+bool NpcduihuanUiLayer::onClicked( CCTouch &touch )
+{
+	return false;
+}
+
+bool NpcduihuanUiLayer::onDoubleClicked( CCTouch &touch )
+{
+	return false;
+}
+
+void NpcduihuanUiLayer::updateJifen()
+{
+	int itemId=1004035;
+	int num2 = PackageManager::getInstance()->getItemNumber(EICT_Bag,itemId);
+	if (jifenTtf)
+	{
+		jifenTtf->setString(CCString::createWithFormat("%d",num2)->getCString());
+	}
+}

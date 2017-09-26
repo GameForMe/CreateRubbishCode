@@ -1,0 +1,807 @@
+#include "RoleInfoUi.h"
+#include "UiResourceMgr.h"
+#include "World.h"
+#include "UiTools.h"
+#include "UiLoader.h"
+#include "RoleEquipUi.h"
+#include "RoleAttrUi.h"
+#include "LocalPlayer.h"
+#include "RemoteRoleStateMgr.h"
+#include "tools.h"
+#include "InputMessageBox.h"
+#include "TextEditBox.h"
+#include "GuildMgr.h"
+#include "Helper.h"
+#include "NPCTalkUi.h"
+#include "f_string_table.h"
+#include "ItemTip.h"
+#include "f_string_util.h"
+#include "NewRoleTitleUi.h"
+XingzuoListItem::XingzuoListItem()
+{
+	
+	CCSprite *sprite = CCSprite::create();
+	CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("roleui_nbtn");
+	CC_ASSERT(spriteFrame != NULL);
+	sprite->setDisplayFrame(spriteFrame);
+	CCSize size = sprite->getContentSize();
+	//sprite->setAnchorPoint(ccp(0.5f, 1.0f));
+	sprite->setPositionX(HP_Pos);
+	sprite->setPositionY(- size.height / 2.0f);
+	sprite->setTag(NT_Sprite);
+	_node->addChild(sprite);
+	
+	TTFConfig config;
+	config.fontFilePath=  FT_FONTFACE;
+	config.fontSize = 16;
+	config.outlineSize = 1;
+
+	LabelFT *label = LabelFT::createWithTTF(config,"");
+	label->setAnchorPoint(ccp(0.5f, 0.5f));
+	label->setTextColor(Helper::converColor3B_2_4B(ccc3(0xfe, 0xf8, 0xd8)));
+	label->setPositionX(HP_Pos);
+	label->setPositionY(- size.height / 2.0f);
+	label->setTag(NT_Name);
+	_node->addChild(label);
+}
+
+XingzuoListItem::~XingzuoListItem()
+{
+
+}
+
+void XingzuoListItem::setData( int index )
+{
+	LabelFT *label = dynamic_cast<LabelFT*>(_node->getChildByTag(NT_Name));
+	CC_ASSERT(label != NULL);
+	label->setString(getXingzuoString((EnumVCardConstellation)index).c_str());
+
+	_index = index;
+}
+
+cocos2d::CCSize XingzuoListItem::getContentSize()
+{
+	CCSprite *sprite = dynamic_cast<CCSprite*>(_node->getChildByTag(NT_Sprite));
+	CC_ASSERT(sprite != NULL);
+	return sprite->getContentSize();
+}
+
+void XingzuoListItem::onSelectChanged( bool select )
+{
+	CCSprite *sprite = dynamic_cast<CCSprite*>(_node->getChildByTag(NT_Sprite));
+	CC_ASSERT(sprite != NULL);
+
+	if(select)
+	{
+		CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("roleui_hbtn");
+		CC_ASSERT(spriteFrame != NULL);
+		sprite->setDisplayFrame(spriteFrame);
+	}
+	else
+	{
+		CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("roleui_nbtn");
+		CC_ASSERT(spriteFrame != NULL);
+		sprite->setDisplayFrame(spriteFrame);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+XingzuoListFrame::XingzuoListFrame()
+	: _verticalList(NULL)
+	, _isShow(true)
+{
+
+}
+
+XingzuoListFrame::~XingzuoListFrame()
+{
+	if(_verticalList != NULL)
+	{
+		delete _verticalList;
+		_verticalList = NULL;
+	}
+}
+
+bool XingzuoListFrame::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(this, pTouch))
+	{
+		_stPt = _content->convertTouchToNodeSpace(pTouch);
+		_verticalList->onTouch(pTouch);
+		return true;
+	}
+	else
+	{
+		showFrame(false);
+		return true;
+	}
+
+	return false;
+}
+
+void XingzuoListFrame::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_content, pTouch))
+	{
+		CCPoint pt = _content->convertTouchToNodeSpace(pTouch);
+		if(ccpDistance(pt, _stPt) < TOUCH_MOVE_DIS)
+		{
+			XingzuoListItem *item = _verticalList->onTouch(pTouch);
+			if(item != NULL)
+			{
+				AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+				showFrame(false);
+				int byStar = item->getIndex();
+				const tagRoleSocialInfo &socialInfo = SocialMgr::getInstance()->getRoleSocialInfo();
+				if(byStar != socialInfo.byStar)
+				{
+					tagRoleSocialInfo sendInfo;
+					memcpy(&sendInfo, &socialInfo, sizeof(tagRoleSocialInfo));
+					sendInfo.byStar = byStar;
+					SocialMgr::getInstance()->SetRoleSocialData(sendInfo);
+				}
+			}
+		}
+	}
+}
+
+void XingzuoListFrame::onNodeLoaded( CCNode * pNode, CCNodeLoader * pNodeLoader )
+{
+	_verticalList = new VerticalList<XingzuoListItem>;
+	_content = getChildByTag(NT_Content);
+	CC_ASSERT(_content != NULL);
+	_scrollView = createScrollViewWithContent(_content);
+	CC_ASSERT(_scrollView != NULL);
+	_content->addChild(_scrollView);
+	_verticalList->addToScrollView(_scrollView);
+	_verticalList->setMinSize(_content->getContentSize());
+	_verticalList->setEnableSelect(true);
+	//_verticalList->setSelectColor(ccc4(255, 255, 255, 0));
+	//_scrollView->setTouchPriority(-1);
+
+	setTouchPriority(1);
+}
+
+void XingzuoListFrame::showFrame( bool show )
+{
+	if(_isShow == show)
+		return;
+
+	CCSize size = CCDirector::sharedDirector()->getWinSize();
+	if(show)
+	{   
+		setTouchEnable(true);
+		setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+		updateList();
+	}
+	else
+	{
+
+		setTouchEnable(false);
+		setPosition(ccp(-size.width / 2.0f, size.height / 2.0f));
+	}
+
+	_isShow = show;
+}
+
+void XingzuoListFrame::updateList()
+{
+	_verticalList->clear();
+
+	//int baseStringId = 51;
+	for(int i = EVC_Aries; i < EVC_Default; i ++)
+	{
+		XingzuoListItem *item = new XingzuoListItem;
+		item->setData(i);
+		_verticalList->addItem(item);
+	}
+
+	_verticalList->updateDisplay();
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+RoleInfoUi::RoleInfoUi()
+{
+
+}
+
+RoleInfoUi::~RoleInfoUi()
+{
+
+}
+
+CCNode * RoleInfoUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["RoleInfoUiLayer"] = UiLayerLoader<RoleInfoUiLayer>::loader();
+	nodeLoaders["TouchSprite"] = TouchSpriteLoader::loader();
+	nodeLoaders["XingzuoListFrame"] = UiFrameLoader<XingzuoListFrame>::loader();
+	CCNode *uiNode = readUiFromCCBI("roleinfoui", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+void RoleInfoUi::popupUIOnEnd()
+{
+	// 如果是膜拜查看，关闭时，重新打开膜拜面板
+	if (m_popTag == RRP_MOBAI)
+	{
+		OPEN_UI(WCT_STATUEWORSHIP);
+		StatueWorshipUiLayer* targetLayer = getUiNodeByTag<StatueWorshipUiLayer>(WCT_STATUEWORSHIP);
+		if (targetLayer){
+			targetLayer->updateInfo();
+		}
+	}
+
+	setPopupPreUiOnClose(false);
+	m_popTag = RRP_NORMAL;
+}
+
+RoleInfoUiLayer * RoleInfoUi::getUiLayer()
+{
+	return getUiNodeByTag<RoleInfoUiLayer>(WCT_RoleInfoUi);
+}
+
+void RoleInfoUi::setRoleId( unsigned int roleId )
+{
+	RoleInfoUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->setRoleId(roleId);
+	}
+}
+
+void RoleInfoUi::updateData( unsigned int roleId )
+{
+	RoleInfoUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateDisplayData(roleId);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+RoleInfoUiLayer::RoleInfoUiLayer()
+	: _selectTitle(-1)
+{
+	m_AttrRemoveMapInfo.clear();
+	m_NoTagEnergy = NULL;
+	m_NoTagLevel = NULL;
+}
+
+RoleInfoUiLayer::~RoleInfoUiLayer()
+{
+	m_AttrRemoveMapInfo.clear();
+}
+bool RoleInfoUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"NoTagLevel",CCLabelTTF*,m_NoTagEnergy);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"NoTagEnergy",CCLabelTTF*,m_NoTagLevel);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"NoTagRoleID",CCLabelTTF*,m_NoTagRoleID);
+	return true;
+}
+cocos2d::SEL_MenuHandler RoleInfoUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler RoleInfoUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", RoleInfoUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSelBtnPressed", RoleInfoUiLayer::onSelBtnPressed);
+	return NULL;
+}
+
+void RoleInfoUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_fightNumAcNode = NULL;
+
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(NT_Frame));
+	CC_ASSERT(_frame != NULL);
+
+	CCControlButton *btn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(NT_Xingzuo));
+	CC_ASSERT(btn != NULL);
+	Helper::replaceControlButtonTextLabel(btn);
+
+	//添加战斗力艺术字
+	CCLabelBMFont* fightNumLabel = CCLabelBMFont::create();
+	fightNumLabel->setFntFile("Art/Scene/fontNum.fnt");
+	fightNumLabel->setPosition(_frame->getChildByTag(NT_FightNumPosLabel)->getPosition());
+	_frame->addChild(fightNumLabel, RZN_EFFECT + 1);
+	fightNumLabel->setAnchorPoint(ccp(0.0f, 0.5f));
+	fightNumLabel->setScale(0.5f);
+	fightNumLabel->setTag(NT_Zhandouli);
+	fightNumLabel->setVisible(false);
+
+	TouchSprite *equipTab = dynamic_cast<TouchSprite*>(_frame->getChildByTag(NT_EquipTab));
+	CC_ASSERT(equipTab != NULL);
+	equipTab->signalTouched.connect(this, &RoleInfoUiLayer::onEquipTabClicked);
+
+	TouchSprite *attrTab = dynamic_cast<TouchSprite*>(_frame->getChildByTag(NT_AttrTab));
+	CC_ASSERT(attrTab != NULL);
+	attrTab->signalTouched.connect(this, &RoleInfoUiLayer::onAttrTabClicked);
+
+	TouchSprite *titleTab = dynamic_cast<TouchSprite*>(_frame->getChildByTag(NT_TitleTab));
+	CC_ASSERT(titleTab != NULL);
+	titleTab->signalTouched.connect(this, &RoleInfoUiLayer::onTitleTabClicked);
+
+	_selectFrame = dynamic_cast<XingzuoListFrame*>(getChildByTag(NT_SelFrame));
+	CC_ASSERT(_selectFrame != NULL);
+	_selectFrame->showFrame(false);
+
+	setAttr(NT_AddressLab, "\xE6\x97\xA0");
+	//setAttr(NT_QianmingLab, "\xE6\x97\xA0");
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string sSEFightFire = sSEDir + "E1_50.plist";
+	_plist.insert(sSEFightFire);
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEFightFire.c_str());
+	_fightNumAcNode = this->getFightSuperEffect();
+	_frame->addChild(_fightNumAcNode, RZN_EFFECT);
+	_fightNumAcNode->setPosition(_frame->getChildByTag(NT_FightNumSE)->getPosition());
+	_fightNumAcNode->BeginAction(0.07f, true);
+	_fightNumAcNode->setScale(0.6f);
+	_fightNumAcNode->setVisible(false);
+//	_frame->getChildByTag(NT_Zhandouli)->setZOrder(RZN_EFFECT+1);
+	_frame->getChildByTag(NT_FightNumSP)->setZOrder(RZN_EFFECT+1);
+	m_AttrRemoveMapInfo.clear();
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_NoTagEnergy);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_NoTagLevel);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_NoTagRoleID);
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void RoleInfoUiLayer::onExit()
+{
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	InputMessageBox::getInstace()->close();
+}
+
+bool RoleInfoUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_frame, pTouch))
+	{
+		if(_roleId == RoleManager::getInstance()->getLocalPlayer()->getId())
+		{
+			if(isTouchOnNodeContent(_frame->getChildByTag(NT_AddressNode), pTouch))
+			{
+				InputMessageBox::getInstace()->open();
+				InputMessageBox::getInstace()->setMessage(GET_STR(2387).c_str());
+				InputMessageBox::getInstace()->setPlaceHolder(GET_STR(9112).c_str());
+				InputMessageBox::getInstace()->setMaxInputNum(6);
+				InputMessageBox::getInstace()->getBtnSignal()->connect(this, &RoleInfoUiLayer::onAddressChanged);
+			}
+			else if(isTouchOnNodeContent(_frame->getChildByTag(NT_QianmingNode), pTouch))
+			{
+				TextEditBox::getInstace()->open();
+				TextEditBox::getInstace()->setTitle(GET_STR(9100));
+				TextEditBox::getInstace()->setMaxInputNum(LEN_MAX_SIGNATURE);
+				TextEditBox::getInstace()->setPlaceHolder(GET_STR(9113));
+				TextEditBox::getInstace()->getBtnSignal()->connect(this, &RoleInfoUiLayer::onQianMingChanged);
+			}
+		}
+
+		if (isTouchOnNodeContent(_frame->getChildByTag(NT_MonthCard),pTouch))
+		{
+			MonthCardItemTip::getInstance()->open();
+			MonthCardItemTip::getInstance()->setPosition(_frame->getChildByTag(NT_TiLiZhi)->getPosition());
+		}
+		return true;
+	}
+	return false;
+}
+
+void RoleInfoUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+
+}
+
+void RoleInfoUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_RoleInfoUi);
+}
+
+void RoleInfoUiLayer::onSelBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_6);//vv
+	CC_ASSERT(_selectFrame != NULL);
+	if(_roleId == RoleManager::getInstance()->getLocalPlayer()->getId())
+		_selectFrame->showFrame(true);
+}
+
+void RoleInfoUiLayer::onEquipTabClicked( TouchSprite*, bool )
+{
+	bool pop = GET_UI(RoleInfoUi, WCT_RoleInfoUi)->isPopupPreUiOnClose();
+	RR_PopTag popTag = GET_UI(RoleInfoUi, WCT_RoleInfoUi)->getPopTag();
+	GET_UI(RoleInfoUi, WCT_RoleInfoUi)->setPopupPreUiOnClose(false);
+
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	unsigned int roleId = _roleId;
+	if (IS_UI_OPEN(WCT_ROLEEQUIPUI))
+	{
+		return;
+	}
+	OPEN_UI(WCT_ROLEEQUIPUI);
+	GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPlayerId(roleId);
+	GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPopupPreUiOnClose(pop);
+	GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPopTag(popTag);
+	CLOSE_UI(WCT_RoleInfoUi);
+}
+
+void RoleInfoUiLayer::onAttrTabClicked( TouchSprite*, bool )
+{
+	bool pop = GET_UI(RoleInfoUi, WCT_RoleInfoUi)->isPopupPreUiOnClose();
+	RR_PopTag popTag = GET_UI(RoleInfoUi, WCT_RoleInfoUi)->getPopTag();
+	GET_UI(RoleInfoUi, WCT_RoleInfoUi)->setPopupPreUiOnClose(false);
+
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	unsigned int roleId = _roleId;
+	if (IS_UI_OPEN(WCT_ROLEATTRUI))
+	{
+		return;
+	}
+	OPEN_UI(WCT_ROLEATTRUI);
+	GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->setPlayerId(roleId);
+	GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->setPopupPreUiOnClose(pop);
+	GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->setPopTag(popTag);
+	CLOSE_UI(WCT_RoleInfoUi);
+}
+
+void RoleInfoUiLayer::setRoleId( unsigned int roleId )
+{
+	_roleId = roleId;
+
+	updateDisplayData(roleId);
+	setTitleInfoVisible();
+}
+
+void RoleInfoUiLayer::updateDisplayData( unsigned int roleId )
+{
+	if(_roleId != roleId)
+		return;
+
+	bool isLocal = (_roleId == RoleManager::getInstance()->getLocalPlayer()->getId());
+	if(isLocal)
+	{
+		LocalPlayer *player = RoleManager::getInstance()->getLocalPlayer();
+		setAttr(NT_Name, player->getName());
+		//setAttr(RAT_JINGJIE, )
+		setAttr(NT_Level, player->getLevel());
+		std::string temp = CCString::createWithFormat("%d",player->getAttribute(RA_BATTLE_POINT))->getCString();//%s%d ,"+tili+",player->getAttribute(RA_TiLiZhi)由于没有图，临时把体力值和战斗力 拼接一起显示，等图有了调试位置[yu]
+		setAttr(NT_Zhandouli, temp.c_str());
+// 		std::string temp1=CCString::createWithFormat("%d",player->getAttribute(RA_TiLiZhi))->getCString();
+// 		setAttr(NT_TiLiZhi,temp1.c_str());
+		setAttr(NT_Profession, getRoleTypeStr(player->getRoleType()).c_str());
+		setAttr(NT_Sex, getRoleSexStr(player->getAttribute(RA_SEX)).c_str());
+		setAttr(NT_Guanzhi, getGuanzhiStr(player->getAttribute(RA_Knowledge)).c_str());
+
+		temp  = SocialMgr::getInstance()->GetSpouseName().c_str();
+		if (temp.empty())
+		{
+			temp = STRING_TABLE["none"];
+		}
+		setAttr(NT_Peiou, temp.c_str());
+		const sGuildDesc &guildDesc = GuildMgr::getInstance()->getGuildDesc();
+		setAttr(NT_Guild, guildDesc.cur_level == -1 ? GET_STR(73).c_str() : guildDesc.guild_name.c_str());
+		const tagRoleSocialInfo &roleSocialInfo = SocialMgr::getInstance()->getRoleSocialInfo();
+		//setAttr(NT_Xingzuo, getXingzuoString((EnumVCardConstellation)roleSocialInfo.byStar).c_str());
+		setXingzuo((EnumVCardConstellation)roleSocialInfo.byStar);
+
+		temp = convertName(roleSocialInfo.chCity);
+		if (temp.empty())
+		{
+			temp = STRING_TABLE["none"];
+		}
+		setAttr(NT_AddressLab, temp.c_str());
+		setAttr(NT_QianmingLab, convertName(roleSocialInfo.bySignature).c_str());
+		setAttr(NT_RoleID, CCString::createWithFormat("%d", _roleId)->getCString());
+
+		setAttrMonthCard(RoleManager::getInstance()->getLocalPlayer()->getMonthCardStartTime());
+	}
+	else
+	{
+		const tagRoleInfo* roleInfo = RemoteRoleStateMgr::getInstance()->GetRoleInfo();
+		const tagRoleSocialInfo* socialInfo = RemoteRoleStateMgr::getInstance()->GetRemoteSocialData();
+		setAttr(NT_Name, roleInfo->strName.c_str());
+		setAttr(NT_Level, roleInfo->level);
+		setAttr(NT_Zhandouli, RemoteRoleStateMgr::getInstance()->GetFightLi()); //战斗力 add by XSea 2014.08.23
+		//setAttr(NT_TiLiZhi,RemoteRoleStateMgr::getInstance()->GetPhysical()); //体力值 add by XSea 2014.08.23
+		setAttr(NT_Profession, getRoleTypeStr((EClassType)RemoteRoleStateMgr::getInstance()->GetClassType()).c_str());
+		setAttr(NT_Sex, getRoleSexStr(RemoteRoleStateMgr::getInstance()->GetSex()).c_str());
+		setAttr(NT_Guanzhi, roleInfo->_roleData[ERRA_ShengW]);
+		setAttr(NT_Peiou, RemoteRoleStateMgr::getInstance()->GetSpouseName().c_str());
+		setAttr(NT_Guild, RemoteRoleStateMgr::getInstance()->GetGuildName().c_str());
+		//setAttr(NT_Xingzuo, getXingzuoString((EnumVCardConstellation)socialInfo->byStar).c_str());
+		setXingzuo((EnumVCardConstellation)socialInfo->byStar);
+
+		std::string temp = convertName(socialInfo->chCity);
+		if (temp.empty())
+		{
+			temp = STRING_TABLE["none"];
+		}
+		setAttr(NT_AddressLab, temp.c_str());
+		setAttr(NT_QianmingLab, convertName(socialInfo->bySignature).c_str());
+		setAttr(NT_RoleID, CCString::createWithFormat("%d", _roleId)->getCString());
+
+		setAttr(NT_Guanzhi, getGuanzhiStr(roleInfo->_roleData[ERRA_ShengW]).c_str());
+		setAttrMonthCard(RemoteRoleStateMgr::getInstance()->GetMonthCardBeginTime());
+		setAttr(NT_RoleID, CCString::createWithFormat("%d", roleInfo->uRoleID)->getCString());
+	}
+}
+
+void RoleInfoUiLayer::onTitleTabClicked( TouchSprite*, bool )
+{
+	bool pop = GET_UI(RoleInfoUi, WCT_RoleInfoUi)->isPopupPreUiOnClose();
+	RR_PopTag popTag = GET_UI(RoleInfoUi, WCT_RoleInfoUi)->getPopTag();
+	GET_UI(RoleInfoUi, WCT_RoleInfoUi)->setPopupPreUiOnClose(false);
+
+	if(_roleId != RoleManager::getInstance()->getLocalPlayer()->getId())
+		return;
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	//unsigned int roleId = _roleId;
+	if (IS_UI_OPEN(WCT_RoleTitleUi))
+	{
+		return;
+	}
+	OPEN_UI(WCT_RoleTitleUi);
+	//GET_UI(RoleTitleUi, WCT_RoleTitleUi)->setRoleId(roleId);
+	GET_UI(NewRoleTitleUi, WCT_RoleTitleUi)->setPopupPreUiOnClose(pop);
+	GET_UI(NewRoleTitleUi, WCT_RoleTitleUi)->setPopTag(popTag);
+	CLOSE_UI(WCT_RoleInfoUi);
+}
+void RoleInfoUiLayer::setAttrMonthCard(tagDWORDTime beginTime)
+{
+	std::string strKey;
+	string str = STRING_TABLE["20628"];
+	if (beginTime.IsTimeEmpty())
+	{
+		safe_sprintf(strKey, "%d", 0);
+		strKey.append(str);
+		setAttr(NT_TiLiZhi,strKey.c_str()); 
+		return;
+	}
+	tagDWORDTime curtime = ServerTime::getInstance()->cal_current_server_dword_time();
+	int second = CalcTimeDiff(curtime,beginTime);
+	int day = 30 - second / (24 * 3600) - 1; //月卡周期30天 -1是为了跟服务器使用时候那个协议对照
+	day = (day < 0) ? 0 : day;
+	safe_sprintf(strKey, "%d", day);
+	strKey.append(str);
+
+	setAttr(NT_TiLiZhi,strKey.c_str());
+
+}
+void RoleInfoUiLayer::setAttr( eNodeTag tag, const char *value )
+{
+	if(NT_Zhandouli == tag)
+	{
+		CCLabelBMFont* label = dynamic_cast<CCLabelBMFont*>(_frame->getChildByTag(NT_Zhandouli));
+		if(label != NULL)
+			label->setString(value);
+	}
+	else
+	{
+		LabelFT *label = NULL;
+		map<eNodeTag,bool>::iterator it = m_AttrRemoveMapInfo.find(tag);
+		if(it != m_AttrRemoveMapInfo.end())
+		{
+			if(it->second)
+			{
+				label = dynamic_cast<LabelFT*>(_frame->getChildByTag(tag));
+				if(label != NULL)
+				{
+					label->setString(value);
+					set_att_sign_no_cue(label, tag, value);
+				}
+			}
+
+		}
+		else
+		{
+			Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(tag))));
+			m_AttrRemoveMapInfo.insert(make_pair(tag,true));
+			label = dynamic_cast<LabelFT*>(_frame->getChildByTag(tag));
+			if(label != NULL)
+			{
+				label->setString(value);
+				set_att_sign_no_cue(label, tag, value);
+			}
+		}
+
+	}
+}
+
+void RoleInfoUiLayer::setAttr( eNodeTag tag, const wchar_t *value )
+{
+	char vStr[128];
+	memset(vStr, 0, sizeof(char) * 128);
+	Utf16ToUtf8(value, vStr, 128, 0);
+	setAttr(tag, vStr);
+}
+
+void RoleInfoUiLayer::setAttr( eNodeTag tag, int value )
+{
+	std::ostringstream ostr;
+	ostr << value;
+	setAttr(tag, ostr.str().c_str());
+}
+
+void RoleInfoUiLayer::set_att_sign_no_cue(LabelFT* label, eNodeTag tag, const std::string str)
+{
+	if((tag == NT_QianmingLab))
+	{
+		if(str.empty())
+		{
+			if(label)
+			{
+				label->setString(STRING_TABLE["role_no_sign_cue"]);
+			}
+		}
+	}
+}
+
+void RoleInfoUiLayer::onAddressChanged( bool isOk, std::string str )
+{
+	if(isOk)
+	{
+		if (str.size() <= 0)
+			return;
+		setAttr(NT_AddressLab, str.c_str());
+
+		const tagRoleSocialInfo &socialInfo = SocialMgr::getInstance()->getRoleSocialInfo();
+
+		tagRoleSocialInfo sendInfo;
+		memcpy(&sendInfo, &socialInfo, sizeof(tagRoleSocialInfo));
+		memset(sendInfo.chCity, 0, sizeof(wchar_t) * LEN_CITY_NAME);
+
+		wchar_t ad[56];
+		memset(ad, 0, sizeof(wchar_t) * 56);
+		Utf8ToUtf16(str.c_str(), ad, 56, 0);
+
+		memcpy(sendInfo.chCity, ad, LEN_CITY_NAME > 56 ? sizeof(wchar_t) * 56 : sizeof(wchar_t) * (LEN_CITY_NAME-1));
+
+		SocialMgr::getInstance()->SetRoleSocialData(sendInfo);
+	}
+}
+
+void RoleInfoUiLayer::onQianMingChanged( bool isOk, std::string str )
+{
+	if(isOk)
+	{
+		if (str.size() <= 0)
+			return;
+
+		// 由于连续的ACSII字符不能自动换行，故引入此函数
+		insertNewlineInString( str , 33 );
+
+		const tagRoleSocialInfo &socialInfo = SocialMgr::getInstance()->getRoleSocialInfo();
+		tagRoleSocialInfo sendInfo;
+		memcpy(&sendInfo, &socialInfo, sizeof(tagRoleSocialInfo));
+		memset(sendInfo.bySignature, 0, sizeof(wchar_t) * (LEN_MAX_SIGNATURE + 1));
+		//
+		wchar_t ad[50];
+		memset(ad, 0, sizeof(wchar_t) * 50);
+		Utf8ToUtf16(str.c_str(), ad, 50, 0);
+		memcpy(sendInfo.bySignature,ad,LEN_MAX_SIGNATURE > 50 ? sizeof(wchar_t) * 50 : sizeof(wchar_t) * LEN_MAX_SIGNATURE);
+		SocialMgr::getInstance()->SetRoleSocialData(sendInfo);
+	}
+}
+
+void RoleInfoUiLayer::setXingzuo( EnumVCardConstellation index )
+{
+	CCControlButton *btn = dynamic_cast<CCControlButton*>(_frame->getChildByTag(NT_Xingzuo));
+	CC_ASSERT(btn != NULL);
+	setBtnTitle(btn, getXingzuoString(index));
+}
+
+GameActionNode* RoleInfoUiLayer::getFightSuperEffect()
+{
+	GameActionNode* fireSEAcNode = GameActionNode::create();
+// 	for (int i=1; i<99; ++i)
+// 	{
+// 		CCString* fireStr = CCString::createWithFormat("%s%02d", "E1_50", i);
+// 		if(!fireSEAcNode->AddTexture(fireStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+	fireSEAcNode->InitTextureWithSpriteFrame("E1_50");
+	return fireSEAcNode;
+}
+
+void RoleInfoUiLayer::setTitleInfoVisible()
+{
+	TouchSprite *titleSprite=dynamic_cast<TouchSprite*>(_frame->getChildByTag(NT_TitleTab));
+	CCControlButton* xingzuo = dynamic_cast<CCControlButton*>(_frame->getChildByTag(NT_Xingzuo));
+	if (_roleId!=RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		titleSprite->setVisible(false);
+		xingzuo->setEnabled(false);
+	}
+	else
+	{
+		titleSprite->setVisible(true);
+		xingzuo->setEnabled(true);
+	}
+}
+
+void RoleInfoUiLayer::insertNewlineInString( std::string & str , int max_line_length )
+{
+
+	float length_line = 0;							// 当前一行文字长度的累加计数，与行宽作判断用
+	float length_last_not_ACSII = 0;		// 上次出现非ACSII时的length_line长度
+	int ACSII_Size = 0;							// 连续的ACSII字符的长度
+	std::set<int> NewlineIndices;			// 插入换行符的索引
+
+	for ( size_t i = 0; i < str.size();  )
+	{
+		int offset = 0;
+
+		// 如果遇到回车符，直接重置相关计数并迭代
+		if ( (int)str.at(i) == '\n' )
+		{
+			length_line = 0;
+			length_last_not_ACSII = 0;
+			ACSII_Size = 0;
+			++i;
+			continue;
+		}
+
+
+		if ( (unsigned int)(str.at(i)) < 0x80 )			// 如果此处是ACSII字符
+		{
+			offset = 1;
+			length_line += 1.0f;
+			if ( (int)str.at(i) == ' ' )					// 若为空格则不算连续
+			{
+				ACSII_Size = 0;
+				length_last_not_ACSII = length_line;					// 空格同样适用于自动换行的情形
+			}
+			else
+			{
+				++ACSII_Size;
+			}
+
+		}
+		else
+		{
+			length_line += 1.73f;			// 汉字等的宽度约相当于1.73个字母
+			length_last_not_ACSII = length_line;
+			offset = 3;							// 汉字的偏移量为3
+			ACSII_Size = 0;					// 重置为0
+		}
+
+		// 汉字加上ACSII字符的长度已经超过了行宽，
+		// 此情况下Textfield会自动换行，将连续的ACSII字符直接转到下一行
+		if ( length_last_not_ACSII + ACSII_Size >= max_line_length )
+		{
+			length_line = ACSII_Size;
+			length_last_not_ACSII = 0;
+		}
+
+		if ( length_line > max_line_length )		// 需要换行。重置数据。此时 i 对应下一行第一个字符
+		{
+			length_line = 0;
+			length_last_not_ACSII = 0;
+			ACSII_Size = 0;
+			NewlineIndices.insert( i );
+		}
+		else
+		{
+			i += offset;
+		}
+
+	}
+
+	// 插入回车
+	for ( std::set<int>::iterator iter = NewlineIndices.begin(); iter != NewlineIndices.end(); ++iter )
+	{
+		// 如果是汉字等，会自动换行，所以仅在是非空格ACSII字符时插入
+		if ((unsigned int)(str.at( *iter )) < 0x80 && (int)str.at( *iter ) != ' ' )
+			str.insert( *iter , "\n" );
+	}
+
+}

@@ -1,0 +1,231 @@
+#include "CommonView.h"
+#include "CommonDefine.h"
+
+USING_NS_CC;
+USING_NS_CC_EXT;
+
+cocos2d::CCRect get_node_world_rect( CCNode* node )
+{
+	CCRect rc;
+	CCSize node_size = node->getContentSize();
+	
+	CCScrollView* sc = dynamic_cast<CCScrollView*>(node);
+	if (sc)
+	{
+		node_size = sc->getViewSize();
+	}
+
+	CCPoint lb = node->convertToWorldSpace(ccp(0,0));
+	CCPoint rt = node->convertToWorldSpace(ccp(node_size.width,node_size.height));
+
+	rc.origin = lb;
+	rc.origin = CCSizeMake(rt.x - lb.x,rt.y - lb.y);
+
+	return rc;
+}
+
+CCPoint convert_point_to_node_space( CCNode* src,const CCPoint& pt,CCNode* target )
+{
+	CC_ASSERT(target);
+	CC_ASSERT(src);
+
+	CCPoint world_pt = src->convertToWorldSpace(pt);
+
+	CCPoint ptNew =  target->convertToNodeSpace(world_pt);
+
+	return ptNew;
+}
+
+std::vector<std::string> split_str( const std::string& rule_str,char spliter )
+{
+	std::vector<std::string> params;
+	size_t start=0;
+	size_t end=rule_str.find_first_of(spliter,start);
+
+	while(end != std::string::npos)
+	{
+		params.push_back(rule_str.substr(start,end-start));
+		start = end+1;
+		end = rule_str.find_first_of(spliter,start);
+	}
+
+	if (start < rule_str.length())
+	{
+		params.push_back(rule_str.substr(start));
+	}
+
+	return params;
+}
+
+const char* pop_word_from_utf8_str( const char*& utf8_str )
+{
+	unsigned char c = (unsigned char) utf8_str[0];
+	size_t num=0;
+	if (c != 0)
+	{
+		c = c>>4;
+		if (c<12)
+		{
+			num =1;
+		}
+		else if (c >=12&& c<14)
+		{
+			num = 2;
+		}
+		else if (c == 14)
+		{
+			num =3;
+		}
+		else if (c== 15)
+		{
+			num = 4;
+		}
+	}
+
+	static char word_cache[16];
+	for (size_t i = 0; i <num  ; ++i)
+	{
+		word_cache[i] = utf8_str[i];
+	}
+	word_cache[num] ='\0';
+
+	utf8_str += num;
+
+	return & word_cache[0];
+}
+
+void remove_specified_char_in_string(std::string& str,char c)
+{
+	str.erase(std::remove(str.begin(),str.end(),c)
+		,str.end());
+}
+
+const char* get_word_from_utf8_str( const char* utf8_str,int offset/*=0*/ )
+{
+	const char* ptr = utf8_str + offset;
+	return pop_word_from_utf8_str(ptr);
+}
+
+std::string get_words_from_utf8_str( const char* utf8_str,int start_word,int num_word )
+{
+	const char* ptr = utf8_str;
+	for (size_t i = 0; i <(size_t)start_word  ; ++i)
+	{
+		pop_word_from_utf8_str(ptr);
+	}
+
+	std::stringstream ss;
+	for (size_t i = 0; i <(size_t)num_word  ; ++i)
+	{
+		ss<<pop_word_from_utf8_str(ptr);
+	}
+
+	return ss.str();
+}
+
+void create_and_arrange_multicolor_lable( std::string const& msg,std::vector<CCLabelTTF*> out ,CCNode* parent)
+{
+	std::string baseString = msg; 
+	std::vector<std::string> msgListData;
+	std::vector<std::string> msgListColor;
+	int index = 0,index2=0;
+	while(true)
+	{
+		index = baseString.find("<");
+		if (index != -1)
+		{
+			msgListColor.push_back(baseString.substr(index + 1,index + 2));
+			baseString = baseString.substr(index + 3,baseString.size());
+			index2 = baseString.find("<");
+			if (index2 != -1)
+			{
+				msgListData.push_back(baseString.substr(0,index2).c_str());
+				baseString = baseString.substr(index2,baseString.size());
+			}
+			else
+			{
+				msgListData.push_back(baseString.substr(0,baseString.size()).c_str());
+				break;
+			}
+			//index = -1;
+		}else{
+			break;
+		}
+	}
+	CC_ASSERT(!msgListData.empty() && msgListData.size()== msgListColor.size());
+	out.clear();
+	out.assign(msgListData.size(),CCLabelTTF::create());
+
+	void BOOST_LOCAL_FUNCTION(CCLabelTTF* label)
+	{
+		label->setFontSize(16);
+		label->setAnchorPoint(ccp(0.5f,0.5f));
+		//label->setPositionY((size.height - 16) / 2);
+	}BOOST_LOCAL_FUNCTION_NAME(EachSetup);
+	boost::range::for_each(out,EachSetup);
+
+	size_t cnt=0;
+	BOOST_FOREACH(CCLabelTTF* label,out)
+	{
+		label->setString(msgListData[cnt].c_str());
+		label->setColor(getChangeColor(msgListColor[cnt]));
+		++cnt;
+
+		parent->addChild(label);
+	}
+	//createMSG(msgListData,msgListColor);
+}
+
+cocos2d::ccColor3B getChangeColor( std::string const& str )
+{
+	ccColor3B color;//11ÖÖÑÕÉ«
+	if (str.compare("c1") == 0)
+	{
+		color = ccc3(255,255,255);
+	}
+	else if (str.compare("c2") == 0)
+	{
+		color = ccc3(192,0,0);
+	}
+	else if (str.compare("c3") == 0)
+	{
+		color = ccc3(255,0,0);
+	}
+	else if (str.compare("c4") == 0)
+	{
+		color = ccc3(255,192,0);
+	}
+	else if (str.compare("c5") == 0)
+	{
+		color = ccc3(255,255,0);
+	}
+	else if (str.compare("c6") == 0)
+	{
+		color = ccc3(146,208,80);
+	}
+	else if (str.compare("c7") == 0)
+	{
+		color = ccc3(0,176,80);
+	}
+	else if (str.compare("c8") == 0)
+	{
+		color = ccc3(0,176,240);
+	}
+	else if (str.compare("c9") == 0)
+	{
+		color = ccc3(0,112,192);
+	}
+	else if (str.compare("c10") == 0)
+	{
+		color = ccc3(0,32,96);
+	}
+	else if (str.compare("c11") == 0)
+	{
+		color = ccc3(112,48,160);
+	}
+	else
+	{
+		color = ccc3(255,255,255);
+	}
+	return color;
+}

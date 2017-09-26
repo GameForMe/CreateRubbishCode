@@ -1,0 +1,819 @@
+#include "TCPClient.h"
+#include <assert.h>
+#include <time.h>
+#include "minilzo.h"
+#include "cocos2d.h"
+#include "cc_timer.h"
+#include "DelayUi.h"
+#include "World.h"
+
+using namespace cocos2d;
+
+
+c_tcp_client::c_tcp_client()
+	:m_send_thread(NULL) , 
+	m_recv_thread(NULL) , 
+	m_conn_thread(NULL) , 
+	m_socket(NULL) , 
+	m_port(0) , 
+	m_lastsend(0) , 
+	m_timeout(0.f) , 
+	m_lconnecting_tl(0.f),
+	m_connected(false) , 
+	m_send_lzo(false) , 
+	m_recv_lzo(false) , 
+	m_running(false),
+	m_con_failed(false),
+	m_con_failed2(false),
+	m_lconnecting_state(false),
+	dwID_Heartbeat(INVALID)
+{
+	memset(m_ip , 0 , 128*sizeof(char));
+	dwID_Heartbeat = message_id_crc("NET_SIS_heartbeat");		// 心跳
+	dwID_GotoNewMap = message_id_crc("NET_SIS_goto_new_map");	// 跳地图
+}
+//--------------------------------------------------------
+c_tcp_client::~c_tcp_client(){}
+//--------------------------------------------------------
+bool c_tcp_client::initialize(float timeout_, bool sendlzo_, bool recvlzo_)
+{
+	m_send_lzo = sendlzo_;
+	m_recv_lzo = recvlzo_;
+	m_timeout = timeout_;
+	int ret = lzo_init();
+	if(LZO_E_OK!=ret)
+		return false;
+#ifdef OVD_PLATFORM_WINDOWS
+	WSADATA ws;
+	WSAStartup(MAKEWORD(2,2), &ws);
+#endif
+	m_pool = new c_mem_pool();
+	if(m_socket)
+		delete m_socket;
+	m_socket = new c_tcp_socket(m_pool);
+	return m_socket->open();	
+}
+//--------------------------------------------------------
+void c_tcp_client::shutdown()
+{
+	m_running = false;
+	if(m_socket)
+	{
+		m_socket->close();
+		delete m_socket;
+		m_socket = NULL;
+	}
+	if(m_conn_thread)
+	{
+		delete m_conn_thread;
+		m_conn_thread = NULL;
+	}
+	if(m_send_thread)
+	{
+		delete m_send_thread;
+		m_send_thread = NULL;
+	}
+	if(m_recv_thread)
+	{
+		delete m_recv_thread;
+		m_recv_thread = NULL;
+	}
+	while(!m_recv_q.empty())
+	{
+		s_net_cmd* cmd = m_recv_q.front();
+		m_pool->dealloc(cmd);
+		m_recv_q.pop_front();
+	}
+	while(!m_send_q_cri.empty())
+	{
+		s_net_cmd* cmd = m_send_q_cri.front();
+		m_pool->dealloc(cmd);
+		m_send_q_cri.pop_front();
+	}
+	while(!m_send_q_nor.empty())
+	{
+		s_net_cmd* cmd = m_send_q_nor.front();
+		m_pool->dealloc(cmd);
+		m_send_q_nor.pop_front();
+	}
+	while(!m_send_q_ins.empty())
+	{
+		s_net_cmd* cmd = m_send_q_ins.front();
+		m_pool->dealloc(cmd);
+		m_send_q_ins.pop_front();
+	}
+	while(!m_send_q_idle.empty())
+	{
+		s_net_cmd* cmd = m_send_q_idle.front();
+		m_pool->dealloc(cmd);
+		m_send_q_idle.pop_front();
+	}
+	delete m_pool;
+	m_pool = NULL;
+	CCLOG("c_tcp_client::shutdown():[%s-%d]", m_ip, m_port);
+#ifdef OVD_PLATFORM_WINDOWS
+	WSACleanup();
+#endif
+}
+void c_tcp_client::clear()
+{
+	m_running = false;
+	if(m_socket)
+	{
+		m_socket->close();
+	}
+	if(m_conn_thread)
+	{
+		delete m_conn_thread;
+		m_conn_thread = NULL;
+	}
+	if(m_send_thread)
+	{
+		delete m_send_thread;
+		m_send_thread = NULL;
+	}
+	if(m_recv_thread)
+	{
+		delete m_recv_thread;
+		m_recv_thread = NULL;
+	}
+	while(!m_recv_q.empty())
+	{
+		s_net_cmd* cmd = m_recv_q.front();
+		m_pool->dealloc(cmd);
+		m_recv_q.pop_front();
+	}
+	while(!m_send_q_cri.empty())
+	{
+		s_net_cmd* cmd = m_send_q_cri.front();
+		m_pool->dealloc(cmd);
+		m_send_q_cri.pop_front();
+	}
+	while(!m_send_q_nor.empty())
+	{
+		s_net_cmd* cmd = m_send_q_nor.front();
+		m_pool->dealloc(cmd);
+		m_send_q_nor.pop_front();
+	}
+	while(!m_send_q_ins.empty())
+	{
+		s_net_cmd* cmd = m_send_q_ins.front();
+		m_pool->dealloc(cmd);
+		m_send_q_ins.pop_front();
+	}
+	while(!m_send_q_idle.empty())
+	{
+		s_net_cmd* cmd = m_send_q_idle.front();
+		m_pool->dealloc(cmd);
+		m_send_q_idle.pop_front();
+	}
+	if(m_socket)
+	{
+		delete m_socket;
+		m_socket = NULL;
+	}
+}
+
+//--------------------------------------------------------
+bool c_tcp_client::connect(const char* ip_, unsigned short port_, bool bIsCgs)
+{
+	CCLog("c_tcp_client::connect(%s,%d), 1", ip_, port_);
+	if (m_conn_thread)
+	{
+		if (m_con_failed2 == true)
+		{
+			delete m_conn_thread;
+			m_conn_thread = NULL;
+			m_con_failed2 = false;
+		}
+		else
+		{
+			CCLOG("c_tcp_client::connect(), 2");
+			return false;
+		}
+	}
+
+	strcpy(m_ip , ip_);
+	m_port = port_;
+	//m_socket->close();
+	if(m_socket)
+		m_socket->close();
+	else
+		m_socket = new c_tcp_socket(m_pool);
+	//return m_socket->open();	
+
+	_dataMutex.lock();
+	m_connected = false;
+	m_running = false;
+	m_con_failed = false;
+	_dataMutex.unlock();
+
+	if(m_recv_thread)
+	{
+		delete m_recv_thread;
+		m_recv_thread = NULL;
+		while(!m_recv_q.empty())
+		{
+			s_net_cmd* cmd = m_recv_q.front();
+			m_pool->dealloc(cmd);
+			m_recv_q.pop_front();
+		}
+	}
+	if(m_send_thread)
+	{
+		delete m_send_thread;
+		m_send_thread = NULL;
+		while(!m_send_q_cri.empty())
+		{
+			s_net_cmd* cmd = m_send_q_cri.front();
+			m_pool->dealloc(cmd);
+			m_send_q_cri.pop_front();
+		}
+		while(!m_send_q_nor.empty())
+		{
+			s_net_cmd* cmd = m_send_q_nor.front();
+			m_pool->dealloc(cmd);
+			m_send_q_nor.pop_front();
+		}
+		while(!m_send_q_ins.empty())
+		{
+			s_net_cmd* cmd = m_send_q_ins.front();
+			m_pool->dealloc(cmd);
+			m_send_q_ins.pop_front();
+		}
+		while(!m_send_q_idle.empty())
+		{
+			s_net_cmd* cmd = m_send_q_idle.front();
+			m_pool->dealloc(cmd);
+			m_send_q_idle.pop_front();
+		}
+	}
+
+	//[bing] 跨分流标签
+	//m_IsCgs = bIsCgs;
+
+	m_socket->open();
+	m_conn_thread = new c_thread(_conn_thread_func , 0 , this);
+	CCLOG("c_tcp_client::connect(), 3");
+	return true;
+}
+//--------------------------------------------------------
+void c_tcp_client::step()
+{
+	bool isConnected = false;
+	bool isRunning = false;
+	bool isConFailed = false;
+
+	_dataMutex.lock();
+	isConnected = m_connected;
+	//isRunning = m_running;
+	isConFailed = m_con_failed;
+	_dataMutex.unlock();
+
+	//处理连接不成功
+	if(isConFailed)
+	{
+		_sig_connectfailed.emit();
+		_dataMutex.lock();
+		m_con_failed = false;
+		m_con_failed2 = true;
+		_dataMutex.unlock();
+
+		if(m_socket)
+		{
+			//调用关闭操作太慢了，直接删除下次重新NEW一个
+			//m_socket->close();
+			delete m_socket;
+			m_socket = NULL;
+		}
+		return;
+	}
+
+	static bool connected = false;
+
+	//int doMsgCount = 0;
+	//处理连接收消息
+	if(isConnected)
+	{
+		if(m_conn_thread)
+		{
+			connected = true;
+			_sig_connected.emit();
+			delete m_conn_thread;
+			m_conn_thread = NULL;
+			return;
+		}
+		m_recv_q.lock();
+		//暂时屏蔽掉此功能，让一帧内处理完所有的包
+		//clock_t t_begin = clock();
+		while(!m_recv_q.empty())
+		{
+// 			clock_t t_end = clock();
+// 			if (t_end>t_begin && (t_end-t_begin)*1000/CLOCKS_PER_SEC>=30)
+// 			{
+// 				break;
+// 			}
+
+			s_net_cmd* cmd = m_recv_q.front();
+			m_recv_q.pop_front();
+			m_cmd_map.lock();
+			c_safe_map<unsigned int , c_signal<unsigned int , s_net_cmd*> >::iterator iter = m_cmd_map.find(cmd->id);
+			m_cmd_map.unlock();
+			if(iter!= m_cmd_map.end())
+			{
+				iter->second.emit(cmd);
+			}
+			m_pool->dealloc(cmd);
+
+		}
+		m_recv_q.unlock();
+	}
+
+	_dataMutex.lock();
+	isConnected = m_connected;
+	isRunning = m_running;
+	//isConFailed = m_con_failed;
+	_dataMutex.unlock();
+	//处理连接断开
+	if(!isConnected&&isRunning)
+	{
+		//不知道为啥，有可能出现连接成功的还没调用，就直接到了连接断开了，
+		//原因是这里没有走消息队列的方式，而是几个变量来判断的，当主线程卡顿的时候就会出现此情况
+		//只能是应用层再次判断重新连接了。
+		if (!connected)
+		{
+			delete m_conn_thread;
+			m_conn_thread = NULL;
+		}
+
+		_sig_disconnected.emit();
+		_dataMutex.lock();
+		m_running = false;
+		_dataMutex.unlock();
+	}
+}
+//--------------------------------------------------------
+void c_tcp_client::send_net_cmd(const s_net_cmd* cmd_, e_network_priority np_, bool overwrite_)
+{
+	static unsigned int dwID_MouseMove	= message_id_crc("NET_SIC_mouse_walk");		// 鼠标行走
+	static unsigned int dwID_KeyboardMove = message_id_crc("NET_SIC_keyboar_walk");	// 键盘行走
+	static unsigned int dwID_StopKeyboardWalk = message_id_crc("NET_SIC_stop_walk");	// 停止键盘行走
+	static unsigned int dwID_Skill = message_id_crc("NET_SIC_skill");				// 使用技能
+	static unsigned int dwID_UseItem = message_id_crc("NET_SIC_use_item");			// 使用物品
+	static unsigned int dwID_SwapWeapon = message_id_crc("NET_SIC_swap_weapon");		// 切换武器
+	static unsigned int dwID_Trigger = message_id_crc("NET_SIC_role_map_trigger");  // 触发器 
+
+	static unsigned int dwID_GetRemoteRoleState = message_id_crc("NET_SIC_get_remote_role_state");	// 得到远程玩家信息
+	static unsigned int dwID_RoleGetSomeName = message_id_crc("NET_SIC_role_set_some_name");	// 得到远程玩家名字
+	static unsigned int dwID_PickUp = message_id_crc("NET_SIC_role_pickup_item");	
+	static unsigned int dwID_Heart = message_id_crc("NET_SIC_heartbeat");
+
+	np_ = NP_INSIGNIFICANT;
+	overwrite_ = false;
+
+	if (cmd_->id == dwID_Skill)
+		np_ = NP_CRITICAL;
+	else if( cmd_->id == dwID_MouseMove
+		|| cmd_->id == dwID_KeyboardMove
+		|| cmd_->id == dwID_StopKeyboardWalk
+		|| cmd_->id == dwID_UseItem
+		|| cmd_->id == dwID_SwapWeapon
+		|| cmd_->id == dwID_Trigger
+		|| cmd_->id == dwID_PickUp
+		|| cmd_->id == dwID_Heart)
+	{
+		if (cmd_->id == dwID_MouseMove
+			|| cmd_->id == dwID_KeyboardMove
+			|| cmd_->id == dwID_StopKeyboardWalk)
+		{
+			overwrite_ = true;
+		}
+		np_ = NP_NORMAL;
+	}
+	else if(cmd_->id == dwID_GetRemoteRoleState
+		|| cmd_->id == dwID_RoleGetSomeName)
+	{
+		np_ = NP_IDLE;
+	}
+
+	switch(np_)
+	{
+	case NP_CRITICAL:
+		{
+			m_send_q_cri.lock();
+			if(overwrite_)
+			{
+				FOREACH(TYPEOF(c_safe_list<s_net_cmd*>)::iterator , iter , m_send_q_cri)
+				{
+					if((*iter)->id == cmd_->id)
+					{
+						m_pool->dealloc(*iter);
+						m_send_q_cri.erase(iter);
+						break;
+					}
+				}
+			}
+			s_net_cmd* nc = (s_net_cmd*)m_pool->alloc(cmd_->size);
+			memcpy(nc , cmd_ , cmd_->size);
+			m_send_q_cri.push_back(nc);
+			m_send_q_cri.unlock();
+		}
+		break;
+	case NP_NORMAL:
+		{
+			m_send_q_nor.lock();
+			if(overwrite_)
+			{
+				FOREACH(TYPEOF(c_safe_list<s_net_cmd*>)::iterator , iter , m_send_q_nor)
+				{
+					if((*iter)->id == cmd_->id)
+					{
+						m_pool->dealloc(*iter);
+						m_send_q_nor.erase(iter);
+						break;
+					}
+				}
+			}
+			s_net_cmd* nc = (s_net_cmd*)m_pool->alloc(cmd_->size);
+			memcpy(nc , cmd_ , cmd_->size);
+			m_send_q_nor.push_back(nc);
+			m_send_q_nor.unlock();
+		}
+		break;
+	case NP_INSIGNIFICANT:
+		{
+			m_send_q_ins.lock();
+			if(overwrite_)
+			{
+				FOREACH(TYPEOF(c_safe_list<s_net_cmd*>)::iterator , iter , m_send_q_ins)
+				{
+					if((*iter)->id == cmd_->id)
+					{
+						m_pool->dealloc(*iter);
+						m_send_q_ins.erase(iter);
+						break;
+					}
+				}
+			}
+			s_net_cmd* nc = (s_net_cmd*)m_pool->alloc(cmd_->size);
+			memcpy(nc , cmd_ , cmd_->size);
+			m_send_q_ins.push_back(nc);
+			m_send_q_ins.unlock();
+		}
+		break;
+	case NP_IDLE:
+		{
+			m_send_q_idle.lock();
+			if(overwrite_)
+			{
+				FOREACH(TYPEOF(c_safe_list<s_net_cmd*>)::iterator , iter , m_send_q_idle)
+				{
+					if((*iter)->id == cmd_->id)
+					{
+						m_pool->dealloc(*iter);
+						m_send_q_idle.erase(iter);
+						break;
+					}
+				}
+			}
+			s_net_cmd* nc = (s_net_cmd*)m_pool->alloc(cmd_->size);
+			memcpy(nc , cmd_ , cmd_->size);
+			m_send_q_idle.push_back(nc);
+			m_send_q_idle.unlock();
+		}
+		break;
+
+	default:assert(0);break;
+	}
+}
+//--------------------------------------------------------
+#ifdef OVD_PLATFORM_WINDOWS
+unsigned int c_tcp_client::_conn_thread_func(void* thread_)
+#else 
+void* c_tcp_client::_conn_thread_func(void* thread_)
+#endif
+{
+	c_tcp_client* self = (c_tcp_client*)((c_thread*)thread_)->lock_user_data();
+	((c_thread*)thread_)->unlock_user_data();
+	if(self->m_socket->connect(self->m_ip , self->m_port , self->m_timeout) == SS_DONE)
+	{
+		self->_dataMutex.lock();
+		self->m_connected = true;
+		self->m_running = true;
+		self->_dataMutex.unlock();
+		CCLOG("c_tcp_client::_conn_thread_func(), ok");
+		self->m_send_thread = new c_thread(_send_thread_func , 0 , self);
+		self->m_recv_thread = new c_thread(_recv_thread_func , 0 , self);
+	}
+	else
+	{
+		CCLOG("c_tcp_client::_conn_thread_func(), error");
+		self->_dataMutex.lock();
+		self->m_connected = false;
+		self->m_con_failed = true;
+		self->m_running = false;
+		self->_dataMutex.unlock();
+	}
+	do
+	{	
+		((c_thread*)thread_)->yield();
+	}while(((c_thread*)thread_)->is_running());
+
+	CCLOG("c_tcp_client::_conn_thread_func End!!!");
+#ifdef OVD_PLATFORM_WINDOWS
+	return 0xdead;
+#else 
+	return (void*)0xdead;
+#endif
+}
+//--------------------------------------------------------
+#ifdef OVD_PLATFORM_WINDOWS
+unsigned int c_tcp_client::_recv_thread_func(void* thread_)
+#else 
+void* c_tcp_client::_recv_thread_func(void* thread_)
+#endif
+{
+	c_tcp_client* self = (c_tcp_client*)((c_thread*)thread_)->lock_user_data();
+	((c_thread*)thread_)->unlock_user_data();
+	do
+	{		
+		((c_thread*)thread_)->yield();
+
+		bool isConnected = false;
+		self->_dataMutex.lock();
+		isConnected = self->m_connected;
+		self->_dataMutex.unlock();
+
+		if(!isConnected)
+			continue;
+
+		std::list<s_net_cmd*> cmds;
+		if (self->m_socket == NULL)
+		{
+			continue;
+		}
+		e_socket_status ss = self->m_socket->receive(cmds , self->m_recv_lzo);
+		if(SS_NOT_READY == ss)
+			((c_thread*)thread_)->yield();
+		else if(SS_DISCONNECTED == ss || SS_ERROR == ss)
+		{
+			self->_dataMutex.lock();
+			self->m_connected = false;
+			self->_dataMutex.unlock();
+		}
+		if(!cmds.empty())
+		{
+			self->m_recv_q.lock();
+			for(std::list<s_net_cmd*>::iterator iter = cmds.begin() ; iter != cmds.end()  ; ++iter)
+			{
+				//s_net_cmd* temp = *iter;
+				self->m_recv_q.push_back(*iter);
+			}
+			self->m_recv_q.unlock();
+		}
+	}while(((c_thread*)thread_)->is_running());
+	CCLOG("c_tcp_client::_recv_thread_func End!!!");
+#ifdef OVD_PLATFORM_WINDOWS
+	return 0xdead;
+#else 
+	return (void*)0xdead;
+#endif
+}
+
+void LogSendTcp(s_net_cmd* cmd)
+{
+	static profile_util::cc_timer _timer;
+	char sp[512] = {0};
+	sprintf(sp, "LogSendTcp:%u, %d, time:%u\n", cmd->id, cmd->size, _timer.get_milliseconds());
+	_timer.reset();
+	//CCLOG(sp);
+}
+//--------------------------------------------------------
+#ifdef OVD_PLATFORM_WINDOWS
+unsigned int c_tcp_client::_send_thread_func(void* thread_)
+#else
+void* c_tcp_client::_send_thread_func(void* thread_)
+#endif
+{
+	c_tcp_client* self = (c_tcp_client*)((c_thread*)thread_)->lock_user_data();
+	unsigned int lastsendtime = 0;
+	//unsigned int lastsendtimeins = 0;
+	((c_thread*)thread_)->unlock_user_data();
+	do
+	{	
+		((c_thread*)thread_)->yield();
+		
+		bool isConnected = false;
+		self->_dataMutex.lock();
+		isConnected = self->m_connected;
+		self->_dataMutex.unlock();
+
+		if(!isConnected)
+			continue;
+
+		self->m_send_q_cri.lock();
+		while(!self->m_send_q_cri.empty())
+		{
+			s_net_cmd* cmd = self->m_send_q_cri.front();
+			self->m_send_q_cri.pop_front();
+			if(SS_DONE != self->m_socket->send(cmd , self->m_send_lzo))
+			{
+				self->_dataMutex.lock();
+				self->m_connected = false;
+				self->_dataMutex.unlock();
+			}
+			LogSendTcp(cmd);
+			self->m_pool->dealloc(cmd);
+		}
+		self->m_send_q_cri.unlock();
+#if 1 //lzz
+		struct timeval tv;
+		gettimeofday(&tv , 0);
+		if(tv.tv_usec - lastsendtime > 220000)
+#else
+		if(clock() - lastsendtime > 220)
+#endif
+		{
+			self->m_send_q_nor.lock();
+			//int qsz = self->m_send_q_nor.size();
+			if(!self->m_send_q_nor.empty())
+			{
+				s_net_cmd* cmd = self->m_send_q_nor.front();
+				self->m_send_q_nor.pop_front();
+				if(SS_DONE != self->m_socket->send(cmd , self->m_send_lzo))
+				{
+					self->_dataMutex.lock();
+					self->m_connected = false;
+					self->_dataMutex.unlock();
+				}
+				LogSendTcp(cmd);
+				self->m_pool->dealloc(cmd);
+			}
+			else
+			{
+				self->m_send_q_ins.lock();
+				if(!self->m_send_q_ins.empty())
+				{
+					s_net_cmd* cmd = self->m_send_q_ins.front();
+					self->m_send_q_ins.pop_front();
+					if(SS_DONE != self->m_socket->send(cmd , self->m_send_lzo))
+					{
+						self->_dataMutex.lock();
+						self->m_connected = false;
+						self->_dataMutex.unlock();
+					}
+					LogSendTcp(cmd);
+					self->m_pool->dealloc(cmd);
+				}
+				else
+				{
+					self->m_send_q_idle.lock();
+					if(!self->m_send_q_idle.empty())
+					{
+						s_net_cmd* cmd = self->m_send_q_idle.front();
+						self->m_send_q_idle.pop_front();
+						if(SS_DONE != self->m_socket->send(cmd , self->m_send_lzo))
+						{
+							self->_dataMutex.lock();
+							self->m_connected = false;
+							self->_dataMutex.unlock();
+						}
+						LogSendTcp(cmd);
+						self->m_pool->dealloc(cmd);
+					}
+					self->m_send_q_idle.unlock();
+				}
+				self->m_send_q_ins.unlock();
+			}
+			self->m_send_q_nor.unlock();
+#if 1 //lzz
+			gettimeofday(&tv , 0);
+			lastsendtime = tv.tv_usec;
+#else
+			lastsendtime = clock();
+#endif
+		}
+//#if 1 //lzz
+//		gettimeofday(&tv , 0);
+//		if(1000*tv.tv_usec - lastsendtimeins > 220000)
+//#else
+//		if(clock() - lastsendtimeins > 220)
+//#endif
+//		{
+//			self->m_send_q_ins.lock();
+//			if(!self->m_send_q_ins.empty())
+//			{
+//				s_net_cmd* cmd = self->m_send_q_ins.front();
+//				self->m_send_q_ins.pop_front();
+//				if(SS_DONE != self->m_socket->send(cmd , self->m_send_lzo))
+//					self->m_connected = false;
+//				self->m_pool->dealloc(cmd);
+//			}
+//			self->m_send_q_ins.unlock();
+//#if 1 //lzz
+//			gettimeofday(&tv , 0);
+//			lastsendtimeins = tv.tv_usec;
+//#else
+//			lastsendtimeins = clock();
+//#endif
+//		}
+	}while(((c_thread*)thread_)->is_running());
+	CCLOG("c_tcp_client::_send_thread_func End!!!");
+#ifdef OVD_PLATFORM_WINDOWS
+	return 0xdead;
+#else 
+	return (void*)0xdead;
+#endif
+}
+
+c_tcp_client* c_tcp_client::_client = NULL;
+c_tcp_client* c_tcp_client::getSingleton()
+{
+#ifndef WIN32
+	extern bool g_exit;
+	if (g_exit)
+	{
+		if(_client)
+		{
+			delete _client;
+		}
+		_client = new c_tcp_client();
+		g_exit = false;
+	}
+	else
+	{
+		if(!_client)
+			_client = new c_tcp_client();
+	}
+#endif
+		if(!_client)
+			_client = new c_tcp_client();
+	return _client;
+}
+
+void c_tcp_client::SaveAccountInfo( const char* p_UID, const char* p_Pwd, unsigned int dwVersion, const char* pLoginIP, int nLoginPort, unsigned int dwCrc32ServerName )
+{
+	m_strUserId = p_UID;
+	m_strPassWord = p_Pwd;
+	m_dwVersion32 = dwVersion;
+	m_strLoginIP = pLoginIP;
+	m_nLoginPort = nLoginPort;
+	m_nCrc32ServerName = dwCrc32ServerName;
+}
+
+void c_tcp_client::GetAccountInfo( char* p_UID, char* p_Pwd, unsigned int &dwVersion, std::string& strLoginIP, int &nLoginPort, unsigned int& dwCrc32ServerName )
+{
+	strcpy( p_UID, m_strUserId.c_str() );
+	strcpy( p_Pwd, m_strPassWord.c_str() );
+	dwVersion = m_dwVersion32;
+	strLoginIP = m_strLoginIP;
+	nLoginPort = m_nLoginPort;
+	dwCrc32ServerName = m_nCrc32ServerName;
+}
+
+void c_tcp_client::repetLoginClear()
+{
+	m_recv_q.lock();
+	while(!m_recv_q.empty())
+	{
+		s_net_cmd* cmd = m_recv_q.front();
+		m_pool->dealloc(cmd);
+		m_recv_q.pop_front();
+	}
+	m_recv_q.unlock();
+}
+
+
+void c_tcp_client::setLConnectingState( bool lConnectingState )
+{
+	m_lconnecting_state = lConnectingState;
+	if( !lConnectingState )
+	{
+		m_lconnecting_tl = 0.f;
+		m_con_failed = false;
+	}
+}
+
+void c_tcp_client::atuoCalLConnectingTime(const float& dt)
+{
+	if( m_lconnecting_state )
+	{
+		m_lconnecting_tl += dt;
+		if( m_lconnecting_tl > X_LCONNECT_TL )
+		{
+			m_lconnecting_state = false;
+			m_lconnecting_tl = 0.f;
+
+			m_con_failed = true;
+		}
+	}
+}
+
+void c_tcp_client::close()
+{
+	if(m_socket)
+	{
+		CCLOG("c_tcp_client::close:[%s-%d]", m_ip, m_port);
+		m_socket->close();
+	}
+}

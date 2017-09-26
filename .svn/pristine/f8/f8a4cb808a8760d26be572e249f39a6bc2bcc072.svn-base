@@ -1,0 +1,128 @@
+/**
+ *	@file		SelectTargetItem1.cpp
+ *	@author		guantiejun
+ *	@date		2016/07/06
+ *	@version	
+ *	@brief		队伍目标选择项
+ */
+
+#include "SelectTargetItem1.h"
+#include "SelectTargetUi.h"
+#include "RadioButton.h"
+#include "CommonClient.h"
+#include "GameEventDefine.h"
+#include "CfgReader.h"
+
+SelectTargetItem1::SelectTargetItem1()
+	: m_button(NULL)
+	, m_name(NULL)
+	, m_up(NULL)
+	, m_down(NULL)
+	, m_index(INVALID)
+	, m_cur_select_index(INVALID)
+{
+	REGISTER_EVENT(team_target_1_event,SelectTargetItem1,select_target_event_1);
+	REGISTER_EVENT(team_target_2_event,SelectTargetItem1,select_target_event_2);
+}
+
+SelectTargetItem1::~SelectTargetItem1()
+{
+	UNREGISTER_EVENT(team_target_1_event,SelectTargetItem1,select_target_event_1);
+	UNREGISTER_EVENT(team_target_2_event,SelectTargetItem1,select_target_event_2);
+}
+
+cocos2d::extension::SEL_CCControlHandler SelectTargetItem1::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(SelectTargetItem1,onClicked);
+
+	return NULL;
+}
+
+cocos2d::SEL_MenuHandler SelectTargetItem1::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+
+	return NULL;
+}
+
+bool SelectTargetItem1::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(RadioButton*, m_button);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*, m_up);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*, m_down);
+
+	return false;
+}
+
+void SelectTargetItem1::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_name = Helper::getLabelFTByParentAndTag(getChildByTag(0)->getChildByTag(2000), 1);
+}
+
+SelectTargetItem1* SelectTargetItem1::create_item(const char* szFile,CCObject*pOwner,UiInterface* holder)
+{
+	CCNodeLoaderLibrary* lib  = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string strFullPath  = CFGReader::instance()->get_ui_ccbi_filepath(szFile);
+	CCNode* node = reader->readNodeGraphFromFile(strFullPath.c_str(),pOwner);
+	SelectTargetItem1* item = dynamic_cast<SelectTargetItem1*>(node);
+	CC_ASSERT(item);
+
+	if(holder)
+	{
+		holder->mergeSheet(reader->getLoadedSpriteSheet());
+	}
+
+	return item;
+}
+
+void SelectTargetItem1::onClicked(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	if(m_cur_select_index == m_index)
+	{
+		if(m_cur_select_index == e_target_protect_skydoor || m_cur_select_index == e_target_underground_aisle || m_cur_select_index == e_target_double_practice || m_cur_select_index == e_target_near)
+		{
+			return;
+		}
+	}
+
+	team_target_1_event event;
+	event.index = (m_cur_select_index != m_index) ? m_index : INVALID;
+	SEND_EVENT(&event);
+}
+
+void SelectTargetItem1::select_target_event_1(team_target_1_event* event)
+{
+	m_cur_select_index = event->index;
+	show_select(m_cur_select_index == m_index);
+}
+
+void SelectTargetItem1::select_target_event_2(team_target_2_event* event)
+{
+	m_cur_select_index = event->index_type;
+	show_select(m_cur_select_index == m_index);
+}
+
+void SelectTargetItem1::show_select(bool is_select)
+{
+	m_button->setShowSelected(is_select);
+
+	if(m_index == e_target_protect_skydoor || m_index == e_target_underground_aisle || m_index == e_target_double_practice || m_index == e_target_near)
+	{
+		m_up->setVisible(false);
+		m_down->setVisible(false);
+	}
+	else
+	{
+		m_up->setVisible(is_select);
+		m_down->setVisible(!is_select);
+	}
+}
+
+void SelectTargetItem1::refresh_info(int index, std::string name)
+{
+	m_index = index;
+	m_name->setString(name.c_str());
+
+	show_select(false);
+}

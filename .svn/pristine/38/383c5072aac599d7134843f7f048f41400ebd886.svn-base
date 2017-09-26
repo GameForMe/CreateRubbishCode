@@ -1,0 +1,171 @@
+#include "MailRewardMgr.h"
+#include "WorldPacket.h"
+#include "UiManager.h"
+#include "MailRewardUi.h"
+#include "World.h"
+#include "ToolTip.h"
+#include "MiniMapUi.h"
+#include <algorithm>
+//////////////////////////////////////////////////////////////////////////
+
+bool compfn( tagMailReward const& item1, tagMailReward const& item2 )
+{
+	if( item1.dwCreateTime > item2.dwCreateTime )
+		return true;
+	else
+		return false;
+}
+
+MailRewardMgr::MailRewardMgr()
+{
+
+}
+
+MailRewardMgr::~MailRewardMgr()
+{
+
+}
+
+MailRewardMgr * MailRewardMgr::getInstance()
+{
+	static MailRewardMgr instance;
+	return &instance;
+}
+
+unsigned int MailRewardMgr::onAddMailReward( s_net_cmd *cmd )
+{//tagMailReward(struct)
+	WorldPacket Msg((const void*)cmd);
+	tagMailReward tempMailReward;
+	Msg >> tempMailReward;
+	mailDataList.push_back(tempMailReward);
+	//ToolTip::getInstance()->push(STRING_TABLE["on_new_mail_reward"]);
+	//根据时间排序
+	std::sort(mailDataList.begin(),mailDataList.end(),compfn);
+	//mailDataList.sort( compfn );
+	//添加邮件提示
+	MiniMapUi* pUI = World::getInstance()->getMiniMapUi();
+	if (!pUI)
+		return 0;
+	CCControlButton* pMiniMapLayer = dynamic_cast<CCControlButton*>(pUI->getChildByTag(0)->getChildByTag(1)->getChildByTag(10));
+	int mailCount = getMailConut();
+	if (mailCount > 0)
+	{
+		if (World::getInstance()->isHighLight( pMiniMapLayer , WT_CCCONTROLBUTTON , WCT_MAILREWARDUI ))
+		{
+			World::getInstance()->SetHighLight(pMiniMapLayer,WT_CCCONTROLBUTTON,WCT_MAILREWARDUI,0,false);
+		}
+		World::getInstance()->SetHighLight(pMiniMapLayer,WT_CCCONTROLBUTTON,WCT_MAILREWARDUI,mailCount,true,-20,5);
+	}
+	return 0;
+}
+
+unsigned int MailRewardMgr::onAddAllMailReward( s_net_cmd *cmd )
+{//Count(INT) + tagMailReward(struct)
+	WorldPacket Msg((const void*)cmd);
+	int tempCount;
+	tagMailReward tempMailReward;
+	Msg >> tempCount;
+
+	for (int i = 0;i < tempCount;i++)
+	{
+		Msg >> tempMailReward;
+		mailDataList.push_back(tempMailReward);
+	}
+
+	//ToolTip::getInstance()->push(STRING_TABLE["on_new_mail_reward"]);
+	//根据时间排序
+	std::sort(mailDataList.begin(),mailDataList.end(),compfn);
+	//mailDataList.sort( compfn );
+	if (tempCount > 0)//添加邮件提示
+	{
+		MiniMapUi* pUI = World::getInstance()->getMiniMapUi();
+		if (!pUI)
+			return 0;
+		CCControlButton* pMiniMapLayer = dynamic_cast<CCControlButton*>(pUI->getChildByTag(0)->getChildByTag(1)->getChildByTag(10));
+		int mailCount = getMailConut();
+		if (mailCount > 0)
+		{
+			if (World::getInstance()->isHighLight( pMiniMapLayer , WT_CCCONTROLBUTTON , WCT_MAILREWARDUI ))
+			{
+				World::getInstance()->SetHighLight(pMiniMapLayer,WT_CCCONTROLBUTTON,WCT_MAILREWARDUI,0,false);
+			}
+			World::getInstance()->SetHighLight(pMiniMapLayer,WT_CCCONTROLBUTTON,WCT_MAILREWARDUI,mailCount,true,-20,5);
+		}
+	}
+	return 0;
+}
+
+ void MailRewardMgr::eraseMailDataListByIndex( int index )
+{
+	CC_ASSERT((size_t)index < mailDataList.size());
+
+	auto iter = mailDataList.begin();
+	std::advance(iter,index);
+	mailDataList.erase(iter);
+
+	MailRewardUi* view = GET_UI(MailRewardUi,WCT_MAILREWARDUI);
+	if (view)
+	{
+		view->updateMailListData();
+	}
+}
+
+ tagMailReward const& MailRewardMgr::getMailDataListByIndex( int index ) const
+ {
+	CC_ASSERT((size_t)index  < mailDataList.size());
+	return mailDataList[index];
+// 	 tagMailReward temp;
+// 	 int tempIndex = 0;
+// 	 std::list<tagMailReward>::iterator iter = mailDataList.begin();
+// 	 while(iter != mailDataList.end())
+// 	 {
+// 		 if (index == tempIndex)
+// 		 {
+// 			 temp = (tagMailReward)*iter;
+// 			 return temp;
+// 		 }
+// 		 tempIndex++;
+// 		 iter++;
+// 	 }
+// 	 return temp;
+ }
+
+ void MailRewardMgr::delayDestroy()
+ {
+	 clearAllMail();
+	 checkedMailIndex = NULL;
+ }
+
+ void MailRewardMgr::erase_mail( INT64 mail_id )
+ {
+	 size_t idx=0;
+	 if (get_mail_index_by_id(mail_id,idx))
+	 {
+		 eraseMailDataListByIndex(idx);
+	 }
+ }
+
+ bool MailRewardMgr::get_mail_index_by_id( INT64 mail_id,size_t& index ) const
+ {
+	 auto head = mailDataList.begin();
+	 auto tail = mailDataList.end();
+	 auto finder =std::find_if(	head
+		 ,tail
+		 ,[&](tagMailReward const& one)->bool
+	 {return one.n64MailID == mail_id;});
+
+	 if (finder != tail)
+	 {
+		 index = std::distance(head,finder);
+	 }
+
+	 return finder!=tail;
+ }
+
+//  std::string MailRewardMgr::getChangeWenziType( wchar_t const* roleName )
+//  {
+// 	 char vStr[128]={0};
+// 	 Utf16ToUtf8(roleName, vStr, 128, 0);
+// 	 return vStr;
+//  }
+

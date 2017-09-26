@@ -1,0 +1,713 @@
+#include "assert.h"
+#include "AStarSearch.h"
+#include "SparseGraph.h"
+#include "UiTools.h"
+#include "MapManager.h"
+//#include "perf_define.h"
+
+const unsigned int INVALID_NODE_INDEX = 0xffffffff;
+
+c_sparse_graph::c_sparse_graph(unsigned int width_,unsigned int height_, unsigned int numcellx_, unsigned int numcelly_)
+	: m_astar(NULL) , 
+	m_next_node_index(0) ,
+	m_cellw((float)width_ / (float)m_num_cellx) , 
+	m_cellh((float)height_ / (float)m_num_celly) , 
+	m_num_cellx(numcellx_) , 
+	m_num_celly(numcelly_) , 
+	m_start(0) , 
+	m_end(0),
+	m_find_thread(NULL)
+{
+	//float midx = m_cellw/2;
+	//float midy = m_cellh/2;
+	//
+	//for (unsigned int row=0; row<m_num_celly; ++row)
+	//{
+	//	for (unsigned int col=0; col<m_num_cellx; ++col)
+	//	{
+	//		s_nav_node n;
+	//		n.index = m_next_node_index;
+	//		n.pos = pathNode(midx + (col*m_cellw),midy + (row*m_cellh));
+	//		add_node(n);
+	//	}
+	//}
+	//for (unsigned int row=0; row<m_num_celly; ++row)
+	//{
+	//	for (unsigned int col=0; col<m_num_cellx; ++col)
+	//	{
+	//		_add_neighbours(row, col, numcellx_, numcelly_);
+	//	}
+	//}
+	//m_astar = new c_astar_search(this);
+}
+//--------------------------------------------------------
+c_sparse_graph::~c_sparse_graph()
+{
+	if (m_find_thread != NULL)
+	{
+		delete m_find_thread;
+		m_find_thread = NULL;
+	}
+	delete m_astar;
+}
+void c_sparse_graph::init1()
+{
+	float midx = m_cellw/2;
+	float midy = m_cellh/2;
+	for (unsigned int row=0; row<m_num_celly; ++row)
+	{
+		for (unsigned int col=0; col<m_num_cellx; ++col)
+		{
+			s_nav_node n;
+			n.index = m_next_node_index;
+			n.pos = pathNode(midx + (col*m_cellw),midy + (row*m_cellh));
+			add_node(n);
+		}
+	}
+}
+void c_sparse_graph::init2()
+{	
+	for (unsigned int row=0; row<m_num_celly; ++row)
+	{
+		for (unsigned int col=0; col<m_num_cellx; ++col)
+		{
+			_add_neighbours(row, col, m_num_cellx, m_num_celly);
+		}
+	}
+}
+void c_sparse_graph::init2(int row)
+{	
+	//for (unsigned int row=0; row<m_num_celly; ++row)
+	{
+		for (unsigned int col=0; col<m_num_cellx; ++col)
+		{
+			_add_neighbours(row, col, m_num_cellx, m_num_celly);
+		}
+	}
+}
+void c_sparse_graph::init3()
+{
+	m_astar = new c_astar_search(this);
+}
+//--------------------------------------------------------
+void c_sparse_graph::brush(unsigned int x_ , unsigned int y_, e_brush_type bt_)
+{
+	unsigned int idx = y_*m_num_cellx+x_;
+	if (bt_ == BT_OBSTACLE) {
+		remove_node(idx);
+	}
+	else {
+		/*bool bret = false;
+		bret = _is_node_present(idx);
+
+		if (!bret) {
+			unsigned int y = idx / m_num_celly;
+			unsigned int x = idx - (y*m_num_celly);
+			s_nav_node nd;
+			nd.pos = pathNode(x*m_cellw + m_cellw/2.f, y*m_cellh+m_cellh/2.f);
+			nd.index = idx;
+			_add_neighbours(y, x, m_num_cellx, m_num_celly);
+		}*/ //fan
+
+		float cost;
+		switch(bt_) {
+		case BT_NORMAL:cost = 1.f;break;
+		case BT_MUD:cost = 1.5f;break;
+		case BT_WATER:cost = 2.f;break;
+		default:assert(0);cost = 0.f;break;
+		}
+
+		m_nodes[idx].index = idx; //fan
+		_weight_edges(idx, cost);
+	}
+}
+
+void c_sparse_graph::brushWithNodeInfo(unsigned int idx, e_brush_type bt_)
+{
+	if (bt_ == BT_OBSTACLE) {
+		remove_node(idx);
+	}
+	else {
+		float cost;
+		switch(bt_) {
+		case BT_NORMAL:cost = 1.f;break;
+		case BT_MUD:cost = 1.5f;break;
+		case BT_WATER:cost = 2.f;break;
+		default:assert(0);cost = 0.f;break;
+		}
+
+		m_nodes[idx].index = idx; //fan
+		valid_node_and_edges(idx);
+		_weight_edges(idx, cost);
+	}
+}
+
+bool c_sparse_graph::isBlockByAStar(const cocos2d::CCPoint& pos)
+{
+	unsigned int sx = (unsigned int)(pos.x/m_cellw);  
+	unsigned int sy = (unsigned int)(pos.y/m_cellh);
+	unsigned int st = sy*m_num_cellx+sx;
+	if(get_node(st).index == INVALID_NODE_INDEX)
+		return true;
+	return false;
+}
+
+//--------------------------------------------------------
+bool c_sparse_graph::go(const pathNode& st_, const pathNode& et_,std::vector<pathNode>& out)
+{
+	unsigned int sx = (unsigned int)((float)(st_.x())/m_cellw);  
+	unsigned int sy = (unsigned int)((float)(st_.y())/m_cellh); 
+	unsigned int ex = (unsigned int)((float)(et_.x())/m_cellw);  
+	unsigned int ey = (unsigned int)((float)(et_.y())/m_cellh); 
+	if(sx <0 || sy <0 || ex <0 || ey < 0)
+		return false;
+	unsigned int start = sy*m_num_cellx+sx;
+	unsigned int end = ey*m_num_cellx+ex; 
+	//std::vector<pathNode> ret;
+	if ((end >= m_nodes.size()) || (end <0))
+	{
+		return false;
+	}
+	if (get_node(end).index == INVALID_NODE_INDEX)
+	{
+		return false;
+	}
+	
+	//end = _find_nearest_pos(st_, et_);
+
+	if (_can_walk_between(start, end)) {
+		out.push_back(get_node(end).pos);
+		return true;
+	}
+
+	if (end != INVALID_NODE_INDEX)
+	{
+		m_astar->search(start , end);
+		std::list<unsigned int> lst = m_astar->get_path();
+#if 0
+		std::list<unsigned int> ::iterator i,iend = lst.end();
+		int idx = 10000;
+		for (int i = idx; i < 10200;++i)
+		{
+			MapManager::getInstance()->getMap()->removeChildByTag(i);
+		}
+		for (i = lst.begin(); i != iend;++i,++idx)
+		{
+			CCLayerColor* pLC = CCLayerColor::create(ccc4(200, 200, 200, 180), 30, 30);
+			CCLabelTTF *label = CCLabelTTF::create();
+			label->setFontSize(20);
+			label->setAnchorPoint(ccp(0.f, 0.5f));
+			label->setString(CCString::createWithFormat("%d",*i)->getCString());
+			pLC->addChild(label);
+			pathNode p1 = get_node(*i).pos;
+			pLC->setPosition(ccp(p1.x(),p1.y()));
+			MapManager::getInstance()->getMap()->addChild(pLC, 50960, idx);
+		}
+#endif
+		_smooth_path(lst);
+#if 0
+		i,iend = lst.end();
+		for (i = lst.begin(); i != iend;++i,++idx)
+		{
+			CCLayerColor* pLC = CCLayerColor::create(ccc4(250, 0, 0, 180), 30, 30);
+			pathNode p1 = get_node(*i).pos;
+			pLC->setPosition(ccp(p1.x(),p1.y()));
+			MapManager::getInstance()->getMap()->addChild(pLC, 50960, idx);
+		}
+#endif
+		FOREACH(TYPEOF(std::list<unsigned int>)::const_iterator, iter, lst)
+		{			
+			out.push_back(get_node(*iter).pos);
+		}
+	}
+	return true;
+}
+
+
+void c_sparse_graph::go_Multi_Thread( const pathNode& st_, const pathNode& et_ )
+{
+	unsigned int sx = (unsigned int)((float)(st_.x())/m_cellw);  
+	unsigned int sy = (unsigned int)((float)(st_.y())/m_cellh); 
+	unsigned int ex = (unsigned int)((float)(et_.x())/m_cellw);  
+	unsigned int ey = (unsigned int)((float)(et_.y())/m_cellh); 
+	if(sx <0 || sy <0 || ex <0 || ey < 0)
+		return;
+	unsigned int start = sy*m_num_cellx+sx;
+	unsigned int end = ey*m_num_cellx+ex; 
+	std::vector<pathNode> ret;
+	if ((end >= m_nodes.size()) || (end <0))
+	{
+		return;
+	}
+	if (get_node(end).index == INVALID_NODE_INDEX)
+	{
+		return;
+	}
+
+	//end = _find_nearest_pos(st_, et_);
+
+	m_qRequests.lock();
+	m_qRequests.push_back(std::make_pair(start, end));
+	m_qRequests.unlock();
+
+	if (m_find_thread == NULL)
+	{
+		m_find_thread = new c_thread(_find_thread_func , NULL , this);
+	}
+
+}
+
+
+#ifdef OVD_PLATFORM_WINDOWS
+unsigned int c_sparse_graph::_find_thread_func(void* thread_)
+#else
+void * c_sparse_graph::_find_thread_func(void* thread_)
+#endif
+{
+
+	c_sparse_graph* self = (c_sparse_graph*)((c_thread*)thread_)->lock_user_data();
+	((c_thread*)thread_)->unlock_user_data();
+	do
+	{
+		((c_thread*)thread_)->yield();
+
+		if((!self->m_qRequests.empty()))
+		{
+			
+			self->m_qRequests.lock();
+			std::pair<unsigned int, unsigned int> Request = self->m_qRequests.front();
+			self->m_qRequests.pop_front();
+			self->m_qRequests.unlock();
+
+			std::vector<pathNode> ret;
+
+			if (self->_can_walk_between(Request.first, Request.second)) 
+			{
+				//Sleep(10000);
+				//CCLOG("%d, %d", Request.first , Request.second);
+				//CCLOG("computing");
+				ret.push_back(self->get_node(Request.first).pos);
+				ret.push_back(self->get_node(Request.second).pos);
+				
+			}
+			else
+			{
+				//Sleep(10000);
+				//CCLOG("A * : %d, %d", Request.first , Request.second);
+				//CCLOG("computing A*");
+				self->m_astar->search(Request.first , Request.second);
+				std::list<unsigned int> lst = self->m_astar->get_path();
+				self->_smooth_path(lst);
+
+				FOREACH(TYPEOF(std::list<unsigned int>)::const_iterator, iter, lst)
+				{			
+					ret.push_back(self->get_node(*iter).pos);
+				}
+			}
+
+			if (!ret.empty())
+				ret.erase(ret.begin());
+
+			self->m_qResults.lock();
+			self->m_qResults.push_back(ret);
+			self->m_qResults.unlock();
+			//CCLOG("find finish");
+			
+		}
+	}while(((c_thread*)thread_)->is_running());
+
+
+
+#ifdef OVD_PLATFORM_WINDOWS
+	return 0xdead;
+#else
+	return (void*)0xdead;
+#endif
+}
+
+
+
+std::vector<pathNode> c_sparse_graph::getResult()
+{
+	std::vector<pathNode> ret;
+
+	m_qResults.lock();
+	if (!m_qResults.empty())
+	{
+		ret = m_qResults.front();
+		m_qResults.pop_front();
+	}
+	m_qResults.unlock();
+	
+	return ret;
+}
+
+
+bool c_sparse_graph::haveResult()
+{
+	//m_qResults.lock();
+	bool empty = m_qResults.empty();
+	//m_qResults.unlock();
+
+	return !empty;
+}
+
+
+//--------------------------------------------------------
+unsigned int c_sparse_graph::num_nodes() const
+{
+	return m_nodes.size();
+}
+//--------------------------------------------------------
+unsigned int c_sparse_graph::num_edges() const
+{
+	unsigned int tot = 0;
+	FOREACH(TYPEOF(std::vector<std::list<s_nav_edge> >)::const_iterator , iter , m_edges)
+		tot += iter->size();
+	return tot;
+}
+//--------------------------------------------------------
+const c_sparse_graph::s_nav_node& c_sparse_graph::get_node(unsigned int idx_) const
+{
+	assert((idx_<m_nodes.size()) &&(idx_ >=0));
+	return m_nodes[idx_];
+}
+//--------------------------------------------------------
+c_sparse_graph::s_nav_node& c_sparse_graph::get_node(unsigned int idx_)
+{
+	assert((idx_ < m_nodes.size()) &&(idx_ >=0));
+	return m_nodes[idx_];
+}
+//--------------------------------------------------------
+const c_sparse_graph::s_nav_edge& c_sparse_graph::get_edge(unsigned int s_, unsigned int e_) const
+{
+	assert((s_ < m_nodes.size()) && (s_ >=0) && m_nodes[s_].index != INVALID_NODE_INDEX);
+	assert((e_ < m_nodes.size()) && (e_ >=0) && m_nodes[e_].index != INVALID_NODE_INDEX);
+	FOREACH(TYPEOF(std::list<s_nav_edge>)::const_iterator , iter , m_edges[s_])
+	{
+		if (iter->end == e_) 
+			return *iter;
+	}
+	assert(0);
+	return m_edges.front().front();
+}
+//--------------------------------------------------------
+c_sparse_graph::s_nav_edge& c_sparse_graph::get_edge(unsigned int s_, unsigned int e_)
+{
+	assert((s_ < m_nodes.size()) && (s_ >=0) && m_nodes[s_].index != INVALID_NODE_INDEX);
+	assert((e_ < m_nodes.size()) && (e_ >=0) && m_nodes[e_].index != INVALID_NODE_INDEX);
+	FOREACH(TYPEOF(std::list<s_nav_edge>)::iterator , iter, m_edges[s_])
+	{
+		if (iter->end == e_)
+			return *iter;
+	}
+	assert(0);
+	return m_edges.front().front();
+}
+//--------------------------------------------------------
+unsigned int c_sparse_graph::add_node(const c_sparse_graph::s_nav_node& node_)
+{
+	if (node_.index < m_nodes.size())
+	{
+		assert(m_nodes[node_.index].index == INVALID_NODE_INDEX);
+		m_nodes[node_.index] = node_;
+		return m_next_node_index;
+	}
+	else
+	{
+		assert(node_.index == m_next_node_index);
+		m_nodes.push_back(node_);
+		m_edges.push_back(std::list<s_nav_edge>());
+		return m_next_node_index++;
+	}
+}
+//--------------------------------------------------------
+void c_sparse_graph::remove_node(unsigned int node_)                                   
+{
+	assert(node_ < m_nodes.size());
+	m_nodes[node_].index = INVALID_NODE_INDEX;
+	FOREACH(TYPEOF(std::list<s_nav_edge>)::iterator , curedge , m_edges[node_])
+	{
+		FOREACH(TYPEOF(std::list<s_nav_edge>)::iterator , iter , m_edges[curedge->end])
+		{
+			if (iter->end == node_)
+			{
+				//m_edges[curedge->end].erase(iter); //fan
+				(*iter).valid = false; //fan
+				break;
+			}
+		}
+	}
+	//m_edges[node_].clear(); //fan
+}
+//--------------------------------------------------------
+void c_sparse_graph::valid_node_and_edges(unsigned int node_)
+{
+	FOREACH(TYPEOF(std::list<s_nav_edge>)::iterator , curedge , m_edges[node_])
+	{
+		FOREACH(TYPEOF(std::list<s_nav_edge>)::iterator , iter , m_edges[curedge->end])
+		{
+			if (iter->end == node_)
+			{
+				//m_edges[curedge->end].erase(iter); //fan
+				(*iter).valid = true; //fan
+				break;
+			}
+		}
+	}
+}
+//--------------------------------------------------------
+void c_sparse_graph::add_edge(const c_sparse_graph::s_nav_edge& edge_)
+{
+	assert((edge_.start < m_next_node_index) && (edge_.end < m_next_node_index));
+	if((m_nodes[edge_.end].index != INVALID_NODE_INDEX) && (m_nodes[edge_.start].index != INVALID_NODE_INDEX))
+	{
+		if (_unique_edge(edge_.start, edge_.end))
+			m_edges[edge_.start].push_back(edge_);
+		if (_unique_edge(edge_.end, edge_.start))
+		{
+			s_nav_edge newedge = edge_;
+			newedge.end = edge_.start;
+			newedge.start = edge_.end;
+			m_edges[edge_.end].push_back(newedge);
+		}
+	}
+}
+//--------------------------------------------------------
+void c_sparse_graph::remove_edge(unsigned int from_, unsigned int to_)
+{
+	assert((from_ < m_nodes.size()) && (to_ < m_nodes.size()));
+	FOREACH(TYPEOF(std::list<s_nav_edge>)::iterator , iter , m_edges[to_])
+	{
+		if (iter->end == from_)
+		{
+			m_edges[to_].erase(iter);
+			iter++;
+			break;
+		}
+	}
+	FOREACH(TYPEOF(std::list<s_nav_edge>)::iterator , iter , m_edges[from_])
+	{
+		if (iter->end == to_)
+		{
+			m_edges[from_].erase(iter);
+			iter++;
+			break;
+		}
+	}
+}
+//--------------------------------------------------------
+bool c_sparse_graph::_is_node_present(unsigned int nd_) const
+{
+	if ((nd_ >= m_nodes.size() || (m_nodes[nd_].index == INVALID_NODE_INDEX)))
+	{
+		return false;
+	}
+	else return true;
+}
+//--------------------------------------------------------
+bool c_sparse_graph::_is_edge_present(unsigned int s_, unsigned int e_)const
+{
+	if (_is_node_present(s_) && _is_node_present(s_))
+	{
+		FOREACH(TYPEOF(std::list<s_nav_edge>)::const_iterator , iter , m_edges[s_])
+		{
+			if (iter->end == e_) 
+				return true;
+		}
+		return false;
+	}
+	else 
+		return false;
+}
+//--------------------------------------------------------
+bool c_sparse_graph::_unique_edge(unsigned int s_, unsigned int e_)const
+{
+	FOREACH(TYPEOF(std::list<s_nav_edge>)::const_iterator , iter , m_edges[s_])
+	{
+		if (iter->end == e_)
+			return false;
+	}
+	return true;
+}
+//--------------------------------------------------------
+void c_sparse_graph::_add_neighbours(unsigned int row_, unsigned int col_, unsigned int numcellx_, unsigned int numcelly_)
+{   
+	//-2, 3
+	for(int i=-1; i<=1; ++i)
+	{
+		for(int j=-1; j<=1; ++j)
+		{
+			int nodex = col_+j;
+			int nodey = row_+i;
+			if ( (i == 0) && (j==0) )
+				continue;
+			if (!((abs(i) == 2 && abs(j) == 3) || (abs(i) <= 1 && (abs(j) <= 1))))
+				continue;
+			if (!((nodex < 0) || (nodex >= (int)numcellx_) || (nodey < 0) || (nodey >= (int)numcelly_)))
+			{
+				unsigned int start = row_*numcellx_+col_;
+				unsigned int end = nodey*numcellx_+nodex;
+				pathNode posnode = get_node(start).pos;
+				pathNode posneighbour = get_node(end).pos;
+				float dist = pt_distance(posnode , posneighbour,5);
+				s_nav_edge newedge;
+				newedge.start = start;
+				newedge.end = end;
+				newedge.cost = dist;
+				add_edge(newedge);
+				newedge.start = end;
+				newedge.end = start;
+				newedge.cost = dist;
+				add_edge(newedge);
+			}
+		}
+	}
+}
+//--------------------------------------------------------
+void c_sparse_graph::_weight_edges(unsigned int nd_, float weight_)
+{
+	std::list<s_nav_edge>::iterator pE;
+	for (pE = m_edges[nd_].begin(); pE != m_edges[nd_].end(); ) {
+		pE->valid = true; //fan
+		float dist = pt_distance(get_node(pE->start).pos,get_node(pE->end).pos,5);
+
+		// 这里因为不需要删除 sparseGraph 信息了所以下面的阻挡点的所有边也不用删除了 //fan
+		
+		// 去除中间有障碍物的路径
+		/*unsigned int start = pE->start;
+		unsigned int end = pE->end;
+		pathNode st = get_node(start).pos;
+		pathNode et = get_node(end).pos;
+		int x = et.x() - st.x();
+		int y = et.y() - st.y() ;
+
+		if (x != 0) {
+			x = x/abs(x)*m_cellw + 20;
+		}
+		if (y != 0) {
+			y = y/abs(y)*m_cellh + 20;
+		}
+
+		CCPoint rt = CCPointMake(st.x() + x,st.y() + y);
+		bool is = MapManager::getInstance()->isBlock(rt);
+		if (is) {
+			std::list<s_nav_edge>::iterator il,ilend = m_edges[start].end();
+			for ( il = m_edges[start].begin(); il !=  ilend; ++il) {
+				if (il->end == end) {
+					pE = m_edges[start].erase(il);
+					break;
+				}
+			}
+			ilend = m_edges[end].end();
+			for ( il = m_edges[end].begin(); il !=  ilend; ++il) {
+				if (il->end == start) {
+					m_edges[end].erase(il);
+					break;
+				}
+			}
+			continue;
+		}*/ //fan
+		
+		_set_edge_cost(pE->start, pE->end, dist * weight_);
+		_set_edge_cost(pE->end, pE->start, dist * weight_);
+		pE++;
+	}
+}
+//--------------------------------------------------------
+void c_sparse_graph::_set_edge_cost(unsigned int s_, unsigned int e_, float cost_)
+{
+	assert((s_ < m_nodes.size()) && (e_ < m_nodes.size()));
+	FOREACH(TYPEOF(std::list<s_nav_edge>)::iterator , iter , m_edges[s_])
+	{
+		if (iter->end == e_)
+		{
+			iter->cost = cost_;
+			break;
+		}
+	}
+}
+//--------------------------------------------------------
+unsigned int c_sparse_graph::_find_nearest_pos( const pathNode& st_, const pathNode& et_ ) const
+{
+	float x = st_.x() - et_.x();
+	float y = st_.y() - et_.y();
+	float len = sqrt(x*x + y*y);
+	x = x/len;
+	y = y/len;
+	for (int i = 0 ; i < len ; ++i) {
+		float dx = et_.x() + x*i;
+		float dy = et_.y() + y*i;
+		unsigned int ex = (unsigned int)((float)(dx)/m_cellw);  
+		unsigned int ey = (unsigned int)((float)(dy)/m_cellh); 
+		unsigned int idx = ey*m_num_cellx+ex; 
+		s_nav_node nd = get_node(idx);
+		if (nd.index != INVALID_NODE_INDEX) {
+			return nd.index;
+		}
+	}
+	return INVALID_NODE_INDEX;
+}
+//--------------------------------------------------------
+void c_sparse_graph::_smooth_path(std::list<unsigned int>& path_)
+{
+	if(path_.size()<3)
+		return;
+	std::list<unsigned int>::iterator et = path_.end();
+	et--;
+	for (std::list<unsigned int>::iterator iter =path_.begin() ;iter!=et;) {
+		if (iter == path_.begin()) {
+			++iter;
+			continue;
+		}
+		if(iter == et)
+			break;
+
+		std::list<unsigned int>::iterator tmp = iter;
+		--tmp;
+		unsigned int pre = *tmp;
+		tmp = iter;
+		++tmp;
+		unsigned int pro = *tmp;
+		if (_can_walk_between(pre , pro)) {
+			tmp = iter;
+			iter++;
+			path_.erase(tmp);
+		}
+		else
+			iter++;
+	}
+}
+
+//检查2点是否可以直线连通过 若可以连通则排除掉这个点 为了直线移动
+//这里是做折线移动的关键 只要判断2点 x 或 y 相同则排除 否则不排除 就可以折线移动 先mark一下
+bool c_sparse_graph::_can_walk_between(unsigned int p1_, unsigned int p2_)
+{
+	pathNode p1 = get_node(p1_).pos;
+	pathNode p2 = get_node(p2_).pos;
+	//float dis = ccpDistance(CCPoint(p1.x(), p1.y()), CCPoint(p2.x(), p2.y()));
+
+	//CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	//float fWinDis = ccpDistance(CCPointZero, CCPointMake(winSize.width, winSize.height));
+ //	if (dis >= /*fWinDis*/ccpDistance(ccp(0.0f, 0.0f), ccp(m_cellw * m_num_cellx, m_cellh * m_num_celly)))
+ //		return false;
+
+	pathNode vec(p1.x() - p2.x() , p1.y() - p2.y());
+	float len = sqrt(vec.x()*vec.x() + vec.y()*vec.y());
+	vec.x()/=len;
+	vec.y()/=len;
+
+
+	// 对p1至p2连线上的格子进行遍历，判断是否为障碍
+	// 取cell的长宽中较短的那一个的长度作为累加基准，并乘以0.9，以保证不会漏掉cell
+	float fDisUnit = min(m_cellh, m_cellw) * 0.9f;		
+
+	for (unsigned int i = 0 ; i < (unsigned int)(len / fDisUnit + 1) ; ++i) {
+		float dx = p2.x() + vec.x() * i * fDisUnit;
+		float dy = p2.y() + vec.y() * i * fDisUnit;
+		s_nav_node nd = get_node((unsigned int)(dy/m_cellh)*m_num_cellx+(unsigned int)(dx/m_cellw));
+		if (nd.index == INVALID_NODE_INDEX)
+			return false;
+	}
+	return true;
+}

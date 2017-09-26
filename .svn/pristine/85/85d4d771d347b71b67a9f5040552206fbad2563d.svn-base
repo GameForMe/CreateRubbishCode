@@ -1,0 +1,93 @@
+#include "RoleProxy.h"
+#include "PlayerState.h"
+#include "DBMgr.h"
+#include "AnimationCache.h"
+#include "CfgReader.h"
+#include "RoleManager.h"
+#include "Phyx.h"
+#include "LandNode.h"
+
+RoleProxy::RoleProxy()
+	:_shadow(NULL)
+{
+	_creatureType = CT_Proxy;
+
+	CC_ASSERT(_node);
+	_node->setTag(ELN_PlayerPoxy);
+
+	memset(_roledata , 0 , sizeof(_roledata));
+}
+
+RoleProxy::~RoleProxy()
+{
+}
+
+cocos2d::CCPoint RoleProxy::getHeadPos() const
+{
+	return ccp(0.0f, 0.0f);
+}
+
+void RoleProxy::update( float dt )
+{
+	//第一次进入 特例
+	if(_firstUpdate && _stateMechine != NULL)
+	{
+		_stateMechine->SetCurrentState(RoleStateStand::getInstance());
+		_firstUpdate = false;
+	}
+
+	if(_stateMechine != NULL)
+		_stateMechine->Update(dt);
+
+	updateRealPosition();
+}
+
+void RoleProxy::initFsm()
+{
+	if (RoleManager::getInstance()->isCanShowOtherPlayer(this) == false)
+		return;
+	//std::string uiDir = CFGReader::instance()->get_profile_string("Art", "UI", "");
+	//_shadow = CCSprite::create((uiDir + "shade.png").c_str());
+	_shadow = CCSprite::createWithSpriteFrameName("shadow_shade");
+	//_body = CCSprite::create(/*(uiDir + "test_pic.png").c_str()*/);
+	//_node->addChild(_body, RZN_BODY);
+	_node->addChild(_shadow, RZN_SHADOW);
+	//_body->setAnchorPoint(ccp(0.0, 1.0));
+
+	_stateMechine  = new StateMachine<Role>(this);
+
+	//[bing] 角色缩放15%
+	//_node->setScale(0.85f);
+}
+
+void RoleProxy::setAlpha( bool alpha )
+{
+// 	if (_body)
+// 	{
+// 		if(alpha)
+// 			_body->setOpacity(ALPHA_VALUE);
+// 		else
+// 			_body->setOpacity(255);
+// 	}
+}
+
+void RoleProxy::updateRealPosition()
+{
+	if(IS_PLAYER(_id))
+	{
+		const CCPoint &pos = _node->getPosition();
+		Phyx::getInstance()->modifyPhyxObjectPos(_id , pos.x , pos.y);
+	}
+	Role::updateRealPosition();
+}
+
+void RoleProxy::destroyFsm()
+{
+	if(_shadow)
+		_shadow->removeFromParentAndCleanup(true);
+	//if(_shadow)
+	//	_body->removeFromParentAndCleanup(true);
+	_shadow =NULL;
+	//_body = NULL;
+	CC_SAFE_DELETE(_stateMechine);
+}

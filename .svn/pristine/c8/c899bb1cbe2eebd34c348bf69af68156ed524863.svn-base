@@ -1,0 +1,233 @@
+#include "TradeUiFrame.h"
+#include "ItemNode.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "TradeUi.h"
+#include "ExchangeBusinessMgr.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "PackageManager.h"
+#include "f_string_table.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "Helper.h"
+#include "CommonClient.h"
+#include "tools.h"
+
+TradeUiFrame::TradeUiFrame()
+	: _userId((unsigned int) -1)
+	, m_profession(NULL)
+	, m_level(NULL)
+	, m_Profession(NULL)
+	, m_Level(NULL)
+{
+
+}
+
+TradeUiFrame::~TradeUiFrame()
+{
+
+}
+
+cocos2d::SEL_MenuHandler TradeUiFrame::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler TradeUiFrame::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", TradeUiFrame::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLockBtnPressed", TradeUiFrame::onLockBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onTradeBtnPressed", TradeUiFrame::onTradeBtnPressed);
+	return NULL;
+}
+
+bool TradeUiFrame::onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode)
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_profession);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_level);
+
+	return false;
+}
+
+void TradeUiFrame::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	for(int i = NT_NodeBegin; i < NT_NodeBegin + NT_NodeNum; i ++)
+	{
+		CCNode *node = getChildByTag(i);
+		CC_ASSERT(node != NULL);
+		_pos[i - NT_NodeBegin] = node->getPosition();
+		ItemNode *itemNode = ItemNode::create();
+		itemNode->setPosition(node->getPosition());
+		itemNode->setTag(i + NT_ItemNodeBegin - NT_NodeBegin);
+		itemNode->setBlank();
+		addChild(itemNode);
+	}
+	m_Profession = Helper::replaceLabelTTFWithLabelFTAndRemove(m_profession);
+	m_Level = Helper::replaceLabelTTFWithLabelFTAndRemove(m_level);
+}
+
+void TradeUiFrame::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	ExchangeBusinessMgr::getInstance()->CancleExchange();
+	CLOSE_UI(WCT_TradeUi);
+}
+
+void TradeUiFrame::onLockBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	ExchangeBusinessMgr::getInstance()->CancleExchange();
+	CLOSE_UI(WCT_TradeUi);
+}
+
+void TradeUiFrame::onTradeBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	ExchangeBusinessMgr::getInstance()->MakeExchange();
+}
+
+void TradeUiFrame::setHeadFrame( const std::string &frameName )
+{
+	CCSprite *sprite = dynamic_cast<CCSprite*>(getChildByTag(NT_HeadSprite));
+	if(sprite == NULL)
+	{
+		CCNode *node = getChildByTag(NT_HeadNode);
+		CC_ASSERT(node != NULL);
+		CCSprite *sprite = CCSprite::create();
+		sprite->setPosition(node->getPosition());
+		sprite->setTag(NT_HeadSprite);
+		addChild(sprite);
+	}
+
+	CC_ASSERT(sprite != NULL);
+
+	CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName.c_str());
+	if(spriteFrame != NULL)
+	{
+		sprite->setDisplayFrame(spriteFrame);
+	}
+}
+
+void TradeUiFrame::setName( const std::string &name )
+{
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(getChildByTag(NT_NameLabel));
+	CC_ASSERT(label != NULL);
+	LabelFT* nameLable = Helper::replaceLabelTTFWithLabelFTAndRemove(label);
+	CC_ASSERT(nameLable != NULL);
+	nameLable->setString(name.c_str());
+}
+
+void TradeUiFrame::setUserId( unsigned int id )
+{
+	_userId = id;
+	if(_userId != RoleManager::getInstance()->getLocalPlayer()->getId())
+		setBtnVisible(false);
+}
+
+void TradeUiFrame::setItemData( int index, unsigned int id, int num )
+{
+	ItemNode *itemNode = getItemNode(index);
+	if(num > 0)
+	{
+		itemNode->setDataId(id);
+		itemNode->setNum(num);
+	}
+	else
+	{
+		itemNode->setBlank();
+	}
+}
+
+void TradeUiFrame::setLevel(int nLevel)
+{
+	std::string levelStr;
+	if (nLevel<=0)
+	{
+		nLevel = 0;
+	}
+	safe_sprintf(levelStr,"%d%s",nLevel,GET_STR(77));
+	CC_ASSERT(m_Level);
+	m_Level->setString(levelStr.c_str());
+}
+
+void TradeUiFrame::setProfession(eRoleType type)
+{
+	std::string professionStr = getRoleTypeStr(type);
+	CC_ASSERT(m_Profession);
+	m_Profession->setString(professionStr.c_str());
+}
+
+ItemNode * TradeUiFrame::getItemNode(int index)
+{
+	ItemNode *itemNode = dynamic_cast<ItemNode*>(getChildByTag(NT_ItemNodeBegin + index));
+	return itemNode;
+}
+
+void TradeUiFrame::getItemEnd( CCTouch &touch, EItemConType src, short itemIndex )
+{
+	if(src == EICT_Bag && RoleManager::getInstance()->getLocalPlayer()->getId() == _userId)
+	{
+		if(isTouchOnNodeContent(this, &touch))
+		{
+			f_item *item = PackageManager::getInstance()->getItem(src, itemIndex);
+			if(item != NULL)
+			{
+				const ItemTypeData & pdate = PackageManager::getInstance()->getItemTypeData(item->get_item_type_id());
+ 				if (true == item->is_item_binded())
+ 				{
+ 					ToolTip::getInstance()->push(GET_STR(159));
+ 					return;
+ 				}
+				else if (pdate.isFaceDeal == false)// 判断是否贵重 ZhangYajie TODO;
+				{
+					string strkey = STRING_TABLE["Trade_Item_Precious"];
+					ToolTip::getInstance()->push(strkey);
+					return;
+				}
+				if (MIsEquipment(item->get_item_type_id()))
+				{
+					f_equipment* equip = dynamic_cast<f_equipment*>(item);
+					if (equip && equip->is_posy())
+					{
+						ToolTip::getInstance()->push(STRING_TABLE["need_no_gems"]);
+						return;
+					}
+				}
+				
+				//2016.4.25 在这里添加对物品的限制 获取那个字段 (提示字段  Trade_Item_Precious )
+				ExchangeBusinessMgr::getInstance()->AddExchangeItem(item->get_item_id());
+			}
+		}
+	}
+}
+
+int TradeUiFrame::getItemUnderPoint( const CCPoint &point )
+{
+	CCRect rect(point.x - ITEMNODE_CONTENTWIDTH / 2.0f, point.y - ITEMNODE_CONTENTHEIGHT / 2.0f, 
+		ITEMNODE_CONTENTWIDTH, ITEMNODE_CONTENTHEIGHT);
+
+	for(int i = NT_NodeBegin; i < NT_NodeNum + NT_NodeBegin; i ++)
+	{
+		if(rect.containsPoint(_pos[i - NT_NodeBegin]))
+			return i;
+	}
+
+	return -1;
+}
+
+void TradeUiFrame::setLock(bool lock)
+{
+	CCNode *sel = getChildByTag(NT_LockSprite);
+	if(sel != NULL)
+		sel->setVisible(lock);
+}
+
+void TradeUiFrame::setBtnVisible( bool visible )
+{
+	getChildByTag(NT_LockBtn)->setVisible(visible);
+	getChildByTag(NT_TradeBtn)->setVisible(visible);
+}
+
+cocos2d::CCPoint TradeUiFrame::getItemWorldPos( int index )
+{
+	CC_ASSERT(index < NT_NodeNum && index > -1);
+	return convertToWorldSpace(_pos[index]);
+}

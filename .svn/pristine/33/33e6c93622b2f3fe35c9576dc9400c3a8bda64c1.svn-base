@@ -1,0 +1,130 @@
+#include "XiaomiUi.h"
+#include "UiTools.h"
+#include "UiLoader.h"
+#include "Helper.h"
+#include "UiManager.h"
+#include "BaseDefine.h"
+#include "StringMgr.h"
+#include "CfgReader.h"
+#include "ChongZhiActivityMgr.h"
+#include "PackageManager.h"
+
+CCNode * XiaomiUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["ChaoJiWanJiaUiLayer"] = UiLayerLoader<XiaomiUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("chaojiwanjia", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+XiaomiUi* XiaomiUi::getUiLayer()
+{
+	return getUiNodeByTag<XiaomiUi>(WCT_XiaomiUi);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler XiaomiUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler XiaomiUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", XiaomiUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChongZhiBtnPressed", XiaomiUiLayer::onChongZhiBtnPressed);
+
+	return NULL;
+}
+
+void XiaomiUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_frame = getChildByTag(0);
+	_xiaomiPic = dynamic_cast<CCSprite*>(_frame->getChildByTag(4));
+	//显示充值达到多少可以看到号
+	_questLab  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(3)->getChildByTag(2)));
+	//显示号
+	_qqStrLab  = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(2)->getChildByTag(2)));
+
+	setAllChildernButtonPriority(this, -1);
+	setInfo();
+}
+
+void XiaomiUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void XiaomiUiLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+
+bool XiaomiUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if(isTouchOnNodeContent(_frame, pTouch))
+		return true;
+	
+	return false;
+}
+
+void XiaomiUiLayer::onCloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CLOSE_UI(WCT_XiaomiUi);
+}
+
+void XiaomiUiLayer::onChongZhiBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CLOSE_UI(WCT_XiaomiUi);
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+}
+
+void XiaomiUiLayer::setInfo()
+{
+	int czNums = ChongZhiActivityMgr::getInstance()->getXiaomiMoney();
+	if(czNums < 0)
+		return;
+
+	std::string csNumsStr = GET_STR(9524);
+	if(csNumsStr.empty())
+		return;
+
+	CCString *tempStr = CCString::createWithFormat("%d", czNums);
+	std::string tempNumStr = tempStr->getCString();
+	
+	csNumsStr = replaceStr(csNumsStr, "*", tempNumStr);
+	_questLab->setString(csNumsStr.c_str());
+
+	std::string infoNums = ChongZhiActivityMgr::getInstance()->getXiaomiQQInfo();
+	int lpTotalYuanbao = PackageManager::getInstance()->getTotalChargeYuanBao();
+	if(infoNums.empty() || lpTotalYuanbao < (ChongZhiActivityMgr::getInstance()->getXiaomiMoney() * 10))
+	{
+		_qqStrLab->setString("");
+	}
+	else
+	{
+		std::string infoStr = GET_STR(9523);
+		if(infoStr.empty())
+			return;
+
+		infoStr += infoNums;
+		_qqStrLab->setString(infoStr.c_str());
+	}
+
+	std::string picName = ChongZhiActivityMgr::getInstance()->getXiaomiPicStr();
+	if(!picName.empty())
+	{
+		std::string uiDir = CFGReader::instance()->get_profile_string("Art", "ICON", "");
+		std::string fullFileName = uiDir + "Beautys/" + picName + ".png";
+		CCSpriteFrame* tempFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(fullFileName.c_str());
+		if(tempFrame == NULL)
+		{
+			CCTexture2D *texture = CCTextureCache::sharedTextureCache()->addImage(fullFileName.c_str());
+			tempFrame = CCSpriteFrame::createWithTexture(texture, CCRect(0.0, 0.0, texture->getPixelsWide(), texture->getPixelsHigh()));
+			CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFrame(tempFrame, fullFileName.c_str());
+		}
+		_xiaomiPic->setDisplayFrame(tempFrame);
+	}
+}

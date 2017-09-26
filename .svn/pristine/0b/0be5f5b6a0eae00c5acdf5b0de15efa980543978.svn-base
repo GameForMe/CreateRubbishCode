@@ -1,0 +1,1059 @@
+#include "tools.h"
+#include "UiTools.h"
+#include "ToolTip.h"
+#include "Signals.h"
+#include "TradingUi.h"
+#include "UiLoader.h"
+#include "TCPClient.h"
+#include "TradingUI.h"
+#include "CfgReader.h"
+#include "UiManager.h"
+#include "ItemDefine.h"
+#include "TradingMgr.h"
+#include "RoleManager.h"
+#include "TradingProto.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h" 
+#include "CommonClient.h"
+#include "InviteListView.h"
+#include "boost/foreach.hpp"
+#include "PackageManager.h"
+#include "ItemTipDataMgr.h"
+#include "NumericalIniMgr.h"
+#include "TradingEquipItemTipUI.h"
+#include "TradingOnterItemTipList.h"
+#include "TradingBuyRightFinalItemList.h"
+#include "f_string_util.h"
+#include "f_string_table.h"
+
+INT64 TradingEquipItemTipUILayer::m_n64_serial = 0;
+TradingEquipItemTipUI::TradingEquipItemTipUI()
+{
+	
+}
+
+TradingEquipItemTipUI::~TradingEquipItemTipUI()
+{
+}
+
+CCNode * TradingEquipItemTipUI::openUi()
+{
+	TradingUILayer * ui = getUiNodeByTag<TradingUILayer>(WCT_TradingUI);
+	if(NULL == ui)
+		return NULL;
+
+	if(ui->getSellLeftScrollView())
+		ui->getSellLeftScrollView()->setTouchEnabled(false);
+
+	if(ui->getSellRightScrollView())
+	{
+		CCPoint Offset = ui->getSellRightScrollView()->getContentOffset();
+		if(0 > Offset.y && Offset.y < (ui->getSellRightScrollView()->getViewSize().height - ui->getSellRightScrollView()->getContentSize().height))
+			ui->getSellRightScrollView()->setContentOffset(ccp(0,ui->getSellRightScrollView()->getViewSize().height - ui->getSellRightScrollView()->getContentSize().height));
+
+		else if(0 < Offset.y)
+			ui->getSellRightScrollView()->setContentOffset(ccp(0,0));
+
+		if(ui->getSellRightScrollView()->isTouchEnabled())
+			ui->getSellRightScrollView()->setTouchEnabled(false);
+	}
+
+	CCNode *uiNode = TradingEquipItemTipUILayer::createFromCCBI("TradingEquipItemTipUI",NULL,this);
+	CC_ASSERT(uiNode != NULL);
+	return uiNode;
+}
+
+TradingEquipItemTipUILayer * TradingEquipItemTipUI::getUiLayer()
+{
+	return getUiNodeByTag<TradingEquipItemTipUILayer>(WCT_TradingTipUI);
+}
+
+TradingEquipItemTipUILayer::TradingEquipItemTipUILayer()
+	:m_pEquipData(NULL)
+	,m_pUICCLayer(NULL)
+	,m_pItemTipControl(NULL)
+	,m_PItemdata(NULL)
+	,m_pOnterInfo(NULL)
+	,m_pItemTipTalk(NULL)
+	,m_pSetPrice(NULL)
+	,m_pSetNum(NULL)
+	,m_pEquipInfo(NULL)
+	,m_pEquipCCNode(NULL)
+	,m_pEquipnode(NULL)
+	,m_pEquipName(NULL)
+	,m_pEquipqualityName(NULL)
+	,m_pEquipFireSEAcNode(NULL)
+	,m_pEquipFireCCNode(NULL)
+	,m_pEquipFightNumBLabel(NULL)
+	,m_pEquipFightNumBCCNode(NULL)
+	,m_pEquipFireSprite(NULL)
+	,m_pItemInfo(NULL)
+	,m_pItemCCNode(NULL)
+	,m_pItemName(NULL)
+	,m_pItemUseLevel(NULL)
+	,m_pItemDesc(NULL)
+	,m_pItemDescSpecial(NULL)
+	,m_pItemState(NULL)
+	,m_pItemnode(NULL)
+	,m_pPayDutyInfo(NULL)
+	,m_pPayDutyPrice(NULL)
+	,m_pPayDutyTradetax(NULL)
+	,m_pSetDataInfo(NULL)
+	,m_pPriceCCNode(NULL)
+	,m_pNumCCNode(NULL)
+	,m_pPriceKeypad(NULL)
+	,m_pNumKeypad(NULL)
+	,m_pTotalPriceLabel(NULL)
+	,m_pClickBtn(NULL)
+	,m_eBtnType(ETT_BtnTypePriceUp)
+	,m_pFitem(NULL)
+	,m_pOnePriceText(NULL)
+	,m_pAllPriceText(NULL)
+	,m_pNumText(NULL)
+	,m_pUseLevelText(NULL)
+	,m_pTimeText(NULL)
+{
+	m_pEquipData = new TradingEquipData;
+}
+
+TradingEquipItemTipUILayer::~TradingEquipItemTipUILayer()
+{
+	CC_SAFE_DELETE(m_pEquipData);
+}
+
+TradingEquipItemTipUILayer* TradingEquipItemTipUILayer::createFromCCBI( const char* szFile,CCObject* pOwner/*=NULL*/,UiInterface* holder/*=NULL*/ )
+{
+	CCNodeLoaderLibrary* lib = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string uiFile =CFGReader::instance()->get_ui_ccbi_filepath(szFile);
+	CCNode * node = reader->readNodeGraphFromFile(uiFile.c_str(),pOwner);
+
+	TradingEquipItemTipUILayer* panel  = dynamic_cast<TradingEquipItemTipUILayer*>(node);
+	holder->mergeSheet(reader->getLoadedSpriteSheet());
+
+	return panel;
+}
+
+bool TradingEquipItemTipUILayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(ListControl*,m_pItemTipControl);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mPriceCCNode",CCNode*,m_pPriceCCNode);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"UICCLayer",CCNode*,m_pUICCLayer);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mNumCCNode",CCNode*,m_pNumCCNode);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mPriceKeypad",CCNode*,m_pPriceKeypad);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"ItemTipTalk",CCNode*,m_pItemTipTalk);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mNumKeypad",CCNode*,m_pNumKeypad);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mfire",CCSprite*,m_pEquipFireSprite);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mTotalPrice",CCLabelTTF*,m_pTotalPriceLabel);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mClickBtn",CCControlButton*,m_pClickBtn);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_pOnePriceText",CCLabelTTF*,m_pOnePriceText);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_pAllPriceText",CCLabelTTF*,m_pAllPriceText);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_pNumText",CCLabelTTF*,m_pNumText);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_pUseLevelText",CCLabelTTF*,m_pUseLevelText);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_pTimeText",CCLabelTTF*,m_pTimeText);
+
+	return false;
+}
+
+cocos2d::SEL_MenuHandler TradingEquipItemTipUILayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler TradingEquipItemTipUILayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{	
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingEquipItemTipUILayer,onClickBtnPressed);
+	return NULL;
+}
+
+void TradingEquipItemTipUILayer::SetBtnImage(eBtnType Type )
+{
+	if(ETT_BtnTypePriceUp == Type)
+	{
+		m_pSetPrice->setZoomOnTouchDown(false);
+		m_pSetNum->setZoomOnTouchDown(false);
+		setButtonSpriteFrame(dynamic_cast<CCControlButton*>(m_pClickBtn),"jiaoyi_shangjia_shangjiabtnh","jiaoyi_shangjia_shangjiabtnn","jiaoyi_shangjia_shangjiabtnn");
+	}
+	else
+	{
+		m_pSetPrice->setZoomOnTouchDown(true);
+		m_pSetNum->setZoomOnTouchDown(true);
+		setButtonSpriteFrame(dynamic_cast<CCControlButton*>(m_pClickBtn),"jiaoyi_shangjia_xiajiabtnh","jiaoyi_shangjia_xiajiabtnn","jiaoyi_shangjia_xiajiabtnn");
+	}
+
+	m_eBtnType = Type;
+}
+
+void TradingEquipItemTipUILayer::onClickBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if ( NULL == player)
+		return ;
+
+	if(ETT_BtnTypePriceUp == m_eBtnType)
+	{
+		if(TradingMgr::getInstance()->m_bTradingUpMsgIsReceive)
+			CheakUpConditionToMsg(player);	
+	}
+	else if(ETT_BtnTypePriceDown == m_eBtnType)
+	{
+		if(NULL == m_PItemdata)
+			return ;
+
+		if(TradingMgr::getInstance()->m_bTradingDownMsgIsReceive)
+		{
+			m_n64_serial = m_PItemdata->m_ItemInfo.n64_serial;
+			tagDWORDTime dwTmpTime = IncreaseTime(m_PItemdata->tUptime, NumericalIniMgr::getInstance()->get_trading_update_up_time());
+			DWORD distime = CalcTimeDiff(dwTmpTime,ServerTime::getInstance()->cal_current_server_dword_time());
+			if (0 < distime)
+			{
+				std::stringstream oss;
+				oss << distime / 3600;
+				if(0 < (distime / 3600))
+				{
+					if(NULL != World::getInstance()->getScene())
+					{
+						MessageBoxUi *msgUi = dynamic_cast<MessageBoxUi*>(World::getInstance()->getScene()->getChildByTag(WZ_MESSAGEBOX));
+						if (NULL == msgUi)
+						{ 
+							std::string str = replaceStr(GET_STR(9273),"*",oss.str().c_str());
+							msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,str.c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+							if(NULL != msgUi)
+							{
+								msgUi->setTag(MessageBoxUi::MessageBox_Trading);
+								World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+								msgUi->signalOkBtnPressed.connect(this,&TradingEquipItemTipUILayer::SendDeleteRoleDownCallFun);
+							}
+						}
+					}
+				}
+				else
+				{
+					if(NULL != World::getInstance()->getScene())
+					{
+						MessageBoxUi *msgUi = dynamic_cast<MessageBoxUi*>(World::getInstance()->getScene()->getChildByTag(WZ_MESSAGEBOX));
+						if (NULL == msgUi)
+						{ 
+							msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(9358).c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+							if(NULL != msgUi)
+							{
+								msgUi->setTag(MessageBoxUi::MessageBox_Trading);
+								World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+								msgUi->signalOkBtnPressed.connect(this,&TradingEquipItemTipUILayer::SendDeleteRoleDownCallFun);
+							}
+						}
+					}
+				}
+			}
+			else if(0 == distime)
+				SendDeleteRoleDownCallFun();
+		}	
+	}
+}
+
+void TradingEquipItemTipUILayer::SendDeleteRoleDownCallFun()
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if ( NULL == player)
+		return ;
+
+	if(NULL != m_pClickBtn)
+		m_pClickBtn->setEnabled(false);
+
+	NET_C2G_Delete_Trading_Role_Down send;
+	send.dwClientRoleID = player->getId();
+	send.n64Serial = m_n64_serial;
+	TCP_CLIENT->send_net_cmd(&send, NP_NORMAL, false);
+	TradingMgr::getInstance()->m_bTradingDownMsgIsReceive = false;
+}
+
+void TradingEquipItemTipUILayer::CheakUpConditionToMsg(LocalPlayer* player)
+{
+	if(NULL == player || NULL == m_pSetNum || NULL == m_pSetPrice || NULL == m_pFitem)
+		return ; 
+
+	const ItemTypeData &itemdata = PackageManager::getInstance()->getItemTypeData(m_pFitem->get_item_type_id());
+// 	if(itemdata.bottomPrice > (m_pSetPrice->getValue() * m_pSetNum->getValue()))
+// 	{
+// 		std::stringstream ss;
+// 		ss<<itemdata.bottomPrice;
+// 		ToolTip::getInstance()->push(GET_STR(9272));	
+// 		return ;
+// 	}
+	//待验证  这个是否正确
+	bool conMin = itemdata.bottomPrice > /*(*/m_pSetPrice->getValue()/* / m_pSetNum->getValue())*/;
+	bool conMax = itemdata.maxPrice < /*(*/m_pSetPrice->getValue()/* / m_pSetNum->getValue())*/;
+	if ( conMin || conMax)// 判断是否贵重 ZhangYajie TODO;
+	{
+		string strkey;
+		if (conMin)
+		{
+			strkey = STRING_TABLE["Trade_Item_Cheap"];
+			safe_sprintf(strkey,strkey.c_str(),itemdata.bottomPrice);
+		}
+		else if (conMax)
+		{
+			strkey = STRING_TABLE["Trade_Item_Expensive"];
+			safe_sprintf(strkey,strkey.c_str(),itemdata.maxPrice);
+		}
+		ToolTip::getInstance()->push(strkey);
+
+		return;
+	}
+
+	//交易费
+	int pricetax = NumericalIniMgr::getInstance()->Get_trading_price_tax(m_pSetPrice->getValue() * m_pSetNum->getValue());
+	if(PackageManager::getInstance()->getJinBi() < pricetax)
+	{
+		ToolTip::getInstance()->push(GET_STR(2007));	
+		return ;
+	}  
+
+	if(TradingMgr::getInstance()->getRoleTradingSize() >= TradingMgr::getInstance()->preSellLeftItemNolist())
+	{		 
+		ToolTip::getInstance()->push(GET_STR(9331));	
+		return ;
+	}
+
+	if(NumericalIniMgr::getInstance()->get_m_trading_get_container_count() <= TradingMgr::getInstance()->getRoleTradingGetSize())
+	{		 
+		ToolTip::getInstance()->push(GET_STR(9414));	
+		return ;
+	}
+
+	if(MIsEquipment(m_pFitem->get_item_type_id()))
+	{
+		CheakEquipIsPosy(m_pFitem);
+		return ;
+	}
+	else
+	{
+		if(NULL != World::getInstance()->getScene())
+		{
+			MessageBoxUi *msgUi = dynamic_cast<MessageBoxUi*>(World::getInstance()->getScene()->getChildByTag(WZ_MESSAGEBOX));
+			if (NULL == msgUi)
+			{ 
+				std::ostringstream ostr;
+				ostr << NumericalIniMgr::getInstance()->Get_trading_price_tax(m_pSetPrice->getValue() * m_pSetNum->getValue());
+				std::string str = replaceStr(GET_STR(9390),"*",ostr.str());
+
+				msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,str.c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+				if(NULL != msgUi)
+				{	
+					msgUi->setTag(MessageBoxUi::MessageBox_Trading);
+					World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+					msgUi->signalOkBtnPressed.connect(this,&TradingEquipItemTipUILayer::SendTradingUpCallFun);
+				}
+			}
+		}
+	}
+}
+
+void TradingEquipItemTipUILayer::SendTradingUpCallFun()
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if ( NULL == player )
+		return ;
+
+	if(!IS_UI_OPEN(WCT_TradingUI))
+		return ;
+
+	if(	NULL == m_pClickBtn || NULL == m_pFitem || NULL == m_pSetNum || NULL == m_pSetPrice)
+		return ; 
+
+	TradingMgr::getInstance()->SendTradingUpMsg(player->getId(),m_pFitem->get_item_id(),m_pFitem->get_item_type_id(),m_pSetPrice->getValue(),m_pSetNum->getValue());
+
+	NumKeypad::getInstance()->close();
+	CLOSE_UI(WCT_TradingTipUI);	
+
+	if(NULL != m_pClickBtn)
+		m_pClickBtn->setEnabled(false);
+
+	if(NULL != m_pSetNum)
+		m_pSetNum->setClickEnabled(false);
+
+	if(NULL != m_pSetPrice)
+		m_pSetPrice->setClickEnabled(false);
+}
+
+void TradingEquipItemTipUILayer::CheakEquipIsPosy(f_item* m_pFitem)
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if ( NULL == player )
+		return ;
+
+	f_equipment *itemData = static_cast<f_equipment*>(m_pFitem);
+	CC_ASSERT(NULL != itemData);
+
+	m_n64_serial = m_pFitem->get_item_id();
+	if(itemData->is_posy())
+	{
+		std::vector<unsigned int > dwHoleGemID_tmp;
+		for(int i = 0; i<itemData->m_equipex.byHoleNum; ++i)
+		{
+			if(itemData->m_equipex.dwHoleGemID[i] > 0)
+				dwHoleGemID_tmp.push_back(itemData->m_equipex.dwHoleGemID[i]);
+		}
+
+		if(dwHoleGemID_tmp.empty())
+			return ;
+	
+		int bagCount = PackageManager::getInstance()->getBlankCount();//获取玩家背包空格数
+		if(dwHoleGemID_tmp.size() > (size_t)bagCount)
+		{
+			ToolTip::getInstance()->push(GET_STR(2027));
+			return ;
+		}
+
+		if(NULL != World::getInstance()->getScene())
+		{
+			MessageBoxUi *msgUi = dynamic_cast<MessageBoxUi*>(World::getInstance()->getScene()->getChildByTag(WZ_MESSAGEBOX));
+			if (NULL == msgUi)
+			{ 
+				std::string strbase = GET_STR(9412);
+				msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,strbase.c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+				if(NULL != msgUi)
+				{
+					msgUi->setTag(MessageBoxUi::MessageBox_Trading);
+					World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+					msgUi->signalOkBtnPressed.connect(this,&TradingEquipItemTipUILayer::TradingUpRemoveGemBtnCallFun);
+				}
+			}
+		}
+		
+		return ;
+	}
+
+	if(NULL != World::getInstance()->getScene())
+	{
+		MessageBoxUi *msgUi = dynamic_cast<MessageBoxUi*>(World::getInstance()->getScene()->getChildByTag(WZ_MESSAGEBOX));
+		if (NULL == msgUi)
+		{ 
+			std::ostringstream ostr;
+			ostr << NumericalIniMgr::getInstance()->Get_trading_price_tax(m_pSetPrice->getValue() * m_pSetNum->getValue());
+			std::string str = replaceStr(GET_STR(9390),"*",ostr.str());
+
+			msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,str.c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+			if(NULL != msgUi)
+			{
+				msgUi->setTag(MessageBoxUi::MessageBox_Trading);
+				World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX);
+				msgUi->signalOkBtnPressed.connect(this,&TradingEquipItemTipUILayer::SendTradingUpCallFun);
+			}
+		}
+	}
+}
+
+void TradingEquipItemTipUILayer::TradingUpRemoveGemBtnCallFun()
+{	
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if ( NULL == player )
+		return ;
+
+	NET_C2G_remove_gem_begin send;
+	send.dwClientRoleID = player->getId();
+	send.itemid = m_n64_serial;
+	TCP_CLIENT->send_net_cmd(&send,NP_NORMAL,false);
+}
+
+void TradingEquipItemTipUILayer::onNodeLoaded( cocos2d::CCNode* pNode, cocos2d::extension::CCNodeLoader* pNodeLoader )
+{
+	m_pOnterInfo = dynamic_cast<CCNode*>(m_pUICCLayer->getChildByTag(ETT_onTherFrame));
+	CC_ASSERT(m_pOnterInfo != NULL);
+
+	m_pPayDutyInfo = dynamic_cast<CCNode*>(m_pUICCLayer->getChildByTag(ETT_payDutyFrame));
+	CC_ASSERT(m_pPayDutyInfo != NULL);
+	m_pPayDutyPrice = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_pPayDutyInfo->getChildByTag(ETT_payDutyPrice)));
+	CC_ASSERT(m_pPayDutyPrice != NULL);
+	m_pPayDutyTradetax = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_pPayDutyInfo->getChildByTag(ETT_payDutyTradTax)));
+	CC_ASSERT(m_pPayDutyTradetax != NULL);
+
+	SetPayDutyTradetax(NumericalIniMgr::getInstance()->get_trading_price_traing_tax());
+
+	m_pEquipInfo = dynamic_cast<CCNode*>(m_pUICCLayer->getChildByTag(ETT_equipFrame));
+	CC_ASSERT(NULL != m_pEquipInfo);
+	m_pEquipCCNode = dynamic_cast<CCNode*>(m_pEquipInfo->getChildByTag(ETT_ItemNode));
+	CC_ASSERT(NULL !=  m_pEquipCCNode);
+	m_pEquipName = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_pEquipInfo->getChildByTag(ETT_EquipName)));
+	CC_ASSERT(NULL != m_pEquipName);
+	m_pEquipqualityName = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_pEquipInfo->getChildByTag(ETT_Quality)));
+	CC_ASSERT(NULL != m_pEquipqualityName);
+	m_pEquipFireCCNode = dynamic_cast<CCNode*>(m_pEquipInfo->getChildByTag(ETT_FightNumSE));
+	CC_ASSERT(NULL != m_pEquipFireCCNode );
+	m_pEquipFightNumBCCNode = dynamic_cast<CCNode*>(m_pEquipInfo->getChildByTag(ETT_FightNum));
+	CC_ASSERT(NULL != m_pEquipFightNumBCCNode );
+	m_pEquipFightNumBLabel = CCLabelBMFont::create();
+	CC_ASSERT(NULL != m_pEquipFightNumBLabel);
+	m_pEquipFightNumBLabel->setPosition(m_pEquipFightNumBCCNode->getPosition());
+	m_pEquipFightNumBLabel->setFntFile("Art/Scene/fontNum.fnt");
+	m_pEquipFightNumBLabel->setScale(0.5f);
+	m_pEquipInfo->addChild(m_pEquipFightNumBLabel,1);
+	CC_ASSERT(NULL != m_pEquipFireSprite);
+	m_pEquipFireSprite->setZOrder(1);
+	
+	m_pItemInfo = dynamic_cast<CCNode*>(m_pUICCLayer->getChildByTag(ETT_itemFrame));
+	CC_ASSERT(NULL != m_pItemInfo );
+	m_pItemCCNode = dynamic_cast<CCNode*>(m_pItemInfo->getChildByTag(11));
+	CC_ASSERT(NULL !=  m_pItemCCNode);
+	m_pItemUseLevel = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_pItemInfo->getChildByTag(NT_UseLevel)));
+	CC_ASSERT(NULL !=  m_pItemUseLevel);
+	m_pItemDesc = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_pItemInfo->getChildByTag(NT_Desc)));
+	CC_ASSERT(NULL != m_pItemDesc);
+	m_pItemDescSpecial = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_pItemInfo->getChildByTag(NT_SpeDesc)));
+	CC_ASSERT(NULL != m_pItemDescSpecial);
+	m_pItemState = Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(m_pItemInfo->getChildByTag(NT_State)));
+	CC_ASSERT(NULL != m_pItemState );
+
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_pOnePriceText);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_pAllPriceText);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_pNumText);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_pUseLevelText);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_pTimeText);
+// 	CC_ASSERT(NULL != Helper::replaceLabelTTFWithLabelFTAndRemove(m_pOnePriceText));
+// 	CC_ASSERT(NULL != Helper::replaceLabelTTFWithLabelFTAndRemove(m_pAllPriceText));
+// 	CC_ASSERT(NULL != Helper::replaceLabelTTFWithLabelFTAndRemove(m_pNumText));
+// 	CC_ASSERT(NULL != Helper::replaceLabelTTFWithLabelFTAndRemove(m_pUseLevelText));
+// 	CC_ASSERT(NULL != Helper::replaceLabelTTFWithLabelFTAndRemove(m_pTimeText));
+
+	m_pSetDataInfo = dynamic_cast<CCNode*>(m_pUICCLayer->getChildByTag(ETT_setDataFrame));
+	CC_ASSERT(NULL != m_pSetDataInfo);
+
+	m_pSetPrice = TradingSetPlane::createItem("TradingSetPlane",NULL);
+	CC_ASSERT(NULL != m_pSetPrice);
+	m_pSetPrice->setUpClickBtn(m_pClickBtn);
+	m_pPriceCCNode->addChild(m_pSetPrice);
+	m_pPriceCCNode->setPosition(m_pPriceCCNode->getPositionX() + 30,m_pPriceCCNode->getPositionY() + 13);
+	m_pSetNum = TradingSetPlane::createItem("TradingSetPlane",NULL);
+	CC_ASSERT(NULL != m_pSetNum);
+	m_pNumCCNode->addChild(m_pSetNum);
+	m_pSetNum->setUpClickBtn(m_pClickBtn);
+	m_pNumCCNode->setPosition(m_pNumCCNode->getPositionX() + 30,m_pNumCCNode->getPositionY() + 13);
+
+	LabelFT* NewLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(m_pTotalPriceLabel);
+	CC_ASSERT(NULL != NewLabel);
+	m_pSetNum->setOtherData(m_pSetPrice,NewLabel);
+	m_pSetPrice->setOtherData(m_pSetNum,NewLabel);
+	m_pSetNum->setParentNode(m_pNumKeypad);
+	m_pSetPrice->setParentNode(m_pPriceKeypad);
+	m_pClickBtn->setEnabled(true);
+}
+
+void TradingEquipItemTipUILayer::onExit()
+{
+	CCLayer::onExit();
+
+	m_pSetNum = NULL;
+	m_pSetPrice = NULL;
+
+	TradingUILayer * ui = getUiNodeByTag<TradingUILayer>(WCT_TradingUI);
+	if(NULL != ui)
+	{
+		if(ui->getSellLeftScrollView())
+			ui->getSellLeftScrollView()->setTouchEnabled(true);
+
+		if(ui->getSellRightScrollView())
+			ui->getSellRightScrollView()->setTouchEnabled(true);
+	}
+
+	m_pEquipFireSEAcNode = NULL;
+
+	extern MessageBoxUi *g_msgUi;
+	if (NULL != g_msgUi && MessageBoxUi::MessageBox_Trading == g_msgUi->getTag())
+	{
+		g_msgUi->removeFromParentAndCleanup(true);
+		g_msgUi = NULL;
+	}
+}
+
+void TradingEquipItemTipUILayer::SetPayDutyTradetax(float value)
+{
+	std::stringstream oss;
+	oss << floor(value * 100.0f + 0.5f);
+	std::string str = oss.str() + "%";
+	m_pPayDutyTradetax->setString(str);
+}
+
+void TradingEquipItemTipUILayer::setCommonTitleText(CCNode * node,int tag, const string str, bool redColor /*= false*/,bool systemColor,CCPoint pos)
+{
+	LabelFT *newLabel = NULL;
+	CCLabelTTF * label = dynamic_cast<CCLabelTTF*>(node->getChildByTag(tag));
+	if(NULL != label)
+	{
+		newLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(label);
+		newLabel->setPosition(label->getPosition() + pos);
+	}
+	else
+		newLabel = dynamic_cast<LabelFT*>(node->getChildByTag(tag));
+
+	if(NULL != newLabel)
+	{	
+		newLabel->setVisible(true);
+		setCommonText(newLabel, str, redColor,systemColor);
+	}
+}
+
+void TradingEquipItemTipUILayer::setCommonTitleText(CCNode * node,int tag, int value, bool redColor /*= false*/,bool systemColor,CCPoint pos)
+{
+	LabelFT *newLabel = NULL;
+	CCLabelTTF * label = dynamic_cast<CCLabelTTF*>(node->getChildByTag(tag));
+	if(NULL != label)
+	{
+		newLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(label);
+		newLabel->setPosition(label->getPosition() + pos);
+	}
+	else
+		newLabel = dynamic_cast<LabelFT*>(node->getChildByTag(tag));
+	
+	if(NULL != newLabel)
+	{
+		newLabel->setVisible(true);
+		CCString *str = CCString::createWithFormat("%d", value);
+		setCommonText(newLabel, str->getCString(), redColor,systemColor);
+	}
+}
+
+void TradingEquipItemTipUILayer::setCommonText(LabelFT *label, const string str, bool redColor/* = false*/,bool systemColor)
+{
+	CC_ASSERT(label != NULL);
+	ccColor3B color;
+	if(!systemColor)
+	{
+		if(redColor)
+			color = ccc3(255, 0, 0);
+		else
+			color = ccc3(0xfe, 0xf8, 0xd8);
+
+		label->setTextColor(Helper::converColor3B_2_4B(color));
+	}
+
+	label->setVisible(true);
+	label->setString(str.c_str());
+}
+
+void TradingEquipItemTipUILayer::hideCompose(bool value)
+{
+	if(NULL != m_pItemnode)
+		m_pItemnode->hideCompose(value);
+}
+
+void TradingEquipItemTipUILayer::refreshItemData(f_item *item)
+{
+	if(NULL == item ||MIsEquipment(item->get_item_type_id()))
+		return ;
+
+	const ItemTypeData &itemdata = PackageManager::getInstance()->getItemTypeData(item->get_item_type_id());
+	const ItemTipData &info = ItemTipDataMgr::getInstance()->FindItemTipById(item->get_item_type_id());
+
+	m_pItemInfo->setVisible(true);
+	m_pEquipInfo->setVisible(false);
+
+	setItemNode(item);
+	setCommonTitleText(m_pItemInfo,ETT_EquipName,itemdata.name.c_str());
+	setItemUseLevel(itemdata.level);
+	setItemDesc(info.desc);
+	setBind(item->is_item_binded());
+	setItemSpecialDesc(info.sdesc);
+}
+
+void TradingEquipItemTipUILayer::setRefreshSetPlaneData(f_item *item,const tagTradingItemDataMsg *itemdata)
+{
+	if(NULL != itemdata)
+	{
+		std::stringstream ossPrice;
+		ossPrice << itemdata->nUnitPrice;
+
+		m_pSetPrice->setValue(ossPrice.str().c_str());
+
+		std::stringstream ossNum;
+		ossNum << itemdata->nNumber;
+
+		m_pSetNum->setValue(ossNum.str().c_str());	
+	}
+	else
+	{
+		if(NULL == m_pFitem)
+			return ;
+
+		const ItemTypeData &Typedata = PackageManager::getInstance()->getItemTypeData(item->get_item_type_id());	
+		std::stringstream ossPrice;
+		ossPrice << Typedata.recommendedPrice;
+		m_pSetPrice->setValue(ossPrice.str().c_str());
+		m_pSetPrice->setItemTypeID(item->get_item_type_id());
+		m_pSetPrice->setRecomNum(Typedata.recommendedPrice);
+		m_pSetPrice->setMinTotalPrice(Typedata.bottomPrice);
+		m_pSetPrice->setShowMaxImage(false);
+		m_pSetPrice->setMaxNum(999999);
+		m_pSetPrice->setKeyState(NumKeypad::NumKeypadStateRecom);
+
+		if(1 == m_pFitem->get_item_number())
+		{
+			m_pSetNum->setZoomOnTouchDown(false);
+			m_pSetNum->setClickEnabled(false);
+		}
+		else
+		{
+			m_pSetNum->setZoomOnTouchDown(true);
+			m_pSetNum->setClickEnabled(true);
+		}
+
+		m_pSetNum->SetItemData(item->get_item_id());
+		m_pSetNum->setItemTypeID(item->get_item_type_id());
+		std::stringstream ossNum;
+		ossNum << m_pFitem->get_item_number();
+		m_pSetNum->setValue(ossNum.str().c_str());
+		m_pSetNum->setShowMaxImage(true);
+		m_pSetNum->setMinTotalPrice(Typedata.bottomPrice);
+		m_pSetNum->setMaxNum(m_pFitem->get_item_number());
+		m_pSetNum->setKeyState(NumKeypad::NumKeypadStateMax);
+	}	
+
+	if(NULL != m_pPayDutyInfo && NULL != m_pSetNum && NULL != m_pSetPrice)
+		setCommonTitleText(m_pPayDutyInfo,ETT_payDutyPrice,NumericalIniMgr::getInstance()->Get_trading_price_tax(m_pSetNum->getValue() * m_pSetPrice->getValue()));
+}
+
+void TradingEquipItemTipUILayer::setItemNode(f_item *item)
+{
+	if(NULL == item)
+		return;
+
+	if(NULL == m_pItemnode)
+		m_pItemnode = ItemNode::create();
+
+	CC_ASSERT(NULL != m_pItemnode);
+	m_pItemnode->hideItemOpBtn();
+	m_pItemnode->initWithItem(item);
+
+	if(NULL != m_PItemdata)
+		m_pItemnode->setNum(m_PItemdata->nNumber);
+	else
+	   m_pItemnode->setNum(item->get_item_number());
+
+	if(0 == m_pItemCCNode->getChildrenCount())
+		m_pItemCCNode->addChild(m_pItemnode);
+}
+
+void TradingEquipItemTipUILayer::setItemUseLevel( int level )
+{
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	CC_ASSERT(NULL != lp);
+	CC_ASSERT(NULL != m_pItemUseLevel);
+
+	std::ostringstream ostr;
+	ostr<< level;
+
+	m_pItemUseLevel->setString(ostr.str().c_str());
+	if(level > lp->getLevel())
+		m_pItemUseLevel->setTextColor(Helper::converColor3B_2_4B(ccc3(255,0,0)));
+}
+
+void TradingEquipItemTipUILayer::setBind( bool state)
+{
+	if (state)
+	{
+		m_pItemState->setString(GET_STR(9333).c_str());  //不可交易;
+
+	}
+	else
+	{
+		m_pItemState->setString(GET_STR(9332).c_str());    //可交易; 
+	}
+}
+
+void TradingEquipItemTipUILayer::setItemDesc(const std::string desc)
+{
+	CC_ASSERT(m_pItemDesc != NULL);
+	std::string str = desc;
+	std::replace(str.begin(), str.end(), '\\', '\n');
+	m_pItemDesc->setTextColor(Helper::converColor3B_2_4B(ccc3(0xff,0xf3,0xb3)));
+	m_pItemDesc->setString(str.c_str());
+}
+
+void TradingEquipItemTipUILayer::setItemSpecialDesc(const std::string spedesc )
+{
+	CC_ASSERT(m_pItemDescSpecial != NULL);
+	m_pItemDescSpecial->setTextColor(Helper::converColor3B_2_4B(ccc3(0xff,0xf3,0xb3)));
+	m_pItemDescSpecial->setString(spedesc.c_str());
+}
+
+void TradingEquipItemTipUILayer::refreshEquipData(f_item *item)
+{
+	if(NULL == item ||!MIsEquipment(item->get_item_type_id()))
+		return ;
+
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	CC_ASSERT(NULL != lp);
+
+	f_equipment* equip = dynamic_cast<f_equipment*>(item);
+	const EquipTypeData* equipType = PackageManager::getInstance()->getEquipTypeData(item->get_item_type_id());
+	CC_ASSERT(equipType);
+	const EquipTypeData &equipData = *equipType;
+	//const ItemTipData &info = ItemTipDataMgr::getInstance()->FindItemTipById(item->get_item_type_id());
+
+	m_pItemInfo->setVisible(false);
+	m_pEquipInfo->setVisible(true);
+
+	setEquipNode(item);
+	setEquipName(equipData.name.c_str());
+	setEquipEqualityText((EItemQuality)equip->get_item_quality());
+	setEquipBattleSuperEffect();
+	setEquipFightText(equip->get_fightli());
+	setCommonTitleText(m_pEquipInfo,ETT_Profession,equipData.profession.c_str());
+	setCommonTitleText(m_pEquipInfo,ETT_EquipLevel,equipData.minUseLevel,lp->getLevel() < equipData.minUseLevel);
+	if(equipData.bySex == -1)
+		setCommonTitleText(m_pEquipInfo,ETT_EquipPos,equipData.pos.c_str());
+	else
+		setCommonTitleText(m_pEquipInfo,ETT_EquipPos,equipData.pos.c_str(),equipData.bySex != lp->getAttribute(RA_SEX));
+	std::stringstream oss;
+	oss << GetEquipNewness(equipData.posIndex, equip->get_item_use_times(), equipData.durability) << "/" << equipData.durability;
+	setCommonTitleText(m_pEquipInfo,ETT_EquipDurability,oss.str().c_str());
+}
+
+void TradingEquipItemTipUILayer::setEquipName(const char* name)
+{
+	m_pEquipName->setString(name);
+}
+
+void TradingEquipItemTipUILayer::setEquipNode(f_item *item)
+{
+	if(NULL == m_pEquipnode)
+		m_pEquipnode = ItemNode::create();
+
+	CC_ASSERT(NULL != m_pEquipCCNode);
+	m_pEquipnode->hideItemOpBtn();
+	m_pEquipnode->initWithItem(item);
+	if(0 == m_pEquipCCNode->getChildrenCount())
+		m_pEquipCCNode->addChild(m_pEquipnode);
+}
+
+void TradingEquipItemTipUILayer::setEquipBattleSuperEffect()
+{
+	if(NULL  == m_pEquipFireSEAcNode)
+	{
+		m_pEquipFireSEAcNode = GameActionNode::create();
+		std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+		std::string sSEActivity2 = sSEDir + "E1_50.plist";
+		m_pEquipFireSEAcNode->InitWithPList(sSEActivity2.c_str(),"E1_50");
+	}
+
+	CC_ASSERT(NULL != m_pEquipFireSEAcNode);
+	m_pEquipFireSEAcNode->setPosition(m_pEquipFireCCNode->getPosition().x + 43,m_pEquipFireCCNode->getPosition().y + 5);
+	m_pEquipFireSEAcNode->BeginAction(0.07f, true);
+	m_pEquipFireSEAcNode->setScale(0.7f);
+	m_pEquipInfo->addChild(m_pEquipFireSEAcNode);
+}
+
+void TradingEquipItemTipUILayer::setEquipFightText( int value)
+{
+	std::stringstream oss;
+	oss << value;
+
+	m_pEquipFightNumBLabel->setString(oss.str().c_str());
+}
+
+void TradingEquipItemTipUILayer::setEquipEqualityText(EItemQuality eQuality)
+{
+	if(EIQ_Start >= eQuality || EIQ_End <= eQuality)
+		return ;
+
+	ccColor3B textColor;
+	switch(eQuality)
+	{
+	case EIQ_Null:
+		textColor = ccc3(0xfe,0xf8,0xd8);
+		m_pEquipqualityName->setColor(textColor);
+		m_pEquipName->setTextColor(Helper::converColor3B_2_4B(textColor));
+		m_pEquipqualityName->setString(converQualityToString(EIQ_Null).c_str());
+		break;
+	case EIQ_Quality0:
+		textColor = ccc3(0xfe,0xf8,0xd8);
+		m_pEquipqualityName->setTextColor(Helper::converColor3B_2_4B(textColor));
+		m_pEquipName->setTextColor(Helper::converColor3B_2_4B(textColor));
+		m_pEquipqualityName->setString(converQualityToString(EIQ_Quality0).c_str());
+		break;
+	case EIQ_Quality1:
+		textColor = ccc3(0x3f,0xd4,0x16);
+		m_pEquipqualityName->setTextColor(Helper::converColor3B_2_4B(textColor));
+		m_pEquipName->setTextColor(Helper::converColor3B_2_4B(textColor));
+		m_pEquipqualityName->setString(converQualityToString(EIQ_Quality1).c_str());
+		break;
+	case EIQ_Quality2:
+		textColor = ccc3(0x1d,0xad,0xe7);
+		m_pEquipqualityName->setTextColor(Helper::converColor3B_2_4B(textColor));
+		m_pEquipName->setTextColor(Helper::converColor3B_2_4B(textColor));
+		m_pEquipqualityName->setString(converQualityToString(EIQ_Quality2).c_str());
+		break;
+	case EIQ_Quality3:
+		textColor = ccc3(0x91,0x13,0xbc);
+		m_pEquipqualityName->setTextColor(Helper::converColor3B_2_4B(textColor));
+		m_pEquipName->setTextColor(Helper::converColor3B_2_4B(textColor));
+		m_pEquipqualityName->setString(converQualityToString(EIQ_Quality3).c_str());
+		break;
+	case EIQ_Quality4:
+		textColor = ccc3(0xe0,0x78,0x09);
+		m_pEquipqualityName->setTextColor(Helper::converColor3B_2_4B(textColor));
+		m_pEquipName->setTextColor(Helper::converColor3B_2_4B(textColor));
+		m_pEquipqualityName->setString(converQualityToString(EIQ_Quality4).c_str());
+		break;
+	case EIQ_Quality5:
+		textColor = ccc3(0xe1,0xe4,0x00);
+		m_pEquipqualityName->setTextColor(Helper::converColor3B_2_4B(textColor));
+		m_pEquipName->setTextColor(Helper::converColor3B_2_4B(textColor));
+		m_pEquipqualityName->setString(converQualityToString(EIQ_Quality5).c_str());
+		break;
+	default:
+		break;
+	}
+}
+
+void TradingEquipItemTipUILayer::hideEquipBaseAttr()
+{
+   for (int i = static_cast<int>(ETT_BaseAttrLabel); i < static_cast<int>(ETT_AdditionalLabel); i++)
+   {
+	   CCNode* tmpCCNode = dynamic_cast<CCNode*>(m_pEquipInfo->getChildByTag(i));	
+	   CC_ASSERT(NULL != tmpCCNode);
+	   for( int tag = static_cast<int>(ETT_AttrFirst); tag < static_cast<int>(ETT_AttrTotal); tag++)
+	   {
+		   CCLabelTTF * label = dynamic_cast<CCLabelTTF*>(tmpCCNode->getChildByTag(tag));
+		   CC_ASSERT(NULL != label);
+		   label->setVisible(false);
+	   }
+   }
+}
+
+void TradingEquipItemTipUILayer::setEquipBaseAttr()
+{
+	hideEquipBaseAttr();
+	int baseatrTag = static_cast<int>(ETT_BaseAttrLabel);
+	for(TradingEquipData::AttrItemList::iterator iter = m_pEquipData->m_EquipbaseAttr.begin(); iter != m_pEquipData->m_EquipbaseAttr.end(); ++iter)
+	{
+		EquipTipData* item = *iter;
+		CCNode* tmpCCNode = dynamic_cast<CCNode*>(m_pEquipInfo->getChildByTag(baseatrTag));	
+		CC_ASSERT(NULL != tmpCCNode);
+		setCommonTitleText(tmpCCNode,ETT_AttrFirst,item->str1,false,true);
+		setCommonTitleText(tmpCCNode,ETT_AttrSecond,item->str2,false,true,CCPoint(tmpCCNode->getChildByTag(ETT_AttrFirst)->getContentSize().width - 42,0));
+
+		++baseatrTag;
+	}
+
+	m_pEquipData->clearEquipBaseAttr();
+}
+
+void TradingEquipItemTipUILayer::hideEquipIdentifyAttr()
+{
+	for (int i = static_cast<int>(ETT_AdditionalLabel); i < static_cast<int>(ETT_FightNum); i++)
+	{
+		CCNode* tmpCCNode = dynamic_cast<CCNode*>(m_pEquipInfo->getChildByTag(i));	
+		CC_ASSERT(NULL != tmpCCNode);
+		for( int tag = static_cast<int>(ETT_AttrFirst); tag < static_cast<int>(ETT_AttrTotal); tag++)
+		{
+			CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(tmpCCNode->getChildByTag(tag));
+			CC_ASSERT(NULL != label);
+			label->setVisible(false);
+		}
+	}
+}
+
+void TradingEquipItemTipUILayer::setEquipIdentifyAttr()
+{
+	 hideEquipIdentifyAttr();
+	int additionatrTag = (int)ETT_AdditionalLabel;
+	for(TradingEquipData::AttrItemList::iterator iter = m_pEquipData->m_IdentifyEquipAttr.begin(); iter != m_pEquipData->m_IdentifyEquipAttr.end(); ++ iter)
+	{
+		EquipTipData* item = *iter;
+		CCNode* tmpCCNode = dynamic_cast<CCNode*>(m_pEquipInfo->getChildByTag(additionatrTag));	
+		CC_ASSERT(NULL != tmpCCNode);
+		setCommonTitleText(tmpCCNode,ETT_AttrFirst,item->str1,false,true);
+		setCommonTitleText(tmpCCNode,ETT_AttrSecond,item->str2,false,true,CCPoint(tmpCCNode->getChildByTag(ETT_AttrFirst)->getContentSize().width - 42,0));
+
+		++additionatrTag;
+	}
+
+	m_pEquipData->clearEquipindentifyAttr();
+}
+bool TradingEquipItemTipUILayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(NULL != m_pSetNum)
+		m_pSetNum->setClickEnabled(false);
+
+	if(NULL != m_pSetPrice)
+		m_pSetPrice->setClickEnabled(false);
+
+	if(NULL != m_pClickBtn)
+		m_pClickBtn->setEnabled(false);
+
+	TradingUILayer * ui = getUiNodeByTag<TradingUILayer>(WCT_TradingUI);
+	if(NULL == ui)
+		return false;
+
+	NumKeypad::getInstance()->close();
+	CLOSE_UI(WCT_TradingTipUI);
+	
+	return true;
+}
+
+void TradingEquipItemTipUILayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	
+}
+
+void TradingEquipItemTipUILayer::initWithItem(f_item *item,const tagTradingItemDataMsg *itemdata)
+{
+	m_pFitem = item;
+
+	m_PItemdata = itemdata;
+
+	refreshItemData(m_pFitem);
+	refreshEquipData(m_pFitem);	
+
+	CC_ASSERT(NULL != m_pEquipData);
+	m_pEquipData->initEqupBaseAttr(m_pFitem);
+	m_pEquipData->parseEqupBaeAttr();
+	setEquipBaseAttr();
+
+	m_pEquipData->initEqiupIdentifyAttr(m_pFitem);
+	m_pEquipData->parseEqiupIdentifyAttr();
+	setEquipIdentifyAttr();
+
+	updateItemTipList();
+	setRefreshSetPlaneData(m_pFitem,itemdata);
+
+	const ItemTypeData iteminfo = PackageManager::getInstance()->getItemTypeData(m_pFitem->get_item_type_id());
+	const std::string strMsg =  TradingMgr::getInstance()->GetTradingOtherItemMsgString(iteminfo);
+	TradingMgr::getInstance()->GetLoadTradingBuyOtherDataByMsg(strMsg,m_pFitem->get_item_id(),m_pFitem->get_item_type_id());
+}
+
+void TradingEquipItemTipUILayer::updateItemTipList()
+{
+	m_pItemTipControl->clear_list();
+	int i = 0;
+	TradingMgr::tagTrading_onther_item_vector::iterator iter = TradingMgr::getInstance()->m_vOntherTradingInfo.begin();
+	TradingMgr::tagTrading_onther_item_vector::iterator iterEnd = TradingMgr::getInstance()->m_vOntherTradingInfo.end();
+	for ( ;iter != iterEnd; ++iter)
+	{
+		//const ItemTypeData &itemData = PackageManager::getInstance()->getItemTypeData(iter->dwItemId);
+
+		TradingOnterItemTipList* item = TradingOnterItemTipList::createItem("TradingOnterItemTipList",NULL);
+		if(NULL != item)
+		{
+			item->refreshData(*iter);
+			item->hideCompose(false);
+			item->showFirstEnd(false);
+			if(0 == i)
+				item->showFirst(true);
+			else if(0 != i && (TradingMgr::getInstance()->m_vOntherTradingInfo.size() - 1) == i)
+				item->showEnd(true);
+
+			m_pItemTipControl->add_item(item);
+		}
+
+		++i;
+	}
+
+	if(0 < m_pItemTipControl->count())
+		m_pItemTipTalk->setVisible(false);
+	else
+		m_pItemTipTalk->setVisible(true);
+
+	m_pItemTipControl->scroll_to_top();
+}

@@ -1,0 +1,110 @@
+#include "SliderControl.h"
+#include "BaseDefine.h"
+#include "f_string_table.h"
+
+SliderControl::SliderControl()
+	: _slider(NULL)
+	, _label(NULL)
+	,_showPercent(false)
+{
+
+}
+
+SliderControl::~SliderControl()
+{
+	_slider->setUserData(NULL);
+	CC_SAFE_RELEASE(_slider);
+	CC_SAFE_RELEASE(_label);
+}
+
+
+void SliderControl::init( float min, float max, const std::string &back, const std::string &progress, const std::string &thumb, CCNode *content )
+{
+	if(content == NULL)
+		return;
+
+
+	TTFConfig fc;
+	fc.fontFilePath = FT_FONTFACE;
+	fc.fontSize = 14;
+	fc.outlineSize = 1;
+
+	_label = LabelFT::createWithTTF(fc,"");
+	//_label -> setAnchorPoint(ccp(0.0f, 1.0f));
+	_label->retain();
+
+	//_label->setFontSize(16);
+	
+
+	CCSprite *spriteBack = CCSprite::create();
+	spriteBack->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(back.c_str()));
+	CCSprite *spriteScroll = CCSprite::create();
+	spriteScroll->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(progress.c_str()));
+	CCSprite *spriteSlider = CCSprite::create();
+	spriteSlider->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(thumb.c_str()));
+
+	_slider = CCControlSlider::create(spriteBack, spriteScroll, spriteSlider);
+	_slider->setUserData(this);
+	_slider->addTargetWithActionForControlEvents(SliderControlCallback::getInstance(), SEL_CCControlHandler(&SliderControlCallback::onSliderValueChanged), CCControlEventValueChanged );
+	_slider->setPosition(content->getPosition());
+	_slider->setAnchorPoint(content->getAnchorPoint());
+	_slider->setContentSize(content->getContentSize());
+	_slider->setMaximumValue(max);
+	_slider->setMinimumValue(min);
+	_slider->retain();
+
+	//CCPoint thumbPos = _slider->getThumbSprite()->getPosition();
+	//thumbPos = _slider->getParent()->convertToNodeSpace(thumbPos);
+	//_label->setPosition(ccp(thumbPos.x, thumbPos.y + 25.0f));
+}
+
+void SliderControl::addToParent( CCNode *parent )
+{
+	CC_ASSERT(_label != NULL && _slider != NULL);
+	if(parent != NULL)
+	{
+		parent->addChild(_slider);
+		_slider->addChild(_label);
+		//parent->addChild(_label);
+	}
+}
+
+void SliderControl::onSliderValueChanged()
+{
+	CC_ASSERT(_slider != NULL && _label != NULL);
+	float v = _slider->getValue();
+	signalValueChanged.emit(v);
+	
+	char str[25];
+	memset(str, 0, sizeof(char) * 25);
+	if (setShowPercent())
+	{
+		sprintf(str, "%.f%%", v * 100);
+	}
+	else
+	{
+		sprintf(str, "%.1f", v);
+	}
+	_label->setString(str);
+
+	if(_slider->getParent() != NULL)
+	{
+		CCPoint thumbPos = _slider->getThumbSprite()->getPosition();
+		_label->setPosition(ccp(thumbPos.x, thumbPos.y + 12.0f));
+	}
+}
+
+bool SliderControl::setShowPercent()
+{
+	_showPercent = true;
+	return _showPercent;
+}
+
+void SliderControl::setValue( float v )
+{
+	CC_ASSERT(_label != NULL && _slider != NULL);
+
+	_slider->setValue(v);
+}
+
+

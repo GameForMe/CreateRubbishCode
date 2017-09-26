@@ -1,0 +1,318 @@
+#include "StrNumPad.h"
+#include "ToolTip.h"
+#include "World.h"
+#include "f_string_util.h"
+
+StrNumPadDelegateInterface::StrNumPadDelegateInterface()
+	:m_isPwd(false)
+{
+
+}
+
+
+StrNumPadPwdDelegate::StrNumPadPwdDelegate()
+	:m_pLabelProtocol(NULL)
+{
+
+}
+
+void StrNumPadPwdDelegate::setTargetLabel(CCLabelProtocol* pLabelPro,string* pSrcstr,string pDefault)
+{
+	CC_ASSERT(pLabelPro != NULL);
+	m_pLabelProtocol = pLabelPro;
+	m_pStrContent = pSrcstr;
+	m_pDefaultStr = pDefault;
+}
+
+void StrNumPadPwdDelegate::onFinished(int num, int srcNum)
+{
+// 	string t_str = *m_pStrContent;
+// 	CCNode* t_node = dynamic_cast<CCNode*>(m_pLabelProtocol);
+// 	if (t_node  == NULL) return;
+// 	if (t_str.length() < 1) 
+// 	{
+// 		m_pLabelProtocol->setString(m_pDefaultStr.c_str());
+// 		LabelFT* t_ft = dynamic_cast<LabelFT*>(m_pLabelProtocol);
+// 		if (t_ft) t_ft->setColor(ccc3(0xfe, 0xf8, 0xd8));
+// 		return;
+// 	}
+// 	t_node->release();
+}
+
+void StrNumPadPwdDelegate::onCancel(int num)
+{
+// 	string t_str = *m_pStrContent;
+// 	CCNode* t_node = dynamic_cast<CCNode*>(m_pLabelProtocol);
+// 	if (t_node  == NULL) return;
+// 	if (t_str.length() < 1) 
+// 	{
+// 		m_pLabelProtocol->setString(m_pDefaultStr.c_str());
+// 		LabelFT* t_ft = dynamic_cast<LabelFT*>(m_pLabelProtocol);
+// 		if (t_ft) t_ft->setColor(ccc3(0xfe, 0xf8, 0xd8));
+// 		return;
+// 	}
+// 	t_node->release();
+}
+
+void StrNumPadPwdDelegate::insertNum(int num)
+{
+	string t_str = *m_pStrContent;
+	string t_str2 = "";
+	if (m_isPwd)
+	{
+		if (t_str.length() >= 6)
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["second_verify_pwd_length_max"]);
+			return;
+		}
+		safe_sprintf(t_str2,"%d",num);
+		t_str += t_str2;
+		m_pStrContent->assign(t_str);
+
+		string t_strStar(t_str.length(),'*');
+		m_pLabelProtocol->setString(t_strStar.c_str());
+	}
+	if (t_str.length() > 0)
+	{
+		LabelFT* t_ft = dynamic_cast<LabelFT*>(m_pLabelProtocol);
+		if (t_ft) t_ft->setColor(ccc3(255, 255, 255));
+	}
+}
+
+void StrNumPadPwdDelegate::deleteNum()
+{
+	string t_str = *m_pStrContent;
+	if (t_str.length() < 1) 
+		return;
+	t_str.erase(t_str.length() - 1,1);
+	m_pStrContent->assign(t_str);
+	string t_strStar(t_str.length(),'*');
+	if (t_str.length() < 1)
+	{
+		t_strStar = m_pDefaultStr;
+		LabelFT* t_ft = dynamic_cast<LabelFT*>(m_pLabelProtocol);
+		if (t_ft) t_ft->setColor(ccc3(155,155,155));
+	}
+	m_pLabelProtocol->setString(t_strStar.c_str());
+}
+
+void StrNumPadPwdDelegate::onConfirm()
+{
+	string t_str = m_pLabelProtocol->getString();
+	if (t_str.length() != 6)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["second_verify_pwd_length_max"]);
+		return;
+	}
+	StrNumPadMgr::getInstance()->close();
+}
+ void StrNumPadPwdDelegate::onClose()
+ {
+// 	 CCNode* t_node = dynamic_cast<CCNode*>(m_pLabelProtocol);
+// 	 if (t_node)
+// 		t_node->release();
+ }
+//***********************************************************************************
+StrNumPadMgr * StrNumPadMgr::getInstance()
+{
+	static StrNumPadMgr instance;
+	return &instance;
+}
+
+StrNumPadMgr::StrNumPadMgr()
+{
+
+}
+
+StrNumPadMgr::~StrNumPadMgr()
+{
+
+}
+
+void StrNumPadMgr::open()
+{
+	if(isOpen())
+		return;
+	CCScene *scene = World::getInstance()->getScene();
+	if(scene != NULL)
+	{
+		CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+		ccNodeLoaderLibrary->registerCCNodeLoader("StrNumPadFrame", StrNumPadLoader::loader());
+		cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+		CCNode *node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "commnumkeypad.ccbi").c_str());
+		ccbReader->release();
+		if(node != NULL) {
+			scene->addChild(node, WZ_POPUI, WCT_StrNumPad);
+			CCSize size = CCDirector::sharedDirector()->getWinSize();
+			node->setPosition(ccp(size.width / 2.0f, size.height / 2.0f));
+		}
+	}
+}
+
+void StrNumPadMgr::close()
+{
+	if(!isOpen())
+		return;
+	StrNumPadFrame *node = this->getFrame();
+	if (node)
+	{
+		node->deleteStrNumPadDelegate();
+		node->removeFromParent();
+	}
+}
+
+bool StrNumPadMgr::isOpen()
+{
+	StrNumPadFrame *node = this->getFrame();
+	return node != NULL;
+}
+
+StrNumPadFrame* StrNumPadMgr::getFrame()
+{
+	CCScene *scene = World::getInstance()->getScene();
+	StrNumPadFrame *t_node = dynamic_cast<StrNumPadFrame*>(scene->getChildByTag(WCT_StrNumPad));
+	return t_node;
+}
+
+void StrNumPadMgr::setPositionByContent(CCNode *node)
+{
+	if(node == NULL)
+		return;
+
+	StrNumPadFrame *frame = getFrame();
+	if(frame != NULL)
+	{
+		CCSize nodeSize = node->getContentSize();
+		CCSize frameSize = frame->getContentSize();
+		CCPoint point = node->convertToWorldSpace(ccp(nodeSize.width + frameSize.width*0.5f/*/ 2.0f*/, nodeSize.height / 2.0f));
+
+		CCPoint dest = ccp(point.x /** 1.4f*/, point.y);
+		frame->setPosition(dest);
+	}
+}
+
+void StrNumPadMgr::attachToDelegate(StrNumPadDelegateInterface *del)
+{
+	StrNumPadFrame* frame = getFrame();
+	if (frame)
+	{
+		frame->attachStrNumPadDelegate(del);
+	}
+}
+
+void StrNumPadMgr::refreshRandNumNodePos()
+{
+	StrNumPadFrame* frame = getFrame();
+	if (frame)
+	{
+		frame->refreshRandNumNodePos();
+	}
+}
+
+//***********************************************************************************
+SEL_MenuHandler StrNumPadFrame::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+SEL_CCControlHandler StrNumPadFrame::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	string t_str = "";
+	for (int i = 0 ; i < MAX_KEYPAD_NUM ; i++)
+	{
+		safe_sprintf(t_str,"onBtnPressed%d",i);
+		CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, t_str.c_str(), StrNumPadFrame::onBtnNumPressed);
+	}
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, t_str.c_str(), StrNumPadFrame::onBtnNumPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", StrNumPadFrame::onBtnConfirmPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCancelBtnPressed", StrNumPadFrame::onBtnDeletePressed);
+	return NULL;
+}
+
+void StrNumPadFrame::onEnter()
+{
+	CCSprite::onEnter();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -2, true);
+	setAllChildernButtonPriority(this,-3);
+}
+
+void StrNumPadFrame::onExit() 
+{
+	CCSprite::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool StrNumPadFrame::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (isTouchOnNodeContent(this,pTouch))
+	{
+		return true;
+	}else
+	{
+		StrNumPadMgr::getInstance()->close();
+	}
+	return false;
+}
+
+
+StrNumPadFrame::StrNumPadFrame()
+{
+	for (int index = 0 ; index < MAX_KEYPAD_NUM ; index++)
+	{
+		m_arrTag[index] = index;
+		m_pNumBtn[index] = NULL;
+		m_numOldPos[index] = CCPointZero;
+	}
+}
+
+void StrNumPadFrame::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	for (int index = 0 ; index < MAX_KEYPAD_NUM ; index++)
+	{
+		m_arrTag[index] = index;
+		m_pNumBtn[index] = dynamic_cast<CCControlButton*>(getChildByTag(index));
+		m_numOldPos[index] = m_pNumBtn[index]->getPosition();
+	}
+
+	setAllChildernButtonPriority(this, -2);
+}
+
+void StrNumPadFrame::refreshRandNumNodePos()
+{
+	get_rand_arr_by_length(m_arrTag,MAX_KEYPAD_NUM);
+
+	for ( int index = 0; index < MAX_KEYPAD_NUM; index ++)
+	{
+		m_pNumBtn[m_arrTag[index]]->setPosition(m_numOldPos[index]);
+	}
+}
+
+void StrNumPadFrame::onBtnNumPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CCNode* t_node = dynamic_cast<CCNode*>(pSender);
+	CC_ASSERT(t_node != NULL);
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	m_pDelegate->insertNum(t_node->getTag());
+}
+
+void StrNumPadFrame::onBtnConfirmPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	m_pDelegate->onConfirm();
+}
+
+void StrNumPadFrame::onBtnDeletePressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	m_pDelegate->deleteNum();
+}
+
+void StrNumPadFrame::attachStrNumPadDelegate(StrNumPadDelegateInterface* pDelegate)
+{
+	if (pDelegate)
+	{
+		m_pDelegate = pDelegate;
+	}
+}
+void StrNumPadFrame::deleteStrNumPadDelegate()
+{
+	m_pDelegate->onClose();
+}

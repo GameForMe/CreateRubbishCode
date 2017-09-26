@@ -1,0 +1,457 @@
+#include "RechargeGiftUi.h"
+#include "World.h"
+#include "CfgReader.h"
+#include "UiResourceMgr.h"
+#include "ChongZhiActivityFarmeUI.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "BaseDefine.h"
+#include "ItemNode.h"
+#include "PackageManager.h"
+#include "SQLCommand.h"
+#include "SQLTable.h"
+#include "DBMgr.h"
+#include "ChongZhiActivityMgr.h"
+#include "WorldPacket.h"
+#include "CommonMsgDefine.h"
+#include "TCPClient.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "GameActionNode.h"
+#include "CfgReader.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "GameEventDefine.h"
+
+RechargeGiftUi * RechargeGiftUi::getInstance()
+{
+	static RechargeGiftUi instance;
+	return &instance;
+}
+
+RechargeGiftUi::RechargeGiftUi()
+{
+
+}
+
+RechargeGiftUi::~RechargeGiftUi()
+{
+
+}
+
+void RechargeGiftUi::open()
+{
+	if(isOpen())
+		return;
+
+	ChongZhiActivityFarmeUILayer *uiLayer = GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer();
+	if(uiLayer != NULL)
+	{
+		CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+		ccNodeLoaderLibrary->registerCCNodeLoader("RechargeGiftUiLayer", RechargeGiftUiLoader::loader());
+		cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+		CCNode *node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "rechargegiftui.ccbi").c_str());
+		_usedPlistFile = ccbReader->getLoadedSpriteSheet();
+		UiResourceMgr::getInstance()->retainPlistFile(_usedPlistFile);
+		ccbReader->release();
+		if(node != NULL) {
+			node->setTag(CZA_ChongZhiHaoLi);
+			uiLayer->getChildByTag(0)->getChildByTag(0)->addChild(node,10);
+		}
+	}
+}
+
+void RechargeGiftUi::close()
+{
+	if(!isOpen())
+		return;
+
+	ChongZhiActivityFarmeUILayer *uiLayer = GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->getChildByTag(0)->getChildByTag(0)->removeChildByTag(CZA_ChongZhiHaoLi);
+	}
+	CCNode* zzzNode = World::getInstance()->getScene()->getChildByTag(WCT_ZZZ_ITEM_TIPS_UI);
+	if (zzzNode)
+	{
+		World::getInstance()->getScene()->removeChildByTag(WCT_ZZZ_ITEM_TIPS_UI);
+	}
+
+	UiResourceMgr::getInstance()->releasePlistFile(_usedPlistFile);
+	_usedPlistFile.clear();
+}
+
+bool RechargeGiftUi::isOpen()
+{
+	return (getUiLayer() != NULL);
+}
+
+RechargeGiftUiLayer * RechargeGiftUi::getUiLayer()
+{
+	ChongZhiActivityFarmeUILayer *uiLayer = GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer();
+	if(uiLayer != NULL)
+	{
+		RechargeGiftUiLayer *uiNode = dynamic_cast<RechargeGiftUiLayer*>(uiLayer->getChildByTag(0)->getChildByTag(0)->getChildByTag(CZA_ChongZhiHaoLi));
+		if(uiNode != NULL)
+			return uiNode;
+	}
+	return NULL;
+}
+
+void RechargeGiftUi::updateDisplay()
+{
+/*
+	JuhuasuanUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateData();
+	}*/
+	RechargeGiftUiLayer* uiLayer = getUiLayer();
+	if (uiLayer != NULL)
+		uiLayer->updateUIDisplay();
+}
+
+void RechargeGiftUi::setVisible(bool isVisible)
+{
+	if (isOpen())
+	{
+		getUiLayer()->setVisible(isVisible);
+//		getUiLayer()->setTouchEnabled(isVisible);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler RechargeGiftUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler RechargeGiftUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChongZhiBtnPressed", RechargeGiftUiLayer::onChongZhiBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRechargeRewaredBtnPressed", RechargeGiftUiLayer::onToGetRewardsPressed);
+	return NULL;
+}
+
+bool RechargeGiftUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (!isVisible() || !hasVisibleParents() || !isRunning())
+	{
+		return false;
+	}
+	if(isTouchOnNodeContent(_containNode, pTouch))
+	{
+		return false;
+	}
+	else
+	{
+		CLOSE_UI(WCT_ChongZhiActivityFarmeUI);//关闭充值活动界面
+		return false;
+	}
+	return true;
+}
+void RechargeGiftUiLayer::ccTouchEnded(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (isTouchOnNodeContent(_content,pTouch))
+	{
+		for (size_t i = 0; i < _rechargeItem.size(); ++i)
+		{
+			if(_rechargeItem[i] && isTouchOnNodeContent(_rechargeItem[i]->_uiFrame,pTouch))
+			{
+				_rechargeItem[i]->_uiFrame->ccTouchEnded(pTouch,pEvent);
+			}
+		}
+	}
+}
+
+void RechargeGiftUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	//m_dwTotalChargeYB = 0;
+	//m_nSelectedIdx = 0;
+	//m_cRechargeLv = 0;
+	//m_cToGetGift = 0;
+	//m_fNowGiftLvYB = 0.f;
+	//m_fNextGiftLvYB = 0.f;
+	//m_fBarLength = 0.f;
+	//m_sSEName = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_34.plist";
+	//
+	//_selectSp = dynamic_cast<CCSprite*>(this->getChildByTag(RGUIT_SelectedSp));
+	//_selectSp->setZOrder(RGUIT_ZSelect);
+	//_expBarSp = dynamic_cast<CCSprite*>(this->getChildByTag(RGUIT_RechargeBar));
+	//_toGetGiftsBtn = dynamic_cast<CCControlButton*>(this->getChildByTag(RGUIT_ToGetBtn));
+	//_expBarLabel = dynamic_cast<CCLabelTTF*>(this->getChildByTag(RGUIT_ExpBarDes));
+	//
+	//_boxAry = CCArray::create();
+	//_boxAry->retain();
+	//for (int i = 0; i < GIFTBOXNUM; ++i)
+	//	_boxAry->addObject(this->getChildByTag(RGUIT_LevelBox + i));
+	//
+	//_itemAry = CCArray::create();
+	//_itemAry->retain();
+	//std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+	//std::string sSESurround = sSEDir + "E1_54.plist";
+	//_plist.insert(sSESurround);
+	//UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	//CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSESurround.c_str());
+	//for (int j = 0; j < GIFTITEMNUM; ++j)
+	//{
+	//	ItemNode* giftItem = ItemNode::create();
+	//	giftItem->setClickable(true);
+	//	giftItem->hideItemOpBtn();
+	//	giftItem->getSurroundSE("E1_39");
+	//	giftItem->setPosition(this->getChildByTag(RGUIT_GiftItem + j)->getPosition());
+	//	this->addChild(giftItem);
+	//	_itemAry->addObject(giftItem);
+	//}
+	//
+	//m_cRechargeLv = ChongZhiActivityMgr::getInstance()->getRechargeGiftsLevel();
+	//if (m_cRechargeLv < GIFTBOXNUM)
+	//	m_nSelectedIdx = m_cRechargeLv;
+	//else
+	//	m_nSelectedIdx = 0;
+	//this->updateUIDisplay();
+	//
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+
+	m_dwTotalChargeYB = 0;
+	m_cRechargeLv = 0;
+	m_cToGetGift = 0;
+	m_fNowGiftLvYB = 0.f;
+	m_fNextGiftLvYB = 0.f;
+	m_fBarLength = 0.f;
+	_itemNodeCount = 0;
+//	_canTouch = true;
+	//memset(_rechargeItem, 0, sizeof(_rechargeItem));
+	size_t size = CFG(int,"recharge_gift_list_num",11);
+	_rechargeItem.assign(size,NULL);
+	_uiBgSp = dynamic_cast<CCSprite*>(this->getChildByTag(RGUIT_BG));
+	m_cRechargeLv = ChongZhiActivityMgr::getInstance()->getRechargeGiftsLevel();
+	m_dwTotalChargeYB = PackageManager::getInstance()->getTotalChargeYuanBao();
+	_expBarSp = dynamic_cast<CCSprite*>(_uiBgSp->getChildByTag(RGUIT_RechargeBar));
+	_expBarLabel = dynamic_cast<CCLabelTTF*>(_uiBgSp->getChildByTag(RGUIT_ExpBarDes));
+	_containNode = dynamic_cast<CCNode*>(getChildByTag(4));
+	_containNode->setVisible(false);
+
+	_content = (CCNode*)_uiBgSp->getChildByTag(RGUIT_Content);
+	CC_ASSERT(_content != NULL);
+	_scrollView =  CCScrollView::create(_content->getContentSize());
+	_scrollView->setAnchorPoint(ccp(0.0f,0.0f));
+	_content->addChild(_scrollView);
+
+	_container = CCNode::create();
+	//_container->retain();
+	_container->setContentSize(CCSize(_content->getContentSize().width,EIP_interval * _rechargeItem.size()));
+
+	_scrollView->setContainer(_container);
+	//_scrollView->setTouchEnabled(true);
+	_scrollView->setBounceable(true);
+	_scrollView->setContentSize(_container->getContentSize());
+	_scrollView->setDirection(kCCScrollViewDirectionVertical);
+	_scrollView->setContentOffset(_scrollView->minContainerOffset());
+	//_scrollView->update_child_touch_clip_rect();
+
+	updataExp();
+	scheduleUpdate();
+//	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+	setAllChildernButtonPriority(this,-1);
+}
+
+void RechargeGiftUiLayer::onChongZhiBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);//vv
+	int yuanbaoNum=PackageManager::getInstance()->getTotalChargeYuanBao();
+	if (yuanbaoNum<=0)
+	{
+		OPEN_UI(WCT_ShouChongUi);
+	}
+	else
+	{
+		//OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+		//GET_UI(ChongZhiActivityFarmeUI, WCT_ChongZhiActivityFarmeUI)->getUiLayer()->selectTab(CZA_ChongZhi);
+		jump_to_recharge evt;
+		SEND_EVENT(&evt);
+	}
+}
+
+void RechargeGiftUiLayer::onToGetRewardsPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_20);//vv
+	this->toGetGifts();
+}
+
+void RechargeGiftUiLayer::onEnter()
+{
+	setTouchEnabled(false);
+	CCLayer::onEnter();
+
+	setTouchPriority(0);
+	setTouchEnabled(true);
+}
+
+void RechargeGiftUiLayer::onExit()
+{
+	for (size_t i =0;i < _rechargeItem.size(); ++i)
+	{
+		if (_rechargeItem[i])
+		{
+			delete _rechargeItem[i];
+			_rechargeItem[i] = NULL;
+		}
+	}
+	_container->removeAllChildrenWithCleanup(true);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->removeSpriteFrameByName("Art/ICON/icon_havegot.png");
+//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	_giftsPermissionMap.clear();
+//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+}
+
+void RechargeGiftUiLayer::showGiftsItem( int boxIdx )
+{
+
+}
+
+void RechargeGiftUiLayer::toGetGifts()
+{
+	WorldPacket C2G_Msg(NET_C2G_REQUEST_GET_TOTAL_RECHARGE_REWARD);
+	C2G_Msg << m_cToGetGift;
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);
+}
+
+void RechargeGiftUiLayer::updateUIDisplay()
+{
+	m_cRechargeLv = ChongZhiActivityMgr::getInstance()->getRechargeGiftsLevel();
+	m_dwTotalChargeYB = PackageManager::getInstance()->getTotalChargeYuanBao();
+
+	for (size_t i = 0; i < _rechargeItem.size(); ++i)
+	{
+		updataButtonState(i);
+	}
+
+	updataExp();
+}
+
+int RechargeGiftUiLayer::getTotalRechargeRewardNeedYB( int boxLv )
+{
+// 	int needYB= 0;
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM RechargeReward WHERE ID = ?1");
+// 	cmd->set_integer32(1 , boxLv * 6);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("YuanBao");
+// 		needYB = table->get_integer32(idx);
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	return World::getInstance()->get_recharge_yuanbao(boxLv * 6);
+}
+
+void RechargeGiftUiLayer::update( float dt )
+{
+	for (int i = 0;i < 4; ++i)
+	{
+		if ((size_t)_itemNodeCount < _rechargeItem.size())
+		{
+			RechargeitemUiLayer* rechargeItemLayer = (RechargeitemUiLayer*)_container->getChildByTag(RGUIT_LevelBox + _itemNodeCount);
+			if (!rechargeItemLayer)
+			{
+				_rechargeItem[_itemNodeCount] = new RechargeItem;
+				_rechargeItem[_itemNodeCount]->setGiftData(_itemNodeCount + 1);
+				_rechargeItem[_itemNodeCount]->setTag(RGUIT_LevelBox + _itemNodeCount);
+				//_rechargeItem[_itemNodeCount]->setPosition(ccp( - EIP_width, _scrollView->getContentSize().height/2 -  (_itemNodeCount - 1) * EIP_interval));
+				//_rechargeItem[_itemNodeCount]->setPosition(ccp( - EIP_width, EIP_height -  _itemNodeCount * EIP_interval));
+				_rechargeItem[_itemNodeCount]->setPosition(ccp( - EIP_width, (_rechargeItem.size() -  _itemNodeCount) * EIP_interval - _scrollView->getViewSize().height));
+				_container->addChild(_rechargeItem[_itemNodeCount]->_uiFrame);
+				updataButtonState(_itemNodeCount);
+				++_itemNodeCount;
+			}
+		}
+		else
+		{
+			_scrollView->update_child_touch_clip_rect();
+			unscheduleUpdate();
+		}
+	}
+}
+
+void RechargeGiftUiLayer::updataButtonState(int index)
+{
+	RechargeitemUiLayer* rechargeItemLayer = (RechargeitemUiLayer*)_container->getChildByTag(RGUIT_LevelBox + index);
+	if (rechargeItemLayer)
+	{
+		if (index < m_cRechargeLv)		//已领取
+		{
+			rechargeItemLayer->setEnabled(false);
+			rechargeItemLayer->runRewardEffect(false);
+			return;
+		}
+		else if (m_dwTotalChargeYB >= (unsigned int)this->getTotalRechargeRewardNeedYB(index + 1))		//未领取
+		{
+			rechargeItemLayer->runRewardEffect();
+			return;
+		}
+		else		//不可领取
+		{
+			return;
+		}
+	}
+}
+
+void RechargeGiftUiLayer::updataExp()
+{
+	if(m_dwTotalChargeYB >= (unsigned int)this->getTotalRechargeRewardNeedYB(_rechargeItem.size()))//设置进度条
+	{
+		m_fBarLength = 1.f;
+		m_fNextGiftLvYB = this->getTotalRechargeRewardNeedYB(_rechargeItem.size());
+	}
+	else
+	{
+		for (size_t j = 0; j < _rechargeItem.size(); ++j)
+		{
+			unsigned int nNeedCostYB = this->getTotalRechargeRewardNeedYB(j+1);
+			if(m_dwTotalChargeYB >= nNeedCostYB)
+				m_fNowGiftLvYB = nNeedCostYB;
+			else
+			{
+				m_fNextGiftLvYB = nNeedCostYB;
+				break;
+			}
+		}
+		m_fBarLength = m_dwTotalChargeYB / m_fNextGiftLvYB;
+	}
+	_expBarSp->setScaleX(m_fBarLength);
+	//int nNowExp = static_cast<int>(m_dwTotalChargeYB);
+	//int nNextLvExp = static_cast<int>(m_fNextGiftLvYB);
+	//CCString* expBarStr = CCString::createWithFormat("%d / %d", nNowExp/10, nNextLvExp/10);
+	int nNowExp = m_dwTotalChargeYB;
+	int nNextLvExp = static_cast<int>(m_fNextGiftLvYB);
+	CCString* expBarStr = CCString::createWithFormat("%u / %d", nNowExp/10, nNextLvExp/10);
+	_expBarLabel->setString(expBarStr->getCString());
+}
+
+// void RechargeGiftUiLayer::setTouchEnabled( bool value )
+// {
+	//_canTouch = value;
+// 	CCLayer::setTouchEnabled(value);
+// 	if (value)
+// 	{
+// 		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this,1,true);
+// 	}
+// 	else
+// 	{
+// 		CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+// 	}
+// 	for (int i = 0; i < GIFTBOXNUM; i++)
+// 	{
+// 		if (_rechargeItem[i])
+// 		{
+// 			//_rechargeItem[i]->setTouchEnable(value);
+// 			//_rechargeItem[i]->_uiFrame->setTouchEnable(value);
+// 		}
+// 	}
+//}

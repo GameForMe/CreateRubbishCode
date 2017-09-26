@@ -1,0 +1,118 @@
+#include "EquipLevelUpUiMgr.h"
+#include "PackageManager.h"
+#include "CfgReader.h"
+#include "DBMgr.h"
+#include "WorldPacket.h"
+#include "UiManager.h"
+#include "EquipLevelUpUi.h"
+#include "ToolTip.h"
+#include "EquipLevelupNoticeMgr.h"
+#include "EquipUpStarUi.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "MessageBoxUi.h"
+#include "World.h"
+#include "StringMgr.h"
+#include "EquipFusionUi.h"
+//////////////////////////////////////////////////////////////////////////
+
+EquipLevelUpUiMgr::EquipLevelUpUiMgr():m_bCanUp(true)
+{
+	
+}
+
+EquipLevelUpUiMgr::~EquipLevelUpUiMgr()
+{
+	
+}
+
+void EquipLevelUpUiMgr::removeUplevelEquip()
+{
+	//CC_SAFE_DELETE(_uplevelEquipment);
+	//_uplevelEquipment = new UplevelEquip;
+}
+
+void EquipLevelUpUiMgr::setUplevelEquip( s_net_cmd *cmd )
+{//结果(DWORD)[0=成功 + 属性个数(INT) + <<属性类型(INT) + 附加值(INT32)>> 非0=错误编号]
+	//_uplevelEquipment = new UplevelEquip;
+	WorldPacket Msg((const void*)cmd);
+	Msg >> _uplevelEquipment.isSuccess;
+	if (_uplevelEquipment.isSuccess == 0)
+	{
+		Msg >> _uplevelEquipment.attrCount; //属性个数
+
+		//循环读取属性类型与属性值
+		for (int i = 0;i < _uplevelEquipment.attrCount; i++)
+		{
+			Msg >> _uplevelEquipment.TypeAndData[i].attrType;
+			Msg >> _uplevelEquipment.TypeAndData[i].attrData;		
+		}
+		GET_UI(EquipLevelUpUi, WCT_EquipLevelUpUi)->updateUplevelEquipAttr();
+	}
+	//removeUplevelEquip();
+	_uplevelEquipment.isSuccess = 0;
+}
+
+void EquipLevelUpUiMgr::getBuyStuffResult( s_net_cmd* cmd )
+{
+	int stuffResult = 0;
+	WorldPacket Msg((const void*)cmd);
+	Msg >> stuffResult;
+
+	if (stuffResult == E_LvUp_Bag_YuanBao_Not_Enough)
+	{
+		//MessageBoxUi *messageBox;
+		//messageBox = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(7024).c_str(), TEXT_UTF8_RECHARGE, TEXT_UTF8_QUXIAO);//充值，取消
+		//messageBox->signalOkBtnPressed.connect(this, &EquipLevelUpUiMgr::noticeRecharge);
+		//World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+	}
+	else if (stuffResult == E_LvUp_Bag_Buy_Not_Enough)
+	{
+		ToolTip::getInstance()->push("\xE8\x83\x8C\xE5\x8C\x85\xE7\xA9\xBA\xE9\x97\xB4\xE4\xB8\x8D\xE8\xB6\xB3");
+	}
+
+	if (stuffResult != 0)
+		return;
+
+	switch(EquipLevelupNoticeUiMgr::getInstance()->getOpenUiId())
+	{
+	case WCT_EquipLevelUpUi:
+		{
+			GET_UI(EquipLevelUpUi, WCT_EquipLevelUpUi)->getLevelupStuff(stuffResult);
+			break;
+		}
+	case WCT_EQUIPUPSTARUI:
+		{
+			//Src装备ID(INT64)
+			GET_UI(EquipUpStarUi, WCT_EQUIPUPSTARUI)->updateEquipData();
+			break;
+		}
+	case WCT_EquipFusionUi:
+		{
+			GET_UI(EquipFusionUi, WCT_EquipFusionUi)->updateNum();
+			break;
+		}
+
+	}
+}
+
+void EquipLevelUpUiMgr::noticeRecharge()
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+}
+
+
+EquipLevelUpUiMgr * EquipLevelUpUiMgr::getInstance()
+{
+	static EquipLevelUpUiMgr instance;
+	return &instance;
+}
+
+void EquipLevelUpUiMgr::setLevelupPotency( bool canUp )
+{
+	m_bCanUp = canUp;
+}
+
+

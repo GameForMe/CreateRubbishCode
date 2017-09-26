@@ -1,0 +1,2173 @@
+#include "SkillManager.h"
+#include "DBMgr.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "BaseDefine.h"
+#include "SkillAnimManager.h"
+#include "TCPClient.h"
+#include "LoginProto.h"
+#include "ActionProto.h"
+#include "World.h"
+#include "SkillUi.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "UiManager.h"
+#include "cocos2d.h"
+#include "StringMgr.h"
+#include "ToolTip.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "ShortCutUi.h"
+#include "WorldPacket.h"
+#include "CommonMsgDefine.h"
+#include "UiManager.h"
+#include "HookSetUi.h"
+#include "NewPlayerGuide.h"
+#include "VIPMgr.h"
+#include "AttackAction.h"
+#include "NewFuncGuider.h"
+#include "GameEventDefine.h"
+#include "InstanceMgr.h"
+//#include "Auto_ActionMgr.h"
+#include "QuestMgr.h"
+
+using namespace cocos2d;
+
+SkillManager * SkillManager::getInstance()
+{
+	static SkillManager skillManager;
+	return &skillManager;
+}
+
+SkillManager::SkillManager()
+	: _commonCd(1.2f)
+	, _commonCdTime(0.0f)
+	, _lastUsedSkillId(-1)
+	, _time(0.f)
+	, _manualSkill(NULL)
+	, _petExist(false)
+	, _huoQiangCd(0.f)
+	, _willUseManual(false)
+	, _manualSkillId(-1)
+	,_nKulouID(0)
+	,_nShengshouID(0)
+	,_CurSelectIndex(0)
+	,_isCanUpGrade(false)
+	,_isCanBreak(false)
+	,IsAttackState(false)
+	,_cache_pf_target_id(0)
+{
+	init_skillbook_pathfind();
+	//init_skill_proto();
+	init_skill_exp_level();
+}
+
+SkillManager::~SkillManager()
+{
+	m_skill_exp_level.clear();
+}
+
+void SkillManager::init()
+{
+	//初始化人物所有技能
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	int skillType = 0;
+	switch(lp->getRoleType())
+	{
+	case RT_MWARRIOR:
+	case RT_WWARRIOR:
+		skillType = 1010001;
+		break;
+	case RT_MMAGE:
+	case RT_WMAGE:
+		skillType = 1020001;
+		break;
+	case RT_MTAOIST:
+	case RT_WTAOIST:
+		skillType = 1030001;
+		break;
+	}
+	//初始化技能自动施法
+	GET_UI(HookSetUi,WCT_HookSetUi)->loadAutoSkillList(skillType / 100); 
+	for(int i = 1; i <= MAX_SKILL_NUM; i ++)
+	{
+		addSkill(skillType + i * 100, false);
+	}
+
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_role_init_state_skill", this, &SkillManager::onRoleInitSkill);
+	TCP_CLIENT->register_net_cmd("NET_SIS_add_skill", this, &SkillManager::onAddSkill);
+	TCP_CLIENT->register_net_cmd("NET_SIS_follow_creature_change", this, &SkillManager::onCreatureChange);
+	TCP_CLIENT->register_net_cmd("NET_SIS_level_up_skill", this, &SkillManager::onSkillLevelUp);
+	TCP_CLIENT->register_net_cmd("NET_SIS_update_skill", this, &SkillManager::onSkillUpdate);
+	TCP_CLIENT->register_net_cmd(NET_G2C_PROC_SKILL_ADD_EXP_RESULT, this, &SkillManager::onSkillAddExpRerult);
+	TCP_CLIENT->register_net_cmd("NET_SIS_update_skill_cool_down", this, &SkillManager::on_server_sync_skill_cd);
+
+	
+	//获取人物的技能列表
+	NET_SIC_get_role_init_state roleInitState;
+	roleInitState.eType = ERIT_Skill;
+	TCP_CLIENT->send_net_cmd(&roleInitState, NP_INSIGNIFICANT, false);
+
+	initLoadSkillExpCostMap();
+
+	REGISTER_EVENT(LpLevelUpEvent,SkillManager,on_event_lp_level_change);
+	REGISTER_EVENT(update_skill_can_use,SkillManager,on_event_update_skill_can_use);
+	REGISTER_EVENT(item_num_change,SkillManager,on_event_item_change);
+}
+
+void SkillManager::destroy()
+{
+	UNREGISTER_EVENT(LpLevelUpEvent,SkillManager,on_event_lp_level_change);
+	UNREGISTER_EVENT(update_skill_can_use,SkillManager,on_event_update_skill_can_use);
+	UNREGISTER_EVENT(item_num_change,SkillManager,on_event_item_change);
+
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_role_init_state_skill", this, &SkillManager::onRoleInitSkill);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_add_skill", this, &SkillManager::onAddSkill);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_follow_creature_change", this, &SkillManager::onCreatureChange);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_level_up_skill", this, &SkillManager::onSkillLevelUp);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_update_skill", this, &SkillManager::onSkillUpdate);
+	TCP_CLIENT->unregister_net_cmd(NET_G2C_PROC_SKILL_ADD_EXP_RESULT, this, &SkillManager::onSkillAddExpRerult);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_update_skill_cool_down", this, &SkillManager::on_server_sync_skill_cd);
+
+	for(SkillDataMap::iterator iter = _readyStateSkill.begin(); iter != _readyStateSkill.end(); ++ iter)
+	{
+		SkillData *data = iter->second;
+		delete data;
+	}
+	_readyStateSkill.clear();
+
+	for(SkillDataMap::iterator iter1 = _cdStateSkill.begin(); iter1 != _cdStateSkill.end(); ++ iter1)
+	{
+		SkillData *data = iter1->second;
+		delete data;
+	}
+	_cdStateSkill.clear();
+
+	for(SkillDataMap::iterator iter2 = _unUsedSkill.begin(); iter2 != _unUsedSkill.end(); ++ iter2)
+	{
+		SkillData *data = iter2->second;
+		delete data;
+	}
+	_unUsedSkill.clear();
+
+// 	for (SkillDataMap::iterator iter3 = _canUsedSkill.begin(); iter3 != _canUsedSkill.end(); ++iter3)
+// 	{
+// 		SkillData *data = iter3->second;
+// 		delete data;
+// 	}
+ 	_canUsedSkill.clear();
+
+	_auto_skill_list.clear(); //销毁时清除
+
+	if(_manualSkill != NULL)
+	{
+		delete _manualSkill;
+		_manualSkill = NULL;
+	}
+	
+	_commonCdTime = 0.0f;
+	_petExist = false;
+	_expCostMap.clear();
+
+	reset_pf_target();
+}
+
+void SkillManager::addSkill( int skillId, bool canUse /*= true */)
+{
+	if(isSkillExist(skillId)) return;
+// 	std::map<int, int> tmpSkillNextLvMap;
+// 	int nextLevel = getNextLevel(skillId);
+// 	tmpSkillNextLvMap[skillId] = nextLevel;
+	st_skill_proto const* proto = get_skill_proto(skillId);
+	CC_ASSERT(proto);
+	SkillData *skillData = new SkillData(proto);
+	skillData->canUse = canUse;
+
+	if(canUse)
+	{
+		//从不能使用的列表中删除
+		int skillTypeId = skillId / 10;
+		SkillDataMap::iterator iter = _unUsedSkill.find(skillTypeId * 10 + 1);
+		if(iter != _unUsedSkill.end())
+		{
+			delete iter->second;
+			_unUsedSkill.erase(iter);
+		}
+
+		if(isManaualSkill(skillId))
+		{//主动技能
+			_manualSkill = skillData;
+		}
+		else
+		{//自动技能
+			addSkill(skillData);
+		}
+		if (/*_canUsedSkill.empty() ||*/ _canUsedSkill.find(skillData->proto->id) == _canUsedSkill.end())
+		{
+			_canUsedSkill.insert(std::make_pair(skillData->proto->id, skillData));
+			auto iter = _canUsedSkill.find(skillData->proto->id - 1);
+			if (iter != _canUsedSkill.end())
+			{
+				_canUsedSkill.erase(iter);
+			}
+		}
+	}
+	else
+	{
+		_unUsedSkill[skillData->proto->id] = skillData;
+	}
+
+	/*
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM SkillData WHERE ID = ?1");
+	cmd->set_integer32(1 , skillId);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		//unsigned int idx = table->get_index("EffectFile");
+		//std::string effectFileName = table->get_text(idx);
+		unsigned int idx = table->get_index("ICON");
+		std::string iconFrameName = table->get_text(idx);
+		idx = table->get_index("LvItem_3to4");
+		int LvItem_3to4 = table->get_integer32(idx);
+		idx = table->get_index("LvItem_6to7");
+		int LvItem_6to7 = table->get_integer32(idx);
+		idx = table->get_index("CD");
+		int cd = table->get_integer32(idx);
+		idx = table->get_index("MP");
+		int mp = table->get_integer32(idx);
+		idx = table->get_index("AttackRange");
+		int attrackRange = table->get_integer32(idx);
+		idx = table->get_index("Priority");
+		int priority = table->get_integer32(idx);
+		idx = table->get_index("EffectType");
+		eSkillType effectType = (eSkillType)table->get_integer32(idx);
+		idx = table->get_index("DirType");
+		eSkillDirType dirType = (eSkillDirType)table->get_integer32(idx);
+
+		idx = table->get_index("Desc");
+		std::string desc = table->get_text(idx);
+
+		idx = table->get_index("Desc2");
+		std::string nextDes = table->get_text(idx);
+		idx = table->get_index("skillName");
+		std::string skillName = table->get_text(idx);
+		idx = table->get_index("SkillTarget");
+		eSkillTargetType skillTarget = (eSkillTargetType)table->get_integer32(idx);
+		idx = table->get_index("replace");
+		int replace = table->get_integer32(idx);
+		idx = table->get_index("proficiency");
+		int proficiency = table->get_integer32(idx);
+		int nextLevel = tmpSkillNextLvMap[skillId];
+		idx = table->get_index("IsMononmer");
+		int isMononmer = table->get_integer32(idx);//单体攻击
+		idx = table->get_index("IsBook");
+		int isNeedBook = table->get_integer32(idx);//是否需要技能书
+		idx = table->get_index("lv");
+		int lv = table->get_integer32(idx);//需要学习的等级
+		idx = table->get_index("IsAtive");
+		int IsAtive = table->get_integer32(idx);
+		idx = table->get_index("orderingRule");
+		int ordering = table->get_integer32(idx);
+		idx = table->get_index("IsupAttack");
+		int isUpAttack = table->get_integer32(idx);
+
+		idx = table->get_index("dropTest");
+		std::string dropTest = table->get_text(idx);
+
+		idx = table->get_index("SkillPower");
+		int skillPower = table->get_integer32(idx);
+		idx = table->get_index("SkillPowerSum");
+		int skillPowerSum = table->get_integer32(idx);
+
+		SkillData *skillData = new SkillData;
+
+		if(skillData != NULL)
+		{
+			skillData->id = skillId;
+			skillData->max_cd = cd / 1000.0f;
+			skillData->cur_cd = 0.0f;
+			skillData->iconFrameName = iconFrameName;
+			skillData->desc = desc;
+			skillData->nextDes = nextDes;
+			skillData->dropTest = dropTest;
+			skillData->mp = mp;
+			skillData->dirType = dirType;
+			skillData->type = effectType;
+			skillData->range = attrackRange;
+			skillData->priority = priority;
+			skillData->LvItem_3to4 = LvItem_3to4;
+			skillData->LvItem_6to7 = LvItem_6to7;
+			skillData->skillName = skillName;
+			skillData->targetType = skillTarget;
+			skillData->replaceId = replace;
+			skillData->skill_level = skillData->id % 10;
+			skillData->maxProficienty = proficiency;
+			skillData->canUse = canUse;
+			skillData->need_role_lv_next_skill = nextLevel;
+			skillData->proficiency = 0;
+			skillData->isAtive = IsAtive;//1是主动技能 0是被动技能
+			skillData->isMononmer = isMononmer;// 是否单体攻击
+			skillData->isNeedBook = isNeedBook;// 是否需要技能书
+			skillData->need_role_lv = lv;
+			skillData->orderingRule = ordering;
+			skillData->isUpAttack = isUpAttack;
+			skillData->skillPower = skillPower;
+			skillData->skillPowerSun = skillPowerSum;
+			//skillData->activity = true;
+			if(canUse)
+			{
+				//从不能使用的列表中删除
+				int skillTypeId = skillId / 10;
+				SkillDataMap::iterator iter = _unUsedSkill.find(skillTypeId * 10 + 1);
+				if(iter != _unUsedSkill.end())
+				{
+					delete iter->second;
+					_unUsedSkill.erase(iter);
+				}
+
+				if(isManaualSkill(skillId))
+				{//主动技能
+					_manualSkill = skillData;
+				}
+				else
+				{//自动技能
+					addSkill(skillData);
+				}
+				if (_canUsedSkill.empty() || _canUsedSkill.find(skillData->id) == _canUsedSkill.end())
+				{
+					_canUsedSkill.insert(std::make_pair(skillData->id, skillData));
+					auto iter = _canUsedSkill.find(skillData->id - 1);
+					if (iter != _canUsedSkill.end())
+					{
+						_canUsedSkill.erase(iter);
+					}
+				}
+			}
+			else
+			{
+				_unUsedSkill[skillData->id] = skillData;
+			}
+		}
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+	*/
+
+	GET_UI(ShortCutUi, WCT_ShorCutUi)->refreshSkillBtnRotateFromSkillInfo();
+	SetAutoSkillList(skillId); //设置自动施法
+}
+
+void SkillManager::sendFastAddSkillExp(int addNum)
+{
+	WorldPacket SIC_Msg("NET_C2G_PROC_SKILL_ADD_EXP");		//组装消息头
+	SIC_Msg<<addNum;
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)SIC_Msg.contents(), NP_NORMAL, false);		//发送
+}
+/*
+void SkillManager::querySkillExpByLv( int curPlayerLv)
+{
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM SkillExpByLv WHERE Lv = ?1");
+	cmd->set_integer32(1 , curPlayerLv);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("Lv");
+		int playerLv = table->get_integer32(idx);
+		idx = table->get_index("NormalExp");
+		int normalExp = table->get_integer32(idx);
+		idx = table->get_index("MoneyExp");
+		int moneyExp = table->get_integer32(idx);
+		if (skillExpByLv == NULL)
+		{
+			skillExpByLv = new SkillExpByLv;
+			skillExpByLv->playerLv = playerLv;
+			skillExpByLv->normalExp = normalExp;
+			skillExpByLv->MoneyExp = moneyExp;
+		}else{
+			if (skillExpByLv->playerLv != playerLv)
+			{
+				CC_SAFE_DELETE(skillExpByLv);
+				skillExpByLv = new SkillExpByLv;
+				skillExpByLv->playerLv = playerLv;
+				skillExpByLv->normalExp = normalExp;
+				skillExpByLv->MoneyExp = moneyExp;
+			}
+		}
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+}
+*/
+
+unsigned int SkillManager::onSkillAddExpRerult(s_net_cmd* cmd){
+
+	unsigned int resultType;//返回信息的类型
+	unsigned char dayCount;//当前领悟次数
+	int nCritNum;//暴击次数
+	unsigned int dwAddExp;//加了多少技能点
+	WorldPacket Msg((const void*)cmd);
+	QuickUiLayer *layer = getUiNodeByTag<QuickUiLayer>(WCT_QuickUiLayer);
+	if (!layer)
+		return 0;
+
+	Msg >> resultType;										//结果
+	Msg >> dayCount;									//当前领悟次数
+	LocalPlayer* pLocPlayer = RoleManager::getInstance()->getLocalPlayer();
+	pLocPlayer->setRoleDayClearInfoTwo(ERDCTT_FAST_ADD_SKILL_POINT_COUNT,dayCount);
+	Msg >> nCritNum;											//暴击次数
+	Msg >> dwAddExp;										//加了多少技能点
+
+	if (0 == resultType)
+	{
+		LocalPlayer* lPlayer = RoleManager::getInstance()->getLocalPlayer();
+		if (!lPlayer)
+			return 0;
+		//SkillManager::getInstance()->querySkillExpByLv(lPlayer->getLevel());
+// 		SkillExpByLv otempSkillExpByLv = SkillManager::getInstance()->getSkillExpByLv(lPlayer->getLevel());
+// 
+// 		SkillExpByLv* tempSkillExpByLv =&otempSkillExpByLv;
+		SkillExpByLv* tempSkillExpByLv = SkillManager::getInstance()->getSkillExpByLv(lPlayer->getLevel());
+		CC_ASSERT(tempSkillExpByLv);
+		layer->_temp = VIPMgr::getInstance()->getLocalVipData().quickSkillPoint;
+		layer->_dayCount = lPlayer->getRoleDayClearInfoTwo(ERDCTT_FAST_ADD_SKILL_POINT_COUNT);
+		layer->_moneyExp = (tempSkillExpByLv->MoneyExp) * layer->_studyNum;
+		if (layer->_dayCount < layer->_temp)
+		{
+			layer->updateYuanbao();
+		}
+		
+		layer->updateLabel();
+
+		std::string str;
+		ccColor3B thisColor;
+		if (nCritNum > 0 && dwAddExp > 0)//暴击数大于1
+		{
+			thisColor = ccc3(0xfd,0x3c,0xff);
+			std::ostringstream ostr;
+			ostr << nCritNum;
+			std::ostringstream ostr1;
+			ostr1 << dwAddExp;
+			str = replaceStr(GET_STR(2192), "*", ostr.str()) + "\n" + ostr1.str() + GET_STR(7206);
+		}
+		else
+		{
+			thisColor = ccc3(0xff,0xbe,0x0e);
+			std::ostringstream ostr11;
+			ostr11 << dwAddExp;
+			str = ostr11.str() + GET_STR(7206);
+		}
+		CCLabelBMFont *label = CCLabelBMFont::create();
+		label->setFntFile("Art/Scene/fontNum3.fnt");
+		label->setPosition(ccp(369.f, 279.f));
+		label->setString(str.c_str());
+		label->setColor(thisColor);
+		label->setAnchorPoint(ccp(0.5f, 0.5f));
+		label->setAlignment(kCCTextAlignmentCenter);
+		layer->addChild(label);
+
+		//CCJumpTo *jumpTo = CCJumpTo::create(0.8f, ccp(255.f, 300.f), 110, 1);
+		CCScaleTo *scaleTo = CCScaleTo::create(0.1f, 1.5f, 1.5f);
+		CCFadeOut *fadeOut = CCFadeOut::create(0.9f);
+		//CCSpawn *spawn = CCSpawn::createWithTwoActions(jumpTo, scaleTo);
+		CCSequence *s = CCSequence::createWithTwoActions(scaleTo, fadeOut);
+		CCSequence *action = CCSequence::createWithTwoActions(s, CCCallFuncN::create(HideAnimationCallback::getInstance(), SEL_CallFuncN(&HideAnimationCallback::animationCallback)));
+		label->runAction(action);
+	}
+	GET_UI(SkillUi, WCT_SKILLUI)->showFastAddSkillExpResult(resultType);
+	return 0;
+}
+
+int SkillManager::getNextLevel(int skillId, bool canUse /*= true */)
+{
+	st_skill_proto const* proto = get_skill_proto(skillId);
+	CC_ASSERT(proto);
+	return proto->need_role_lv_next_skill;
+
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM SkillData WHERE ID = ?1");
+// 	cmd->set_integer32(1 , skillId + 1);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	int nextLevel = 0;
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx  = table->get_index("lv");
+// 		nextLevel = table->get_integer32(idx);
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+// 	return nextLevel;
+}
+
+void SkillManager::addSkill( SkillData *skillData )
+{
+	//_activeSkill[skillData->id] = skillData;
+	_readyStateSkill[skillData->proto->id] = skillData;
+	//根据记录的是否自动释放来决定激活或者取消
+	std::map<int, bool>::iterator it = _auto_skill_list.find(skillData->proto->id / 100);
+	if( it != _auto_skill_list.end() )
+	{
+		int smailskillId = (skillData->proto->id / 100) % 10;
+		if (smailskillId == 8)//三个职业第八个技能都是被动
+		{
+			deactiveSkill(skillData->proto->id);
+		}
+		else
+		{
+			if( it->second )
+			{
+				activeSkill(skillData->proto->id);
+			}
+			else
+			{
+				deactiveSkill(skillData->proto->id);
+			}
+		}
+	}
+	else
+		activeSkill(skillData->proto->id);
+}
+
+void SkillManager::setDayCount(int Count){
+	dayCount = Count;
+}
+
+void SkillManager::setskillPointUpper(unsigned int Count){
+	skillPointUpper = Count;
+}
+
+void SkillManager::update( float dt )
+{
+	//std::vector<int> cdOverList;
+	for(SkillDataMap::iterator iter = _cdStateSkill.begin(); iter != _cdStateSkill.end();/* ++ iter*/)
+	{
+		SkillData *data = iter->second;
+		//CC_ASSERT(data->cur_cd > 0.f);
+		data->cur_cd -= dt;
+		if(data->cur_cd <= 0.00001f)
+		{
+			//cdOverList.push_back(data->id);
+			_readyStateSkill[data->proto->id] = data;
+			_cdStateSkill.erase(iter++);
+		}
+		else
+			++iter;
+	}
+
+// 	for(std::vector<int>::iterator iter = cdOverList.begin(); iter != cdOverList.end(); ++ iter)
+// 	{
+// 		_cdStateSkill.erase((*iter));
+// 	}
+
+	//处理公共CD
+	if(_commonCdTime > 0.0f)
+		_commonCdTime -= dt;
+
+	//主动技能
+	if(_manualSkill != NULL)
+	{
+		if(_manualSkill->cur_cd > 0.0f)
+		{
+			_manualSkill->cur_cd -= dt;
+		}
+	}
+	_time += dt;
+
+	_huoQiangCd -= dt;
+}
+
+void SkillManager::removeSkill( int skillId )
+{
+	//SkillData *data1 = NULL;
+	//首先从激活关闭表中查找
+	//SkillDataMap::iterator iter = _activeSkill.find(skillId);
+	//if(iter != _activeSkill.end())
+	//{
+	//	data1 = iter->second;
+	//	_activeSkill.erase(iter);
+	//}
+	//else
+	//{
+	//	SkillDataMap::iterator iter2 = _deactiveSkill.find(skillId);
+	//	if(iter2 != _deactiveSkill.end())
+	//	{
+	//		data1 = iter2->second;
+	//		_activeSkill.erase(iter2);
+	//	}
+	//}
+
+	//如果找到，从状态表中查找
+	if(_manualSkill != NULL && _manualSkill->proto->id == skillId)
+	{
+		delete _manualSkill;
+		_manualSkill = NULL;
+		return;
+	}
+
+	SkillData *data2 = NULL;
+	SkillDataMap::iterator iter3 = _readyStateSkill.find(skillId);
+	if(iter3 != _readyStateSkill.end())
+	{
+		data2 = iter3->second;
+		_readyStateSkill.erase(iter3);
+	}
+	else
+	{
+		SkillDataMap::iterator iter4 = _cdStateSkill.find(skillId);
+		if(iter4 != _cdStateSkill.end())
+		{
+			data2 = iter4->second;
+			_cdStateSkill.erase(iter4);
+		}
+	}
+
+	if(data2 != NULL)
+		delete data2;
+}
+
+int SkillManager::querySkill_bySkillID(int skillId,eSkillQueryState &state)
+{
+	LocalPlayer *localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	Role *targerRole = RoleManager::getInstance()->findRole(RoleManager::getInstance()->get_select_role_id());
+	float dis = 0;
+	if(targerRole != NULL)
+	{
+		dis = ccpDistance(localPlayer->getPosition(), targerRole->getPosition());
+	}
+	int mp = localPlayer->getAttribute(RA_MP);
+
+	//SkillData *select = NULL;
+	state = SQS_NOTARGET;
+	///////
+	SkillDataMap::iterator iter = _readyStateSkill.find(skillId);
+	if (iter == _readyStateSkill.end())
+		return -1;
+	SkillData *sd = iter->second;
+	//if(sd->type == ST_SPECIAL)
+	//{
+	//	if(!SkillAnimManager::getInstance()->isSkillStoped(sd->id, RoleManager::getInstance()->getLocalPlayer()->getId()))
+	//	{//如果还没有停止，则不处理
+	//		state = SQS_INCD;
+	//		return -1;
+	//	}
+	//}
+
+	state = canSkillRun(sd, mp, dis, targerRole);
+	if (state == SQS_INCD || 
+		state == SQS_LESSMP ||
+		state == SQS_NOTARGET)
+	{
+		if (state == SQS_LESSMP)
+			ToolTip::getInstance()->push(GET_STR(2012));//蓝不够
+		return -1;
+	}
+	return 0;
+}
+
+int SkillManager::querySkill(eSkillQueryState &state, bool use /*= true*/)
+{
+	if( _commonCdTime > 0.0f )
+	{
+		state = SQS_INCD;
+		return -1;
+	}
+	if(GetIsAttack())
+	{
+		state = SQS_CURENTATTACK;
+		return -1;
+	}
+	if(_willUseManual)
+	{
+		state = queryManualSkill(use);
+		if(use)
+			_willUseManual = false;
+		CC_ASSERT(_manualSkill != NULL);
+		return _manualSkill->proto->id;
+	}
+
+	if(_manualSkillId != -1)
+	{//手动使用技能，优先判断
+		SkillDataMap::iterator iter = _readyStateSkill.find(_manualSkillId);
+		if(iter != _readyStateSkill.end())
+		{
+			LocalPlayer *localPlayer = RoleManager::getInstance()->getLocalPlayer();
+			Role *targerRole = RoleManager::getInstance()->findRole(RoleManager::getInstance()->get_select_role_id());
+			float dis = 0;
+			if(targerRole != NULL)
+			{
+				dis = ccpDistance(localPlayer->getPosition(), targerRole->getPosition());
+			}
+			int mp = localPlayer->getAttribute(RA_MP);
+
+			SkillData *sd = iter->second;
+
+			if(sd->proto->type == ST_SPECIAL)
+			{
+				//if(!SkillAnimManager::getInstance()->isSkillStoped(sd->id, RoleManager::getInstance()->getLocalPlayer()->getId()))
+				//{//如果还没有停止，则不处理
+				//	state = SQS_INCD;
+				//	return -1;
+				//}
+			}
+
+			//手动释放火墙可以放多个
+			float tmpHuoqiangCd = _huoQiangCd;
+			if(getSkillTypeId(_manualSkillId) == SKILLHUOQIANGTYPEID)
+			{
+				_huoQiangCd = -1.0f;
+			}
+			eSkillQueryState state1 = canSkillRun(sd, mp, dis, targerRole, true);
+			if(getSkillTypeId(_manualSkillId) == SKILLHUOQIANGTYPEID)
+			{
+				_huoQiangCd = tmpHuoqiangCd;
+			}
+
+			if(state1 == SQS_SUCCESS || state1 == SQS_BUFFER || state1 == SQS_SUCCESS2|| state1 == SQS_EXIST)
+			{
+				if(use)
+				{
+					sd->cur_cd = sd->proto->max_cd;
+					_commonCdTime = _commonCd;
+					_readyStateSkill.erase(sd->proto->id);
+					_cdStateSkill[sd->proto->id] = sd;
+					_lastUsedSkillId = sd->proto->id;
+					if(_lastUsedSkillId / 100 == 10202)
+					{//火墙术
+						_huoQiangCd = 6.0f;
+					}
+					_manualSkillId = -1;
+				}
+			}
+			state = state1;
+			if(state == SQS_SUCCESS2)
+				state = SQS_SUCCESS;
+			return sd->proto->id;
+		}
+		state = SQS_EXIT;
+		return -1;
+	}
+
+	Role *targerRole = RoleManager::getInstance()->findRole(RoleManager::getInstance()->get_select_role_id());
+	if (targerRole == NULL && _manualSkillId/100 != SKILLSHENGSHOUTYPEID &&  _manualSkillId/100 != SKILLKULOUTYPEID) //召唤骷髅和圣兽不需要选中目标
+	{
+		state = SQS_NOTARGET;
+		return -1;
+	}
+
+	if( !_readyStateSkill.empty() )
+	{
+		LocalPlayer *localPlayer = RoleManager::getInstance()->getLocalPlayer();
+		Role *targerRole = RoleManager::getInstance()->findRole(RoleManager::getInstance()->get_select_role_id());
+		float dis = 0;
+		if(targerRole != NULL)
+		{
+			dis = ccpDistance(localPlayer->getPosition(), targerRole->getPosition());
+		}
+		int mp = localPlayer->getAttribute(RA_MP);
+
+		SkillData *select = NULL;
+		state = SQS_INCD;
+		///////
+		SkillPriorityMap priorityMap;
+		SkillDataMap::iterator ip,ipend = _readyStateSkill.end();
+		for (ip = _readyStateSkill.begin(); ip != ipend; ++ip)
+		{
+			priorityMap.insert(std::make_pair(ip->second->proto->priority,ip->first));
+		}
+		SkillPriorityMap::iterator iSKP,iSKPend = priorityMap.end();
+		///////
+		//for(SkillDataMap::iterator iter = _readyStateSkill.begin(); iter != _readyStateSkill.end(); ++ iter)
+		for (iSKP = priorityMap.begin(); iSKP != iSKPend; ++iSKP)
+		{
+			SkillDataMap::iterator iter = _readyStateSkill.find(iSKP->second);
+			if (iter == _readyStateSkill.end())
+				continue;
+			SkillData *sd = iter->second;
+			if(!sd->activity)
+				continue;
+			//ZHJL:野蛮冲撞移动范围比较大，会影响新手任务打怪等体验，屏蔽自动释放。
+			/*if (sd->id/100 == 10107)
+				continue;*/
+
+			if(sd->proto->type == ST_SPECIAL)
+			{
+				if(!SkillAnimManager::getInstance()->isSkillStoped(sd->proto->id, RoleManager::getInstance()->getLocalPlayer()->getId()))
+				{//如果还没有停止，则不处理
+					continue;
+				}
+			}
+			//1半月弯刀自动释放的时候，能到的单位应该是俩个人，如果只有一个，不能发
+			int skilltype = sd->proto->id/100; 
+			if(skilltype == 10102)
+			{
+				LocalPlayer *localPlayer = RoleManager::getInstance()->getLocalPlayer();
+				CCPoint ptPlayer = localPlayer->getPosition();
+				//CCPoint ptdir = ccpNormalize(localPlayer->getDirection());
+				CCPoint ptdir = ccp(localPlayer->getDirection().x/1000,localPlayer->getDirection().y/1000);
+				const RoleManager::RoleMap &roleMap = RoleManager::getInstance()->getRoleMap();
+				int count = 0;
+				for(RoleManager::RoleMap::const_iterator iter = roleMap.begin(); iter != roleMap.end(); ++ iter)
+				{
+					Role *role = iter->second;
+					if(! RoleManager::getInstance()->canAttack(role, false))
+						continue;
+					float disx = role->getPosition().x - ptPlayer.x;
+					float disy = role->getPosition().y - ptPlayer.y;
+					if(( (ptdir.x*disx + ptdir.y*disy)/(sqrt(ptdir.x*ptdir.x + ptdir.y*ptdir.y) * sqrt(disx*disx + disy*disy))) < 0.5 )
+						continue;
+					// 检查投影距离
+					if((disx*disx + disy*disy)< (sd->proto->range*sd->proto->range))
+					{
+						count ++;
+					}
+
+				}
+				
+				if(count < 2)
+				{
+					continue;
+				}
+			}
+			if (!RoleActionMgr::GetInstance()->CanUseSkill(sd->proto->id/100))
+				continue;
+
+			eSkillQueryState state1 = canSkillRun(sd, mp, dis, targerRole);
+			if(state1 == SQS_SUCCESS || state1 == SQS_BUFFER || state1 == SQS_OUTRANGE)
+			{
+				select = sd;
+				break;
+			}
+			else
+			{
+				if(state1 == SQS_EXIST)
+				{
+					state1 = SQS_INCD;
+				}
+				else if(state1 == SQS_SUCCESS2 && select == NULL)
+				{
+					select =sd;
+					break;
+				}
+
+				if(state1 < state)
+				{
+					state = state1;
+				}
+			}
+		}
+
+		if(select != NULL)
+		{
+			state = canSkillRun(select, mp, dis, targerRole);
+			if(state == SQS_SUCCESS2)
+			{
+				state = SQS_SUCCESS;
+			}
+			else if(state == SQS_EXIST)
+			{
+				state = SQS_INCD;
+			}
+
+			if(use)
+			{
+				select->cur_cd = select->proto->max_cd;
+				_commonCdTime = _commonCd;
+				_readyStateSkill.erase(select->proto->id);
+				_cdStateSkill[select->proto->id] = select;
+				_lastUsedSkillId = select->proto->id;
+				if(_lastUsedSkillId / 100 == 10202)
+				{//火墙术
+					_huoQiangCd = 6.0f;
+				}
+
+			}
+
+			return select->proto->id;
+		}
+	}
+	else
+	{
+		state = SQS_INCD;
+		return -1;
+	}
+
+	return -1;
+}
+
+bool SkillManager::queryAndUseSkill( int skillId, bool use /*= true*/ )
+{
+	if( _commonCdTime > 0.0f )
+		return false;
+
+	SkillDataMap::iterator iter = _readyStateSkill.find(skillId);
+	if(iter != _readyStateSkill.end())
+	{
+		LocalPlayer *localPlayer = RoleManager::getInstance()->getLocalPlayer();
+		Role *targerRole = RoleManager::getInstance()->findRole(RoleManager::getInstance()->get_select_role_id());
+		float dis = 0;
+		if(targerRole != NULL)
+		{
+			dis = ccpDistance(localPlayer->getPosition(), targerRole->getPosition());
+		}
+		int mp = localPlayer->getAttribute(RA_MP);
+
+		SkillData *data = iter->second;
+		if(data->activity && data->cur_cd <= 0.f)
+		{
+			if(data->proto->type == ST_SPECIAL)
+			{
+				if(!SkillAnimManager::getInstance()->isSkillStoped(data->proto->id, RoleManager::getInstance()->getLocalPlayer()->getId()))
+				{//如果还没有停止，则不处理
+					return false;
+				}
+			}
+
+			eSkillQueryState state1 = canSkillRun(data, mp, dis, targerRole);
+			//1没学习驯兽，
+			//2一个pet都没有
+			//3如果学习了神兽并且自动释放激活，
+			//4骷髅不能发
+			//5存在的pet是骷髅，
+			//6神兽可以发。`
+			//7学习了驯兽，如果自动释放的技能要召唤的宝宝，已经存在，不能发
+			//召唤规则：没有学习驯兽术，优先自动召唤神兽，手动召唤总顶替已召唤宠物
+			if(state1 == SQS_EXIST || state1 == SQS_SUCCESS)
+			{
+				SkillData *skillData2 = SkillManager::getInstance()->getSkillData(XUNSHOUSHUTYPEID, true);
+				SkillData *skillData3 = SkillManager::getInstance()->getSkillData(SKILLSHENGSHOUTYPEID, true);
+				SkillData *skillData4 = SkillManager::getInstance()->getSkillData(SKILLKULOUTYPEID, true);
+				int ShenShouId = -1;
+				int KuLouId = -1;
+				if(skillData3 != NULL)
+				{
+					 ShenShouId = skillData3->proto->id;
+				}
+				if(skillData4 != NULL)
+				{
+					 KuLouId = skillData4->proto->id;
+				}
+				if(skillId == ShenShouId || skillId == KuLouId )
+				{
+					if(skillData2 == NULL)//1
+					{
+
+						if(_nKulouID == 0 && _nShengshouID == 0)//2
+						{
+							if(skillData3 != NULL && skillData3->activity)//3
+							{
+								if(skillId == KuLouId)//4
+								{
+									return false;
+								}
+							}
+						}
+						else if(_nKulouID != 0 && _nShengshouID == 0)//5
+						{
+							if(skillId == ShenShouId)
+							{
+								if(use)
+								{
+									data->cur_cd = data->proto->max_cd;
+									_commonCdTime = _commonCd;
+									_readyStateSkill.erase(data->proto->id);
+									_cdStateSkill[data->proto->id] = data;
+									_lastUsedSkillId = data->proto->id;
+								}
+								return true; //6
+							}
+						}
+					}
+					else//7
+					{
+						 if(_nKulouID != 0 && _nShengshouID == 0)
+						 {
+							 if(skillId == KuLouId)
+							 {
+								 return false;
+							 }
+						 }
+						 if(_nKulouID == 0 && _nShengshouID != 0)
+						 {
+							 if(skillId == ShenShouId)
+							 {
+								 return false;
+							 }
+						 }
+					}
+					
+
+				}
+			}
+			
+			 if(state1 == SQS_SUCCESS || state1 == SQS_BUFFER)
+			{
+				if(use)
+				{
+					data->cur_cd = data->proto->max_cd;
+					_commonCdTime = _commonCd;
+					_readyStateSkill.erase(data->proto->id);
+					_cdStateSkill[data->proto->id] = data;
+					_lastUsedSkillId = data->proto->id;
+
+					if(_lastUsedSkillId / 100 == 10202)
+					{//火墙术
+						_huoQiangCd = 6.0f;
+					}
+				}
+
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+void SkillManager::activeSkill( int skillId )
+{
+	SkillData *skillData = getSkillData(skillId);
+	if(skillData != NULL)
+	{
+		if(!skillData->activity)
+		{
+			skillData->activity = true;
+			_auto_skill_list[skillId / 100] = true; //记录自动施法
+			GET_UI(SkillUi, WCT_SKILLUI)->setSkill(skillData);
+			if(skillData->proto->replaceId > 0)
+			{//关闭互斥的技能
+				SkillData *skillData2 = getSkillData(skillData->proto->replaceId, false);
+				if(skillData2 != NULL && skillData2->activity)
+				{
+					skillData2->activity = false;
+					_auto_skill_list[skillData->proto->replaceId / 100] = false; //记录自动施法
+					GET_UI(SkillUi, WCT_SKILLUI)->setSkill(skillData2);
+				}
+			}
+		}
+	}
+}
+
+void SkillManager::deactiveSkill( int skillId )
+{
+	SkillData *skillData = getSkillData(skillId);
+	if(skillData != NULL)
+	{
+		if(skillData->canClose())
+		{
+			skillData->activity = false;
+			_auto_skill_list[skillId / 100] = false; //记录自动施法
+			GET_UI(SkillUi, WCT_SKILLUI)->setSkill(skillData);
+		}
+
+		if(skillData->proto->id/100 == 10205)
+		{//狱天火
+			SkillData *skillData2 = getSkillData(skillData->proto->replaceId, true);
+			skillData2->activity = true;
+			_auto_skill_list[skillData->proto->replaceId / 100] = true; //记录自动施法
+			GET_UI(SkillUi, WCT_SKILLUI)->setSkill(skillData2);
+		}
+	}
+}
+
+bool SkillManager::isSkillExist( int skillId )
+{
+	SkillDataMap::iterator iter1 = _readyStateSkill.find(skillId);
+	if(iter1 != _readyStateSkill.end())
+		return true;
+
+	SkillDataMap::iterator iter2 = _cdStateSkill.find(skillId);
+	if(iter2 != _cdStateSkill.end())
+		return true;
+
+	if(_manualSkill != NULL && _manualSkill->proto->id == skillId)
+		return true;
+
+	return false;
+}
+
+eSkillQueryState SkillManager::canSkillRun( SkillData *skillData, float mp, float dis, Role *targetRole, bool isManual/* = false */)
+{
+	//CC_ASSERT(skillData->cdTime <= 0.0f);
+	if(skillData->proto->mp > mp)
+		return SQS_LESSMP;
+
+	if(skillData->proto->targetType == SKT_OTHER)
+	{
+		if(skillData->proto->range < dis)
+			return SQS_OUTRANGE;
+
+		if(targetRole == NULL)
+		{
+			return SQS_NOTARGET;
+		}
+		else
+		{
+			if(targetRole->isDead())
+				return SQS_NOTARGET;
+		}
+	}
+
+	int skillIndex = skillData->proto->id / 100;
+	if(skillIndex == SKILLMOFADUNTYPEID)
+	{//魔法盾
+		return SQS_BUFFER;
+	}
+	else if(skillIndex == SKILLSHENGSHOUTYPEID || skillIndex == SKILLKULOUTYPEID)
+	{//圣兽
+		if(_petExist)
+			return SQS_EXIST;
+	}
+	else if(skillIndex == SKILLHUOQIANGTYPEID)
+	{//火墙术
+		if(!isManual)
+		{
+			if(_huoQiangCd > 0)
+				return SQS_INCD;
+		}
+	}
+	else if(skillIndex == SKILLYOULINGHUJIA)
+	{//幽灵护甲
+		LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+		if(!isManual)
+		{
+			if(lp->hasHighBuff(skillData->proto->id) || lp->hasBuff(skillData->proto->id)) 
+			{
+				return SQS_EXIST;
+			}
+		}
+		//else
+		//{
+		//	if(lp->hasBuff(skillData->id))
+		//	{
+		//		return SQS_EXIST;
+		//	}
+		//}
+	}
+// 	else if (skillData->cdTime > 0.00001f)
+// 	{
+// 		return SQS_INCD;
+// 	}
+	eRoleType roleType = RoleManager::getInstance()->getLocalPlayer()->getRoleType();
+	if(roleType == RT_WMAGE || roleType == RT_MMAGE)
+	{
+		if(skillData->proto->id == _lastUsedSkillId)
+			return SQS_SUCCESS2;
+	}
+
+	return SQS_SUCCESS;
+}
+
+bool SkillManager::isDuringCommonCd()
+{
+	return _commonCdTime > 0.0f;
+}
+
+SkillData * SkillManager::getSkillData( int skillId, bool typeId /*= false */)
+{
+	if(!typeId)
+	{
+		SkillDataMap::iterator iter = _readyStateSkill.find(skillId);
+		if(iter != _readyStateSkill.end())
+			return iter->second;
+
+		SkillDataMap::iterator iter2 = _cdStateSkill.find(skillId);
+		if(iter2 != _cdStateSkill.end())
+			return iter2->second;
+
+		if(_manualSkill != NULL && skillId == _manualSkill->proto->id)
+			return _manualSkill;
+	}
+	else
+	{
+		if(_manualSkill != NULL && skillId == _manualSkill->proto->id / 100)
+			return _manualSkill;
+
+		for(SkillDataMap::iterator iter = _readyStateSkill.begin(); iter != _readyStateSkill.end(); ++ iter)
+		{
+			if(iter->first / 100 == skillId)
+				return iter->second;
+		}
+
+		for(SkillDataMap::iterator iter = _cdStateSkill.begin(); iter != _cdStateSkill.end(); ++ iter)
+		{
+			if(iter->first / 100 == skillId)
+				return iter->second;
+		}
+	}
+
+	return NULL;
+}
+
+SkillData * SkillManager::getSkillDataByIndex( int skillIndex )
+{
+	std::list<SkillData*> skills = getSkills();
+	for(std::list<SkillData*>::iterator iter = skills.begin(); iter != skills.end(); ++ iter)
+	{
+		SkillData *skillData = *iter;
+		if(skillData->proto->orderingRule == skillIndex)
+			return skillData;
+	}
+	return NULL;
+}
+
+bool SkillManager::getSkillCanUse( int skillId )
+{
+	std::list<SkillData*> skills = getSkills();
+	for(std::list<SkillData*>::iterator iter = skills.begin(); iter != skills.end(); ++ iter)
+	{
+		SkillData *skillData = *iter;
+		if(((skillData->proto->id / 100) % 100) == ((skillId / 100) % 100))
+			return skillData->canUse;
+	}
+
+	return false;
+}
+
+int SkillManager::getSkillOrderingRule( int skillId )
+{
+	std::list<SkillData*> skills = getSkills();
+	for(std::list<SkillData*>::iterator iter = skills.begin(); iter != skills.end(); ++ iter)
+	{
+		SkillData *skillData = *iter;
+		if(((skillData->proto->id / 100) % 100) == ((skillId / 100) % 100))
+			return skillData->proto->orderingRule;
+	}
+
+	return false;
+}
+
+bool SkillManager::isManaualSkill( int skillId )
+{
+/*
+	if( (skillId / 100) % 100 == 6)
+		return true;*/
+
+	return false;
+}
+
+const std::list<SkillData*> SkillManager::getSkills()
+{
+	std::list<SkillData*> skills;
+	for(SkillDataMap::iterator iter = _readyStateSkill.begin(); iter != _readyStateSkill.end(); ++ iter)
+	{
+		SkillData *data = iter->second;
+		skills.push_back(data);
+	}
+
+	for(SkillDataMap::iterator iter = _cdStateSkill.begin(); iter != _cdStateSkill.end(); ++ iter)
+	{
+		SkillData *data = iter->second;
+		skills.push_back(data);
+	}
+
+	for(SkillDataMap::iterator iter = _unUsedSkill.begin(); iter != _unUsedSkill.end(); ++ iter)
+	{
+		SkillData *data = iter->second;
+		skills.push_back(data);
+	}
+
+	if(_manualSkill != NULL)
+		skills.push_back(_manualSkill);
+
+	return skills;
+}
+unsigned int SkillManager::getLearnSkillTotalNum()
+{
+	unsigned int totalNum = (unsigned int)(_readyStateSkill.size() + _cdStateSkill.size());
+	return totalNum;
+}
+eSkillQueryState SkillManager::queryManualSkill( bool use /*= false*/ )
+{
+	LocalPlayer *player = RoleManager::getInstance()->getLocalPlayer();
+
+	if(_manualSkill == NULL)
+		return SQS_LESSMP;
+
+	int mp = player->getAttribute(RA_MP);
+
+	if(_manualSkill->proto->mp > mp)
+		return SQS_LESSMP;
+
+// 	if(_manualSkill->cdTime > 0.0f)
+// 		return SQS_INCD;
+
+	if(player->getRoleType() == RT_WWARRIOR || player->getRoleType() == RT_MWARRIOR)
+	{
+		unsigned int selectRoleId = RoleManager::getInstance()->get_select_role_id();
+		Role *select = RoleManager::getInstance()->findRole(selectRoleId);
+		if(select == NULL)
+			return SQS_NOTARGET;
+
+		if(ccpDistance(player->getPosition(), select->getPosition()) > _manualSkill->proto->range)
+			return SQS_OUTRANGE;
+	}
+
+	if(use)
+	{
+		_manualSkill->cur_cd = _manualSkill->proto->max_cd;
+		_commonCdTime = _commonCd;
+	}
+
+	return SQS_SUCCESS;
+}
+
+unsigned int SkillManager::onRoleInitSkill( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_get_role_init_state_skill"))
+	{
+		NET_SIS_get_role_init_state_skill *risk = (NET_SIS_get_role_init_state_skill*)cmd;
+		//int skillPoints = RoleManager::getInstance()->getLocalPlayer()->GetRoleData(RA_Jinengdian);
+		for(int i = 0; i < risk->n_num; i ++)
+		{
+			int id = risk->Skill[i].dwID * 100 + risk->Skill[i].nLevel;
+			addSkill(id);
+			SkillData *skillData = getSkillData(id, false);
+			skillData->proficiency = risk->Skill[i].nProficiency;
+
+			//add by lpf 2015-10-15
+			switchIsCanUpGradeValue();
+		}
+
+		//更新shortUi
+		ShortCutUi *shortCutUi = GET_UI(ShortCutUi, WCT_ShorCutUi);
+		shortCutUi->initSkillId();
+	}
+	return 0;
+}
+
+unsigned int SkillManager::onAddSkill( s_net_cmd *cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_add_skill"))
+	{
+		NET_SIS_add_skill *msg = (NET_SIS_add_skill*)cmd;
+		int id = msg->Skill.dwID * 100 + msg->Skill.nLevel;
+		bool isNewSkill = this->isSkillExist(id) ? false:true;
+		addSkill(id);
+		SkillData *skillData = getSkillData(id, false);
+		skillData->proficiency = msg->Skill.nProficiency;
+		updateSkillUi();
+
+		//[bing] 每获得一个新技能触发一个获得效果
+		if (!NewFuncGuider::get_singleton_ptr()->cacheSkillFuncGuideByLocalPlayerLv(id))
+		{
+			if (isNewSkill)
+				NewSkillTipUI::Init(skillData);	
+		}
+		//道士第一次学会驯兽术，帮其直接召唤第二只宠物
+		if(id == 1030901)
+		{
+			_petExist = false;
+		}
+
+		_auto_skill_list[msg->Skill.dwID] = true; //获得新技能，是否自动施法，默认false//获得的新技能更改为自动施法10.27
+
+		switchIsCanUpGradeValue();
+	}
+	
+	return 0;
+}
+
+unsigned int SkillManager::onCreatureChange( s_net_cmd*cmd )
+{
+	if(cmd->id == message_id_crc("NET_SIS_follow_creature_change"))
+	{
+		NET_SIS_follow_creature_change *msg = (NET_SIS_follow_creature_change*)cmd;
+		if(msg->n64ID == 1)
+		{
+			_petExist = false;
+		}
+		else
+		{
+			_petExist = true;
+		}
+		_nKulouID = msg->nID1;
+		_nShengshouID = msg->nID2;
+		Role* kulou = RoleManager::getInstance()->findRole(_nKulouID);
+		if (kulou)
+			kulou->setRoleTag(ELN_LPPet);
+
+		Role* shengshou = RoleManager::getInstance()->findRole(_nShengshouID);
+		if (shengshou)
+			shengshou->setRoleTag(ELN_LPPet);
+	}
+
+	return 0;
+}
+
+unsigned int SkillManager::onSkillLevelUp( s_net_cmd *cmd )
+{
+	NET_SIS_level_up_skill *msg = (NET_SIS_level_up_skill*)cmd;
+	if(msg->dw_error_code == E_Success)
+	{
+		GET_UI(SkillUi, WCT_SKILLUI)->updateData();
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_28);
+		//switchIsCanUpGradeValue();
+	}
+	else
+	{
+		switch (msg->dw_error_code)
+		{
+		case E_LevelUpSkill_ExceedMaxLevel:
+			ToolTip::getInstance()->push(GET_STR(2014));
+			GET_UI(SkillUi, WCT_SKILLUI)->setStudyBtnShowState(false);
+			break;
+		case E_LearnSkill_NeedMoreLevel:
+			ToolTip::getInstance()->push(GET_STR(2015));
+			break;
+		case E_LevelUpSkill_NoTalentPoint:
+			ToolTip::getInstance()->push(GET_STR(2016));
+
+		case E_ClearTalent_NoHaveItem:
+			ToolTip::getInstance()->push(GET_STR(9005));
+			break;
+		case E_LevelUpSkill_NeedStopForMax:            //3,6第一次不能升级，需要点击突破
+			ToolTip::getInstance()->push(GET_STR(2424));
+			break;
+		}
+	}
+	return 0;
+}
+
+unsigned int SkillManager::onSkillUpdate( s_net_cmd *cmd )
+{
+	NET_SIS_update_skill *msg = (NET_SIS_update_skill*)cmd;
+	SkillData *skill = getSkillData(msg->Skill.dwID, true);
+	if(skill != NULL)
+	{
+		if(msg->Skill.nLevel != skill->proto->skill_level)
+		{
+			removeSkill(skill->proto->id);
+			addSkill(getSkillId(msg->Skill.dwID, msg->Skill.nLevel));
+			skill = getSkillData(msg->Skill.dwID, true);
+			CC_ASSERT(skill != NULL);
+			//提示用户，**技能升级到了*级 gx add
+			std::string str1 = replaceStr(GET_STR(2013),"**",skill->proto->skillName);
+			std::stringstream ss;
+			ss<<msg->Skill.nLevel;
+			std::string str2 = replaceStr(str1,"*",ss.str());
+			ToolTip::getInstance()->push(str2);
+		}
+
+		skill->proficiency = msg->Skill.nProficiency;
+		updateSkillUi();
+	}
+	return 0;
+}
+
+void SkillManager::sendSkillLevelUp( unsigned int skillId, unsigned int npcId /*= (unsigned int)-1*/, INT64 itemId /*= -1*/ )
+{
+	NET_SIC_level_up_skill cmd;
+	cmd.dwSkillID = getSkillTypeId(skillId);
+	cmd.dwNPCID = npcId;
+	cmd.n64ItemID = itemId;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_CRITICAL, false);
+}
+
+void SkillManager::updateSkillUi()
+{
+	GET_UI(SkillUi, WCT_SKILLUI)->updateData();
+}
+
+bool SkillManager::planUseManual()
+{
+	if(_manualSkill != NULL)
+	{
+		_willUseManual = true;
+		return true;
+	}
+
+	return false;
+}
+
+bool SkillManager::planUseManual( int skillId )
+{
+	_manualSkillId = skillId;
+	return true;
+}
+
+unsigned int SkillManager::getSkillId( unsigned int skillTypeId )
+{
+	const std::list<SkillData*> skills = getSkills();
+	for(std::list<SkillData*>::const_iterator iter = skills.begin(); iter != skills.end(); ++ iter)
+	{
+		const SkillData *skillData = *iter;
+		if(getSkillTypeId(skillData->proto->id) == skillTypeId)
+		{
+			return skillData->proto->id;
+		}
+	}
+	return -1;
+}
+
+int SkillManager::getSkillId( short skillIndex )
+{
+	skillIndex += 1;
+	SkillData *skillData = getSkillDataByIndex(skillIndex);
+	if(skillData != NULL)
+		return skillData->proto->id;
+
+	return -1;
+}
+
+std::string SkillManager::getSkillIcon( int skillIndex )
+{
+	skillIndex += 1;
+	SkillData *skillData = getSkillDataByIndex(skillIndex);
+	if(skillData != NULL)
+		return skillData->proto->iconFrameName;
+
+	return "";
+}
+
+int SkillManager::getSkillIsActive( int skillIndex )
+{
+	skillIndex += 1;
+	SkillData *skillData = getSkillDataByIndex(skillIndex);
+	if (skillData == NULL)//为了修改被动技能不能拖动到shortcutui上，加的一个判断，感觉会有连锁别的错误，写注释以待后面测试
+	{
+		return 0;
+	}
+	return skillData->proto->isAtive;
+}
+
+std::string SkillManager::getSkillNameByID( unsigned int skillID )
+{
+	std::string retString = "";
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT skillName FROM SkillData WHERE ID = ?1");
+// 	cmd->set_integer32(1 , skillID);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 
+// 	while(table->retrieve_row())
+// 	{
+// 		retString = table->get_text(0);
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+
+	const st_skill_proto* skillProto = get_skill_proto(skillID);
+	
+	if (skillProto)
+	{
+		retString = skillProto->skillName;
+	}
+
+	return retString;
+}
+
+//根据_auto_skill_list 设置自动施法
+void SkillManager::SetAutoSkillList( int nSkillID )
+{
+	SkillData *skillData = getSkillData(nSkillID);
+	if(skillData != NULL)
+	{
+		std::map<int, bool>::iterator it = _auto_skill_list.find( nSkillID / 100 );
+		if( it != _auto_skill_list.end() )
+		{
+			//如果是自动施法
+			if( it->second )
+			{
+				skillData->activity = true;
+				if(skillData->proto->replaceId > 0)
+				{//关闭互斥的技能
+					SkillData *skillData2 = getSkillData(skillData->proto->replaceId, false);
+					if(skillData2 != NULL && skillData2->activity)
+					{
+						skillData2->activity = false;
+						_auto_skill_list[skillData->proto->replaceId / 100] = false; //记录自动施法
+					}
+				}
+			}
+			else //如果不是自动施法
+			{
+				if(skillData->canClose())
+					skillData->activity = false;
+
+				if(skillData->proto->id / 100 == 10205)
+				{	
+					//狱天火
+					SkillData *skillData2 = getSkillData(skillData->proto->replaceId, true);
+					skillData2->activity = true;
+					_auto_skill_list[skillData->proto->replaceId / 100] = true; //记录自动施法
+				}
+			}
+		}
+	}
+}
+
+void SkillManager::delayDestroy()
+{
+	for(SkillDataMap::iterator iter = _readyStateSkill.begin(); iter != _readyStateSkill.end(); ++ iter)
+	{
+		SkillData *data = iter->second;
+		delete data;
+	}
+	_readyStateSkill.clear();
+
+	for(SkillDataMap::iterator iter1 = _cdStateSkill.begin(); iter1 != _cdStateSkill.end(); ++ iter1)
+	{
+		SkillData *data = iter1->second;
+		delete data;
+	}
+	_cdStateSkill.clear();
+
+	for(SkillDataMap::iterator iter2 = _unUsedSkill.begin(); iter2 != _unUsedSkill.end(); ++ iter2)
+	{
+		SkillData *data = iter2->second;
+		delete data;
+	}
+	_unUsedSkill.clear();
+	if(_manualSkill != NULL)
+	{
+		delete _manualSkill;
+		_manualSkill = NULL;
+	}
+
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	int skillType = 0;
+	switch(lp->getRoleType())
+	{
+	case RT_MWARRIOR:
+	case RT_WWARRIOR:
+		skillType = 1010001;
+		break;
+	case RT_MMAGE:
+	case RT_WMAGE:
+		skillType = 1020001;
+		break;
+	case RT_MTAOIST:
+	case RT_WTAOIST:
+		skillType = 1030001;
+		break;
+	}
+	for(int i = 1; i <= MAX_SKILL_NUM; i ++)
+	{
+		addSkill(skillType + i * 100, false);
+	}
+}
+
+//已学过的技能中，有无可升级的技能
+void SkillManager::switchIsCanUpGradeValue()
+{
+	SkillDataMap::iterator iter = _canUsedSkill.begin();
+	int lpSkillPoints = 0;
+	int lpLevel = 0;
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	if (lp)
+	{
+		lpSkillPoints = lp->GetRoleData(RA_Jinengdian);
+		lpLevel = lp->getLevel();
+	}
+	while(iter != _canUsedSkill.end())
+	{
+		int needSkillPoints = iter->second->proto->maxProficienty - iter->second->proficiency;
+		if (lpSkillPoints > needSkillPoints && lpLevel >= getNextLevel(iter->second->proto->id) && needSkillPoints > 0)
+		{
+			_isCanUpGrade = true;
+			return;
+		}
+		iter++;
+	}
+	_isCanUpGrade = false;
+}
+
+// void SkillManager::judgeIsSkillCanBreak( unsigned int itemId, unsigned int itemNum )
+// {
+// 	SkillDataMap::iterator iter = _canUsedSkill.begin();
+// 	if (itemNum > 0)
+// 	{
+// 		int proficiency = 0;
+// 		int skillBookId =0;
+// 		int maxProficienty = 0;
+// 		int skillLevel = 0;
+// 		while(iter != _canUsedSkill.end())
+// 		{
+// 			proficiency = iter->second->proficiency;
+// 			maxProficienty = iter->second->maxProficienty;
+// 			skillBookId = iter->second->LvItem_3to4;
+// 			skillLevel = iter->second->level;
+// 			if (proficiency >= maxProficienty && (skillLevel == 3 || skillLevel == 6) && skillBookId == itemId)
+// 			{
+// 				_isCanBreak = true;
+// 				break;
+// 			}
+// 			iter++;
+// 		}
+// 	}
+// }
+
+void SkillManager::judgeIsSkillCanBreak()
+{
+	int proficiency = 0;
+	int skillBookId =0;
+	int maxProficienty = 0;
+	int skillLevel = 0;
+	int skillBookCount = 0;
+	SkillDataMap::iterator iter = _canUsedSkill.begin();
+	while(iter != _canUsedSkill.end())
+	{
+		proficiency = iter->second->proficiency;
+		maxProficienty = iter->second->proto->maxProficienty;
+		skillLevel = iter->second->proto->skill_level;
+		if (proficiency >= maxProficienty && (skillLevel == 3 || skillLevel == 6))
+		{
+			skillBookId = iter->second->proto->LvItem_3to4;
+			skillBookCount = PackageManager::getInstance()->getItemNumber(EICT_Bag, (unsigned int)skillBookId);
+			if (skillBookCount > 0)
+			{
+				_isCanBreak = true;
+				return;
+			}
+		}
+		iter++;
+	}
+	_isCanBreak = false;
+}
+
+bool SkillManager::getSkillCanUpGrade( int skillId )
+{
+	int lpSkillPoints = 0;
+	int lpLevel = 0;
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	if (lp)
+	{
+		lpSkillPoints = lp->GetRoleData(RA_Jinengdian);
+		lpLevel = lp->getLevel();
+	}
+	std::list<SkillData*> skills = getSkills();
+	for(std::list<SkillData*>::iterator iter = skills.begin(); iter != skills.end(); ++ iter)
+	{
+		SkillData *skillData = *iter;
+		if(((skillData->proto->id / 100) % 100) == ((skillId / 100) % 100))
+		{
+			int needSkillPoints = skillData->proto->maxProficienty - skillData->proficiency;
+			if (lpSkillPoints > needSkillPoints && lpLevel >= getNextLevel(skillData->proto->id) && needSkillPoints > 0)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool SkillManager::getSkillCanBreak( int skillId )
+{
+	int proficiency = 0;
+	int skillBookId =0;
+	int maxProficienty = 0;
+	int skillLevel = 0;
+	int skillBookCount = 0;
+
+	std::list<SkillData*> skills = getSkills();
+	for(std::list<SkillData*>::iterator iter = skills.begin(); iter != skills.end(); ++ iter)
+	{
+		SkillData *skillData = *iter;
+		if(((skillData->proto->id / 100) % 100) == ((skillId / 100) % 100))
+		{
+			proficiency = skillData->proficiency;
+			maxProficienty = skillData->proto->maxProficienty;
+			skillLevel = skillData->proto->skill_level;
+			if (proficiency >= maxProficienty && (skillLevel == 3 || skillLevel == 6))
+			{
+				skillBookId = skillData->proto->LvItem_3to4;
+				skillBookCount = PackageManager::getInstance()->getItemNumber(EICT_Bag, (unsigned int)skillBookId);
+				if (skillBookCount > 0)
+				{
+					return true;
+				}
+			}
+		}
+	}
+	return false;
+}
+
+
+bool SkillManager::getSkillLearnState(const int& skillIndex)
+{
+	SkillData *p_skill_data = getSkillDataByIndex(skillIndex+1);
+
+	return p_skill_data? p_skill_data->canUse : false;
+}
+
+void SkillManager::resetData()
+{
+	_isCanBreak = false;
+	_isCanUpGrade = false;
+}
+
+SkillExpByLv* SkillManager::getSkillExpByLv( int curPlayerLv )
+{
+//	SkillExpByLv ret;
+
+	auto itor = m_skill_exp_level.find(curPlayerLv);
+	CC_ASSERT(itor!=m_skill_exp_level.end());
+	return &itor->second;
+
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM SkillExpByLv WHERE Lv = ?1");
+// 	cmd->set_integer32(1 , curPlayerLv);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx = table->get_index("Lv");
+// 		//int playerLv = table->get_integer32(idx);
+// 		idx = table->get_index("NormalExp");
+// 		int normalExp = table->get_integer32(idx);
+// 		idx = table->get_index("MoneyExp");
+// 		int moneyExp = table->get_integer32(idx);
+// 
+// 		ret.normalExp = normalExp;
+// 		ret.MoneyExp = moneyExp;
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+// 
+// 	return ret;
+}
+
+double SkillManager::getAllSkillPower()
+{
+	double allSkillPowers = 0;
+	SkillDataMap::iterator iterTemp = _canUsedSkill.begin();
+	for(; iterTemp != _canUsedSkill.end(); ++iterTemp){
+		allSkillPowers += iterTemp->second->proto->skillPowerSum;
+	}
+
+	return allSkillPowers;
+}
+
+void SkillManager::init_skillbook_pathfind()
+{
+	reset_skillbook_pathfind();
+
+	f_data_set dataset;
+	std::list<std::string> fields;
+	bool ret =dataset.load("Config/PathFinding.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		unsigned int book_item_id = dataset.get_int("Item_Id",one.c_str());
+
+		st_skillbook_pathfind_info info;
+		info.role_id  = dataset.get_int("Npc_Id",one.c_str());
+		info.notice_text = dataset.get_string("Desc",one.c_str(),"");
+		
+		_skillbook_pathfind_map[book_item_id] = info;
+	});
+}
+
+st_skillbook_pathfind_info const* SkillManager::get_skillbook_pathfind_info( unsigned int skill_book_id ) const
+{
+	auto iter = _skillbook_pathfind_map.find(skill_book_id);
+	if (iter != _skillbook_pathfind_map.end())
+	{
+		return &iter->second;
+	}
+
+	return nullptr;
+}
+
+void SkillManager::on_event_pathfind_reached( skillbook_pathfind_reached* evt )
+{
+
+}
+
+bool SkillManager::try_to_findpath( unsigned int skillbook_id )
+{
+	//检查当前场景是否为副本 add by XSea 2014.10.21
+	if( InstanceMgr::getInstance()->IsPlayerInInstanceMap())
+	{
+		//副本中不可寻路
+		ToolTip::getInstance()->push(GET_STR(9254));
+		return false;
+	}
+
+	st_skillbook_pathfind_info const* info  =get_skillbook_pathfind_info(skillbook_id);
+	if (!info)
+	{
+		return false;
+	}
+	//!去creatureInfo表中查找目标所在位置
+	stCreateProto const* proto = RoleManager::getInstance()->getCreatureProto(info->role_id);
+	if (!proto)
+	{
+		return false;
+	}
+
+	_cache_pf_target_id  = info->role_id;
+	
+	MessageBoxUi* mb = MessageBoxUi::createWithTwoBtn_LabelEx(TEXT_UTF8_TISHI
+		,info->notice_text.c_str()
+		,STRING_TABLE["go_directly"]
+		,TEXT_UTF8_QUXIAO);
+	World::getInstance()->getScene()->addChild(mb, WZ_MESSAGEBOX);
+	mb->signalOkBtnPressed.connect(this,&SkillManager::confirm_pf);
+
+
+	return true;
+}
+
+void SkillManager::confirm_pf()
+{
+	if (!is_valid_pf_target())
+	{
+		return;
+	}
+	QuestMgr::getInstance()->onSelectRunNpc(_cache_pf_target_id);
+	//角色信息
+// 	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+// 	if( !lp )
+// 		return;
+// 
+// 	int x = -1 , y = -1 ;//x是人物x坐标，y类似
+// 	stCreateProto const* proto = RoleManager::getInstance()->getCreatureProto(_cache_pf_target_id);
+// 	CC_ASSERT(proto);
+// 
+// 	x= proto->nPosX;
+// 	y= proto->nPosY;
+// 	std::string maptag = proto->strMapName;
+// 	if(x!=-1)
+// 		//!开始自动寻路 
+// 	{
+// 		AutoActionMgr::getInstance()->cancel_auto_action();
+// // 		std::string animFile = proto->strAnimatorName;
+// // 		animFile = animFile.substr(0, 1);
+// // 		MapManager::getInstance()->setRandPos(animFile == "M"?false:true);
+// 
+// 		if(std::string("0") != maptag && !maptag.empty())
+// 		{
+// 			std::string str2 = maptag.substr(1,maptag.length());
+// 			int mapid = boost::lexical_cast<int>(str2);
+// 			lp->runPathTo(ccp(x, y), mapid);
+//  			RoleHeadUi *ui = World::getInstance()->getRoleHeadUi();
+//  			if (ui)
+//  			{
+//  				CC_ASSERT(NULL != ui);
+//  				CC_ASSERT(NULL != ui->GetRoleUI());
+//  				lp->SetisMouseClick(false);
+//  				ui->GetRoleUI()->SetMapidStr(maptag);
+//  				ui->GetRoleUI()->SetQuestPosx(x);
+//  				ui->GetRoleUI()->SetQuestPosy(y);
+//  				ui->GetRoleUI()->SetNpcId(-1);
+//  			}
+// 		}
+// 
+// 		if (lp->getRunSELastState())
+// 			lp->setRunSEOutMap(false);
+// 		if (!lp->getReachDesControl())
+// 			lp->setReachDesControl(true);
+// 	}
+// 	else
+// 	{
+// 		reset_pf_target();
+// 	}
+
+	//reset_pf_target();
+
+}
+
+void SkillManager::initLoadSkillExpCostMap()
+{
+	_expCostMap.clear();
+
+	f_data_set dataset;
+	std::list<std::string> fields;
+	bool ret =dataset.load("Config/skillExpCost.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		skillExpCost data;
+		data.n16Count = dataset.get_int("id",one.c_str(),0);
+		data.n16Cost = dataset.get_float("costYuanbao",one.c_str(),0);
+
+		_expCostMap.insert(std::make_pair(data.n16Count, data));
+	});
+}
+
+const skillExpCost* const SkillManager::getSkillExpCost( INT16 count )
+{
+	SkillCostMap::iterator findIter = _expCostMap.find(count);
+	if (findIter != _expCostMap.end())
+	{
+		return &findIter->second;
+	}
+	return NULL;
+}
+
+unsigned int SkillManager::on_server_sync_skill_cd( s_net_cmd* cmd )
+{
+	NET_SIS_update_skill_cool_down* msg = (NET_SIS_update_skill_cool_down*)cmd;
+
+	SkillData* skill = getSkillData(msg->dwSkillID,true);
+	CC_ASSERT(skill);
+
+	skill->cur_cd = (float)msg->nCoolDown / 1000.0f;
+	
+	sync_skill_cd_duration evt;
+	evt.skill_id = msg->dwSkillID;
+	evt.max = skill->proto->max_cd;
+	evt.new_cd = skill->cur_cd;
+
+	SEND_EVENT(&evt);
+
+	return 0;
+}
+
+void SkillManager::on_event_update_skill_can_use( update_skill_can_use* evt )
+{
+	switchIsCanUpGradeValue();
+	judgeIsSkillCanBreak();
+}
+
+void SkillManager::on_event_lp_level_change( LpLevelUpEvent* evt )
+{
+	switchIsCanUpGradeValue();
+}
+
+void SkillManager::on_event_item_change( item_num_change* evt )
+{
+	ItemTypeData const*  item = PackageManager::getInstance()->get_item_proto_ptr(evt->item_type_id);
+	if (item && item->type == PIT_SKILLBOOK)
+	{
+		judgeIsSkillCanBreak();
+	}
+}
+
+void SkillManager::init_skill_proto()
+{
+// 	int id;
+// 	int tmp_int_val;
+// 	SQL_START_WITH_DATA(SkillData,st_skill_proto,dataSQL);
+// 	//data.cur_cd = 0.0f;
+// 	SQL_EXTRA_INT(id,ID);
+// 	SQL_EXTRA_INT(dataSQL.next_id,NextSkill);
+// 	dataSQL.id = id;
+// 	dataSQL.skill_level = id%10;
+// 
+// 	SQL_EXTRA_STRING(dataSQL.iconFrameName,ICON);
+// 	SQL_EXTRA_INT(dataSQL.LvItem_3to4,LvItem_3to4);
+// 	SQL_EXTRA_INT(dataSQL.LvItem_6to7,LvItem_6to7);
+// 	SQL_EXTRA_INT(tmp_int_val,CD);
+// 	dataSQL.max_cd = tmp_int_val / 1000.0f;
+// 	SQL_EXTRA_INT(dataSQL.mp,MP);
+// 	SQL_EXTRA_INT(dataSQL.range,AttackRange);
+// 	SQL_EXTRA_INT(dataSQL.priority,Priority);
+// 	SQL_EXTRA_INT(tmp_int_val,EffectType);
+// 	dataSQL.type = (eSkillType)tmp_int_val;
+// 	SQL_EXTRA_INT(tmp_int_val,DirType);
+// 	dataSQL.dirType = (eSkillDirType)tmp_int_val;
+// 	SQL_EXTRA_STRING(dataSQL.desc,Desc);
+// 	SQL_EXTRA_STRING(dataSQL.nextDes,Desc2);
+// 	SQL_EXTRA_STRING(dataSQL.skillName,skillName);
+// 	SQL_EXTRA_INT(tmp_int_val,SkillTarget);
+// 	dataSQL.targetType = (eSkillTargetType)tmp_int_val;
+// 	SQL_EXTRA_INT(dataSQL.replaceId,replace);
+// 	SQL_EXTRA_INT(dataSQL.maxProficienty,proficiency);
+// 	SQL_EXTRA_INT(dataSQL.isMononmer,IsMononmer);
+// 	SQL_EXTRA_INT(dataSQL.isNeedBook,IsBook);
+// 	SQL_EXTRA_INT(dataSQL.need_role_lv,lv);
+// 	SQL_EXTRA_INT(dataSQL.isAtive,IsAtive);
+// 	SQL_EXTRA_INT(dataSQL.orderingRule,orderingRule);
+// 	SQL_EXTRA_INT(dataSQL.isUpAttack,IsupAttack);
+// 	SQL_EXTRA_STRING(dataSQL.dropTest,dropTest);
+// 	SQL_EXTRA_INT(dataSQL.skillPower,SkillPower);
+// 	SQL_EXTRA_INT(dataSQL.skillPowerSun,SkillPowerSum);
+// 
+// 	m_skill_proto[id] = dataSQL;
+// 	SQL_END;
+
+	f_data_set data;
+	std::list<std::string> fields;
+
+	bool ret = data.load("Config/db/SkillData.xml","ID",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		st_skill_proto skillProto;
+		skillProto.id = data.get_int("ID",one.c_str(),0);
+		skillProto.next_id = data.get_int("NextSkill",one.c_str(),0);
+		skillProto.skill_level = skillProto.id%10;
+		skillProto.iconFrameName = data.get_string("ICON",one.c_str(),"");
+		skillProto.LvItem_3to4 = data.get_int("LvItem_3to4",one.c_str(),0);
+		skillProto.LvItem_6to7 = data.get_int("LvItem_6to7",one.c_str(),0);
+		skillProto.max_cd = data.get_int("CD",one.c_str(),0)/1000.0f;
+		skillProto.mp = data.get_int("MP",one.c_str(),0);
+		skillProto.range = data.get_int("AttackRange",one.c_str(),0);
+		skillProto.priority = data.get_int("Priority",one.c_str(),0);
+		skillProto.type = (eSkillType)data.get_int("EffectType",one.c_str(),0);
+		skillProto.dirType = (eSkillDirType)data.get_int("DirType",one.c_str(),0);
+		skillProto.desc = data.get_string("Desc",one.c_str(),"");
+		skillProto.nextDes = data.get_string("Desc2",one.c_str(),"");
+		skillProto.skillName = data.get_string("skillName",one.c_str(),"");
+		skillProto.targetType = (eSkillTargetType)data.get_int("SkillTarget",one.c_str(),0);
+		skillProto.replaceId = data.get_int("replace",one.c_str(),0);
+		skillProto.maxProficienty = data.get_int("proficiency",one.c_str(),0);
+		skillProto.isMononmer = data.get_int("IsMononmer",one.c_str(),0);
+		skillProto.isNeedBook = data.get_int("IsBook",one.c_str(),0);
+		skillProto.need_role_lv = data.get_int("lv",one.c_str(),0);
+		skillProto.isAtive = data.get_int("IsAtive",one.c_str(),0);
+		skillProto.orderingRule = data.get_int("orderingRule",one.c_str(),0);
+		skillProto.isUpAttack = data.get_int("IsupAttack",one.c_str(),0);
+		skillProto.dropTest = data.get_string("dropTest",one.c_str(),"");
+		skillProto.skillPower = data.get_int("SkillPower",one.c_str(),0);
+		skillProto.skillPowerSum = data.get_int("SkillPowerSum",one.c_str(),0);
+		skillProto.animFile = data.get_string("EffectFile",one.c_str(),"");
+		skillProto.musicEffectName = data.get_string("MusicEffect",one.c_str(),"");
+		std::string temp = data.get_string("BeginEffect",one.c_str());
+		skillProto.beginEffect = (temp == "0")? "":data.get_string("BeginEffect",one.c_str());
+
+		m_skill_proto[skillProto.id] = skillProto;
+	});
+	
+	init_next_lv();
+}
+
+st_skill_proto const* SkillManager::get_skill_proto( int long_id )
+{
+	auto finder = m_skill_proto.find(long_id);
+	if (finder != m_skill_proto.end())
+	{
+		return &finder->second;
+	}
+	return NULL;
+}
+
+void SkillManager::init_next_lv()
+{
+	std::for_each(m_skill_proto.begin(),
+		m_skill_proto.end(),
+		[this](skill_proto_map::value_type& kv)
+	{
+		st_skill_proto& cur = kv.second;
+		if (cur.next_id)
+		{
+			st_skill_proto const* next = get_skill_proto(cur.next_id);
+			CC_ASSERT(next);
+			cur.need_role_lv_next_skill = next->need_role_lv;
+		}
+	});
+}
+
+void SkillManager::init_skill_exp_level()
+{
+	m_skill_exp_level.clear();
+
+	f_data_set dataset;
+	std::list<std::string> fields;
+
+	bool ret = dataset.load("Config/db/SkillExpByLv.xml","id",&fields);
+	CC_ASSERT(ret);
+
+	std::for_each(fields.begin(),fields.end(),[&](std::string const& one)
+	{
+		SkillExpByLv ele;
+		ele.playerLv = dataset.get_int("id",one.c_str());
+		ele.normalExp = dataset.get_int("NormalExp",one.c_str());
+		ele.MoneyExp = dataset.get_int("MoneyExp",one.c_str());
+
+		m_skill_exp_level.insert(std::make_pair(ele.playerLv,ele));
+	});
+
+}

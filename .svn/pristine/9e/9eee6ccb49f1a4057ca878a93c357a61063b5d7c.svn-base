@@ -1,0 +1,295 @@
+#include "LongWeiBoxUi.h"
+#include "UiTools.h"
+#include "UiLoader.h"
+#include "UiManager.h"
+#include "PackageManager.h"
+#include "InstanceMgr.h"
+#include "ItemTip.h"
+#include "EquipTipUi.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "ItemDefine.h"
+#include "NumericalIniMgr.h"
+#include "LongWeiDesUi.h"
+#include "VerticalList.h"
+#include "Helper.h"
+//#include "PlacardManager.h"
+
+CCNode* LongWeiBoxUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["ShenLongBaoZangUiLayer"] = UiLayerLoader<LongWeiBoxUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("shenlongbaozang", nodeLoaders, _loadSpriteSheet);	   
+
+	return uiNode;
+}
+
+void LongWeiBoxUi::updateDate()
+{
+	LongWeiBoxUiLayer * uiLayer=getUiNodeByTag<LongWeiBoxUiLayer>(WCT_LongWeiBoxUi);
+	if(uiLayer)
+		uiLayer->updateDate();
+
+
+
+}
+
+
+/////////
+LongWeiBoxUiLayer::LongWeiBoxUiLayer()
+{
+	m_showDes=false;
+	m_openJieDian=false;
+}
+
+
+cocos2d::extension::SEL_CCControlHandler LongWeiBoxUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", LongWeiBoxUiLayer::onCloseBtnPressed);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHelpBtnPressed", LongWeiBoxUiLayer::onHelpBtnPressed);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", LongWeiBoxUiLayer::onOkBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onDaJieDianBtnPressed", LongWeiBoxUiLayer::onDaJieDianBtnPressed);
+	return NULL;
+}
+void LongWeiBoxUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_frame=getChildByTag(0);
+	//_des=getChildByTag(1);
+	//_des->setVisible(false);
+	//_contener=_frame->getChildByTag(3);
+
+	CCNode* t_Node = _frame->getChildByTag(NT_ScorllNode1);
+	CCNode* t_con = CCNode::create();
+	_scrollView1 = createScrollViewWithContent(t_Node);
+	_scrollView1->setContainer(t_con);
+	_scrollView1->setBounceable(true);
+	_scrollView1->setDirection(kCCScrollViewDirectionHorizontal);
+	t_Node->addChild(_scrollView1);
+
+	t_Node = _frame->getChildByTag(NT_ScorllNode2);
+	_scrollView2 = createScrollViewWithContent(t_Node);
+	t_con = CCNode::create();
+	_scrollView2->setContainer(t_con);
+	_scrollView2->setBounceable(true);
+	_scrollView2->setDirection(kCCScrollViewDirectionHorizontal);
+	t_Node->addChild(_scrollView2);
+
+	t_Node = _frame->getChildByTag(NT_ScorllNode3);
+	_scrollView3 = createScrollViewWithContent(t_Node);
+	t_con = CCNode::create();
+	_scrollView3->setContainer(t_con);
+	_scrollView3->setBounceable(true);
+	_scrollView3->setDirection(kCCScrollViewDirectionHorizontal);
+	t_Node->addChild(_scrollView3);
+
+/*	_jieDianlabel=(CCLabelTTF *)_frame->getChildByTag(5);*/
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(1)));
+	//_jieDianButton=(CCControlButton *)_frame->getChildByTag(9);
+// 	_reDianLabel=  (CCLabelTTF *)_frame->getChildByTag(2);
+// 	_reDianLabel->setString(InstanceMgr::getInstance()->m_hotItemName);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(2)));
+	Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(4)));
+
+	setAllChildernButtonPriority(this,-2);
+	this->updateDate();
+
+}
+void LongWeiBoxUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void LongWeiBoxUiLayer::updateDate()
+{
+	float itemWidth = ITEMNODE_CONTENTWIDTH + LONGWEI_ITEM_OFFSET;
+	CCNode* t_node1 = _frame->getChildByTag(NT_ScorllNode1);
+	CCNode* t_node2  = _frame->getChildByTag(NT_ScorllNode2);
+	CCNode* t_node3  = _frame->getChildByTag(NT_ScorllNode3);
+	vector<tagDragonItem> _vecItemListNode1;
+	vector<tagDragonItem> _vecItemListNode2;
+	vector<tagDragonItem> _vecItemListNode3;
+
+	_scrollView1->getContainer()->removeAllChildren();
+	_scrollView2->getContainer()->removeAllChildren();
+	_scrollView3->getContainer()->removeAllChildren();
+
+	vector<tagDragonItem> dragonitems=InstanceMgr::getInstance()->getDragonItems();
+	int index=0;
+	for (vector<tagDragonItem>::iterator iter=dragonitems.begin();iter!=dragonitems.end();iter++)
+	{
+		ItemNode * item=ItemNode::create();
+		item->setAnchorPoint(ccp(0,1));
+// 		itemWidth=item->getContentSize().width+5;
+// 		itemHeight=item->getContentSize().height+5;
+		tagDragonItem t_tagITem = *iter;
+		int randomNum  = rand() % 2;
+
+		string strIcon;
+		switch(t_tagITem.byShowIcon)
+		{
+		case Dragon_Show_BiDe:
+				strIcon = "shenlongbaozang_bide";
+			break;
+		case Dragon_Show_Jidi:
+				strIcon = "shenlongbaozang_jidi";
+			break;
+		case Dragon_Show_JiaoDi:
+				strIcon = "shenlongbaozang_jiaodi";
+			break;
+		case Dragon_Show_JiaoDa:
+				strIcon = "shenlongbaozang_jiaoda";
+			break;
+		case Dragon_Show_GaiLv:
+				strIcon = "shenlongbaozang_gailv";
+			break;
+		default:
+			break;
+		}
+		if (strIcon.length() > 0)
+		{
+			CCSprite * sp=CCSprite::createWithSpriteFrameName(strIcon.c_str());
+			sp->setAnchorPoint(ccp(0,1));
+			sp->setPosition(ccp(0,item->getContentSize().height));
+			item->addChild(sp,3);
+		}
+		item->setClickable(true);
+		item->hideItemOpBtn();
+		item->setDataId(iter->nItemId);
+		if(iter->byQuality==1)
+		{
+			item->runAnimation("E1_97");
+		}
+		switch (t_tagITem.byNode)
+		{
+		case 1:
+			{
+				item->setPosition(ccp(_vecItemListNode1.size() * itemWidth + LONGWEI_ITEM_OFFSET,t_node1->getContentSize().height - LONGWEI_ITEM_OFFSET));
+				_vecItemListNode1.push_back(*iter);
+				_scrollView1->getContainer()->addChild(item);
+				break;
+			}
+		case 2:
+			{
+				item->setPosition(ccp(_vecItemListNode2.size() * itemWidth + LONGWEI_ITEM_OFFSET,t_node2->getContentSize().height - LONGWEI_ITEM_OFFSET));
+				_vecItemListNode2.push_back(*iter);
+				_scrollView2->getContainer()->addChild(item);
+				break;
+			}
+		case 3:
+			{
+				item->setPosition(ccp(_vecItemListNode3.size() * itemWidth + LONGWEI_ITEM_OFFSET,t_node3->getContentSize().height - LONGWEI_ITEM_OFFSET));
+				_vecItemListNode3.push_back(*iter);
+				_scrollView3->getContainer()->addChild(item);
+				break;
+			}
+		}
+// 		item->setPosition(ccp(itemWidth*(index%5),contentSize.height-itemHeight*(index/5)));
+// 		_contener->addChild(item);
+		index++;
+	}
+	
+	_scrollView1->getContainer()->setContentSize(CCSizeMake(_vecItemListNode1.size() * itemWidth + LONGWEI_ITEM_OFFSET , t_node1->getContentSize().height));
+	_scrollView2->getContainer()->setContentSize(CCSizeMake(_vecItemListNode2.size() * itemWidth + LONGWEI_ITEM_OFFSET , t_node2->getContentSize().height));
+	_scrollView3->getContainer()->setContentSize(CCSizeMake(_vecItemListNode3.size() * itemWidth + LONGWEI_ITEM_OFFSET , t_node3->getContentSize().height));
+	_scrollView1->updateInset();
+	_scrollView2->updateInset();
+	_scrollView3->updateInset();
+	_scrollView1->setTouchEnabled(_vecItemListNode1.size() * itemWidth + LONGWEI_ITEM_OFFSET > _scrollView1->getViewSize().width);
+	_scrollView2->setTouchEnabled(_vecItemListNode2.size() * itemWidth + LONGWEI_ITEM_OFFSET > _scrollView2->getViewSize().width);
+	_scrollView3->setTouchEnabled(_vecItemListNode3.size() * itemWidth + LONGWEI_ITEM_OFFSET > _scrollView3->getViewSize().width);
+	_scrollView1->update_child_touch_clip_rect();
+	_scrollView2->update_child_touch_clip_rect();
+	_scrollView3->update_child_touch_clip_rect();
+}
+
+
+void LongWeiBoxUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	CCLog("onCloseBtnPressed");
+	CLOSE_UI(WCT_LongWeiBoxUi);
+
+	LongWeiDesUiLayer * layer=getUiNodeByTag<LongWeiDesUiLayer>(WCT_LongWeiDesUi);
+	if(layer)
+		layer->setVisible(true);
+
+	ItemTip::getInstace()->close();
+
+	CCScene* scene =  UiMgr::getInstance()->getCurScene();
+	if (scene)
+	{
+		EquipTipUiLayer* pNode = dynamic_cast<EquipTipUiLayer*>(scene->getChildByTag(WCT_EQUIP_TIPS_UI_TAG));
+		if (pNode)
+		{
+			pNode->close();
+		}
+	}
+}
+
+// void LongWeiBoxUiLayer::onHelpBtnPressed( cocos2d::CCObject * pSender, CCControlEvent pCCControlEvent )
+// {
+// 	//CCLog("onHelpBtnPressed");
+// 	//if(_des)
+// 	//_des->setVisible(true);
+// 
+// 	PlacardManager::getInstance()->open_placard_node(20);
+// }
+
+void LongWeiBoxUiLayer::onDaJieDianBtnPressed( cocos2d::CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	CCLog("onDaJieDianBtnPressed");
+	if(m_openJieDian)
+	{
+		InstanceMgr::getInstance()->sendDragonCurlyBoss(EDragon_3);
+	}
+}
+
+// void LongWeiBoxUiLayer::onOkBtnPressed( cocos2d::CCObject * pSender, CCControlEvent pCCControlEvent )
+// {
+// 	CCLog("onOkBtnPressed");
+// 	if(m_showDes)
+// 	{
+// 		CLOSE_UI(WCT_LongWeiBoxUi);
+// 	}
+// 	else
+// 	{
+// 		//if(_des)
+// 		//	_des->setVisible(false);
+// 	}
+// }
+
+void LongWeiBoxUiLayer::setShowDes( bool _show )
+{
+	m_showDes=_show;
+	if(_show)
+	{
+		_frame->setVisible(false);
+		//_des->setVisible(true);
+		//PlacardManager::getInstance()->open_placard_node(20);
+
+		_scrollView1->removeAllChildrenWithCleanup(true);
+		_scrollView2->removeAllChildrenWithCleanup(true);
+		_scrollView3->removeAllChildrenWithCleanup(true);
+	}
+	else
+	{
+		_frame->setVisible(true);
+		//_des->setVisible(false);
+		//CLOSE_UI(COMMON_NOTICE_UI);
+	}
+}
+bool LongWeiBoxUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	return true;
+}
+void LongWeiBoxUiLayer::onExit()
+{
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+
+
+
+
+

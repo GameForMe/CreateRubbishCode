@@ -1,0 +1,1330 @@
+#include "WuXueUi.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "ItemNode.h"
+#include "ItemMarixLayer.h"
+#include "PackageManager.h"
+#include "WorldPacket.h"
+#include "MessageBoxUi.h"
+#include "ItemDefine.h"
+#include "RemoteRoleStateMgr.h"
+#include "CommonMsgDefine.h"
+#include "TCPClient.h"
+#include "EquipTipUi.h"
+#include "ToolTip.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "GongfaTip.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "UiResourceMgr.h"
+#include "CfgReader.h"
+#include "Helper.h"
+#include "f_string_table.h"
+#include "CommonView.h"
+#include "PackageProto.h"
+#include "PlacardManager.h"
+#include "SecondVerifyMgr.h"
+#include "f_formula_helper.h"
+#include "f_string_util.h"
+//////////////////////////////////////////////////////////////////////////
+
+
+
+WuXueUi::WuXueUi()
+{
+
+
+}
+
+WuXueUi::~WuXueUi()
+{
+
+}
+
+CCNode* WuXueUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["wuXueLayer"] = UiLayerLoader<WuXueUiLayer>::loader();
+	CCNode* pNode = readUiFromCCBI("wuxue", nodeLoaders, _loadSpriteSheet);
+	return pNode;
+}
+
+void WuXueUi::updateMartialData()
+{
+	WuXueUiLayer *uiLayer = getUiNodeByTag<WuXueUiLayer>(WCT_WUXUEUI);
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateMartialData();
+	}
+}
+
+void WuXueUi::updateEquip()
+{
+	WuXueUiLayer *uiLayer = getUiNodeByTag<WuXueUiLayer>(WCT_WUXUEUI);
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateEquip();
+	}
+}
+
+void WuXueUi::updateWare()
+{
+	WuXueUiLayer *uiLayer = getUiNodeByTag<WuXueUiLayer>(WCT_WUXUEUI);
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateWare();
+	}
+}
+
+bool WuXueUi::getKungfuLockState( int index )
+{
+	WuXueUiLayer *uiLayer = getUiNodeByTag<WuXueUiLayer>(WCT_WUXUEUI);
+	if(uiLayer != NULL)
+	{
+		return uiLayer->getKungfuLockState(index); 
+	}
+	return false;
+}
+
+void WuXueUi::updateRealmTile()
+{
+	WuXueUiLayer *uiLayer = getUiNodeByTag<WuXueUiLayer>(WCT_WUXUEUI);
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateRealmTile();
+	}
+}
+
+
+void WuXueUi::updateRealmView()
+{
+	WuXueUiLayer *uiLayer = getUiNodeByTag<WuXueUiLayer>(WCT_WUXUEUI);
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateRealmView();
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler WuXueUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler WuXueUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtn", WuXueUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onZlBtn", WuXueUiLayer::onZhengLiBtnPressed); //整理
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "OnyjrhBtn", WuXueUiLayer::onYJRongHeBtnPressed);//一键融合
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "OnGoTocjgBtn", WuXueUiLayer::onTiaoZhuanBtnPressed);//跳转
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onWuXueDescPressed", WuXueUiLayer::onWuXueDescPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onKnowBtnPressed", WuXueUiLayer::onKnowBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onMoJingBtnPressed", WuXueUiLayer::onMoJingBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseDescBtnPressed", WuXueUiLayer::onCloseDescBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onchakanjingjieBtnPressed", WuXueUiLayer::onchakanjingjieBtnPressed);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onWuXueList1BtnPressed", WuXueUiLayer::onWuXueList1BtnPressed);
+
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onClose1BtnPressed", WuXueUiLayer::onClose1BtnPressed);
+
+	return NULL;
+}
+
+void WuXueUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_fightNumAcNode = NULL;
+	_fightNumBLabel = NULL;
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -2, true);
+	setAllChildernButtonPriority(this,-2);
+	_firstClick = true;
+	memset(_firstClickNode,0,sizeof(_firstClickNode));
+	nDelItemPos = -1;
+	
+	//[bing] ccbi 小威将背景层与其它空间分离了 为了统一这么写吧... 不影响
+	m_MainFrame =(CCSprite*) getChildByTag(0);
+
+	//m_pBGFrame = (CCSprite*)m_MainFrame->getChildByTag(50);
+	//_roleframe = dynamic_cast<CCSprite*>(m_MainFrame->getChildByTag(20));
+	//CC_ASSERT(_roleframe != NULL);
+	//_roleframe->setZOrder(400);//vv  防止规则与功能层穿透 设置规则的渲染层次（随便写了一个大值）
+
+
+
+
+	mainListNode = (CCSprite*)m_MainFrame->getChildByTag(22);
+
+	_container = (CCNode*)mainListNode->getChildByTag(0);
+	_scrollView = createScrollViewWithContent(_container);
+	_container->addChild(_scrollView);
+	//_verticalList = new VerticalList<CangJingGeListItem>;
+	_verticalList->addToScrollView(_scrollView);
+	_scrollView->getContainer()->set_enable_rect(false);
+	_verticalList->setMinSize(_container->getContentSize());
+	_verticalList->setEnableSelect(true);
+	mainListNode->setVisible(false);
+	mainListNode->setZOrder(100);
+	_scrollView->setTouchPriority(-10);
+
+
+	CCLayer *mylayer= dynamic_cast<CCLayer*>(m_MainFrame->getChildByTag(666));//高光挡板
+	mylayer->setZOrder(399);
+	//CCNode* pMarixSprite = (CCNode*)m_MainFrame->getChildByTag(1387);
+	m_pItemMarixLayer = ItemMarixLayer::create(m_bag_bg->getContentSize().width, m_bag_bg->getContentSize().height, 0, 0, 8, 8);
+	m_pItemMarixLayer->setPosition(m_bag_bg->getPosition());
+	m_pItemMarixLayer->SetItemMap(PackageManager::getInstance()->getItemMap(EICT_KungfuBag));
+	m_pItemMarixLayer->SetColNum(5);
+	m_pItemMarixLayer->SetRowNum(8);		//40格子
+	m_pItemMarixLayer->signalCallEndItem.connect(this, &WuXueUiLayer::onDropEndItem);
+	m_pItemMarixLayer->signalInChangePos.connect(this, &WuXueUiLayer::onChangeItemPos);
+	m_pItemMarixLayer->signalClickItem.connect(this, &WuXueUiLayer::clickitemlayer);
+	m_MainFrame->addChild(m_pItemMarixLayer);
+
+	CCSprite* pItemNode = (CCSprite*)m_MainFrame->getChildByTag(300);
+	m_pEquipMarixLayer = ItemMarixLayer::create(pItemNode->getContentSize().width, pItemNode->getContentSize().height);
+	m_pEquipMarixLayer->setPosition(ccp(pItemNode->getPositionX() - pItemNode->getContentSize().width / 2, pItemNode->getPositionY() - pItemNode->getContentSize().height / 2));
+	m_pEquipMarixLayer->SetItemMap(PackageManager::getInstance()->getItemMap(EICT_KungfuEquip));
+	m_pEquipMarixLayer->signalCallEndItem.connect(this, &WuXueUiLayer::onDropEndEquipItem);
+	m_pEquipMarixLayer->signalClickItem.connect(this, &WuXueUiLayer::clickequiplayer);
+	m_MainFrame->addChild(m_pEquipMarixLayer);
+
+	for(int i = 0; i < f_formula_helper::get_magic_soul_slot_max_num(); ++i)
+	{
+		ItemNode* pCycelItem = ItemNode::create();
+		pCycelItem->set_need_show_lock(false);
+		pCycelItem->VisibleBlock(false);
+		pCycelItem->setBlank();
+		pCycelItem->setTag(i);
+		pCycelItem->setItemSpriteScale(1);
+		CCPoint trueccp = ccp(m_MainFrame->getChildByTag(i)->getPositionX() - m_pEquipMarixLayer->getPositionX(), m_MainFrame->getChildByTag(i)->getPositionY() - m_pEquipMarixLayer->getPositionY());
+		pCycelItem->setPosition(trueccp);
+		m_pEquipMarixLayer->AddCustomNode(pCycelItem);
+		this->removeChild(m_MainFrame->getChildByTag(i));
+	}
+	m_pItemMarixLayer->InsertTargetNodeMap(m_pEquipMarixLayer);
+	m_pEquipMarixLayer->InsertTargetNodeMap(m_pItemMarixLayer);
+
+	//武学仓库初始化
+// 	CCSprite* pMarixSprite2 = (CCSprite*)m_MainFrame->getChildByTag(21);
+// 	m_pWareMarixLayer = ItemMarixLayer::create(pMarixSprite2->getContentSize().width, pMarixSprite2->getContentSize().height + 3, 5, 1, 8, 8);
+// 	m_pWareMarixLayer->setPosition(pMarixSprite2->getPosition());
+// 	m_pWareMarixLayer->SetItemMap(PackageManager::getInstance()->getItemMap(EICT_KungfuWare));
+// 	m_pWareMarixLayer->signalCallEndItem.connect(this, &WuXueUiLayer::onDropEndItem2);
+// 	m_pWareMarixLayer->signalClickItem.connect(this, &WuXueUiLayer::clickitemlayer2);
+// 	m_pWareMarixLayer->SetCanScrollView(false);
+// 	m_MainFrame->addChild(m_pWareMarixLayer);
+// 
+// 	m_pWareMarixLayer->InsertTargetNodeMap(m_pItemMarixLayer);
+// 	m_pItemMarixLayer->InsertTargetNodeMap(m_pWareMarixLayer);
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string sSEFightFire = sSEDir + "E1_50.plist";
+	std::string sSEGFSurround = sSEDir + "E1_48.plist";
+	std::string sSEGFFusion = sSEDir + "E1_42.plist";
+	std::string sLevelUpEffect= sSEDir + "E1_215.plist";
+
+	std::string sButtonEffect= sSEDir + "E1_222.plist";
+	std::string sFuWenEffect= sSEDir + "E1_223.plist";
+
+	std::string E1_236= sSEDir + "E1_236.plist";
+	std::string E1_237= sSEDir + "E1_237.plist";
+	std::string E1_238= sSEDir + "E1_238.plist";
+	std::string E1_239= sSEDir + "E1_239.plist";
+	std::string E1_240= sSEDir + "E1_240.plist";
+	std::string E1_272= sSEDir + "E1_272.plist";
+	
+
+	_plist.insert(sSEFightFire);
+	_plist.insert(sSEGFSurround);
+	_plist.insert(sSEGFFusion);
+	_plist.insert(sLevelUpEffect);
+	_plist.insert(sButtonEffect);
+	_plist.insert(sFuWenEffect);
+	_plist.insert(sFuWenEffect);
+
+	_plist.insert(E1_236);
+	_plist.insert(E1_237);
+	_plist.insert(E1_238);
+	_plist.insert(E1_239);
+	_plist.insert(E1_240);
+	_plist.insert(E1_272);
+
+
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+
+	for (std::set <std::string>::iterator iter=_plist.begin();iter!=_plist.end();iter++)
+	{
+		CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(iter->c_str());
+	}
+
+	_fightNumAcNode = this->getFightSuperEffect();
+	m_MainFrame->addChild(_fightNumAcNode, RZN_EFFECT);
+	_fightNumAcNode->setPosition(m_MainFrame->getChildByTag(WXT_FightNumSE)->getPosition());
+	_fightNumAcNode->setScale(0.8f);
+	_fightNumAcNode->BeginAction(0.07f, true);
+	m_MainFrame->getChildByTag(WXT_FightNumSP)->setZOrder(RZN_EFFECT+1);
+	_fightNumBLabel = CCLabelBMFont::create();
+	_fightNumBLabel->setFntFile("Art/Scene/fontNum.fnt");
+	_fightNumBLabel->setPosition(m_MainFrame->getChildByTag(WXT_FightNumPosLabel)->getPosition());
+	_fightNumBLabel->setAnchorPoint(ccp(0.0f, 0.5f));
+	_fightNumBLabel->setScale(0.8f);
+	m_MainFrame->addChild(_fightNumBLabel, RZN_EFFECT+1);
+	_fightNumBLabel->setTag(WXT_FightNumValue);
+	m_MainFrame->getChildByTag(WXT_FightNumPosLabel)->setVisible(false);
+
+	CCLabelTTF* bagNum=dynamic_cast<CCLabelTTF *>(m_MainFrame->getChildByTag(32));
+	m_realm=dynamic_cast<CCSprite *>(m_MainFrame->getChildByTag(33));;
+	CCLabelTTF* addtion=dynamic_cast<CCLabelTTF *>(m_MainFrame->getChildByTag(34));
+	CCLabelTTF * addtionValue=dynamic_cast<CCLabelTTF *>(m_MainFrame->getChildByTag(35));
+	
+	m_bagNum=Helper::replaceLabelTTFWithLabelFTAndRemove(bagNum);
+	m_addtionDes=Helper::replaceLabelTTFWithLabelFTAndRemove(addtion);
+	m_addtionValue=Helper::replaceLabelTTFWithLabelFTAndRemove(addtionValue);
+
+	m_special_soul=Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF *>(m_MainFrame->getChildByTag(52)));
+
+
+	m_tipNode=m_MainFrame->getChildByTag(36);
+	m_tipNode->setZOrder(1000);
+	m_tipNode->setVisible(true);
+
+	CCNode* contend=m_tipNode->getChildByTag(1);
+
+	m_tipContener = CCNode::create();
+	m_tipContener->setContentSize(contend->getContentSize());
+	m_tipScrollView = createScrollViewWithContent(m_tipContener);
+	m_tipScrollView->setContainer(m_tipContener);
+	m_tipScrollView->setTouchPriority(-10);
+	contend->addChild(m_tipScrollView);
+
+	m_tipItemModel=m_tipNode->getChildByTag(2);
+	m_tipItemModel->removeFromParent();
+	m_tipItemModel->retain();
+
+
+	CCSprite * smallCircle=dynamic_cast<CCSprite*>(m_MainFrame->getChildByTag(38));
+	if(smallCircle)
+	{
+		smallCircle->runAction(CCRepeatForever::create(CCRotateBy::create(18.0,360)));
+		GameActionNode * effect = GameActionNode::create();
+		effect->InitTextureWithSpriteFrame("E1_222");
+		m_MainFrame->addChild(effect);
+		effect->setPosition(smallCircle->getPosition());
+		effect->BeginAction(0.1,true);
+		effect->runAction(CCRepeatForever::create(CCRotateBy::create(18.0,360)));
+	}
+		
+
+	CCSprite * bigCircle=dynamic_cast<CCSprite*>(m_MainFrame->getChildByTag(37));
+	if(bigCircle)
+		bigCircle->runAction(CCRepeatForever::create(CCRotateBy::create(9.0,-360)));
+
+	CCControlButton * button=dynamic_cast<CCControlButton*>(m_MainFrame->getChildByTag(39));
+	if(button)
+	{
+		GameActionNode * buttonEffect = GameActionNode::create();
+		buttonEffect->InitTextureWithSpriteFrame("E1_223");
+		m_MainFrame->addChild(buttonEffect);
+		buttonEffect->setPosition(button->getPosition());
+		buttonEffect->BeginAction(0.1,true);
+	}
+
+
+
+
+	showTip(false);
+	initRealmView();
+	updateRealmTile();
+	setLockitem();
+	updateMartialData();
+	updateWare();
+	updateEquip();
+	setRoleVisible(false);
+	
+}
+
+void WuXueUiLayer::initRealmView()
+{
+	map<int,GongFaRealm> const& realMapData=GambleMgr::getInstance()->m_gongFaRealmData;
+	int lineSpace=0;
+	float totalHeight=realMapData.size()*(m_tipItemModel->getContentSize().height+lineSpace);
+//	m_tipContener->setContentSize(CCSize(m_tipContener->getContentSize().width,totalHeight));
+	m_tipScrollView->setContentSize(CCSize(m_tipScrollView->getContentSize().width,totalHeight));
+	m_tipContener->removeAllChildren();
+
+	for (auto iter=realMapData.begin();iter!=realMapData.end();iter++)
+	{
+		RealmItem * realmItem=new RealmItem(m_tipItemModel);
+		realmItem->addToParent(m_tipContener);
+		float height=realmItem->getNode()->getContentSize().height+lineSpace;
+		realmItem->setPositon(ccp(0,totalHeight-height));
+		realmItem->setData(iter->second);
+		realmItem->setId(iter->second.id);
+		totalHeight-=height;
+		m_realmItemMap.insert(make_pair(realmItem->getId(),realmItem));
+	}
+
+	m_tipScrollView->setContentOffset(m_tipScrollView->minContainerOffset());
+}
+
+
+void WuXueUiLayer::updateRealmView()
+{	
+
+	for (map<int,RealmItem *>::iterator iter=m_realmItemMap.begin();iter!=m_realmItemMap.end();iter++)
+	{
+		RealmItem * item=iter->second;
+		GongFaRealm const* itemData=GambleMgr::getInstance()->getRealmDataByID(item->getId());
+		if(itemData)
+		{
+			item->setData(*itemData);
+		}
+	}
+
+}
+void WuXueUiLayer::updateRealmTile()
+{
+	GongFaRealm const* realmData=GambleMgr::getInstance()->getCurRealmData();
+	if(realmData)
+	{
+		m_realm->setVisible(true);
+		m_addtionDes->setVisible(true);
+		m_addtionValue->setVisible(true);
+		stringstream ss;
+		ss<<realmData->addValue<<"%";
+		m_addtionValue->setString(ss.str());
+		string realmRes=realmData->res;
+		if((!realmRes.empty())&&(realmRes!="0"))
+			m_realm->setDisplayFrame(PackageManager::getInstance()->getIconFrameByName(realmRes));
+	}
+	else
+	{
+		m_realm->setVisible(false);
+		m_addtionDes->setVisible(false);
+		m_addtionValue->setVisible(false);
+	}
+
+	refresh_special_soul_num();
+}
+
+void WuXueUiLayer::showTip(bool show)
+{
+	m_tipNode->setVisible(show);
+	m_tipScrollView->setTouchEnabled(show);
+
+}
+
+void WuXueUiLayer::closeAllUi()
+{
+	GongfaTip::getInstace()->close();
+	Gongfa2Tip::getInstace()->close();
+	showTip(false);
+	showWuXueList(false);
+	setRoleVisible(false);
+}
+
+void WuXueUiLayer::setLockitem()
+{
+ 	LocalPlayer *localPlayer = RoleManager::getInstance()->getLocalPlayer();
+// 	int canUseCount = 0;
+// 	if (localPlayer->getLevel() < 40)
+// 	{
+// 		canUseCount = 0;
+// 	}
+// 	else if (localPlayer->getLevel() >= 40 && localPlayer->getLevel() < 45)
+// 	{
+// 		canUseCount = 1;
+// 	}
+// 	else if (localPlayer->getLevel() >= 45 && localPlayer->getLevel() < 50)
+// 	{
+// 		canUseCount = 2;
+// 	}
+// 	else if (localPlayer->getLevel() >= 50 && localPlayer->getLevel() < 55)
+// 	{
+// 		canUseCount = 3;
+// 	}
+// 	else if (localPlayer->getLevel() >= 55 && localPlayer->getLevel() < 60)
+// 	{
+// 		canUseCount = 4;
+// 	}
+// 	else if (localPlayer->getLevel() >= 60 && localPlayer->getLevel() < 65)
+// 	{
+// 		canUseCount = 5;
+// 	}
+// 	else if (localPlayer->getLevel() >= 65 && localPlayer->getLevel() < 70)
+// 	{
+// 		canUseCount = 6;
+// 	}
+// 	else if (localPlayer->getLevel() >= 70 && localPlayer->getLevel() < 75)
+// 	{
+// 		canUseCount = 7;
+// 	}
+// 	else
+// 	{
+// 		canUseCount = 8;
+// 	}
+	int canUseCount = f_formula_helper::get_enable_magic_soul_slot_num(localPlayer->getLevel());
+
+	for (int i = 0; i < f_formula_helper::get_magic_soul_slot_max_num(); ++i)
+	{
+		itemLock[i] = dynamic_cast<CCSprite*>(m_MainFrame->getChildByTag(100 + i));
+		if (i <= canUseCount - 1)
+		{
+			itemLockState[i] = true;//true代表能使用,所以要不显示lock的精灵
+			itemLock[i]->setVisible(false);
+		} 
+		else
+		{
+			itemLockState[i] = false;
+			itemLock[i]->setVisible(true);
+		}
+	}
+}
+
+void WuXueUiLayer::onExit()
+{
+	//退出时通知服务器整理背包。
+	NET_SIC_stack_item cmd;
+	cmd.eConType = EICT_KungfuBag;
+	TCP_CLIENT->send_net_cmd(&cmd, NP_NORMAL, false);
+	SecondVerifyMgr::getInstance()->destroyRequsetVerityData();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	m_tipItemModel->release();
+	for (map<int,RealmItem*>::iterator iter=m_realmItemMap.begin();iter!=m_realmItemMap.end();iter++)
+	{
+		CC_SAFE_DELETE(iter->second);
+	}
+	m_realmItemMap.clear();
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+	CCLayer::onExit();
+
+	
+}
+
+bool WuXueUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	CCPoint framePoint = m_MainFrame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = m_MainFrame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+
+	if(m_tipNode->isVisible())
+	{
+		CCPoint tipPoint = m_tipNode->convertTouchToNodeSpace(pTouch);
+		CCRect tipframeRect(0.0f, 0.0f, m_tipNode->getContentSize().width, m_tipNode->getContentSize().height);
+		if(!tipframeRect.containsPoint(tipPoint))
+		{
+			showTip(false);
+		}
+		else
+		{
+			return true;
+		}
+	}
+	
+// 	if(_roleframe->isVisible())
+// 	{
+// 		return true;
+// 	}
+
+	if(mainListNode->isVisible())
+		return true;
+
+	if(frameRect.containsPoint(framePoint))
+	{
+		CCPoint framePoint2 = m_pItemMarixLayer->convertTouchToNodeSpace(pTouch);
+		const CCSize &frameSize2 = m_pItemMarixLayer->getContentSize();
+		CCRect frameRect2(0.0f, 0.0f, frameSize2.width, frameSize2.height);
+		if (frameRect2.containsPoint(framePoint2))
+		{
+			return false;
+		}
+
+// 		CCPoint framePoint3 = m_pWareMarixLayer->convertTouchToNodeSpace(pTouch);
+// 		const CCSize &frameSize3 = m_pWareMarixLayer->getContentSize();
+// 		CCRect frameRect3(0.0f, 0.0f, frameSize3.width, frameSize3.height);
+// 		if (frameRect3.containsPoint(framePoint3))
+// 		{
+// 			int index = getItemNode(pTouch);
+// 			if (index == -1)
+// 			{
+// 				GongfaTip::getInstace()->close();
+// 				return true;
+// 			}
+// 			return false;
+// 		}
+
+		CCPoint framePoint4 = m_pEquipMarixLayer->convertTouchToNodeSpace(pTouch);
+		const CCSize &frameSize4 = m_pEquipMarixLayer->getContentSize();
+		CCRect frameRect4(0.0f, 0.0f, frameSize4.width, frameSize4.height);
+		if (frameRect4.containsPoint(framePoint4))
+		{
+			return false;
+		}
+
+	
+
+		return true;
+	}
+	return false;
+}
+
+// int WuXueUiLayer::getItemNode(CCTouch *pTouch)
+// {
+// 	for (int i = 0;i < 5; ++i)
+// 	{
+// 		ItemNode* node = (ItemNode*)m_pWareMarixLayer->getItemContent()->getChildByTag(i);
+// 		if (isTouchOnNodeContent(node,pTouch) && node->GetDataId() != -1)
+// 		{
+// 			return i;
+// 		}
+// 	}
+// 	return -1;
+// }
+
+void WuXueUiLayer::setRoleVisible(bool visible)
+{
+	//CC_ASSERT(_roleframe != NULL);
+	//_roleframe->setVisible(visible);
+}
+void WuXueUiLayer::onWuXueDescPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	closeAllUi();
+	//setRoleVisible(true);
+
+	PlacardManager::getInstance()->open_placard_node(17);
+}
+
+void WuXueUiLayer::onKnowBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setRoleVisible(false);
+}
+void WuXueUiLayer::onCloseDescBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	setRoleVisible(false);
+}
+
+void WuXueUiLayer::updateMartialData()
+{
+	//刷新背包
+	m_pItemMarixLayer->RefreshData();
+	//更新背包格子
+	int usedBagNum=PackageManager::getInstance()->getItemMap(EICT_KungfuBag)->size();
+	stringstream ss;
+	ss<<usedBagNum<<"/"<<MAX_KUNGFU_BAG_NUM;
+	m_bagNum->setString(ss.str());
+}
+
+void WuXueUiLayer::updateEquip()
+{
+	//刷新功法装备
+	m_pEquipMarixLayer->RefreshData();
+	
+	//更新一下战斗力显示
+	PackageManager::ItemMap* tempKungFuMap = PackageManager::getInstance()->getItemMap(EICT_KungfuEquip);
+	PackageManager::ItemMap::iterator iter = tempKungFuMap->begin();
+	int tempFightLi = 0;
+	f_equipment* tempEquip;
+	//此处修改功法描述
+
+	for(ItemMarixLayer::CustomNodeMap::iterator iter=m_pEquipMarixLayer->m_CustomNodeMap.begin();
+		iter!=m_pEquipMarixLayer->m_CustomNodeMap.end();iter++)
+	{
+		ItemNode * item=*iter;
+		item->showGongFaLevel(false);
+		item->showGongFaEffect(false);
+	}
+
+	while(iter != tempKungFuMap->end())
+	{
+		tempEquip = dynamic_cast<f_equipment*>(iter->second);
+		if (PackageManager::getInstance()->IsAddItem(tempEquip))
+		{
+			tempFightLi += tempEquip->get_fightli();
+		
+		}
+
+		ItemNode* pItem = m_pEquipMarixLayer->GetItemNode(iter->first);
+		pItem->showGongFaLevel(true);
+		pItem->showGongFaEffect(true);
+		
+		++iter;
+	}
+	
+
+	CCString* strZhandouli = CCString::createWithFormat("%d", tempFightLi);
+	_fightNumBLabel->setString(strZhandouli->getCString());
+
+	updateRealmView();
+}
+
+
+
+
+void WuXueUiLayer::updateWare()
+{
+	//刷新功法装备
+	//m_pWareMarixLayer->RefreshData();
+}
+
+void WuXueUiLayer::onDropEndItem( CCNode* pNode, short nIdx )
+{
+	if(!pNode)
+		return;
+
+	//先看看是不是功法装备 若不是那一定是功法仓库了
+	if(pNode->getParent() == m_pEquipMarixLayer)
+	{
+		if (itemLockState[pNode->getTag()])
+		{
+			PackageManager::getInstance()->changeItemPosition((EItemConType)EICT_KungfuBag,(EItemConType)EICT_KungfuEquip, (short)nIdx, (short)pNode->getTag(), 0);
+		}
+		else
+		{
+			ToolTip::getInstance()->push("\xE5\xB0\x9A\xE6\x9C\xAA\xE8\xA7\xA3\xE9\x94\x81");
+			return;
+		}
+	}
+	else //功法仓库
+	{
+		PackageManager::getInstance()->changeItemPosition((EItemConType)EICT_KungfuBag,(EItemConType)EICT_KungfuWare, (short)nIdx, (short)pNode->getTag(), 0);
+
+	}
+}
+
+/*
+void WuXueUiLayer::onDropEndItem2( CCNode* pNode, short nIdx )
+{
+	if(!pNode)
+		return;
+	PackageManager::getInstance()->changeItemPosition((EItemConType)EICT_KungfuWare,(EItemConType)EICT_KungfuBag, (short)nIdx, (short)pNode->getTag(), 0);
+//	PackageManager::getInstance()->changeItemPosition((EItemConType)EICT_KungfuBag,(EItemConType)EICT_KungfuEquip, (short)nIdx, (short)pNode->getTag(), 0);
+
+}
+*/
+
+void WuXueUiLayer::onDropEndEquipItem( CCNode* pNode, short nIdx )
+{
+	if(!pNode)
+		return;
+	PackageManager::getInstance()->changeItemPosition((EItemConType)EICT_KungfuEquip,(EItemConType)EICT_KungfuBag, (short)nIdx, (short)pNode->getTag(), 0);
+//	PackageManager::getInstance()->changeItemPosition((EItemConType)EICT_KungfuBag,(EItemConType)EICT_KungfuEquip, (short)nIdx, (short)pNode->getTag(), 0);
+
+}
+
+void WuXueUiLayer::onChangeItemPos( short nPos1, short nPos2 )
+{
+	//若nPos2 == -2 表示是丢弃了
+	//给个确认提示吧 todo:
+	if(nPos2 == -1)
+	{
+		nDelItemPos = nPos1;
+		//丢弃
+		MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, "\xE7\xA1\xAE\xE8\xAE\xA4\xE4\xB8\xA2\xE5\xBC\x83\x3F", TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+		msgUi->signalOkBtnPressed.connect(this, &WuXueUiLayer::DropGongfaItem);
+		World::getInstance()->getScene()->addChild(msgUi, WZ_MESSAGEBOX, WCT_MessageBox);
+		return;
+	}
+	else if(nPos2==-2)//-2表示框内空白
+	{
+		return;
+	}
+
+	PackageManager::getInstance()->changeItemPosition(EICT_KungfuBag, nPos1, nPos2);
+}
+
+void WuXueUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	GongfaTip::getInstace()->close();
+	Gongfa2Tip::getInstace()->close();
+
+	CLOSE_UI(WCT_WUXUEUI);
+	
+}
+
+void WuXueUiLayer::onZhengLiBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_11);
+	PackageManager::getInstance()->reorderPackage(EICT_KungfuBag);
+}
+
+void WuXueUiLayer::onYJRongHeBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_11);
+	if(PackageManager::getInstance()->hasLockItem(EICT_KungfuBag))
+	{
+		//[bing] 已经在融合中不能再次融合
+		return;
+	}
+
+	PackageManager::getInstance()->lockItem(EICT_KungfuBag);//功法背包
+
+	//少于2个不可融合
+	if (PackageManager::getInstance()->getItemMap(EICT_KungfuBag)->size() <= 1)
+	{
+		PackageManager::getInstance()->unLockItem(EICT_KungfuBag);//背包解锁
+		//功法数量少于两个无法一键合成
+			
+		ToolTip::getInstance()->push(STRING_TABLE["gongfa_string7"]);
+		return;
+	}
+
+	WorldPacket C2GMsg(NET_C2G_PROC_KUNGFU_ONE_KEY_FUSION);
+	C2GMsg << (int)1;
+
+	if (PackageManager::getInstance()->isHavePurpleSwalllowInKungfuBag(EICT_KungfuBag))
+	{
+		std::function<void(bool)> func = [C2GMsg](bool isSuccess){
+			if (isSuccess)
+			{
+				TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2GMsg.contents(), NP_NORMAL, false);
+			}
+			else
+			{
+				PackageManager::getInstance()->unLockItem(EICT_KungfuBag);//背包解锁
+			}
+
+		};
+		SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+	}
+	else
+	{
+		TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2GMsg.contents(), NP_NORMAL, false);
+	}
+	
+
+	//TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2GMsg.contents(), NP_NORMAL, false);
+}
+
+void WuXueUiLayer::onTiaoZhuanBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+//	CLOSE_UI(WCT_WUXUEUI);
+	Gongfa2Tip::getInstace()->close();
+	OPEN_UI(WCT_CangJingGeUi);
+	
+}
+
+void WuXueUiLayer::DropGongfaItem()
+{
+	if(nDelItemPos == -1)
+		return;
+
+	PackageManager::getInstance()->DropGongfaItem(nDelItemPos);
+	nDelItemPos = -1;
+}
+
+void WuXueUiLayer::clickitemlayer( short idx )
+{
+	if(idx == -1)
+		return;
+
+// 	f_item* pItem = PackageManager::getInstance()->getItem(EICT_KungfuBag, idx);
+// 	if(!pItem)
+// 		return;
+// 
+// 	GongfaTip::getInstace()->open();
+// 	CCPoint itemPos = convertToWorldSpace(m_pItemMarixLayer->GetItemNode(idx)->getPosition());
+// 	GongfaTip::getInstace()->setPosition(ccp(itemPos.x+90, itemPos.y-90));
+// 	GongfaTip::getInstace()->setData((f_equipment*)pItem);
+}
+
+void WuXueUiLayer::clickitemlayer2( short idx )
+{
+	if(idx == -1)
+		return;
+
+// 	f_item* pItem = PackageManager::getInstance()->getItem(EICT_KungfuWare, idx);
+// 	if(!pItem)
+// 		return;
+// 
+// 	GongfaTip::getInstace()->open();
+// 	CCPoint itemPos = convertToWorldSpace(m_pItemMarixLayer->GetItemNode(idx)->getPosition());
+// 	GongfaTip::getInstace()->setPosition(ccp(itemPos.x+90, itemPos.y-400));
+// 	GongfaTip::getInstace()->setData((f_equipment*)pItem);
+}
+
+void WuXueUiLayer::clickequiplayer(short idx)
+{
+	if(idx == -1)
+		return;
+
+// 	f_item* pItem = PackageManager::getInstance()->getItem(EICT_KungfuEquip, idx);
+// 	if(!pItem)
+// 		return;
+// 
+// 	GongfaTip::getInstace()->open();
+// 	CCPoint itemPos = convertToWorldSpace(m_pItemMarixLayer->GetItemNode(idx)->getPosition());
+// 	GongfaTip::getInstace()->setPosition(ccp(itemPos.x+220, itemPos.y-140));
+// 	GongfaTip::getInstace()->setData((f_equipment*)pItem);
+}
+
+GameActionNode* WuXueUiLayer::getFightSuperEffect()
+{
+	GameActionNode* fireSEAcNode = GameActionNode::create();
+// 	for (int i=1; i<99; ++i)
+// 	{
+// 		CCString* fireStr = CCString::createWithFormat("%s%02d", "E1_50", i);
+// 		if(!fireSEAcNode->AddTexture(fireStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+	fireSEAcNode->InitTextureWithSpriteFrame("E1_50");
+	return fireSEAcNode;
+}
+
+bool WuXueUiLayer::getKungfuLockState( int index )
+{
+	return itemLockState[index];
+}
+
+cocos2d::CCRect WuXueUiLayer::GetItemRect( short nIdx )
+{
+	ItemNode* pItemNode = m_pItemMarixLayer->GetItemNode(nIdx);
+	if(!pItemNode)
+		return CCRect(0.0f, 0.0f, 0.0f, 0.0f);
+	m_pItemMarixLayer->SetSrollViewOffSetY(nIdx);
+	SetNodeTintTo(dynamic_cast<CCNode*>(pItemNode));
+	CCPoint cp = pItemNode->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = pItemNode->getContentSize();
+	return CCRect(cp.x, cp.y, cs.width, cs.height);
+}
+
+cocos2d::CCRect WuXueUiLayer::GetCloseBtnPos()
+{
+	CCPoint cp = m_MainFrame->getChildByTag(2000)->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = m_MainFrame->getChildByTag(2000)->getContentSize();
+	return CCRect(cp.x, cp.y, cs.width, cs.height);
+}
+void WuXueUiLayer::showFusionEffect(short idx, string effect,EItemConType conType)
+{
+	if (conType == EICT_KungfuBag)
+	{
+		ItemNode* node = m_pItemMarixLayer->GetItemNode(idx);
+		if (node)
+		{
+			m_pItemMarixLayer->GetItemNode(idx)->showGongfaSE(effect);
+		}
+	}
+	if (conType == EICT_KungfuEquip)
+	{
+		ItemNode* node = m_pEquipMarixLayer->GetItemNode(idx);
+		if (node)
+		{
+			m_pEquipMarixLayer->GetItemNode(idx)->showGongfaSE(effect);
+		}
+	}
+}
+void WuXueUiLayer::showFusionEffect( short idx, eVisualPattern seLevel ,EItemConType conType)
+{
+	if (conType == EICT_KungfuBag)
+	{
+		ItemNode* node = m_pItemMarixLayer->GetItemNode(idx);
+		if (node)
+		{
+			m_pItemMarixLayer->GetItemNode(idx)->showGongfaSE(seLevel);
+		}
+	}
+	if (conType == EICT_KungfuEquip)
+	{
+		ItemNode* node = m_pEquipMarixLayer->GetItemNode(idx);
+		if (node)
+		{
+			m_pEquipMarixLayer->GetItemNode(idx)->showGongfaSE(seLevel);
+		}
+	}
+}
+
+void WuXueUiLayer::showLevelUpEffect(short idx, string effect,EItemConType conType)
+{
+
+
+	if (conType == EICT_KungfuBag)
+	{
+		ItemNode* node = m_pItemMarixLayer->GetItemNode(idx);
+		if (node)
+		{
+			//功法背包中，为了升级特效不被遮挡，放到这里
+			GameActionNode* burstAcNode;
+			burstAcNode = GameActionNode::create();
+			burstAcNode->InitTextureWithSpriteFrame(effect.c_str());
+			burstAcNode->playAnimOnce(0.05f);	
+			burstAcNode->setPosition(node->getPosition());
+			m_pItemMarixLayer->getItemContent()->addChild(burstAcNode,100);
+		}
+		
+	}
+	if (conType == EICT_KungfuEquip)
+	{
+		ItemNode* node = m_pEquipMarixLayer->GetItemNode(idx);
+		if (node)
+		{
+			m_pEquipMarixLayer->GetItemNode(idx)->showGongfaSE(effect);
+		}
+	}
+}
+
+void WuXueUiLayer::onMoJingBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	//if(_roleframe->isVisible())
+	//	return;
+	closeAllUi();
+	showTip(true);
+}
+
+void WuXueUiLayer::onchakanjingjieBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	closeAllUi();
+	Gongfa2Tip::getInstace()->open();
+	Gongfa2Tip::getInstace()->showMe();
+	
+}
+
+
+void WuXueUiLayer::onWuXueList1BtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	closeAllUi();
+	showWuXueList(true);	
+}
+
+void WuXueUiLayer::onClose1BtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	showWuXueList(false);	
+}
+
+
+void WuXueUiLayer::showWuXueList(bool _show)
+{
+	mainListNode->setVisible(_show);
+	if(_show)
+		updateDisplay();
+	_scrollView->setTouchEnabled(_show);
+
+}
+void WuXueUiLayer::updateDisplay()
+{
+	if (_verticalList->getItemCount() > 0)
+		return;
+	_verticalList->clear();
+	const std::vector<CangJingGeListItemData>& datas = CangJingGeListItemDataMgr::getInstance()->getData();
+	for(std::vector<CangJingGeListItemData>::const_iterator iter = datas.begin(); iter != datas.end(); ++ iter)
+	{
+		const CangJingGeListItemData &data = *iter;
+		CangJingGeListItem *item=new CangJingGeListItem(); 
+		item->setData(data);
+		_verticalList->addItem(item);
+	}
+	_verticalList->updateDisplay();
+}
+
+WuXueUiLayer::WuXueUiLayer()
+	:m_slot_max_num(f_formula_helper::get_magic_soul_slot_max_num())
+	,_verticalList(new VerticalList<CangJingGeListItem> ())
+{
+	itemLock.assign(m_slot_max_num,NULL);
+	itemLockState.assign(m_slot_max_num,true);
+}
+
+bool WuXueUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"m_bag_bg",CCNode*,m_bag_bg);
+	return false;
+}
+
+void WuXueUiLayer::refresh_special_soul_num()
+{
+	int realm = GambleMgr::getInstance()->m_curGongFaRealm;
+	int num = f_formula_helper::get_special_gold_magic_soul_limit_num(realm);
+	
+	if (num)
+	{
+		std::string text;
+		safe_sprintf(text,STRING_TABLE["gongfa_special_soul_num"],num);
+		m_special_soul->setString(text.c_str());
+	}
+
+	m_special_soul->setVisible(num>0);
+}
+
+//0 = 白 1 = 绿 2 = 蓝 3 = 紫 4 = 橙 5 = 金
+
+///////////////
+const ccColor3B RealmItem::qualityColors[6]={ccc3(0xfe,0xf8,0xd8),ccc3(0x3f,0xd4,0x16),ccc3(0x1d,0xad,0xe7),ccc3(0x91,0x13,0xbc),
+	ccc3(0xe0,0x78,0x09),ccc3(0xe1,0xe4,0x00)};
+void RealmItem::addToParent( CCNode * _node )
+{
+	_node->addChild(m_node);
+}
+
+RealmItem::RealmItem( CCNode * _node )
+{
+	m_node=CCNode::create();
+	m_node->setContentSize(_node->getContentSize());
+
+	for(int i=2;i<=15;i++)
+	{
+		CCLabelTTF * modelLabel=dynamic_cast<CCLabelTTF *>(_node->getChildByTag(i));
+		if(modelLabel)
+		{
+			//Helper::replaceLabelTTFWithLabelFTAndRemove(modelLabel);
+			LabelFT * label=createLabel(modelLabel);
+			m_node->addChild(label);
+		}
+	}
+	m_realmName=NULL;
+	CCSprite * realmName=dynamic_cast<CCSprite*>(_node->getChildByTag(1));
+	if(realmName)
+	{
+		m_realmName=CCSprite::createWithSpriteFrame(realmName->displayFrame());
+		m_realmName->setPosition(realmName->getPosition());
+		m_node->addChild(m_realmName);
+	}
+
+	CCSprite * line=dynamic_cast<CCSprite*>(_node->getChildByTag(100));
+
+	if(line)
+	{
+		m_line=CCSprite::createWithSpriteFrame(line->displayFrame());
+		m_line->setPosition(line->getPosition());
+		m_node->addChild(m_line);
+	}
+	
+
+	m_getLabel=dynamic_cast<LabelFT*>(m_node->getChildByTag(2));
+
+	m_qualityLabel=dynamic_cast<LabelFT*>(m_node->getChildByTag(4));
+	m_needNumLabel=dynamic_cast<LabelFT*>(m_node->getChildByTag(6));
+	m_needLvLabel=dynamic_cast<LabelFT*>(m_node->getChildByTag(8));
+
+	m_curNumLabel=dynamic_cast<LabelFT*>(m_node->getChildByTag(10));
+
+	m_addValueLabel=dynamic_cast<LabelFT*>(m_node->getChildByTag(12));
+
+	m_special_soul = dynamic_cast<LabelFT*>(m_node->getChildByTag(15));
+
+}
+
+
+void RealmItem::setData( GongFaRealm const& realmData )
+{
+	
+	stringstream ss;
+
+	if(m_realmName)
+	{
+		m_realmName->setDisplayFrame(PackageManager::getInstance()->getIconFrameByName(realmData.res));
+	}
+		
+	// 获得
+	bool overDone=false;
+	if(m_getLabel)
+	{
+		if(realmData.id>GambleMgr::getInstance()->m_curGongFaRealm)//未获得
+		{
+			m_getLabel->setString(STRING_TABLE["gongfa_string2"]);
+			m_getLabel->setColor(ccc3(129,129,129));
+			overDone=false;
+		}
+		else
+		{
+			m_getLabel->setString(STRING_TABLE["gongfa_string"]);
+			m_getLabel->setColor(ccc3(0,255,0));
+			overDone=true;
+		}
+	}
+	
+
+	if(m_qualityLabel)
+	{
+		m_qualityLabel->setColor(qualityColors[realmData.needQuality]);
+		m_qualityLabel->setString(realmData.qualityStr.c_str());
+	}
+	//needNum
+	ss.str("");
+	ss<<realmData.needNum;
+	if(m_needNumLabel)
+		m_needNumLabel->setString(ss.str());
+	//needLv
+	ss.str("");
+	ss<<realmData.needLv;
+	if(m_needLvLabel)
+		m_needLvLabel->setString(ss.str());
+
+	//addValue
+	ss.str("");
+	ss<<realmData.addValue<<"%";
+	if(m_addValueLabel)
+		m_addValueLabel->setString(ss.str());
+
+	//当前装备的
+	if(m_curNumLabel)
+	{
+		ss.str("");
+		
+		if(overDone)
+		{
+			ss<<"("<<realmData.needNum<<"/"<<realmData.needNum<<")";
+			m_curNumLabel->setColor(ccc3(0,255,0));
+			m_curNumLabel->setString(ss.str());
+		}
+		else
+		{
+			PackageManager::ItemMap * itemMap=PackageManager::getInstance()->getItemMap(EICT_KungfuEquip);
+			int curNum=0;
+			for (PackageManager::ItemMap::iterator iter=itemMap->begin();iter!=itemMap->end();iter++)
+			{
+				f_equipment * equip=dynamic_cast<f_equipment*>(iter->second);
+				if(equip)
+				{
+					if((equip->get_equip()->nLevel>=realmData.needLv)&&(equip->get_equip()->byQuality>=(unsigned char)realmData.needQuality))
+					{
+						curNum++;
+					}
+				}
+
+			}
+			ss<<"("<<curNum<<"/"<<realmData.needNum<<")";
+			m_curNumLabel->setColor(ccc3(255,0,0));
+			m_curNumLabel->setString(ss.str());
+		}
+	}
+
+	refresh_special_soul_text(realmData);
+
+}
+void RealmItem::setOtherData( GongFaRealm const&realmData,tagOtherGongFa const& otherGongFa )
+{
+	stringstream ss;
+
+	if(m_realmName)
+	{
+		m_realmName->setDisplayFrame(PackageManager::getInstance()->getIconFrameByName(realmData.res));
+	}
+
+	// 获得
+	bool overDone=false;
+	if(m_getLabel)
+	{
+		if(realmData.id>otherGongFa.reamLevel)//未获得
+		{
+			m_getLabel->setString(STRING_TABLE["gongfa_string2"]);
+			m_getLabel->setColor(ccc3(129,129,129));
+			overDone=false;
+		}
+		else
+		{
+			m_getLabel->setString(STRING_TABLE["gongfa_string"]);
+			m_getLabel->setColor(ccc3(0,255,0));
+			overDone=true;
+		}
+	}
+
+
+	if(m_qualityLabel)
+	{
+		m_qualityLabel->setColor(qualityColors[realmData.needQuality]);
+		m_qualityLabel->setString(realmData.qualityStr.c_str());
+	}
+	//needNum
+	ss.str("");
+	ss<<realmData.needNum;
+	if(m_needNumLabel)
+		m_needNumLabel->setString(ss.str());
+	//needLv
+	ss.str("");
+	ss<<realmData.needLv;
+	if(m_needLvLabel)
+		m_needLvLabel->setString(ss.str());
+
+	//addValue
+	ss.str("");
+	ss<<realmData.addValue<<"%";
+	if(m_addValueLabel)
+		m_addValueLabel->setString(ss.str());
+
+	//当前装备的
+	if(m_curNumLabel)
+	{
+		ss.str("");
+
+		if(overDone)
+		{
+			ss<<"("<<realmData.needNum<<"/"<<realmData.needNum<<")";
+			m_curNumLabel->setColor(ccc3(0,255,0));
+			m_curNumLabel->setString(ss.str());
+		}
+		else
+		{
+			
+			int curNum=0;
+			//查数据库，获得数据
+
+			for(auto iter=otherGongFa.items.begin();iter!=otherGongFa.items.end();iter++)
+			{
+
+				c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM equipData WHERE typeId = ?1");
+				cmd->set_integer32(1 , iter->id);
+				c_sql_table* table = c_db_manager::getSingleton()->create_table();
+				int quatity=0;
+				if(table->retrieve_row())
+				{
+					unsigned int idx = table->get_index("quality");
+					quatity=table->get_integer32(idx);
+				}
+				if(quatity>=realmData.needQuality&&iter->level>=realmData.needLv)
+					curNum++;
+
+				c_db_manager::getSingleton()->destroy_table(table);
+				c_db_manager::getSingleton()->end_operation(cmd);
+			}
+	
+			ss<<"("<<curNum<<"/"<<realmData.needNum<<")";
+			m_curNumLabel->setColor(ccc3(255,0,0));
+			m_curNumLabel->setString(ss.str());
+		}
+	}
+}
+
+LabelFT * RealmItem::createLabel( CCLabelTTF * _label )
+{
+	TTFConfig config;
+	config.outlineSize=1;
+	config.fontFilePath=FT_FONTFACE;
+	config.fontSize=_label->getFontSize();
+	LabelFT *label = LabelFT::createWithTTF(config,_label->getString());
+	label->setPosition(_label->getPosition());
+	label->setAnchorPoint(_label->getAnchorPoint());
+	label->setTag(_label->getTag());
+	label->setColor(_label->getColor());
+	return label;
+}
+
+void RealmItem::refresh_special_soul_text( GongFaRealm const& realm )
+{
+	bool visible = realm.add>0;
+
+	LabelFT* text_label =static_cast<LabelFT*>(m_node->getChildByTag(14)); 
+
+	if (text_label&& m_special_soul)
+	{
+		if(visible)
+		{
+			std::stringstream ss;
+			ss<<realm.add;
+			m_special_soul->setString(ss.str().c_str());
+			bool reach = GambleMgr::getInstance()->m_curGongFaRealm >= realm.id;
+			m_special_soul->setColor(reach ?ccGREEN:ccc3(129,129,129));
+			text_label->setColor(reach ?ccGREEN:ccc3(129,129,129));
+		}
+
+		text_label->setVisible(visible);
+		m_special_soul->setVisible(visible);
+	}
+}
+
+
+
+
+
+

@@ -1,0 +1,830 @@
+#include "RoleAttrUi.h"
+#include "CfgReader.h"
+#include "CmdAdapter.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "TouchSprite.h"
+#include "World.h"
+#include "RoleEquipUi.h"
+#include "RemoteRoleStateMgr.h"
+#include "UiResourceMgr.h"
+#include "RoleInfoUi.h"
+#include "UiManager.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "StringMgr.h"
+#include "TextTip.h"
+#include "Helper.h"
+#include "NPCTalkUi.h"
+#include "GambleMgr.h"
+#include "NewRoleTitleUi.h"
+#include "CommonClient.h"
+#include "WorldLevelMgr.h"
+CCNode * RoleAttrUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["RoleAttrUiLayer"] = UiLayerLoader<RoleAttrUiLayer>::loader();
+	nodeLoaders["TouchSprite"] = TouchSpriteLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("roleattrui", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+void RoleAttrUi::popupUIOnEnd()
+{
+	// 如果是膜拜查看，关闭时，重新打开膜拜面板
+	if (m_popTag == RRP_MOBAI)
+	{
+		OPEN_UI(WCT_STATUEWORSHIP);
+		StatueWorshipUiLayer* targetLayer = getUiNodeByTag<StatueWorshipUiLayer>(WCT_STATUEWORSHIP);
+		if (targetLayer){
+			targetLayer->updateInfo();
+		}
+	}
+
+	setPopupPreUiOnClose(false);
+	m_popTag = RRP_NORMAL;
+}
+
+void RoleAttrUi::setPlayerId( unsigned int playerId )
+{
+	RoleAttrUiLayer *uiLayer = getUiNodeByTag<RoleAttrUiLayer>(WCT_ROLEATTRUI);
+	if(uiLayer != NULL)
+	{
+		uiLayer->setPlayerId(playerId);
+	}
+}
+
+unsigned int RoleAttrUi::getPlayerId() const
+{
+	RoleAttrUiLayer *uiLayer = getUiNodeByTag<RoleAttrUiLayer>(WCT_ROLEATTRUI);
+	if(uiLayer != NULL)
+	{
+		return uiLayer->getPlayerId();
+	}
+	return (unsigned int) -1;
+}
+
+void RoleAttrUi::updateAttr()
+{
+	RoleAttrUiLayer *uiLayer = getUiNodeByTag<RoleAttrUiLayer>(WCT_ROLEATTRUI);
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateAttr();
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+RoleAttrUiLayer::RoleAttrUiLayer()
+	: m_otherPro(NULL)
+	, m_morePro(NULL)
+	, m_resistTitle(NULL)
+	, m_shiMoTitle(NULL)
+	, m_fuShiTitle(NULL)
+	, m_zhenShangTitle(NULL)
+	, m_poDunTitle(NULL)
+	, m_diKangNum(NULL)
+	, m_shiMoNum(NULL)
+	, m_fuShiNum(NULL)
+	, m_zhenShangNum(NULL)
+	, m_poDunNum(NULL)
+	, m_diKangLabel(NULL)
+	, m_shiMoLabel(NULL)
+	, m_fuShiLabel(NULL)
+	, m_zhenShangLabel(NULL)
+	, m_poDunLabel(NULL)
+	,m_pNodeWorldLevel(NULL)
+	,m_pftWorldLvAdd(NULL)
+	,m_pBtnWroldLvAddShow(NULL)
+	,m_worldLevelTitle(NULL)
+{
+
+}
+
+RoleAttrUiLayer::~RoleAttrUiLayer()
+{
+
+}
+
+cocos2d::SEL_MenuHandler RoleAttrUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler RoleAttrUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", RoleAttrUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onchakanjingjieBtnPressed", RoleAttrUiLayer::onchakanjingjieBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "ongengduoBtnPressed", RoleAttrUiLayer::ongengduoBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onWorldLevelBtnPressed", RoleAttrUiLayer::onWorldLevelBtnPressed);
+	return NULL;
+}
+
+bool RoleAttrUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,m_otherPro);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_morePro);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_resistTitle);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_shiMoTitle);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_fuShiTitle);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_zhenShangTitle);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_poDunTitle);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_diKangNum);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_shiMoNum);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_fuShiNum);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_zhenShangNum);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,m_poDunNum);
+
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,m_pNodeWorldLevel);
+	return false;
+}
+
+void RoleAttrUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_fightNumAcNode = NULL;
+	_tipsBgSprite = NULL;
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(1));
+	CC_ASSERT(_frame != NULL);
+
+	CCLabelBMFont* fightNumLabel = CCLabelBMFont::create();
+	fightNumLabel->setFntFile("Art/Scene/fontNum.fnt");
+	fightNumLabel->setPosition(_frame->getChildByTag(RAT_FightNumPosLabel)->getPosition());
+	_frame->addChild(fightNumLabel, RZN_EFFECT+1);
+	fightNumLabel->setAnchorPoint(ccp(0.0f, 0.5f));
+	fightNumLabel->setScale(0.5f);
+	fightNumLabel->setTag(RAT_ZHANDOULI);
+
+	TouchSprite *equipTab = dynamic_cast<TouchSprite*>(_frame->getChildByTag(RAT_EquipTab));
+	CC_ASSERT(equipTab != NULL);
+	equipTab->signalTouched.connect(this, &RoleAttrUiLayer::onEquipTabClicked);
+
+	TouchSprite *titleTab = dynamic_cast<TouchSprite*>(_frame->getChildByTag(RAT_TitleTab));
+	CC_ASSERT(titleTab != NULL);
+	titleTab->signalTouched.connect(this, &RoleAttrUiLayer::onTitleTabClicked);
+
+	TouchSprite *infoTab = dynamic_cast<TouchSprite*>(_frame->getChildByTag(RAT_InfoTab));
+	CC_ASSERT(infoTab != NULL);
+	infoTab->signalTouched.connect(this, &RoleAttrUiLayer::onInfoTabClicked);
+	//updateAttr();
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+	std::string sSEFightFire = sSEDir + "E1_50.plist";
+	_plist.insert(sSEFightFire);
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEFightFire.c_str());
+	_fightNumAcNode = this->getFightSuperEffect();
+	_frame->addChild(_fightNumAcNode, RZN_EFFECT);
+	_fightNumAcNode->setPosition(_frame->getChildByTag(RAT_FightNumSE)->getPosition());
+	_fightNumAcNode->BeginAction(0.07f, true);
+	_fightNumAcNode->setScale(0.6f);
+//	_frame->getChildByTag(RAT_ZHANDOULI)->setZOrder(RZN_EFFECT+1);
+	_frame->getChildByTag(RAT_FightNumSP)->setZOrder(RZN_EFFECT+1);
+	m_AttrRemoveMap.clear();
+	for(int i = 100; i<=112;i++)
+	{
+		 Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(i)));
+	}
+	for (int k = 41; k <= 44; k++)
+	{
+		 Helper::replaceLabelTTFWithLabelFTAndRemove(dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(k)));
+	}
+	
+
+	m_gongfaButton= dynamic_cast<CCControlButton*>(_frame->getChildByTag(RAT_GongFaButton));
+	
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+
+	CC_ASSERT(m_otherPro);
+	m_otherPro->setVisible(false);
+
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_morePro);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_resistTitle);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_shiMoTitle);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_fuShiTitle);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_zhenShangTitle);
+	Helper::replaceLabelTTFWithLabelFTAndRemove(m_poDunTitle);
+	m_diKangLabel    = Helper::replaceLabelTTFWithLabelFTAndRemove(m_diKangNum);
+	m_shiMoLabel     = Helper::replaceLabelTTFWithLabelFTAndRemove(m_shiMoNum);
+	m_fuShiLabel     = Helper::replaceLabelTTFWithLabelFTAndRemove(m_fuShiNum);
+	m_zhenShangLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(m_zhenShangNum);
+	m_poDunLabel     = Helper::replaceLabelTTFWithLabelFTAndRemove(m_poDunNum);
+
+	m_worldLevelTitle = Helper::getLabelFTByParentAndTag(_frame,RAT_WorldLevelTitle);
+	m_pftWorldLvAdd = Helper::getLabelFTByParentAndTag(_frame, RAT_WroldLevelFtLabel);
+	m_pBtnWroldLvAddShow = dynamic_cast<CCControlButton*>(_frame->getChildByTag(RAT_WroldLevelButton));
+	m_pNodeWorldLevel->setVisible(false);
+// 	for ( int i = 1; i <= 3; i++)
+// 	{
+// 		Helper::getLabelFTByParentAndTag(m_pNodeWorldLevel, i);
+// 	}
+	m_stNodeWroldLvDes.m_pNodeTitle = m_pNodeWorldLevel->getChildByTag(1);
+	m_stNodeWroldLvDes.m_pNodeAddValue = m_pNodeWorldLevel->getChildByTag(2);
+	m_stNodeWroldLvDes.m_pBgSprite = dynamic_cast<CCScale9Sprite*>(m_pNodeWorldLevel->getChildByTag(0));
+
+	Helper::getLabelFTByParentAndTag(m_stNodeWroldLvDes.m_pNodeTitle,0);
+	m_stNodeWroldLvDes.m_ftWorldLv = dynamic_cast<LabelFT*>(Helper::getLabelFTByParentAndTag(m_stNodeWroldLvDes.m_pNodeTitle, 1));
+	m_stNodeWroldLvDes.m_ftWorldLvDes = dynamic_cast<LabelFT*>(Helper::getLabelFTByParentAndTag(m_stNodeWroldLvDes.m_pNodeTitle, 2));
+	m_stNodeWroldLvDes.m_ftWorldLvDes->setMaxLineWidth(m_stNodeWroldLvDes.m_pNodeTitle->getContentSize().width);
+	m_stNodeWroldLvDes.m_ftGetDes = dynamic_cast<LabelFT*>(Helper::getLabelFTByParentAndTag(m_stNodeWroldLvDes.m_pNodeAddValue, 3));
+	for (int arrIndex = 0,tagIndex = 4; tagIndex <= 8; tagIndex++,arrIndex++)
+	{
+		m_stNodeWroldLvDes.m_arrftAddValue[arrIndex] = Helper::getLabelFTByParentAndTag(m_stNodeWroldLvDes.m_pNodeAddValue, tagIndex);
+	}
+	for (int arrIndex = 0,tagIndex = 9; tagIndex <= 13; tagIndex++,arrIndex++)
+	{
+		m_stNodeWroldLvDes.m_arrftAddValueDes[arrIndex] = Helper::getLabelFTByParentAndTag(m_stNodeWroldLvDes.m_pNodeAddValue, tagIndex);
+	}
+
+	refershWorldLevelNode();
+	refershWorldLvAddLabelAndBtn();
+}
+
+void RoleAttrUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_ROLEATTRUI);
+}
+
+void RoleAttrUiLayer::setPlayerId( unsigned int playerId )
+{
+	_playerId = playerId;
+	updateAttr();
+	setTitleAttVisible();
+}
+
+void RoleAttrUiLayer::updateAttr() 
+
+{
+	//LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	//CC_ASSERT(lp != NULL);
+	
+	Player *player = RoleManager::getInstance()->getLocalPlayer();//dynamic_cast<Player*>(RoleManager::getInstance()->findRole(_playerId));
+	int gongFaLevel=0;
+	int playerLevel=0;
+	if(_playerId != player->getId())
+	{//不是自己
+		const tagRoleInfo* roleInfo = RemoteRoleStateMgr::getInstance()->GetRoleInfo();
+		setAttr(RAT_NAME, roleInfo->strName.c_str());
+		//setAttr(RAT_JINGJIE, )
+		std::string temp = CCString::createWithFormat("%d",roleInfo->level)->getCString();//由于没有图，临时把等级和战斗力 拼接一起显示，等图有了调试位置[yu]
+		setAttr(RAT_LEVEL, temp.c_str());
+		//setAttr(RAT_ZHANDOULI, roleInfo->)
+		std::string temp2 = CCString::createWithFormat("%d",RemoteRoleStateMgr::getInstance()->GetPhysical())->getCString(); //体力值，原来显示的是自己的体力值- -|| add by XSea 2014.08.23
+		setAttr(RAT_TiLiZhi, temp2.c_str());
+		setAttr(RAT_HP, roleInfo->_roleData[ERRA_HP], roleInfo->_roleData[ERRA_MaxHP], "/");
+		setAttr(RAT_MP, roleInfo->_roleData[ERRA_MP], roleInfo->_roleData[ERRA_MaxMP], "/");
+		setAttr(RAT_HITRATE, roleInfo->_roleData[ERRA_HitRate]);
+		setAttr(RAT_DODGE, roleInfo->_roleData[ERRA_Dodge]);
+		setAttr(RAT_CRIT_RATE, roleInfo->_roleData[ERRA_Crit_Rate]);
+		setAttr(RAT_UNCRIT_RATE, roleInfo->_roleData[ERRA_UnCrit_Rate]);
+		setAttr(RAT_EXATTRACK, roleInfo->_roleData[ERRA_ExAttackMin], roleInfo->_roleData[ERRA_ExAttackMax], "-");
+		setAttr(RAT_INATTRACK, roleInfo->_roleData[ERRA_InAttackMin], roleInfo->_roleData[ERRA_InAttackMax], "-");//魔攻
+		//setAttr(RAT_INATTRACK, 20000, 50000, "-");
+		setAttr(RAT_ARMORATTRACK, roleInfo->_roleData[ERRA_ArmorEx], roleInfo->_roleData[ERRA_ArmorIn], "-");//道功
+		setAttr(RAT_EXDEFENSE, roleInfo->_roleData[ERRA_ExAttack], roleInfo->_roleData[ERRA_ExDefense], "-");
+		setAttr(RAT_INDEFENSE, roleInfo->_roleData[ERRA_InAttack], roleInfo->_roleData[ERRA_InDefense], "-");
+		setAttr(RAT_LUCK, roleInfo->_roleData[ERRA_Luck]);
+
+		//gx add 
+		setAttr(RAT_ZHANDOULI,RemoteRoleStateMgr::getInstance()->GetFightLi());
+		setAttr(RAT_MEILIZHI,RemoteRoleStateMgr::getInstance()->GetMeiLi());
+		setAttr(RAT_RONGYUDIAN,RemoteRoleStateMgr::getInstance()->GetRongyu());
+		setAttr(RAT_PKZHI,RemoteRoleStateMgr::getInstance()->GetPKValue());
+		setAttr(RAT_SHENGWANG,roleInfo->_roleData[ERRA_ShengW]);
+		//end
+		//setAttr(RAT_PKZHI, roleInfo->pk);
+		setAttr(RAT_Exp, "--/--");
+		gongFaLevel=roleInfo->_otherGongFa.reamLevel;
+		playerLevel=roleInfo->level;
+	}
+	else
+	{
+		setAttr(RAT_NAME, player->getName());
+		//setAttr(RAT_JINGJIE, )
+		setAttr(RAT_LEVEL, player->getLevel());
+		std::string temp = CCString::createWithFormat("%d",player->getAttribute(RA_BATTLE_POINT))->getCString();//由于没有图，临时把等级和战斗力 拼接一起显示，等图有了调试位置[yu]
+		setAttr(RAT_ZHANDOULI, temp.c_str());
+		std::string temp2 = CCString::createWithFormat("%d",player->getAttribute(RA_TiLiZhi))->getCString();
+		setAttr(RAT_TiLiZhi, temp2.c_str());
+		setAttr(RAT_HP, player->getAttribute(RA_HP), player->getAttribute(RA_MaxHP), "/");
+		setAttr(RAT_MP, player->getAttribute(RA_MP), player->getAttribute(RA_MaxMP), "/");
+		setAttr(RAT_HITRATE, player->getAttribute(RA_HITRATE));
+		setAttr(RAT_DODGE, player->getAttribute(RA_DODGE));
+		setAttr(RAT_CRIT_RATE, player->getAttribute(RA_CRIT_RATE));
+		setAttr(RAT_UNCRIT_RATE, player->getAttribute(RA_UNCRIT_RATE));
+		setAttr(RAT_EXATTRACK, player->getAttribute(RA_ExAttackMin), player->getAttribute(RA_ExAttackMax), "-");
+		setAttr(RAT_INATTRACK, player->getAttribute(RA_InAttackMin), player->getAttribute(RA_InAttackMax), "-");
+		//setAttr(RAT_INATTRACK, 20000, 50000, "-");
+		setAttr(RAT_ARMORATTRACK, player->getAttribute(RA_ArmorEx), player->getAttribute(RA_ArmorIn), "-");
+		setAttr(RAT_EXDEFENSE, player->getAttribute(RA_ExMinDefense), player->getAttribute(RA_ExMaxDefense), "-");
+		setAttr(RAT_INDEFENSE, player->getAttribute(RA_InMinDefense), player->getAttribute(RA_InMaxDefense), "-");
+		setAttr(RAT_LUCK, player->getAttribute(RA_Luck));
+		setAttr(RAT_PKZHI, player->getAttribute(RA_PKVALUE));
+		setAttr(RAT_SHENGWANG, player->getAttribute(RA_Knowledge));
+		//gx add
+		setAttr(RAT_MEILIZHI,player->getAttribute(RA_MEILI_POINT));//魅力值
+		setAttr(RAT_RONGYUDIAN,player->getAttribute(RA_RONGYU_POINT));//荣誉点
+		//end
+		LocalPlayer *lp = static_cast<LocalPlayer*>(player);
+		setAttr(RAT_Exp, lp->getCurLevelExp(), lp->getMaxLevelExp(), "/");
+		gongFaLevel=GambleMgr::getInstance()->m_curGongFaRealm;
+		m_gongfaButton->setVisible(false);
+		playerLevel=lp->getLevel();
+	}
+	//显示功法境界
+	CCSprite * gonfaSp=dynamic_cast<CCSprite*>(_frame->getChildByTag(RAT_GonfFaLevel));
+	if(gonfaSp)
+	{
+		if(playerLevel<50)
+		{
+			gonfaSp->setVisible(false);
+			m_gongfaButton->setVisible(false);
+		}
+		else
+		{
+			if(gongFaLevel==0)
+			{
+				gonfaSp->setVisible(true);
+				gonfaSp->setDisplayFrame(PackageManager::getInstance()->getIconFrameByName("wuxueui_jingjie0"));
+			}
+			else
+			{
+				GongFaRealm const* realmData=GambleMgr::getInstance()->getRealmDataByID(gongFaLevel);
+				if(realmData)
+				{
+					gonfaSp->setVisible(true);
+					string realmRes=realmData->res;
+					if((!realmRes.empty())&&realmRes!="0")
+						gonfaSp->setDisplayFrame(PackageManager::getInstance()->getIconFrameByName(realmRes));
+				}
+			}
+
+		}
+	}
+
+	
+}
+
+void RoleAttrUiLayer::setAttr( eRoleAttrTag attr, int value )
+{
+	if (attr == RAT_ZHANDOULI)
+	{
+		CCLabelBMFont* label = dynamic_cast<CCLabelBMFont*>(_frame->getChildByTag(RAT_ZHANDOULI));
+		if(label != NULL)
+		{
+			CCString *str = CCString::createWithFormat("%d", value);
+			label->setString(str->getCString());
+		}
+	}
+	else
+	{	
+		LabelFT *label = NULL;
+		map<eRoleAttrTag,bool>::iterator it = m_AttrRemoveMap.find(attr);
+		if(it != m_AttrRemoveMap.end())
+		{
+			if(it->second)
+			{
+				label = dynamic_cast<LabelFT*>(_frame->getChildByTag((int)attr));
+				if(label != NULL)
+				{
+					CCString *str = CCString::createWithFormat("%d", value);
+					label->setString(str->getCString());
+				}
+			}
+
+		}
+		else
+		{
+			Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(_frame->getChildByTag((int)attr))));
+			m_AttrRemoveMap.insert(make_pair(attr,true));
+			label = dynamic_cast<LabelFT*>(_frame->getChildByTag((int)attr));
+			if(label != NULL)
+			{
+				CCString *str = CCString::createWithFormat("%d", value);
+				label->setString(str->getCString());
+			}
+		}
+		
+		
+		
+	}
+	
+}
+
+void RoleAttrUiLayer::setAttr( eRoleAttrTag attr, INT64 cur, INT64 max, const char *sp )
+{
+	LabelFT *label = NULL;
+	map<eRoleAttrTag,bool>::iterator it = m_AttrRemoveMap.find(attr);
+	if(it != m_AttrRemoveMap.end())
+	{
+		if(it->second)
+		{
+			label = dynamic_cast<LabelFT*>(_frame->getChildByTag((int)attr));
+			if(label != NULL)
+			{
+				CCString *str = CCString::createWithFormat("%lld %s %lld", cur, sp, max);
+				label->setString(str->getCString());
+			}
+		}
+
+	}
+	else
+	{
+		Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(_frame->getChildByTag((int)attr))));
+		m_AttrRemoveMap.insert(make_pair(attr,true));
+		label = dynamic_cast<LabelFT*>(_frame->getChildByTag((int)attr));
+		if(label != NULL)
+		{
+			CCString *str = CCString::createWithFormat("%lld %s %lld", cur, sp, max);
+			label->setString(str->getCString());
+		}
+	}
+
+}
+
+void RoleAttrUiLayer::setAttr( eRoleAttrTag attr, const char *value )
+{
+	CC_ASSERT(value != NULL);
+	if (attr == RAT_ZHANDOULI)
+	{
+		CCLabelBMFont* label = dynamic_cast<CCLabelBMFont*>(_frame->getChildByTag(RAT_ZHANDOULI));
+		if(label != NULL)
+			label->setString(value);
+	}
+	else
+	{
+
+		LabelFT *label = NULL;
+		map<eRoleAttrTag,bool>::iterator it = m_AttrRemoveMap.find(attr);
+		if(it != m_AttrRemoveMap.end())
+		{
+			if(it->second)
+			{
+				label = dynamic_cast<LabelFT*>(_frame->getChildByTag((int)attr));
+				if(label != NULL)
+				{
+					label->setString(value);
+				}
+			}
+
+		}
+		else
+		{
+			Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(_frame->getChildByTag((int)attr))));
+			m_AttrRemoveMap.insert(make_pair(attr,true));
+			label = dynamic_cast<LabelFT*>(_frame->getChildByTag((int)attr));
+			if(label != NULL)
+			{
+				label->setString(value);
+			}
+		}
+
+	
+	}
+}
+
+void RoleAttrUiLayer::setAttr( eRoleAttrTag attr, const wchar_t *value )
+{
+	char vStr[128];
+	memset(vStr, 0, sizeof(char) * 128);
+	Utf16ToUtf8(value, vStr, 128, 0);
+	setAttr(attr, vStr);
+}
+
+void RoleAttrUiLayer::onExit()
+{
+	m_AttrRemoveMap.clear();
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+
+bool RoleAttrUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CC_ASSERT(_frame != NULL);
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if (isTouchOnNodeContent(m_otherPro,pTouch))
+	{
+		if (m_otherPro->isVisible())
+		{
+			return true;
+		}
+	}
+	else
+	{
+		m_otherPro->setVisible(false);
+	}
+
+	if (isTouchOnNodeContent(m_pNodeWorldLevel,pTouch))
+	{
+		if (m_pNodeWorldLevel->isVisible())
+		{
+			return true;
+		}
+	}
+	else
+	{
+		m_pNodeWorldLevel->setVisible(false);
+	}
+
+	if(frameRect.containsPoint(framePoint))
+	{
+		for (int i = 41; i <= 44; i++)
+		{
+			CCNode *labelTTF = _frame->getChildByTag(i);
+			if (isTouchOnNodeContent(labelTTF, pTouch))
+			{
+				showTips(labelTTF);
+			}
+		}
+		return true;
+	}
+
+	return false;
+}
+
+void RoleAttrUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+// 	if (_tipsBgSprite)
+// 	{
+// 		_tipsBgSprite->removeFromParent();
+// 		_tipsBgSprite = NULL;
+// 	}
+	TextTip::getInstance()->close();
+}
+
+//add by lpf 2015-10-05
+void RoleAttrUiLayer::showTips(CCNode* labelNode )
+{
+	if (labelNode == NULL)
+		return;
+	TextTip::getInstance()->open();
+	int nodeTag = labelNode->getTag();
+	int index = 8001;
+	switch(nodeTag)
+	{
+	case RAT_LabelHp:
+		index = 8001;
+		break;
+	case RAT_LabelLucky:
+		index = 8002;
+		break;
+	case RAT_LabelPK:
+		index = 8003;
+		break;
+	case RAT_LabelCharm:
+		index = 8004;
+		break;
+	}
+	TextTip::getInstance()->setString(index);
+	TextTip::getInstance()->setPostion(labelNode,ETTD_Right);
+
+// 	if (_tipsBgSprite == NULL)
+// 	{
+// 		std::string sSEDir = CFGReader::instance()->get_profile_string("Art","ICON","");
+// 		std::string sSEImageName = sSEDir + "tips.png";
+// 		_tipsBgSprite = CCScale9Sprite::create(sSEImageName.c_str());
+// 		_tipsBgSprite->setAnchorPoint(ccp(0, 0));
+// 		_frame->addChild(_tipsBgSprite, WZ_MESSAGEBOX, 45);
+// 		_tipsBgSprite->setPosition(ccp(labelNode->boundingBox().getMaxX(), labelNode->boundingBox().getMaxY()));
+// 		float marginWidth = 8;
+// 		float marginHeight = 5;
+// 		CCLabelTTF *tempLabel = CCLabelTTF::create();
+// 		_tipsBgSprite->addChild(tempLabel);
+// 		tempLabel->setAnchorPoint(ccp(0, 0));
+// 		tempLabel->setPosition(ccp(marginWidth, marginHeight));
+// 		tempLabel->setFontSize(16);
+// 		//tempLabel->setDimensions(CCSize(208.f, 0.0f));
+// 		int nodeTag = labelNode->getTag();
+// 		switch(nodeTag)
+// 		{
+// 		case RAT_LabelHp:
+// 			tempLabel->setString(GET_STR(8001).c_str());
+// 			break;
+// 		case RAT_LabelLucky:
+// 			tempLabel->setString(GET_STR(8002).c_str());
+// 			break;
+// 		case RAT_LabelPK:
+// 			tempLabel->setString(GET_STR(8003).c_str());
+// 			break;
+// 		case RAT_LabelCharm:
+// 			tempLabel->setString(GET_STR(8004).c_str());
+// 			break;
+// 		default:
+// 			break;
+// 		}
+// 		CCSize tempLabelBBSize = tempLabel->boundingBox().size;
+// 		_tipsBgSprite->setContentSize(CCSize(tempLabelBBSize.width + marginWidth * 2, tempLabelBBSize.height + marginHeight * 2));
+// 	}
+}
+
+void RoleAttrUiLayer::onEquipTabClicked( TouchSprite*, bool )
+{
+	bool pop = GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->isPopupPreUiOnClose();
+	RR_PopTag popTag = GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->getPopTag();
+	GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->setPopupPreUiOnClose(false);
+
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	unsigned int playerId = _playerId;
+	if (IS_UI_OPEN(WCT_ROLEEQUIPUI))
+	{
+		return;
+	}
+	OPEN_UI(WCT_ROLEEQUIPUI);
+	GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPlayerId(playerId);
+	GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPopupPreUiOnClose(pop);
+	GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPopTag(popTag);
+	CLOSE_UI(WCT_ROLEATTRUI);
+}
+
+void RoleAttrUiLayer::onTitleTabClicked( TouchSprite*, bool )
+{
+	bool pop = GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->isPopupPreUiOnClose();
+	RR_PopTag popTag = GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->getPopTag();
+	GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->setPopupPreUiOnClose(false);
+
+	if(_playerId != RoleManager::getInstance()->getLocalPlayer()->getId())
+		return;
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	//unsigned int playerId = _playerId;
+	if (IS_UI_OPEN(WCT_RoleTitleUi))
+	{
+		return;
+	}
+	OPEN_UI(WCT_RoleTitleUi);
+	//GET_UI(RoleTitleUi, WCT_RoleTitleUi)->setRoleId(playerId);
+	GET_UI(NewRoleTitleUi, WCT_RoleTitleUi)->setPopupPreUiOnClose(pop);
+	GET_UI(NewRoleTitleUi, WCT_RoleTitleUi)->setPopTag(popTag);
+	CLOSE_UI(WCT_ROLEATTRUI);
+}
+
+void RoleAttrUiLayer::onInfoTabClicked( TouchSprite*, bool )
+{
+	bool pop = GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->isPopupPreUiOnClose();
+	RR_PopTag popTag = GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->getPopTag();
+	GET_UI(RoleAttrUi, WCT_ROLEATTRUI)->setPopupPreUiOnClose(false);
+
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	unsigned int playerId = _playerId;
+	if (IS_UI_OPEN(WCT_RoleInfoUi))
+	{
+		return;
+	}
+	OPEN_UI(WCT_RoleInfoUi);
+	GET_UI(RoleInfoUi, WCT_RoleInfoUi)->setRoleId(playerId);
+	GET_UI(RoleInfoUi, WCT_RoleInfoUi)->setPopupPreUiOnClose(pop);
+	GET_UI(RoleInfoUi, WCT_RoleInfoUi)->setPopTag(popTag);
+	CLOSE_UI(WCT_ROLEATTRUI);
+}
+
+GameActionNode* RoleAttrUiLayer::getFightSuperEffect()
+{
+	GameActionNode* fireSEAcNode = GameActionNode::create();
+// 	for (int i=1; i<99; ++i)
+// 	{
+// 		CCString* fireStr = CCString::createWithFormat("%s%02d", "E1_50", i);
+// 		if(!fireSEAcNode->AddTexture(fireStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+	fireSEAcNode->InitTextureWithSpriteFrame("E1_50");
+	return fireSEAcNode;
+}
+
+void RoleAttrUiLayer::setTitleAttVisible()
+{
+	TouchSprite *titleSprite=dynamic_cast<TouchSprite*>(_frame->getChildByTag(RAT_TitleTab));
+	if (_playerId!=RoleManager::getInstance()->getLocalPlayer()->getId())
+	{
+		titleSprite->setVisible(false);
+	}
+	else
+	{
+		titleSprite->setVisible(true);
+	}
+}
+
+void RoleAttrUiLayer::onchakanjingjieBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	m_otherPro->setVisible(false);
+	const tagRoleInfo* roleInfo = RemoteRoleStateMgr::getInstance()->GetRoleInfo();
+	Gongfa2Tip::getInstace()->open();
+	Gongfa2Tip::getInstace()->setData(roleInfo->_otherGongFa);
+
+}
+
+void RoleAttrUiLayer::ongengduoBtnPressed(CCObject* pSender,CCControlEvent pCCControlEvent)
+{
+	if (m_otherPro->isVisible())
+	{
+		m_otherPro->setVisible(false);
+		return;
+	}
+	LocalPlayer* localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if (localPlayer->getId() == _playerId)
+	{
+		m_otherPro->setVisible(true);
+		std::string numStr;
+		safe_sprintf(numStr,"%d",localPlayer->getAttribute(RA_Derate_InAttack));
+		m_diKangLabel->setString(numStr);
+		safe_sprintf(numStr,"%d",localPlayer->getAttribute(RA_Derate_Wood));
+		m_shiMoLabel->setString(numStr);
+		safe_sprintf(numStr,"%d",localPlayer->getAttribute(RA_Derate_Water));
+		m_fuShiLabel->setString(numStr);
+		safe_sprintf(numStr,"%d",localPlayer->getAttribute(RA_Derate_Injury));
+		m_zhenShangLabel->setString(numStr);
+		safe_sprintf(numStr,"%d",localPlayer->getAttribute(RA_Derate_Fire));
+		m_poDunLabel->setString(numStr);
+	}
+	else
+	{
+		m_otherPro->setVisible(true);
+		std::string numStr;
+		const tagRoleInfo* roleInfo = RemoteRoleStateMgr::getInstance()->GetRoleInfo();
+		safe_sprintf(numStr,"%d",roleInfo->_roleData[ERRA_Derate_InAttack]);
+		m_diKangLabel->setString(numStr);
+		safe_sprintf(numStr,"%d",roleInfo->_roleData[ERRA_Derate_Wood]);
+		m_shiMoLabel->setString(numStr);
+		safe_sprintf(numStr,"%d",roleInfo->_roleData[ERRA_Derate_Water]);
+		m_fuShiLabel->setString(numStr);
+		safe_sprintf(numStr,"%d",roleInfo->_roleData[ERRA_Derate_Injury]);
+		m_zhenShangLabel->setString(numStr);
+		safe_sprintf(numStr,"%d",roleInfo->_roleData[ERRA_Derate_Fire]);
+		m_poDunLabel->setString(numStr);
+	}
+}
+
+void RoleAttrUiLayer::refershWorldLvAddLabelAndBtn()
+{
+	if (WorldLevelMgr::getInstance()->ifWorldLevelOpen())
+	{
+// 		if (WorldLevelMgr::getInstance()->ifLvLowThanWorldLv())
+// 		{
+// 		}
+// 		else
+// 		{
+// 			m_pftWorldLvAdd->setVisible(false);
+// 		}
+		string t_str = "";
+		safe_sprintf(t_str,"%d%%",WorldLevelMgr::getInstance()->getWorldLevelAddedExpPercentByType(E_ADDED_MONSTER_EXP_PER));
+		m_pftWorldLvAdd->setString(t_str.c_str());
+		m_pftWorldLvAdd->setVisible(true);
+		m_pBtnWroldLvAddShow->setVisible(true);
+	}
+	else
+	{
+		m_pBtnWroldLvAddShow->setVisible(false);
+		m_pftWorldLvAdd->setVisible(false);
+		m_worldLevelTitle->setVisible(false);
+	}
+}
+
+void RoleAttrUiLayer::onWorldLevelBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	m_pNodeWorldLevel->setVisible(!m_pNodeWorldLevel->isVisible());
+}
+
+void RoleAttrUiLayer::refershWorldLevelNode()
+{
+	WorldLevelMgr *t_wlvMgr = WorldLevelMgr::getInstance();
+
+	string t_str = "";
+	safe_sprintf(t_str,"%d",t_wlvMgr->getCurrentWorldLv());
+	m_stNodeWroldLvDes.m_ftWorldLv->setString(t_str.c_str());
+	float t_height;
+	if (t_wlvMgr->ifLvLowThanWorldLv())
+	{
+		safe_sprintf(t_str,STRING_TABLE["world_lv_low_than_world_lv"],t_wlvMgr->getWorldLevelAddedExpPercentByType(E_ADDED_MONSTER_EXP_PER));
+		m_stNodeWroldLvDes.m_ftWorldLvDes->setString(t_str.c_str());
+		m_stNodeWroldLvDes.m_ftGetDes->setVisible(true);
+		for ( int index = 0; index < 5; index++)
+		{
+			safe_sprintf(t_str,"%d%%",t_wlvMgr->getWorldLevelAddedExpPercentByType((eWorldLevelAddedType)index));
+			m_stNodeWroldLvDes.m_arrftAddValue[index]->setString(t_str.c_str());
+			m_stNodeWroldLvDes.m_arrftAddValue[index]->setVisible(true);
+			m_stNodeWroldLvDes.m_arrftAddValueDes[index]->setVisible(true);
+		}
+		t_height = m_stNodeWroldLvDes.m_pNodeTitle->getContentSize().height + m_stNodeWroldLvDes.m_pNodeAddValue->getContentSize().height;
+		m_stNodeWroldLvDes.m_pNodeTitle->setPositionY(m_stNodeWroldLvDes.m_pNodeAddValue->getContentSize().height);
+		m_stNodeWroldLvDes.m_pNodeAddValue->setPositionY(0.f);
+	}
+	else
+	{
+		m_stNodeWroldLvDes.m_ftWorldLvDes->setString(STRING_TABLE["world_lv_high_than_world_lv"]);
+		m_stNodeWroldLvDes.m_ftGetDes->setVisible(false);
+		for ( int index = 0; index < 5; index++)
+		{
+			m_stNodeWroldLvDes.m_arrftAddValue[index]->setVisible(false);
+			m_stNodeWroldLvDes.m_arrftAddValueDes[index]->setVisible(false);
+		}
+		t_height = m_stNodeWroldLvDes.m_pNodeTitle->getContentSize().height;
+		m_stNodeWroldLvDes.m_pNodeTitle->setPositionY(0.f);
+	}
+	m_pNodeWorldLevel->setContentSize(CCSizeMake(m_pNodeWorldLevel->getContentSize().width,t_height));
+	m_pNodeWorldLevel->setPositionY(m_pBtnWroldLvAddShow->getPositionY());
+	m_stNodeWroldLvDes.m_pBgSprite->setContentSize(m_pNodeWorldLevel->getContentSize());
+	m_stNodeWroldLvDes.m_pBgSprite->setPositionY(t_height);
+}

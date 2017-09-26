@@ -1,0 +1,186 @@
+#ifndef ROLEUI_H
+#define ROLEUI_H
+
+#include "cocos2d.h"
+#include "cocos-ext.h"
+#include "DropDragDelegate.h"
+#include "ItemDefine.h"
+#include "Signals.h"
+#include "BaseDefine.h"
+#include "BSAnimate.h"
+#include "UiInterface.h"
+#include "AnimationCache.h"
+using namespace cocos2d;
+using namespace cocos2d::extension;
+
+class Player;
+class f_equipment;
+class TouchSprite;
+class CheckButton;
+
+#define ROLEEQUIPUIITEMEND 13
+
+class RoleDisplayNode : public CCNode
+{
+	enum eRoleDisplayNodeTag 
+	{ 
+		RDNT_Body = 1, 
+		RDNT_Weapon,
+		RDNT_Wing,
+	};
+public:
+	RoleDisplayNode();
+	~RoleDisplayNode();
+	CREATE_FUNC(RoleDisplayNode);
+	bool init();
+	void setAttrabute(ePlayerDisplayAttr attr, unsigned int id);
+	void loadAnimate();
+	void releaseAnimation();
+	void setRoleId(unsigned int roleId);
+private:
+	unsigned int _displayAttr[PDA_End];
+	bool _isAnimateLoad;
+	AnimationCache::AnimateList _bodyAnim;
+	AnimationCache::AnimateList _weaponAnim;
+	AnimationCache::AnimateList _wingAnim;
+	std::vector<AnimsUsed> _usedAnim;
+	unsigned int _roleId;
+};
+
+class RoleEquipUi : public UiInterface
+{
+	friend class RoleUiLayer;
+public:
+	RoleEquipUi(){}
+
+	virtual CCNode *openUi();
+	virtual void popupUIOnEnd();
+
+	void updateEquipment();
+	void updateDisplay();
+	void setPlayerId(unsigned int id);
+	unsigned int getPlayerId();
+
+	//new player guide
+	CCRect getCloseBtnPos();
+	CCRect getEquipBtnPos(EEquipPos eTag);
+	bool isWeaponEquiped();
+	bool isWeaponUpgrade();
+};
+
+class RoleUiLayer 
+	: public DropDragInterface
+	, public cocos2d::extension::CCBSelectorResolver
+	, public cocos2d::extension::CCBMemberVariableAssigner
+	, public cocos2d::extension::CCNodeLoaderListener
+{
+	friend class RoleEquipUi;
+
+	enum eItemNodeTag 
+	{ 
+		INT_DISPLAY = 20, 
+		INT_NAME = 21, 
+		INT_PROPERTYLAB = 22,	//属性标签
+		INT_InfoLab = 23,	//信息标签
+		INT_TitleLab = 24,	//称号标签
+		INT_BTNCONTAINER = 25,
+		INT_FashionCheck = 26,
+		INT_BEGIN = 100, 
+		INT_SELECTSPRITE = 200 
+	};
+	struct EquipData
+	{
+		unsigned int equipId;
+		unsigned int equipLevelUpId;
+		unsigned int stuffId[3];
+		int stuffNum[3];
+
+		EquipData()
+		{
+			clear();
+		}
+
+		bool isValid()
+		{
+			if(equipId == (unsigned int)-1 || equipLevelUpId == (unsigned int)-1)
+				return false;
+
+			return true;
+		}
+
+		void clear()
+		{
+			memset(this, 0xff, sizeof(EquipData));
+		}
+	};
+public:
+	CCB_STATIC_NEW_AUTORELEASE_OBJECT_WITH_INIT_METHOD(RoleUiLayer , create);
+
+	virtual cocos2d::SEL_MenuHandler onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName);
+	virtual cocos2d::extension::SEL_CCControlHandler onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName);
+	virtual bool onAssignCCBMemberVariable(CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode);
+	virtual void onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader);
+	virtual bool ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent);
+
+	virtual void onEnter();
+	virtual void onExit();
+
+
+	void onCloseBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onStrengthenBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onIndentifyBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onMosaicBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onPackageBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+
+	void onRoleEquipBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+	void onRoleRingBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent);
+
+	virtual short getItemBegin(CCTouch &touch, eGetResult &result);
+	virtual short getItemEnd(CCTouch &touch, eGetResult &result, EItemConType src, short itemIndex);
+	virtual bool onClicked(CCTouch &touch);
+	virtual bool onDoubleClicked(CCTouch &touch);
+	virtual EItemConType getConType() { return EICT_Equip; }
+
+
+	//new player guide
+	CCRect getCloseBtnPos();
+	CCRect getEquipBtnPos(EEquipPos eTag);
+	bool isWeaponCanUpgrade();
+protected:
+	void onPropertyTabClicked(TouchSprite *, bool );
+	void onTitleTabClicked(TouchSprite*, bool);
+	void onInfoTabClicked(TouchSprite*, bool);
+	bool setItemSelect(int index);
+	ItemNode *getItemNode(int i);
+
+	void setUserName(const char *name);
+	void setUserName(const wchar_t *name);
+	void setDisplayAttr(ePlayerDisplayAttr dsa, unsigned int id);
+	void showEquipTip(int index, f_equipment *equip);
+	void showEquipTip(int index, const tagEquipViewInfo *equipInfo);
+	void setPlayerId(int id);
+	unsigned int getPlayerId() const { return _playerId; } 
+
+	void updateEquipment();
+	void updateDisplay();
+	void setTitleBtnVisible();
+	void onFashionStateChange(CheckButton *, bool);
+	bool getEquipmentDisplayLevelUpState(f_item* item);
+private:
+	short getItem( CCTouch &touch, eGetResult &result );
+	short getItemUnderPoint(const CCPoint &point);
+	CCNode *getDisplayNode();
+	LabelFT *getNameLabel();
+	LabelFT* m_NameLabel;
+	CheckButton *getFashionStateBtn();
+
+private:
+	CCPoint _itemPos[ROLEEQUIPUIITEMEND];
+	CCSprite *_frame;
+	unsigned int _displayAttr[PDA_End];
+	RoleDisplayNode *_displayNode;
+	unsigned int _playerId;
+	int m_nTmpEquipLevel;					//装备强化等级特效用来保存强化等级
+};
+
+#endif //ROLEUI_H

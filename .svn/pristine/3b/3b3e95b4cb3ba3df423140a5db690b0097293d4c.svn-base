@@ -1,0 +1,666 @@
+#ifndef TEAMPROTO_H
+#define TEAMPROTO_H
+#include "BaseDefine.h"
+#include "CmdAdapter.h"
+#include "RoleDefine.h"
+#include "ActionProto.h"
+
+
+//玩家所在队伍的队伍成员信息，使用结构体可方便后续扩展
+struct tagTeammateData
+{
+	unsigned int		uRoleID;
+	EClassType			eClassEx;
+	int					nLevel;
+	bool				b_online;
+	int					nHP;
+	int					nMaxHp;
+	std::string			strName;
+	unsigned char		bySex;
+	int					nRating;
+	tagDWORDTime		dwJointime;
+	tagEquipDisplay		sDisplayInfo[PDA_End];
+	tagTeammateData() : uRoleID(INVALID)
+		,eClassEx(EV_Null)
+		,nLevel(0)
+		,b_online(false)
+		,nHP(0)
+		,nMaxHp(0)
+		,strName("")
+		,bySex(0)
+		,nRating(0)
+	{
+		for (int i = 0;i < PDA_End ;i++)
+		{
+			sDisplayInfo[i].dw_data_id = INVALID;
+			sDisplayInfo[i].byDisplayPos = INVALID;
+		}
+	}
+	tagTeammateData(const tagTeammateData& other)
+	{
+		Copy(other);
+	}
+
+	const tagTeammateData& operator = (const tagTeammateData& other)
+	{
+		if(this!=&other)
+			Copy(other);
+		return *this;
+	}
+
+	bool isValid()const{return uRoleID!=INVALID;}
+private:
+	void Copy(const tagTeammateData& other)
+	{
+		uRoleID = other.uRoleID;
+		eClassEx = other.eClassEx;
+		nLevel = other.nLevel;
+		b_online = other.b_online;
+		nHP = other.nHP;
+		nMaxHp = other.nMaxHp;
+		strName = other.strName;
+		bySex = other.bySex;
+		nRating = other.nRating;
+		dwJointime = other.dwJointime;
+		for (int i = 0;i < PDA_End ;i++)
+		{
+			sDisplayInfo[i].byDisplayPos = other.sDisplayInfo[i].byDisplayPos;
+			sDisplayInfo[i].dw_data_id = other.sDisplayInfo[i].dw_data_id;
+		}
+	}
+};
+
+#pragma pack(push, 1)
+
+#ifndef INVALID
+#define INVALID						(-1)
+#endif
+#ifndef IS_VALID
+#define IS_VALID(n)					(((int)(n)) != INVALID)
+#endif
+#ifndef IS_VALID_PTR
+#define IS_VALID_PTR(n)				( (((int)(n)) != INVALID) && ((n) != NULL) )
+#endif
+const int MAX_TEAM_NUM					= 5;		// 小队最大人数
+const int TEAM_DISPLAY_NUM				= 3;
+const int MAX_TEAM_PLACARD_LEN			= 20;		// 队伍公告最大长度
+
+#define	TeamListMaxNum						  100
+
+// 错误码
+enum
+{
+	E_Team_Not_Leader					=	1,		// 邀请方不是队长
+	E_Team_Target_Not_Exit				=	2,		// 目标不合法
+	E_Team_Target_Have_Team				=	3,		// 被邀请者已在小队中
+	E_Team_Member_Full					=	4,		// 小队成员以满
+	E_Team_Role_Not_In_Team				=	5,		// 踢出的玩家不在本小队
+	E_Team_Pick_Model_Not_Exit			=	6,		// 所设置的拾取模式不存在
+	E_Team_Target_Busy					=	7,		// 被邀请者正忙
+	E_Team_Target_Not_Online			=	8,		// 被邀请玩家不在线
+	E_Team_Map_CanNot_Invite			=	9,		// 该地图内无法邀请队友组队
+	E_Team_Map_CanNot_Leave				=	10,		// 该地图内无法离开小队
+	E_Team_Map_CanNor_ChangeLeader		=	11,		// 该地图内无法移交队长
+	E_Team_Map_CanNot_Kick				=	12,		// 该地图内无法踢人
+	E_Team_Map_NoHave_Team				=   13,		// 该队伍已解散
+	E_Team_Apply_Have_Team				=   14,		// 申请者（自己）已经在队伍中
+	E_Team_Have_Apply					=   15,		// 已经申请过了
+	E_Team_Apply_Not_Online				=   16,		// 申请玩家不在线
+	E_Team_Leader_Not_Agree				=	17,		// 队长拒绝要求
+	E_Team_Placard_Too_Loog				=	18,		// 公告太长
+	E_Team_Placard_Same_Before			=	19,		// 和之前相同	
+	E_Team_Quality_Not_Exist			=	20,		// 物品品质不合法
+	E_Team_Sice_GroundItemError			=	21,		// 掷骰子时，地物异常
+	E_Team_Sice_Cant_RequireSice		=	22,		// 掷骰子时，不能需求掷骰
+	E_Team_Assign_Your_Baggage_Not_Enough = 23,		// 获取分配物品时，背包已满.
+	E_Team_Target_InDuel = 24,					// 对方正在进行切磋。
+	E_Team_Min_Level_Limit_Erroe		=	25,		// 小于队伍最低等级限制,无法加入队伍
+	E_Team_Max_Level_Limit_Erroe		=	26,		// 大于队伍最高等级限制,无法加入队伍
+	E_Team_role_type_Limit_Erroe		=	27,		// 职业不符,无法加入队伍
+	E_Team_can_not_join					=	28,		// 当前队伍禁止入队
+
+	E_Team_not_find						=	29,		// 没有队伍，无法传送
+	E_Team_not_find_leader				=	30,		// 未找到队长，无法传送
+	E_Team_not_find_fly_shoes			=	31,		// 没有飞鞋，无法传送
+	E_Team_goto_new_map_error			=	32,		// 传送失败
+	E_Team_leader_int_skb				=	33,		// 队长在沙巴克地图，无法传送
+	E_Team_myself_int_skb				=	34,		// 自己在沙巴克地图，无法传送
+	E_Team_apply_is_full				=	35,		// 申请队列已满，请稍后申请
+	E_Team_apply_success				=	36,		// 发送申请成功，请稍等
+	E_Team_invite_success				=	37,		// 发送邀请成功，请稍等
+	E_Team_is_dead						=	38,		// 您已死亡，无法执行该操作
+	E_Team_stall						=	39,		// 您正在摆摊中，无法执行该操作
+	E_Team_exchange						=	40,		// 您正在交易中，无法执行该操作
+	E_Team_compractice					=	41,		// 您正在双修中，无法执行该操作
+	E_Team_myself_not_goto_new_map		=	42,		// 自己所在地图无法传送
+	E_Team_dest_not_goto_new_map		=	43,		// 队长所在地图无法传送
+	E_Team_dest_max_role_limit			=	44,		// 队长所在地图人数已满
+	E_Team_dest_map_min_level_limit		=	45,		// 等级不足
+
+	E_Team_Xzdd_CanNot_Invite           =   46,     // 血战到底 禁止发出 组队申请 [2016-5-25 by willing]
+	E_Team_Xzdd_CanNot_Apply            =   47,     // 该地图禁止发送 申请加入队伍 [2016-5-25 by willing]
+	E_Team_Xzdd_Target_CanNot_Invite    =   48,     // 对方 在参加血战到底 活动，无法被邀请 [2016-5-25 by willing]
+	E_Team_Level_Limit_Erroe			=   49,     // 您的等级不符合队伍要求 new
+	E_Team_Mathing_Not_Leader			=   50,     // 您的不是队长 无权设置队伍匹配 new
+	E_Team_Mathing_In					=   51,     // 队伍正在匹配中 无法再次匹配 new
+	E_Team_Mathing_Role_In				=   52,     // 您正在匹配中 无法再次匹配 new
+	E_Team_Mathing_Role_No_Team			=   53,     // 您没有队伍 无法匹配 new
+	E_Team_Mathing_Cancel				=   54,     // 您的不是队长 无权取消队伍匹配 new
+	E_Team_Level_Other_Limit_Erroe		=   55,     // 对方的等级不符合队伍要求 new
+	E_Team_I_Have_Team_Erroe			=   56,     // 您已经有队伍了 无法加入其他队伍 new
+};
+
+enum EPickMode
+{
+	EPUM_Free,										// 自由拾取
+	EPUM_Sice,										// 掷骰拾取
+	EPUM_Leader,									// 队长拾取
+};
+
+// 组队装备信息
+struct tagEquipTeamInfo
+{
+	int n32_ConsolidateNum;		// 装备总强化星数
+	int n32_InlayNum;				// 装备总镶嵌星数
+	int n32_Rating;				// 装备总评分
+};
+struct tagApplyRoleData
+{
+	DWORD			dw_role_id;
+	DWORD			dw_time;
+	BYTE			eClassEx;		// 职业
+	BYTE		    bySex;
+	short			nLevel;
+	DWORD			dwEquipTypeID[TEAM_DISPLAY_NUM];	
+	tagAvatarAtt	AvatarAtt;
+	tagEquipTeamInfo stEquipTeamInfo;
+};
+
+//小队准备结构体
+struct TeamInfo
+{
+	int nclass;				//职业
+	unsigned int nZhanLi;	//战斗力
+	bool bIsSelf;			//是否是自己	
+	std::string strname;	//名字
+	unsigned char bySex;	//性别
+	int nlevel;				//等级
+	int nPrepared;			//准备状态
+	unsigned int uRoleID;	//玩家id
+	tagDWORDTime dwJointime;//加入小队时间
+	TeamInfo()
+	{
+		nclass = 0;
+		nZhanLi = 0;
+		bIsSelf = false;
+		strname = "";
+		bySex = 0;
+		nlevel = 0;
+		nPrepared = 0;
+		uRoleID = 0;
+	}
+};
+//---------------------------------------------------------------------
+//队长邀请散人组队、队员邀请散人组队、散人邀请散人组队、散人申请入队全用此消息，去掉冗余的消息    add-- qjw
+//---------------------------------------------------------------------
+struct NET_SIC_invite_join_team : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_invite_join_team)
+	unsigned int		dwDestRoleID;		// 被邀请玩家	
+	unsigned int		dwRoleNameCrc;
+};
+
+// 邀请组队(返回给邀请者)
+struct NET_SIS_invite_to_leader : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_invite_to_leader)
+	unsigned int		dw_error_code;
+};
+
+//---------------------------------------------------------------------
+//队员邀请散人进入，队长同意后，服务器判断散人可以加入，给散人发送是否同意入队消息
+//队长邀请散人进入，服务器给散人发送是否同意入队消息
+//---------------------------------------------------------------------
+struct NET_SIS_invite_join_team : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_invite_join_team)
+	unsigned int		dwLeaderID;		//队长ID
+	unsigned int		dwDestRoleID;	//被邀请者ID
+	unsigned int		dwTeamMenRoleID;//提出邀请的队员ID
+	short				level;			//队长等级
+	BYTE				roleType;		//队长职业
+	BYTE				sex;			//队长性别
+};
+//---------------------------------------------------------------------
+//队员邀请玩家组队，	---------废弃		add-- qjw
+//---------------------------------------------------------------------
+struct NET_SIC_member_invite_join_team : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_member_invite_join_team)
+	unsigned int	dwDestRoleID;			// 被邀请者ID
+};
+// 玩家是否同意组队邀请
+struct NET_SIC_invite_reply : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_invite_reply)
+	unsigned int	dwLeaderID;
+	unsigned int	dwTeamMenRoleID;//提出邀请的队员ID
+	int		bAgree;				// 是否同意
+};
+
+//玩家是否同意组队邀请
+struct NET_SIS_invite_reply : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_invite_reply)
+	unsigned int	dwTeamMemID[MAX_TEAM_NUM];//若成功，则是队伍成员ID；不成功，0为队长ID，1为被邀请者ID
+	int		bAgree;
+	unsigned int	dw_error_code;
+};
+
+//---------------------------------------------------------------------
+//队员邀请散人进入，队长拒绝后，给队员发送消息
+//---------------------------------------------------------------------
+struct NET_SIS_member_invite_join_team_reply : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_member_invite_join_team_reply)
+	unsigned int		dwDestRoleID;				// 队员邀请的目标ID
+};
+// 队长广播
+struct NET_SIS_team_leader_set : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_team_leader_set)
+	//unsigned int dwRoleID;		不需要同步队伍状态给周围玩家了，所以去掉该成员，减少包大小
+	//DWORD  bLeader;		换成队长ID
+	unsigned int	dwTeamID;
+	unsigned int	dwLeaderID;
+};
+struct NET_SIS_role_state_to_team : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_role_state_to_team)
+	unsigned int	dw_role_id;		// 玩家ID
+	unsigned int	dwMapID;
+	EClassType		eClassEx;		// 职业
+	unsigned char	bySex;
+	int				nLevel;
+	int				nMaxHP;
+	int				nHP;
+	int				nMaxMP;
+	int				nMP;
+	float			fX;
+	float			fZ;
+	unsigned int	dwEquipTypeID[TEAM_DISPLAY_NUM];	
+	tagAvatarAtt	AvatarAtt;
+	tagEquipTeamInfo st_EquipTeamInfo;
+	int			b_online;
+	int			b_leader;
+	tagDWORDTime dwJointime;
+};
+
+//---------------------------------------------------------------------
+//队员邀请散人进入，服务器给队长发送的请求同意消息
+//---------------------------------------------------------------------
+struct NET_SIS_member_invite_join_team_to_leader : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_member_invite_join_team_to_leader)
+	unsigned int	dwDestRoleID;				// 被邀请者ID
+	unsigned int	dwTeamMemID;				// 提出邀请的队员ID
+	short				level;					//散人等级
+	BYTE				roleType;				//散人职业
+	BYTE				sex;					//散人性别
+
+};
+//---------------------------------------------------------------------
+//队员邀请散人进入，队长给服务器发送的是否同意消息
+//---------------------------------------------------------------------
+struct NET_SIC_member_invite_join_team_replay : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_member_invite_join_team_replay)
+	unsigned int	dwTeamMemID;				// 提出邀请的队员ID
+	unsigned int	dwDestRoleID;				// 目标ID
+	unsigned int	bAgree;						// 是否同意
+};
+
+//---------------------------------------------------------------------
+//队员邀请玩家组队,返回给队员的错误码
+//---------------------------------------------------------------------
+struct NET_SIS_member_invite_join_team : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_member_invite_join_team)
+	unsigned int		dwError;
+};
+//---------------------------------------------------------------------
+//申请入队			---------废弃		add-- qjw
+//---------------------------------------------------------------------
+struct NET_SIC_apply_join_team : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_apply_join_team)
+	unsigned int	dwApplyeeID;		// 申请者目标ID
+	unsigned int	dwRoleNameCrc;	// 角色名称crc32
+};
+
+//---------------------------------------------------------------------
+//散人申请入队返回错误码
+//---------------------------------------------------------------------
+struct NET_SIS_apply_join_team : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_apply_join_team)
+	unsigned int	dwError;
+	unsigned int	dwApplyeeID;		// 申请者目标ID
+};
+
+//---------------------------------------------------------------------
+//散人申请入队，服务器判断通过后，给队长发送的是否同意信息
+//---------------------------------------------------------------------
+struct NET_SIS_apply_data : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_apply_data)
+	tagApplyRoleData st_ApplyRoleData;
+	tagEquipTeamInfo st_EquipTeamInfo;
+};
+
+
+//---------------------------------------------------------------------
+//队长是否同意散人入队的申请入队反馈
+//---------------------------------------------------------------------
+struct NET_SIC_apply_join_team_reply : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_apply_join_team_reply)
+	unsigned int	dwDestRoleID;			// 申请人ID
+	int		bApply;					// 是否同意申请
+};
+
+//---------------------------------------------------------------------
+//队长同意散人入队后，服务器判断散人是否能入队的错误码
+//---------------------------------------------------------------------
+struct NET_SIS_apply_join_team_reply : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_apply_join_team_reply)
+	unsigned int	dwLeaderId;				// 队长ID
+	unsigned int	dwApplyRoleID;			// 申请人ID
+	unsigned int	dwError;
+};
+
+// 踢玩家出队
+struct NET_SIC_kick_member : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_kick_member)
+	unsigned int	dwSrcRoleID;		// 队长	
+	unsigned int	dwDestRoleID;		// 被踢玩家
+};
+
+struct NET_SIS_kick_member : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_kick_member)
+	unsigned int	dwDestRoleID;
+	unsigned int	dw_error_code;
+};
+
+// 玩家上线必发送，判断是否有队伍
+struct NET_SIS_get_team_id : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_get_team_id)
+	unsigned int		dwTeamID;
+	//EPickMode	ePickMode;
+	//char		szTeamPlacard[MAX_TEAM_PLACARD_LEN];
+};
+
+//更换队长
+struct NET_SIC_change_leader : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_change_leader)
+	unsigned int		dwNewLeader;
+};
+
+//更换队长
+struct NET_SIS_change_leader : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_change_leader)
+	unsigned int		dwLeaderID;
+	unsigned int		dwNewLeaderID;
+	unsigned int		dw_error_code;
+};
+
+// 离开队伍
+struct NET_SIC_leave_team : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_leave_team)
+};
+
+// 包括主动离开和掉线
+struct NET_SIS_leave_team : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_leave_team)
+	int					bLeaveLine;			
+	unsigned int		dw_role_id;
+	unsigned int		dwLeaderID;			// 队长ID
+	unsigned int		dw_error_code;
+};
+//---------------------------------------------------------------------
+//队员重新上线
+//---------------------------------------------------------------------
+struct NET_SIS_member_online : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_member_online)
+	unsigned  int dw_role_id;			// 上线队员ID
+};
+//-------------------------------------------------------------------------------
+// 远程玩家以及远程生物属性改变
+//------------------------------------------------------------------------------
+/*struct NET_SIS_single_remote_att_change : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_single_remote_att_change)
+	unsigned int			dw_role_id;
+	ERemoteRoleAtt	eType;
+	int				nValue;
+};*/
+
+//组队准备
+struct  NET_SIC_team_set_state : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_team_set_state)
+	unsigned char state;			// 1 准备 2 拒绝
+	unsigned char m_value;			//是否是队长 0不是队长 1是队长
+};
+
+
+struct STeam_Set_State
+{
+	unsigned int roleId;
+	int	state;			//0 未准备 1 已准备 2已拒绝
+	tagDWORDTime dwJointime;//入队时间
+};
+
+//队员是否准备状态
+struct NET_SIS_team_set_state : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_team_set_state)
+	STeam_Set_State state[MAX_TEAM_NUM];
+	bool	bLeader;	
+};
+
+struct NET_SIS_team_chat_room : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_team_chat_room)
+	unsigned int teamId;
+	unsigned int roomId;
+};
+
+//---------------------------------------------------------------------
+//自建队伍
+//---------------------------------------------------------------------
+struct NET_SIC_own_create_team : public s_net_cmd//NET_SIS_own_create_team NET_SIS_team_leader_set
+{
+	DECL_NETCMD(NET_SIC_own_create_team)
+	DWORD	dwFatherTarget; // 队伍父目标		没有填0 默认为附近队伍
+	DWORD	dwSonTarget;	// 队伍子目标		没有填0 默认为附近队伍
+	DWORD	dwMinLevel;		// 队伍最小等级限制 没有填0
+	DWORD	dwMaxLevel;		// 队伍最大等级限制 没有填0
+};
+
+struct NET_SIS_own_create_team : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_own_create_team)
+	DWORD	dwError;
+	DWORD	dwTeamId;
+};
+
+//---------------------------------------------------------------------
+//修改队伍设置
+//---------------------------------------------------------------------
+struct NET_SIC_change_team_att : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_change_team_att)
+	DWORD	dwFatherTarget; // 队伍父目标		没有填0 默认为附近队伍
+	DWORD	dwSonTarget;	// 队伍子目标		没有填0 默认为附近队伍
+	DWORD	dwMinLevel;		// 队伍最小等级限制 没有填0
+	DWORD	dwMaxLevel;		// 队伍最大等级限制 没有填0
+};
+
+struct NET_SIS_change_team_att : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_change_team_att)
+
+	BYTE	byBroadcastType;// 广播类型 0 不广播 1 广播队伍属性改变 2 广播匹配状态改变
+	DWORD	dwFatherTarget; // 队伍父目标		没有填0 默认为附近队伍
+	DWORD	dwSonTarget;	// 队伍子目标		没有填0 默认为附近队伍
+	DWORD	dwMinLevel;		// 队伍最小等级限制 没有填0
+	DWORD	dwMaxLevel;		// 队伍最大等级限制 没有填0
+	bool	bMathing;		// 队伍是否在匹配状态
+	DWORD	dwError;		// 错误码
+};
+
+//---------------------------------------------------------------------
+//修改队伍设置，是否能加入
+//---------------------------------------------------------------------
+struct NET_SIC_change_team_can_join : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_change_team_can_join)
+	bool canJoin;
+};
+
+struct NET_SIS_change_team_can_join : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_change_team_can_join)
+	bool canJoin;
+};
+
+//---------------------------------------------------------------------
+//飞到队长身边
+//---------------------------------------------------------------------
+struct NET_SIC_goto_leader_near : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_goto_leader_near)
+	INT64 itemId;
+};
+
+struct NET_SIS_goto_leader_near : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_goto_leader_near)
+	DWORD	dwError;
+};
+
+
+
+/*
+	组队匹配消息
+*/
+struct STeamListInfo
+{
+	STeamListInfo()
+	{
+//		ZeroMemory(this, sizeof(*this));
+        memset(this, 0, sizeof(*this));
+	}
+	DWORD	dwLeaderID;		// 队长ID
+	wchar_t	szRoleName[X_SHORT_NAME]; //队长名称crc32
+	DWORD	dwRoleNameCrc;	// 队长名称crc32
+	BYTE	byNum;			// 队伍人数
+	BYTE	byProfs[5];		// 队伍中玩家的职业 没有为0
+	BYTE	bySex[5];		// 1女 2男 没有为0
+	DWORD	dwMinLevel;		// 队伍最小等级限制 没有填0
+	DWORD	dwMaxLevel;		// 队伍最大等级限制 没有填0
+};
+
+// 请求队伍列表
+struct NET_C2S_Team_List : public s_net_cmd
+{
+	DECL_NETCMD(NET_C2S_Team_List)
+	DWORD	dwFatherTarget;		// 队伍父级目标类型 0 默认附近队伍
+	DWORD	dwSonTarget;		// 队伍子级目标类型 0 默认附近队伍
+};
+
+// 请求队伍列表反馈 如果没有队伍
+struct NET_SIC_Team_List : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_Team_List)
+
+	DWORD			dwMatchingTeamNum;				// 目前正在匹配中的队伍数量
+	BYTE			listInfosSize;					// 列表中是否有可申请的队伍
+	STeamListInfo	listInfos[1];					// 列表中队伍最大数量
+};
+
+// 队伍请求匹配
+struct NET_C2S_Team_TeamMatching : public s_net_cmd
+{
+	DECL_NETCMD(NET_C2S_Team_TeamMatching)
+};
+
+// 队伍请求取消匹配
+struct NET_C2S_Team_CancelTeamMatching : public s_net_cmd
+{
+	DECL_NETCMD(NET_C2S_Team_CancelTeamMatching)
+};
+
+// 玩家请求匹配
+struct NET_C2S_Team_RoleMatching : public s_net_cmd
+{
+	DECL_NETCMD(NET_C2S_Team_RoleMatching)
+	DWORD	m_dwFatherTarget;		//匹配父级目标类型
+	DWORD	m_dwSonTarget;			//匹配子级目标类型
+};
+
+// 玩家请求匹配反馈
+struct NET_SIC_Team_RoleMatching : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_Team_RoleMatching)
+	// 错误码
+	DWORD	m_nRes;	// 0成功
+};
+
+// 玩家请求取消匹配
+struct NET_C2S_Team_CancelRoleMatching : public s_net_cmd
+{
+	DECL_NETCMD(NET_C2S_Team_CancelRoleMatching)
+};
+
+// 玩家请求取消匹配反馈
+struct NET_SIC_Team_CancelRoleMatching : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_Team_CancelRoleMatching)
+	// 错误码
+	DWORD	m_nRes;	// 0成功
+};
+
+//---------------------------------------------------------------------
+//解散队伍
+//---------------------------------------------------------------------
+struct NET_SIC_dismiss_team : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIC_dismiss_team)
+};
+
+struct NET_SIS_dismiss_team : public s_net_cmd
+{
+	DECL_NETCMD(NET_SIS_dismiss_team)
+	DWORD	dwError;
+};
+
+// 删除申请列表中的玩家
+struct NET_S2C_delete_apply_data : public s_net_cmd
+{
+	DECL_NETCMD(NET_S2C_delete_apply_data)
+	DWORD	dwRoleID;
+};
+
+#pragma pack(pop)
+#endif

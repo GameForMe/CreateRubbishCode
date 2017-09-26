@@ -1,0 +1,531 @@
+#include "DropDragDelegate.h"
+#include "World.h"
+#include "BaseDefine.h"
+#include "ItemNode.h"
+#include "PackageManager.h"
+#include "MessageBoxUi.h"
+#include "InputMessageBox.h"
+#include "UiManager.h"
+#include "StringMgr.h"
+#include "NewPlayerGuide.h"
+#include "UiManager.h"
+#include "SkillUi.h"
+#include "SkillManager.h"
+#include "ItemMarixLayer.h"
+#include "ShortCutUi.h"
+#include "ToolTip.h"
+#include "LocalPlayer.h"
+#include "f_string_table.h"
+#include "GuildMgr.h"
+#include "GuildBossManager.h"
+
+DropDragDelegate::DropDragDelegate()
+	: _node(NULL)
+	, _moveItemNode(NULL)
+	, _beginWithMovableItem(false)
+	, _selectItem(-1)
+	, _firstClick(true)
+	, _moveOnlyDiffCon(true)
+	, _doubleClickEnble(true)
+	, _dragEnable(true)
+	, _clickEnble(true)
+	, _srcTargetFrame(NULL)
+{
+
+}
+
+DropDragDelegate * DropDragDelegate::getInstance()
+{
+	static DropDragDelegate instance;
+	return &instance;
+}
+
+bool DropDragDelegate::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	//CC_ASSERT(_moveItemNode == NULL);
+	if (_moveItemNode != NULL )
+	{
+		return false;
+	}
+
+	_beginWithMovableItem = false;
+	_selectItem = -2;
+
+	_beginTouchPoint = _node->convertTouchToNodeSpace(pTouch);
+
+	DropDragInterface::eGetResult result = DropDragInterface::GR_NULL; 
+	for(DropLayer::iterator iter = _layers.begin(); iter != _layers.end(); ++ iter)
+	{
+		DropDragInterface *i = *iter;
+		_selectItem = i->getItemBegin(*pTouch, result);
+		if(result == DropDragInterface::GR_SUCCESS)
+		{//点击在layer上
+			if(_selectItem != -1)
+			{//点击在item上
+				if(i->getConType() > EICT_Start && i->getConType() < EICT_End)
+				{
+					PackageManager::ItemMap *itemMap = PackageManager::getInstance()->getItemMap(i->getConType());
+					if(itemMap == NULL)
+						return true;
+					f_item *item = PackageManager::getInstance()->getItem(*itemMap, _selectItem);
+					if(item == NULL || item->is_locked())
+						return true;
+				}
+				else if((i->getConType() == EICT_CommonLayer)||(i->getConType()==EICT_Inlay) || (i->getConType() == EICT_GuildPackage))
+				{
+					f_item *item = i->GetItemData(_selectItem);
+					//锁定的东西不可拖动
+					//if(!item){
+					//	MessageBox(NULL,L"TEST",NULL,NULL);
+					//}
+					if(!item || item->is_locked())
+						return true;
+
+					//拖动东西时不要滑动滚动条
+					ItemMarixLayer* layer = dynamic_cast<ItemMarixLayer*>(i);
+					if (layer)
+					{
+						layer->SetScrollViewTouchEnable(false);
+					}
+				}
+
+				if(_dragEnable)
+					_beginWithMovableItem = true;
+			}
+			_srcCon = i->getConType();
+			_srcTargetFrame = i;
+			return true;
+		}
+	}
+	return false;
+}
+
+void DropDragDelegate::ccTouchMoved( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(_beginWithMovableItem)
+	{
+		if(_moveItemNode == NULL)
+		{
+			CCPoint touchPoint = _node->convertTouchToNodeSpace(pTouch);
+			if(ccpDistance(touchPoint, _beginTouchPoint) > TOUCH_MOVE_DIS)
+			{
+				CCNode *node = _node->getChildByTag(DROP_ITEM_NODE_TAG);
+				if(node == NULL)
+				{
+					node = ItemNode::create();
+					node->setTag(DROP_ITEM_NODE_TAG);
+					_node->addChild(node);
+				}
+				_moveItemNode =static_cast<ItemNode*>(node);
+				CC_ASSERT(_moveItemNode != NULL);
+				_moveItemNode->SetToDropDragItemNode();
+				_moveItemNode->setVisible(false);
+
+				if(_srcCon > EICT_Start && _srcCon < EICT_End)
+				{
+					PackageManager::ItemMap *itemMap = PackageManager::getInstance()->getItemMap(_srcCon);
+					CC_ASSERT(itemMap != NULL);
+					f_item *item = PackageManager::getInstance()->getItem(*itemMap, _selectItem);
+					CC_ASSERT(item != NULL);
+					_moveItemNode->initWithItem(item);
+				}
+				else
+				{
+					if(_srcCon == EICT_SKILL)
+					{
+						if (SkillManager::getInstance()->getSkillIsActive(_selectItem))
+						{
+							//SkillUiLayer *uiLayer = getUiNodeByTag<SkillUiLayer>(WCT_SKILLUI);
+							if ( SkillManager::getInstance()->getSkillLearnState(_selectItem) ) //uiLayer->getSkillIsNoLearn()
+							{
+								//如果是从技能拖出的
+								ShortCutUiLayer *layer = getUiNodeByTag<ShortCutUiLayer>(WCT_ShorCutUi);
+								if (layer && !(layer->getSkillState()))
+								{
+									//layer->stopAllEffectAction();
+									layer->SkillRunEffect();
+								}
+								_moveItemNode->setBlankSpriteFrame(SkillManager::getInstance()->getSkillIcon(_selectItem));
+								_moveItemNode->setBlank();
+								_moveItemNode->setShowPosyUpstar(false);
+							}
+							else
+							{
+								ToolTip::getInstance()->push(GET_STR(2420).c_str());
+								return;
+							}
+						}
+						else
+						{
+							ToolTip::getInstance()->push(GET_STR(2419).c_str());
+							return;
+						}	
+					}
+					else if(_srcCon == EICT_CommonLayer||_srcCon == EICT_UpStar)
+					{
+						f_item *item = _srcTargetFrame->GetItemData(_selectItem);
+						if(item)
+							_moveItemNode->initWithItem(item);
+						else
+							return;
+					}
+					else if (_srcCon == EICT_GuildPackage || _srcCon == EICT_GuildAdd)
+					{
+						f_item* item = _srcTargetFrame->GetItemData(_selectItem);
+						if (item)
+						{
+							_moveItemNode->setDataId(item->get_item_type_id());
+						}
+						else
+						{
+							return;
+						}
+					}
+				}
+
+				_moveItemNode->setVisible(true);
+				_moveItemNode->setScale(1.5f);
+				NewPlayerGuider::getInstance()->onDragItemBegin(_srcCon, _selectItem);
+			} 
+		}
+
+		if(_moveItemNode != NULL)
+		{
+			CCPoint point = _node->convertTouchToNodeSpace(pTouch);
+			_moveItemNode->setPosition(point);
+			unsigned int itemId = _moveItemNode->GetDataId();
+			if (itemId >= 1001001 && itemId <= 1001029)
+			{
+				ShortCutUiLayer *layer = getUiNodeByTag<ShortCutUiLayer>(WCT_ShorCutUi);
+				if (layer && !(layer->getMedicineState()))
+				{
+					//layer->stopAllEffectAction();
+					LocalPlayer* localPlayer = RoleManager::getInstance()->getLocalPlayer();
+					const ItemTypeData &itemdata = PackageManager::getInstance()->getItemTypeData(itemId);
+					if (localPlayer && localPlayer->getLevel() >= itemdata.level)
+					{
+						layer->MedicineRunEffect();
+					}
+				}
+			}
+			else if (itemId >= 1002001 && itemId <= 1002005)
+			{
+				ShortCutUiLayer *layer = getUiNodeByTag<ShortCutUiLayer>(WCT_ShorCutUi);
+				if (layer && !(layer->getBreakState()))
+				{
+					layer->BreakRunEffect();
+				}
+			}
+		}
+	}
+}
+
+void DropDragDelegate::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	ShortCutUiLayer *layer = getUiNodeByTag<ShortCutUiLayer>(WCT_ShorCutUi);
+	if (layer)
+	{
+		layer->stopAllEffectAction();	
+	}
+	if(_moveItemNode == NULL)
+	{
+		CCPoint touchPoint = _node->convertTouchToNodeSpace(pTouch);
+		if(ccpDistance(touchPoint, _beginTouchPoint) <= TOUCH_MOVE_DIS)
+		{//点击
+			if(_firstClick)
+			{
+				_firstTouch = *pTouch;
+				CCDirector::sharedDirector()->getScheduler()->scheduleSelector(SEL_SCHEDULE(&DropDragDelegate::clickCallback), this, 0.2, false);
+				_firstClick = false;
+			}
+			else
+			{
+				if(_doubleClickEnble)
+				{
+					CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&DropDragDelegate::clickCallback), this);
+					for(DropLayer::iterator iter = _layers.begin(); iter != _layers.end(); ++ iter)
+					{
+						DropDragInterface *i = *iter;
+						if(i->onDoubleClicked(*pTouch))
+							break;
+					}
+					_firstClick = true;
+				}
+			}
+		}
+	}
+	//[bing] 公共框走另一个
+	else if(_srcCon != EICT_CommonLayer)
+	{
+		CCScene *scene = UiMgr::getInstance()->getCurScene();
+		CCPoint worldPos = scene->convertTouchToNodeSpace(pTouch);
+
+		_destItem = -1;
+		bool bAccept = false;
+		DropDragInterface::eGetResult result =  DropDragInterface::GR_NULL; 
+		short selectItem = -2;
+		for(DropLayer::iterator iter = _layers.begin(); iter != _layers.end(); ++ iter)
+		{
+			DropDragInterface *i = *iter;
+			selectItem = i->getItemEnd(*pTouch, result, _srcCon, _selectItem);
+			if (_srcCon == EICT_Bag && _destCon == EICT_Equip)
+			{
+				f_item *srcItem = PackageManager::getInstance()->getItem(_srcCon, _selectItem);
+				if(srcItem != NULL && selectItem == -1)
+				{
+
+					selectItem = PackageManager::getInstance()->changeDest(srcItem);
+				}
+			}
+			if(result == DropDragInterface::GR_SUCCESS)
+			{
+				_destCon = i->getConType();
+				bAccept = true;
+				break;
+			}
+		}
+
+		if(!bAccept)
+		{//丢掉
+			if(_moveOnlyDiffCon)
+			{
+				if(_srcCon == EICT_Bag)
+				{
+					f_item *item = PackageManager::getInstance()->getItem(EICT_Bag, _selectItem);
+					if (!item)
+						return;
+					ItemTypeData const* data_ptr = PackageManager::getInstance()->get_item_proto_ptr(item->get_item_type_id());
+					CC_ASSERT(data_ptr);
+					ItemTypeData const& data = *data_ptr;
+					if (!data.canSell)
+					{
+						ToolTip::getInstance()->push(STRING_TABLE["can_not_drop_notice"]);
+					}
+					else
+					{
+						std::string t_str; 
+						const EquipTypeData* equipType = PackageManager::getInstance()->getEquipTypeData(item->get_item_type_id());
+						if (PIT_Equip == data.type && equipType && equipType->explodeId != -1)
+						{
+							t_str = STRING_TABLE["bag_string1"];
+						}
+						else
+						{
+							std::stringstream ss;
+							ss<<STRING_TABLE["drop_confirm"]<<data.name<<"*"<<item->get_data()->GetNum();
+							t_str = ss.str();
+						}
+						MessageBoxUi *messageBox = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, t_str.c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+						World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX);
+						messageBox->signalOkBtnPressed.connect(this, &DropDragDelegate::onPutDownMessageBoxOk);
+					}
+				}
+			}
+		}
+		else 
+		{
+			if(selectItem != -1)
+			{
+				if(_destCon == _srcCon)
+				{//同一个容器中的交换
+					if(_moveOnlyDiffCon)
+					{
+						if(_srcCon == EICT_Bag)
+						{
+							PackageManager::ItemMap *itemMap = PackageManager::getInstance()->getItemMap(EICT_Bag);
+							f_item *item = PackageManager::getInstance()->getItem(*itemMap, _selectItem);
+							if(item != NULL)
+							{
+								f_item *itemd = PackageManager::getInstance()->getItem(*itemMap, selectItem);
+								if(item->get_item_number() == 1 || itemd != NULL)
+								{
+									PackageManager::getInstance()->changeItemPosition(_srcCon, _selectItem, selectItem);
+								}
+								else
+								{
+									_destItem = selectItem;
+									MessageBoxUi *ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, "\xE8\xA6\x81\xE6\x8B\x86\xE5\x88\x86\xE7\x89\xA9\xE5\x93\x81\xE5\x90\x97\xEF\xBC\x9F",
+										TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+									World::getInstance()->getScene()->addChild(ui, WZ_MESSAGEBOX);
+									ui->signalCancelBtnPressed.connect(this, &DropDragDelegate::onSplitItemMessageBoxNo);
+									ui->signalOkBtnPressed.connect(this, &DropDragDelegate::onSplitItemMessageBoxYes);
+								}
+							}
+						}
+						else
+						{
+							if (_srcCon == EICT_KungfuEquip)
+							{
+								//do nothing;
+							}
+							else
+							{
+								PackageManager::getInstance()->changeItemPosition(_srcCon, _selectItem, selectItem);
+							}
+
+						}
+					}
+				}
+				else
+				{//不同容器之间的交换
+					if(_destCon > EICT_Start && _destCon < EICT_End &&
+						_srcCon > EICT_Start && _srcCon < EICT_End)
+					{
+						PackageManager::getInstance()->changeItemPosition(_srcCon, _destCon, _selectItem, selectItem);
+					}
+					if (_srcCon == EICT_GuildPackage && _destCon == EICT_GuildAdd)
+					{
+						GuildBossManager* bossManager = GuildMgr::getInstance()->getBossManager();
+						bossManager->getItemFromPackage(_selectItem,selectItem);
+					}
+					if (_srcCon == EICT_GuildAdd && _destCon == EICT_GuildPackage)
+					{
+						GuildBossManager* bossManager = GuildMgr::getInstance()->getBossManager();
+						bossManager->getItemToPackage(_selectItem,selectItem);
+					}
+				}
+			}
+		}
+
+		NewPlayerGuider::getInstance()->onDropItemEnd(worldPos);
+
+		if(_moveItemNode)
+		{
+			_moveItemNode->setScale(1.0f);
+			_moveItemNode->setVisible(false);
+			_moveItemNode = NULL;
+		}
+
+	}
+	else if(_srcCon == EICT_CommonLayer)
+	{
+		DropDragInterface::eGetResult result;
+		if(_srcTargetFrame!=NULL)
+		{
+			_srcTargetFrame->getItemEnd(*pTouch, result, _srcCon, _selectItem);
+			CCPoint worldPos = _srcTargetFrame->convertTouchToNodeSpace(pTouch);
+			NewPlayerGuider::getInstance()->onDropItemEnd(worldPos);
+			_srcTargetFrame = NULL;
+		}
+		
+		if (_moveItemNode)
+		{
+			_moveItemNode->setScale(1.0f);
+			_moveItemNode->setVisible(false);
+			_moveItemNode = NULL;
+		}
+	}
+}
+void DropDragDelegate::ccTouchCancelled(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if(_moveItemNode)
+	{
+		_moveItemNode->setScale(1.0f);
+		_moveItemNode->setVisible(false);
+		_moveItemNode = NULL;
+
+		_srcTargetFrame = NULL;
+	}
+}
+
+void DropDragDelegate::attachToScene()
+{
+	CC_ASSERT(_node != NULL);
+	World::getInstance()->getScene()->addChild(_node, WZ_DROPDRAGDELEGATE);
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void DropDragDelegate::detachFromScene()
+{
+	CC_ASSERT(_node != NULL);
+	World::getInstance()->getScene()->removeChild(_node);
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+void DropDragDelegate::init()
+{
+	CC_ASSERT(_node == NULL);
+	_node = CCNode::create();
+	_node->retain();
+}
+
+void DropDragDelegate::destroy()
+{
+	_node->release();
+	_node = NULL;
+}
+
+void DropDragDelegate::addDropLayer( DropDragInterface *layer )
+{
+	CC_ASSERT(layer != NULL);
+	layer->retain();
+	_layers.push_front(layer);
+}
+
+void DropDragDelegate::removeDropLayer( DropDragInterface *layer )
+{
+	CC_ASSERT(layer != NULL);
+	if(_srcTargetFrame==layer)//如果移除的是正在选择的目标
+		_srcTargetFrame=NULL;
+	for(DropLayer::iterator iter = _layers.begin(); iter != _layers.end(); ++ iter)
+	{
+		if(layer == *iter)
+		{
+			layer->release();
+			_layers.erase(iter);
+			break;
+		}
+	}
+}
+
+void DropDragDelegate::onPutDownMessageBoxOk()
+{
+	PackageManager::getInstance()->putDownBagItem(_selectItem);
+}
+
+void DropDragDelegate::onSplitItemMessageBoxYes()
+{
+	f_item *item = PackageManager::getInstance()->getItem(_srcCon, _selectItem);
+	if(!IS_VALID_PTR(item))
+	{
+		return;
+	}
+
+	int num = item->get_item_number();
+	CC_ASSERT(_srcCon == EICT_Bag);
+	//SplitItemUi *ui = SplitItemUi::create();
+	//World::getInstance()->getScene()->addChild(ui, WZ_MESSAGEBOX);
+	InputMessageBox::getInstace()->open();
+	InputMessageBox::getInstace()->setMessage(GET_STR(2385).c_str());//2385  请输入要拆分的数量
+	InputMessageBox::getInstace()->setNumOnly(true,num);
+	InputMessageBox::getInstace()->setDefaultText(1);
+	InputMessageBox::getInstace()->getBtnSignal()->connect(this, &DropDragDelegate::onSplitItemMessageBox);
+}
+
+void DropDragDelegate::onSplitItemMessageBoxNo()
+{
+	PackageManager::getInstance()->changeItemPosition(_srcCon, _selectItem, _destItem);
+}
+
+void DropDragDelegate::clickCallback( float dt )
+{
+	CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&DropDragDelegate::clickCallback), this);
+	if(_clickEnble)
+	{
+		for(DropLayer::iterator iter = _layers.begin(); iter != _layers.end(); ++ iter)
+		{
+			DropDragInterface *i = *iter;
+			if(i->onClicked(_firstTouch))
+			{
+				break;
+			}
+		}
+	}
+	_firstClick = true;
+}
+
+void DropDragDelegate::onSplitItemMessageBox( bool isOk, std::string str )
+{
+	if(isOk)
+		PackageManager::getInstance()->changeItemPosition(EICT_Bag, _selectItem, _destItem, atoi(str.c_str()));
+}

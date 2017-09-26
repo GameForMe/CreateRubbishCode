@@ -1,0 +1,471 @@
+#include "NewSignUi.h"
+#include "World.h"
+#include "UiResourceMgr.h"
+#include "CfgReader.h"
+#include "UiLoader.h"
+#include "BaseDefine.h"
+#include "ItemNode.h"
+#include "UiTools.h"
+#include "RewardMgr.h"
+#include "GameActionNode.h"
+#include "BSAnimate.h"
+#include "RewardMgr.h"
+#include "UiManager.h"
+#include "LocalPlayer.h"
+#include "RoleManager.h"
+#include "ItemTip.h"
+#include "MessageBoxUi.h"
+#include "StringMgr.h"
+#include "PackageManager.h"
+#include "StringMgr.h"
+#include "ToolTip.h"
+#include "SQLCommand.h"
+#include "DBMgr.h"
+#include "ReceiveRewardUi.h"
+#include "RoleManager.h"
+
+CCNode * NewSignUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["DailySignUiFrame"] = UiSpriteLoader<NewSignUiLayer>::loader();
+	nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+
+	return readUiFromCCBI("dailysignui", nodeLoaders, _loadSpriteSheet);
+}
+
+NewSignUiLayer * NewSignUi::getUiLayer()
+{
+	return getUiNodeByTag<NewSignUiLayer>(WCT_NewSignUi);
+}
+///////////////////////////////////////////////////////////////
+
+NewSignUiLayer::NewSignUiLayer()
+	: _currentDay(-1)
+	, _currentSelectIndex(-1)
+	, _leaderSprite(NULL)
+	, _handNode(NULL)
+	, _currentSelectSprite(NULL)
+	,_lingquSuccess(0)
+{
+
+}
+
+NewSignUiLayer::~NewSignUiLayer()
+{
+
+}
+
+
+cocos2d::SEL_MenuHandler NewSignUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler NewSignUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", NewSignUiLayer::onCloseBtnPressed);
+	return NULL;
+}
+
+void NewSignUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_leaderSprite = (CCSprite*)getChildByTag(0);
+
+	LocalPlayer* pSelfRole = RoleManager::getInstance()->getLocalPlayer();
+	if (!pSelfRole)
+		return;
+
+	_currentDay = pSelfRole->GetDayNumFromRoleCrateTime();
+
+	int rewardIndex = 1;
+	if (_currentDay > NST_DateEnd && _currentDay <= 56)
+	{
+		rewardIndex = 2;
+	}
+	else if (_currentDay > 56)
+	{
+		rewardIndex = 3;
+	}
+	_currentDay = _currentDay % NST_DateEnd;
+	_byType = NEWSIGNUI_NORMAL_SIGN;
+	if (_currentDay >= MAX_SIGN_DAY_NUM)
+		_currentDay = MAX_SIGN_DAY_NUM - 1;
+	if(_currentDay < 0)
+		_currentDay = 0;
+	_currentSelectIndex = _currentDay;
+
+	//CCSpriteFrame* alreadySprite1 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("dailysignui_already");
+	CCSpriteFrame* alreadySprite2 = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("dailysignui_willsign");
+	//CCSpriteFrame* queryFrame = NULL;
+	_bigNode = (CCNode*)_leaderSprite->getChildByTag(0);
+	CC_ASSERT(_bigNode != NULL);
+	float top = _bigNode->getContentSize().height;
+	getRewardInfomation(rewardIndex);
+
+	if (/*alreadySprite1 != NULL && */alreadySprite2 != NULL && !_rewardDataBowl.empty())
+	{
+		int index = 0;
+		//int vipDoubleLevel = 0;
+		for (int i = NST_DateBegin;i < NST_LineNum;i++)
+		{
+			int jianjuRow = i < 1 ? NEWSIGNUIJIANJUROW : NEWSIGNUIJIANJUROW + NEWSIGNUIBIANJIEROW2;
+			float posY = top - NEWSIGNUIBIANJIEROW - NEWSIGNUIJIANJUROW - NEWSIGNUISPRITEHEIGHT * i - jianjuRow * i - NEWSIGNUISPRITEHEIGHT/2;
+			for (int j = NST_DateBegin;j < NST_RowNum;j++)
+			{
+				int jianju = j < 1 ? NEWSIGNUIJIANJULINE : NEWSIGNUIJIANJULINE + NEWSIGNUIBIANJIELINE2;
+				float posX = NEWSIGNUIBIANJIELINE + NEWSIGNUIJIANJULINE + NEWSIGNUISPRITEHEIGHT * j + jianju * j + NEWSIGNUISPRITEHEIGHT/2;
+				_itemNodePos[index] = ccp(posX,posY);
+
+				//if (index < _currentDay)
+				//	//已过去的日期
+				//	queryFrame = alreadySprite1;
+				//else
+				//	//今天和今天以后的日期
+				//	queryFrame = alreadySprite2;
+				CCSprite *sprite = CCSprite::createWithSpriteFrame(alreadySprite2);
+				sprite->setPosition(_itemNodePos[index]);
+				_bigNode->addChild(sprite,ENSZO_BlankSprite,index + NST_SpriteBegin);
+
+				ItemNode* itemNode = ItemNode::create();
+				itemNode->setBlank();
+				itemNode->setAnchorPoint(ccp(0.5f,0.5f));
+				itemNode->setPosition(ccp(_itemNodePos[index].x,_itemNodePos[index].y));
+				itemNode->setTag(index + NST_ItemNodeBegin);
+				itemNode->hideItemOpBtn();
+				itemNode->setMainVisible(false);
+				itemNode->setQualityFrameShowState(false);
+				itemNode->setDataId(_rewardDataBowl[index].ItemId[0]);
+				itemNode->setClickable(true);
+				itemNode->setNum(_rewardDataBowl[index].ItemNum[0]);
+				if (_rewardDataBowl[index].ItemNum[0] == 1)
+				{
+					itemNode->SetShowNum(true);
+				}
+				_bigNode->addChild(itemNode,ENSZO_BlankSprite);
+				itemNode->setScale(0.9f);
+
+				//std::ostringstream fontZuHe;
+				//fontZuHe << "dailysignui_fontdate" << index + 1;
+				//CCSpriteFrame* zitiFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(fontZuHe.str().c_str());
+				//if (zitiFrame != NULL)
+				//{
+				//	CCSprite *LabelSprite = CCSprite::createWithSpriteFrame(zitiFrame);
+				//	LabelSprite->setPosition(ccp(_itemNodePos[index].x,_itemNodePos[index].y - NEWSIGNUIZITICANSHU));
+				//	_bigNode->addChild(LabelSprite,ENSZO_BlankSprite/*,index + NST_LabelTTFBegin*/);
+
+				//	LabelSprite->setScale(0.8f);
+				//}
+
+				if (index < _currentDay)
+				{
+					CCSpriteFrame* signInFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("dailysignui_masking");
+					if (signInFrame != NULL)
+					{
+						CCSprite* signInSprite = CCSprite::createWithSpriteFrame(signInFrame);
+
+						signInSprite->setPosition(ccp(_itemNodePos[index].x + 1,_itemNodePos[index].y + 7));
+						_bigNode->addChild(signInSprite,ENSZO_maskingSprite);
+						signInSprite->setScale(1.05f);
+					}
+				}
+
+				if (index <= _currentDay && RewardMgr::getInstance()->isSignedCurDay(index))
+				{
+					setSignInFlogBySprite(index);
+				}
+
+				/*
+				if (j % 3 == 0)
+				{
+					vipDoubleLevel++;
+					std::ostringstream vipZuHe;
+					vipZuHe << "dailysignui_v" << vipDoubleLevel;
+					CCSpriteFrame* vipDoubleFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(vipZuHe.str().c_str());
+					if (vipDoubleFrame != NULL)
+					{
+						CCSprite *vipDoubleSprite = CCSprite::createWithSpriteFrame(vipDoubleFrame);
+						vipDoubleSprite->setPosition(ccp(_itemNodePos[index].x - 10,_itemNodePos[index].y + 10));
+						_bigNode->addChild(vipDoubleSprite,ENSZO_vipSprite);
+
+					}
+				}*/
+				index++;
+			}
+		}
+	}
+
+	//CCSpriteFrame* selectFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("dailysignui_select");
+	//if (selectFrame != NULL)
+	//{
+	//	CCSprite *selectSprite = CCSprite::createWithSpriteFrame(selectFrame);
+	//	selectSprite->setPosition(_itemNodePos[_currentDay]);
+	//	_bigNode->addChild(selectSprite,ENSZO_selectSprite);
+	//}
+	CCSpriteFrame* currentSelectFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("dailysignui_selectrect");
+	if (currentSelectFrame != NULL)
+	{
+		_currentSelectSprite = CCSprite::createWithSpriteFrame(currentSelectFrame);
+		_currentSelectSprite->setPosition(_itemNodePos[_currentDay]);
+		_bigNode->addChild(_currentSelectSprite,ENSZO_selectSprite);
+		_currentSelectSprite->setVisible(false);
+	}
+
+	//updateItemNodeTip();
+	if (!RewardMgr::getInstance()->isSignedCurDay(_currentDay))
+	{
+		std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+		std::string sSEPlist = sSEDir + "E1_151.plist";
+
+		_handNode = GameActionNode::create();
+		_handNode->InitWithPList(sSEPlist.c_str(),"E1_151");
+		//_handNode->setPosition(ccp(270.f,180.f));
+		_handNode->setPosition(ccp(_itemNodePos[_currentDay].x,_itemNodePos[_currentDay].y));
+		_bigNode->addChild(_handNode,ENSZO_RewardSprite);
+
+		_handNode->setVisible(true);
+		_handNode->BeginAction(0.09f,true);
+		//CCSpriteFrame* selectFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("dailysignui_select2");
+		//if (selectFrame != NULL)
+		//{
+		//	_headSprite = CCSprite::createWithSpriteFrame(selectFrame);
+		//	_headSprite->setPosition(ccp(_itemNodePos[_currentDay].x + 21,_itemNodePos[_currentDay].y - 21));
+		//	_bigNode->addChild(_headSprite,ENSZO_maskingSprite);
+		//}
+	}
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	setAllChildernButtonPriority(this,0);
+}
+
+bool NewSignUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	CCPoint leaderLayerPoint = _leaderSprite->convertTouchToNodeSpace(pTouch);
+	const CCSize leaderLayerSize = _leaderSprite->getContentSize();
+	CCRect rect(0.0f,0.0f,leaderLayerSize.width,leaderLayerSize.height);
+	if (rect.containsPoint(leaderLayerPoint))
+	{
+		CCPoint bigNodePoint = _bigNode->convertTouchToNodeSpace(pTouch);
+		const CCSize bigNodeSize = _bigNode->getContentSize();
+		CCRect bigNodeRect(0.0f,0.0f,bigNodeSize.width,bigNodeSize.height);
+		if (bigNodeRect.containsPoint(bigNodePoint))
+		{
+			int index = getItemNodeByPoint(bigNodePoint);
+			if (index == -1)
+				return true;
+
+			ItemNode* itemNode = getItemNode(index);
+			_currentSelectIndex = index;
+			if (_currentDay == index && !RewardMgr::getInstance()->isSignedCurDay(index))	//不可重复签到
+			{
+				//签到
+				_byType = NEWSIGNUI_NORMAL_SIGN;
+				itemNode->setClickable(false);
+				signIn();
+				_lingquSuccess = 1;
+			}
+			else
+			{
+				if (index <= _currentDay)
+				{
+					_byType = NEWSIGNUI_REPAIR_SIGN;
+					itemNode->setClickable(false);
+					if (!RewardMgr::getInstance()->isSignedCurDay(index))
+					signIn();
+					_lingquSuccess = 2;
+				}
+				else
+				{
+					itemNode->setClickable(true);
+				}
+			}
+
+			//设置奖励界面“继续领取”按钮标识
+			if (!_rewardDataBowl.empty())
+			{
+				int level = RoleManager::getInstance()->getLocalPlayer()->getVIPLevel();
+				if (level < _rewardDataBowl[index]._vipLevel)
+				{
+					ReceiveRewardUiMgr::GetInstance()->setContinueLingquReward(true);
+				}
+				else
+				{
+					ReceiveRewardUiMgr::GetInstance()->setContinueLingquReward(false);
+				}
+				if (_lingquSuccess < 1)
+				{
+					ReceiveRewardUiMgr::GetInstance()->setContinueLingquReward(false);
+				}
+				
+			}
+			
+			_currentSelectSprite->setPosition(_itemNodePos[index]);
+			_currentSelectSprite->setVisible(true);
+			return true;
+		}
+		return true;
+	}
+	return false;
+}
+
+void NewSignUiLayer::onExit()
+{
+	CCSprite::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+void NewSignUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	if (RewardMgr::getInstance()->isSignedCurDay(_currentDay))
+	{
+		World::getInstance()->setSignBtnAction();
+	}
+	CLOSE_UI(WCT_NewSignUi);
+}
+
+int NewSignUiLayer::getItemNodeByPoint( const CCPoint &point )
+{
+	for (int i = NST_DateBegin;i < NST_DateEnd;i++)
+	{
+		float posX = _itemNodePos[i].x;
+		float posY = _itemNodePos[i].y;
+
+		CCRect rect = CCRectMake(posX - NEWSIGNUISPRITEHEIGHT/2,posY - NEWSIGNUISPRITEHEIGHT/2,NEWSIGNUISPRITEHEIGHT,NEWSIGNUISPRITEHEIGHT);
+		//CCRect rect = CCRectMake(posX - NEWSIGNUISPRITEHEIGHT/2,posY - NEWSIGNUISPRITEHEIGHT/2,NEWSIGNUISPRITEHEIGHT,NEWSIGNUISPRITEHEIGHT);
+		if (rect.containsPoint(point))
+		{
+			return i;
+		}
+	}
+	return -1;
+}
+
+void NewSignUiLayer::signIn()
+{
+	if (_byType == NEWSIGNUI_NORMAL_SIGN)
+	{
+		RewardMgr::getInstance()->sendSign2Server(_currentSelectIndex,_byType);
+	}
+	else
+	{
+		MessageBoxUi *repairSignUI = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, GET_STR(7000).c_str(), TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+		World::getInstance()->getScene()->addChild(repairSignUI, WZ_MESSAGEBOX);
+		repairSignUI->signalOkBtnPressed.connect(this, &NewSignUiLayer::complementarySign);
+	}
+/*签到后再充值不再补充发邮件奖励 by zhang 2015.09.21
+	SignReceiveRewardData data;
+	data.selectIndex = _currentSelectIndex;	
+	if (!_rewardDataBowl.empty())
+	{
+		data.vipLevel = _rewardDataBowl[_currentSelectIndex]._vipLevel;
+	}	
+	ReceiveRewardUiMgr::GetInstance()->setRewardData(data);*/
+}
+
+void NewSignUiLayer::complementarySign()
+{
+	if (PackageManager::getInstance()->getYuanBao() < 10)
+	{
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+		return;
+	}
+	RewardMgr::getInstance()->sendSign2Server(_currentSelectIndex,_byType);
+}
+
+void NewSignUiLayer::setSignInFlogBySprite(int day/* = -1*/)
+{
+	int index = _currentSelectIndex;
+	if (day >= 0)
+	{
+		index = day;
+	}
+	CCSprite *signInSprite = NULL;
+	CCSpriteFrame* signInFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("dailysignui_signin");
+	if (signInFrame != NULL)
+	{
+		signInSprite = CCSprite::createWithSpriteFrame(signInFrame);
+		signInSprite->setPosition(_itemNodePos[index]);
+		_bigNode->addChild(signInSprite,ENSZO_RewardSprite,NST_SignInFlogBySpriteBegin + index);
+	}
+	if (day == -1 && _currentSelectIndex == _currentDay)
+	{
+		signInFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("dailysignui_masking");
+		if (signInFrame != NULL)
+		{
+			signInSprite = CCSprite::createWithSpriteFrame(signInFrame);
+
+			signInSprite->setPosition(ccp(_itemNodePos[index].x + 1,_itemNodePos[index].y + 7));
+			_bigNode->addChild(signInSprite,ENSZO_maskingSprite);
+			signInSprite->setScale(1.05f);
+		}
+
+		if (_handNode != NULL && _handNode->isVisible())
+		{
+			_handNode->StopAction();
+			_handNode->setVisible(false);
+		}
+	}
+
+	//CCSprite* sprite = dynamic_cast<CCSprite*>(_bigNode->getChildByTag(NST_SpriteBegin + index));
+	//if (sprite != NULL)
+	//{
+	//	sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("dailysignui_already"));
+	//}
+
+
+	//if (day == -1 && _headSprite != NULL && _currentSelectIndex == _currentDay)
+	//{
+	//	_headSprite->removeFromParentAndCleanup(true);
+
+	//	_headSprite = NULL;
+	//}
+}
+
+void NewSignUiLayer::getRewardInfomation(int index)
+{
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM DailySigninData");
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	std::string rowName = CCString::createWithFormat("%s%d","Item",index)->getCString();
+	std::string rowNunber = CCString::createWithFormat("%s%d","Num",index)->getCString();
+	while(table->retrieve_row())
+	{
+		AwardInfo rewardInfo;
+
+		unsigned int idx = table->get_index(rowName);
+		rewardInfo.ItemId[0] = table->get_integer32(idx);
+		idx = table->get_index(rowNunber);
+		rewardInfo.ItemNum[0] = table->get_integer32(idx);
+		//增加vip等级
+		idx = table->get_index("vipLevel");
+		rewardInfo._vipLevel = table->get_integer32(idx);
+		_rewardDataBowl.push_back(rewardInfo);
+	}
+
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+}
+
+ItemNode* NewSignUiLayer::getItemNode(int index)
+{
+	return dynamic_cast<ItemNode*>(_bigNode->getChildByTag(NST_ItemNodeBegin + index));
+}
+
+void NewSignUiLayer::updateItemNodeTip()
+{
+	if (_rewardDataBowl.empty())
+	{
+		return;
+	}
+	for (int i = NST_DateBegin;i < NST_DateEnd;i++)
+	{
+		ItemNode* node = getItemNode(i);
+		f_item *item = PackageManager::getInstance()->getItem(EICT_Bag, _rewardDataBowl[i].ItemId[0]);
+		if (item != NULL)
+		{
+			node->initWithItem(item,false);
+			node->setClickable(true);
+		}
+	}
+}
+
+

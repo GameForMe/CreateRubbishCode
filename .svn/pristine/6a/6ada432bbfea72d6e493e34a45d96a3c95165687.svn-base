@@ -1,0 +1,483 @@
+#include "DayActivityUi.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "UiResourceMgr.h"
+#include "BaseDefine.h"
+#include "CfgReader.h"
+#include "StringMgr.h"
+#include "UiTools.h"
+#include "ActivityMgr.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "MapManager.h"
+#include "UiManager.h"
+#include "ExchangeBusinessMgr.h"
+#include "Auto_ActionMgr.h"
+#include "StringMgr.h"
+#include "ToolTip.h"
+#include <algorithm>
+#include "ActivityMgr.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "ItemNode.h"
+DayActivityItem::DayActivityItem()
+{
+	for(int i = NT_Name; i <= NT_JoinBtn; i ++)
+	{
+		CCLabelTTF *label = CCLabelTTF::create();
+		label->setFontSize(16);
+		label->setAnchorPoint(ccp(0.0f, 1.0f));
+		label->setTag(i);
+		switch(i)
+		{
+		case 0:
+			label->setColor(ccc3(0x88, 0xe5, 0x00));
+			break;
+		case 1:
+			label->setColor(ccc3(0xef, 0x6b, 0x01));
+			break;
+		case 2:
+			label->setColor(ccc3(0xff, 0xff, 0xff));
+			//label->setColor(ccc3(0xff, 0xeb, 0x7f));
+			break;
+		case 3:
+			label->setColor(ccc3(0xff, 0xff, 0xff));
+			//label->setColor(ccc3(0xff, 0xff, 0xff));
+			break;
+		case 4:
+			label->setColor(ccc3(0x88, 0xe5, 0x00));
+			//label->setColor(ccc3(0xff, 0xff, 0xff));
+			break;
+		default:
+			label->setColor(ccc3(0xe3, 0x26, 0x06));
+			break;
+		}
+		_node->addChild(label);
+	}
+
+	getLabel(NT_Name)->setPosition(ccp(HP_Name, 0.f));
+	//getLabel(NT_NpcName)->setPosition(ccp(HP_NpcName, 0.f));
+	//getLabel(NT_Reward)->setPosition(ccp(HP_Reward, 0.f));
+	getLabel(NT_Level)->setPosition(ccp(HP_Level,0.f));
+	getLabel(NT_Time)->setPosition(ccp(HP_Time, 0.f));
+	getLabel(NT_State)->setPosition(ccp(HP_State, 0.f));
+	getLabel(NT_JoinBtn)->setPosition(ccp(HP_JoinBtn, 0.f));
+	getLabel(NT_JoinBtn)->setVisible(false);
+	getLabel(NT_JoinBtn)->setColor(ccc3(255, 200, 0));
+}
+
+DayActivityItem::~DayActivityItem()
+{
+
+}
+
+void DayActivityItem::setData( const DayActivityData &data )
+{
+	_data = data;
+
+	getLabel(NT_Name)->setString(_data.name.c_str());
+	//getLabel(NT_NpcName)->setString(_data.npcName.c_str());
+	//getLabel(NT_Reward)->setString(_data.reward.c_str());
+	getLabel(NT_Time)->setString(_data.time.c_str());
+	getLabel(NT_Level)->setString(_data.level.c_str());
+	//getLabel(NT_Level)->setString(CCString::createWithFormat("%d",_data.level)->getCString());
+	CCLabelTTF *label = CCLabelTTF::create();
+	label->setFontSize(16);
+	label->setAnchorPoint(ccp(0.0f, 1.0f));
+	label->setTag(4);
+	std::string stateString;
+	if(_data.state == DayActivityData::S_Weikaishi)
+	{
+		 stateString = GET_STR(31);
+	     label->setColor(ccc3(0x88, 0xe5, 0x00));//蓝色
+	  }
+	else if(_data.state == DayActivityData::S_Jinxingzhong)
+	{
+		stateString = GET_STR(32);
+		label->setColor(ccc3(0xff, 0xf0, 0x06));//红色
+	}
+	else if(_data.state == DayActivityData::S_Yijieshu)
+		{
+		stateString = GET_STR(33);
+	     label->setColor(ccc3(0xb6, 0x95, 0x87));//褐色
+	     }
+
+	getLabel(NT_State)->setString(stateString.c_str());
+	getLabel(NT_State)->setColor(label->getColor());
+	getLabel(NT_JoinBtn)->setString(GET_STR(34).c_str());
+
+	updateContent();
+}
+
+CCLabelTTF * DayActivityItem::getLabel( eNodeTag tag )
+{
+	return dynamic_cast<CCLabelTTF*>(_node->getChildByTag(tag));
+}
+
+void DayActivityItem::setSelect( bool sel )
+{
+	if(sel && (_data.state == DayActivityData::S_Jinxingzhong||
+		_data.state == DayActivityData::S_Weikaishi))
+	{
+		//_node->getChildByTag(NT_JoinBtn)->setVisible(true);
+	}
+	else
+	{
+		//_node->getChildByTag(NT_JoinBtn)->setVisible(false);
+	}
+}
+
+void DayActivityItem::onTouch( CCTouch *touck )
+{
+	CCPoint touchPoint = _node->convertTouchToNodeSpace(touck);
+	CCLabelTTF *labelJoinLab = getLabel(NT_JoinBtn);
+	if(labelJoinLab->isVisible())
+
+	{
+		if(touchPoint.x > HP_JoinBtn && touchPoint.x < HP_JoinBtn + labelJoinLab->getContentSize().width) //560HP_JoinBtn
+		{//TODO参加
+			unsigned int id = _data.mapID;
+			if(id)
+			{
+				//gx add
+				LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+				if (!lp)
+					return;
+				//玩家状态检查 gx add
+				if (AutoActionMgr::getInstance()->Get_Auto_Action())
+				{
+					AutoActionMgr::getInstance()->Set_Auto_Action(false);
+				}
+				if (lp->isInRoleStateAny(RA_ShuangXiu))
+				{
+					ToolTip::getInstance()->push(GET_STR(2101));
+					return;
+				}
+				if (lp->isInRoleStateAny(RA_Stall))
+				{
+					ToolTip::getInstance()->push(GET_STR(2102));
+					return;
+				}
+				if (lp->isInRoleStateAny(RA_Exchange))
+				{
+					ExchangeBusinessMgr::getInstance()->CancleExchange();
+					return;
+				}
+
+				if (!lp->getAutoRunState())
+				{
+					lp->setAutoRunState(true);
+				}
+				lp->runPathTo(ccp(_data.x, _data.y), id);
+			}
+		}
+	}
+}
+
+void DayActivityItem::updateContent()
+{
+	float height = 0.f;
+	for(int i = NT_Name; i <= NT_JoinBtn; i ++)
+	{
+		CCLabelTTF *label = getLabel((eNodeTag)i);
+		if(label != NULL)
+		{
+			float tmpHeight = label->getContentSize().height;
+			if(height < tmpHeight)
+				height = tmpHeight;
+		}
+	}
+
+	_contentSize.height = height;
+
+	CCLabelTTF *last = getLabel(NT_JoinBtn);
+	if(last != NULL)
+	{
+		_contentSize.width = HP_JoinBtn + last->getContentSize().width;
+	}
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+
+DayActivityUi::DayActivityUi()
+{
+
+}
+
+DayActivityUi::~DayActivityUi()
+{
+
+}
+
+CCNode * DayActivityUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["DayActivityUiLayer"] = UiLayerLoader<DayActivityUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("dayactivityui", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+DayActivityUiLayer * DayActivityUi::getUiLayer()
+{
+	return getUiNodeByTag<DayActivityUiLayer>(WCT_DayActivity);
+}
+
+void DayActivityUi::updateData()
+{
+	DayActivityUiLayer *uiLayer = getUiLayer();
+	if(uiLayer != NULL)
+	{
+		uiLayer->updateDisplay();
+	}
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+
+DayActivityUiLayer::DayActivityUiLayer()
+	: _verticalList(NULL)
+{
+
+}
+
+DayActivityUiLayer::~DayActivityUiLayer()
+{
+	if(_verticalList != NULL)
+	{
+		delete _verticalList;
+		_verticalList = NULL;
+	}
+}
+
+cocos2d::SEL_MenuHandler DayActivityUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler DayActivityUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", DayActivityUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onKaishiBtnPressed", DayActivityUiLayer::onKaishiBtnPressed);
+	return NULL;
+}
+
+void DayActivityUiLayer::onKaishiBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	//如果当前没有选中的活动，或者选中的活动为空则给提示 add by XSea 2014.08.26
+	if ( !(_verticalList->getSelectItem()) || _checkData==NULL)
+	{
+		ToolTip::getInstance()->push("\xE5\xB0\x9A\xE6\x9C\xAA\xE9\x80\x89\xE6\x8B\xA9\xE4\xBB\xBB\xE4\xBD\x95\xE6\xB4\xBB\xE5\x8A\xA8");
+		return;
+	}
+	unsigned int id = _checkData->getData().mapID;
+	std::string levelStr = _checkData->getData().level.substr(0,2);
+	const char* str = levelStr.c_str();
+	int level = (str[0] - 48) * 10 + (str[1] - 48);
+	//gx add
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	if (!lp)
+		return;
+	if (lp->getLevel() < level)
+	{
+		ToolTip::getInstance()->push(GET_STR(2392));
+		return;
+	}
+	if (_checkData->getData().state == 1)
+	{
+		if(id)
+		{
+			//玩家状态检查 gx add
+			if (AutoActionMgr::getInstance()->Get_Auto_Action())
+			{
+				AutoActionMgr::getInstance()->Set_Auto_Action(false);
+			}
+			if (lp->isInRoleStateAny(RA_ShuangXiu))
+			{
+				ToolTip::getInstance()->push(GET_STR(2101));
+				return;
+			}
+			if (lp->isInRoleStateAny(RA_Stall))
+			{
+				ToolTip::getInstance()->push(GET_STR(2102));
+				return;
+			}
+			if (lp->isInRoleStateAny(RA_Exchange))
+			{
+				ExchangeBusinessMgr::getInstance()->CancleExchange();
+				ToolTip::getInstance()->push(GET_STR(7218));
+				return;
+			}
+			//需求修改，将自动寻路修改成传送，与活动开始时的传送按钮功能一致
+			if (RoleManager::getInstance()->getLocalPlayer()->isInRoleStateAny(RA_Stall))
+			{
+				ToolTip::getInstance()->push(GET_STR(2102));
+				return;
+			}
+			bool bStart = ActivityMgr::getInstance()->isThereActStartForDayActivity();
+ 			//int nIndex = ActivityMgr::getInstance()->GetStartActIndexForDayActivity();
+			if (bStart && ActivityMgr::getInstance()->GetStartActIndexForDayActivity() > 0)
+			{
+				ActivityMgr::getInstance()->OneKeyTransForDayActivity();
+			}
+		}
+	}
+	else if(_checkData->getData().state  == 0)
+	{
+		ToolTip::getInstance()->push(GET_STR(7004));
+	}
+}
+
+void DayActivityUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(NT_Frame));
+	CC_ASSERT(_frame != NULL);
+
+	_content = _frame->getChildByTag(NT_Content);
+	_scrollView = createScrollViewWithContent(_content);
+	_content->addChild(_scrollView);
+
+	_verticalList = new VerticalList<DayActivityItem>;
+	_verticalList->addToScrollView(_scrollView);
+	_verticalList->setMinSize(_content->getContentSize());
+	_verticalList->setEnableSelect(true);
+	_verticalList->setSelectSpriteFrame("dayactivityui_select");
+	isShow=true;
+	for (int i=0;i<3;i++)
+	{
+		ItemNode *item1 = ItemNode::create();
+		item1->setBlank();
+		item1->setZOrder(0);
+		item1->setPosition(_frame->getChildByTag(i+3)->getPosition());
+		item1->setTag(NT_Item1+i);
+		item1->setClickable(true);
+		item1->hideItemOpBtn();
+		_frame->addChild(item1);
+	}
+//	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+
+	updateDisplay();
+}
+
+void DayActivityUiLayer::onEnter()
+{
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+}
+
+void DayActivityUiLayer::onExit()
+{
+	CCLayer::onExit();
+//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool DayActivityUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if ( !isVisible() || !isRunning() || !hasVisibleParents())
+	{
+		return false;
+	}
+	if(isTouchOnNodeContent(_frame, pTouch))
+	{
+		_stPoint = _content->convertTouchToNodeSpace(pTouch);
+		return true;
+	}
+	return false;
+}
+
+void DayActivityUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(_content, pTouch))
+	{
+		CCPoint pt = _content->convertTouchToNodeSpace(pTouch);
+		if(ccpDistance(pt, _stPoint) < TOUCH_MOVE_DIS)
+		{
+			DayActivityItem *perItem = _verticalList->getSelectItem();
+			DayActivityItem *item = _verticalList->onTouch(pTouch);
+			setCheckData(item);
+			if(perItem != item && perItem != NULL)
+			{
+				perItem->setSelect(false);
+			}
+
+			if(item != NULL)
+			{
+				item->setSelect(true);
+				setDesc(item->getData().desc);
+				setActivityName(item->getData().name);
+				updateItem(item->getData().item[0],item->getData().item[1],item->getData().item[2]);
+			}
+			else
+			{
+				setCheckData(NULL);
+				setDesc("");
+			}
+		}
+	}
+}
+
+void DayActivityUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_DayActivity);
+}
+
+void DayActivityUiLayer::setDesc( const std::string &desc )
+{
+	std::string str = desc;
+	std::replace(str.begin(), str.end(), '\\', '\n');
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_Desc));
+	label->setString(str.c_str());
+	label->setDimensions(CCSize(210.0f,0.0f));
+}
+
+void DayActivityUiLayer::updateDisplay()
+{
+	_verticalList->clear();
+	DayActivityItem *item1 = NULL;
+	const std::vector<DayActivityData>& datas = ActivityMgr::getInstance()->getData();
+	for(std::vector<DayActivityData>::const_iterator iter = datas.begin(); iter != datas.end(); ++ iter)
+	{
+		const DayActivityData &data = *iter;
+		if (DayActivityData::S_NotToday == data.state)
+			continue;//针对行会BOSS战与攻城战
+		DayActivityItem *item = new DayActivityItem;
+		item->setData(data);
+		if (DayActivityData::S_Weikaishi ==data.state || DayActivityData::S_Jinxingzhong == data.state)
+		{
+			if(isShow)
+			{
+				item->setSelect(true);
+				setDesc(item->getData().desc);
+				setActivityName(item->getData().name);
+				updateItem(item->getData().item[0],item->getData().item[1],item->getData().item[2]);//显示奖励
+				setCheckData(item);
+				isShow=false;
+				item1=item;
+			}
+		}
+		_verticalList->addItem(item);
+	}
+	_verticalList->updateDisplay();
+	if (item1)
+		_verticalList->setSelectItem(item1);
+}
+
+void DayActivityUiLayer::setActivityName( std::string name )
+{
+	CCLabelTTF *label = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(NT_Title));
+	label->setColor(ccc3(255,235,174));
+	label->setString(name.c_str());
+}
+
+void DayActivityUiLayer::updateItem( int item1Id,int item2Id,int item3Id )
+{
+	ItemNode *item1Node=dynamic_cast<ItemNode*>(_frame->getChildByTag(NT_Item1));
+	item1Node->setDataId(item1Id);
+	ItemNode *item2Node=dynamic_cast<ItemNode*>(_frame->getChildByTag(NT_Item2));
+	item2Node->setDataId(item2Id);
+	ItemNode *item3Node=dynamic_cast<ItemNode*>(_frame->getChildByTag(NT_Item3));
+	item3Node->setDataId(item3Id);
+}

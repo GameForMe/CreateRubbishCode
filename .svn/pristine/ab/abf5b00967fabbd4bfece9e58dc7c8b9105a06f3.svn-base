@@ -1,0 +1,681 @@
+#include "SelectRoleHeadUi.h"
+#include "SocialMgr.h"
+#include "TeamMgr.h"
+#include "RemoteRoleStateMgr.h"
+#include "World.h"
+#include "ChatUi.h"
+#include "UiTools.h"
+#include "SonghuaUi.h"
+#include "ExchangeBusinessMgr.h"
+#include "RoleEquipUi.h"
+#include "Monster.h"
+#include "LocalPlayer.h"
+#include "MasterPrenticeMgr.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "GuildMgr.h"
+#include "NumericalIniMgr.h"
+#include "NameMgr2.h"
+#include "SBKSDManager.h"
+
+SelectRoleHeadUi::SelectRoleHeadUi()
+	: _hpProgress(NULL)
+	, _mpProgress(NULL)
+	, _hp(NULL)
+	, _mp(NULL)
+	, _uiLayer(NULL)
+	, _level(NULL)
+{
+
+}
+
+SelectRoleHeadUi::~SelectRoleHeadUi()
+{
+	CC_SAFE_DELETE(_hpProgress);
+	CC_SAFE_DELETE(_mpProgress);
+}
+
+bool SelectRoleHeadUi::init()
+{
+// 	_hp = NULL;
+// 	_mp = NULL;
+// 	_uiLayer = NULL;
+// 	_level = NULL;
+
+	if(!CCLayer::init())
+		return false;
+
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("SelectRoleHeadUiLoaderLayer", SelectRoleHeadUiLoader::loader());
+	ccNodeLoaderLibrary->registerCCNodeLoader("TouchSprite", TouchSpriteLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode * node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "selectRoleHeadUi.ccbi").c_str());
+	ccbReader->release();
+	if(node != NULL) {
+		addChild(node);
+		_hp = (CCSprite*)node->getChildByTag(1);
+		_mp = (CCSprite*)node->getChildByTag(2);
+		_name = (CCLabelTTF*)node->getChildByTag(3);
+		_level = (CCLabelTTF*)node->getChildByTag(5);
+		_bg = (CCSprite*)node->getChildByTag(7);
+		_headSprite = dynamic_cast<CCSprite*>(node->getChildByTag(13));
+		_xuanzhanbtn = dynamic_cast<CCControlButton*>(node->getChildByTag(6));
+		CC_ASSERT(_headSprite != NULL);
+		_hpProgress = new ProgressBar;
+		_mpProgress = new ProgressBar;
+		_hpProgress->initBarWithSprite(_hp, 12,false);
+		_mpProgress->initBarWithSprite(_mp, 12,false);
+		_hpProgress->addToParent(node);
+		_mpProgress->addToParent(node);
+		_bgPt = _bg->getPosition();
+		_hpPt = _hp->getPosition();
+		_hp->removeFromParent();
+		_hp =NULL;
+
+		_namePt = _name->getPosition();
+		_levelPt = _level->getPosition();
+		setAllChildernButtonPriority(node, 2);
+
+		_uiLayer = (SelectRoleHeadUiLoaderLayer*)node;
+
+		return true;
+	}
+
+	return false;
+}
+
+void SelectRoleHeadUi::onHpChanged( int hp , int mhp )
+{
+	_hpProgress->setProgress(hp, mhp);
+}
+
+void SelectRoleHeadUi::onMpChanged( int mp , int mmp )
+{
+	_mpProgress->setProgress(mp, mmp);
+}
+
+void SelectRoleHeadUi::setRoleName( const char *name )
+{
+	CC_ASSERT(_name != NULL);
+	CCPoint pt = _name->getPosition();
+	_name->setString(name);
+}
+
+void SelectRoleHeadUi::setRoleName( const wchar_t *name )
+{
+	char roleName[128];
+	memset(roleName, 0, sizeof(char) * 128);
+	Utf16ToUtf8(name, roleName, 128, 0);
+	setRoleName(roleName);
+}
+
+void SelectRoleHeadUi::setBtnVisible( bool visible )
+{
+	// if(NULL != _uiLayer)
+		// _uiLayer->setBtnVisible(visible);
+}
+
+void SelectRoleHeadUi::updateMonsterHead( Role *role )
+{
+	if(role != NULL )
+	{
+		Monster *monst = (Monster*)role;
+		if (monst->isBoss())
+		{
+			_headSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(role->getMonsterBossHeadFrameName().c_str()));
+		}
+		else
+		{
+			_headSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(role->getMonsterHeadFrameName().c_str()));
+		}
+	}
+	_xuanzhanbtn->setVisible(false);
+}
+
+void SelectRoleHeadUi::updateNpcHead( Role *role )
+{
+	if (role != NULL)
+		_headSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(role->getNpcHeadFrameName().c_str()));
+}
+
+void SelectRoleHeadUi::updateHead( Role *role )
+{
+	if (role != NULL)
+		_headSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(role->getHeadFrameName().c_str()));
+
+	_xuanzhanbtn->setVisible(isNeedShowXuanZhanBtn(role->getGuildID()));
+}
+
+void SelectRoleHeadUi::setLevel( int level )
+{
+	CCString *lv = CCString::createWithFormat("%d", level);
+	CCPoint pt = _level->getPosition();
+	_level->setString(lv->getCString());
+}
+
+void SelectRoleHeadUi::setRole()
+{
+	_bg->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("touxaing2"));
+	//_hp->initWithSpriteFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("otherred"));
+	//_mp->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("otherblue"));
+	
+	CCSprite* one = CCSprite::createWithSpriteFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("otherred"));
+	one->setAnchorPoint(ccp(0.5f,0.5f));
+	one->setPosition(_hpPt);
+
+	_hpProgress->initWithCCSprite(one);
+
+	_mpProgress->setVisible(true);
+	_headSprite->setVisible(true);
+	_hpProgress->setPosition(_hpPt);
+	_hpProgress->setLabelPosition(_hpPt);
+	_bg->setPosition(_bgPt);
+	_level->setPosition(_levelPt);
+	_name->setPosition(_namePt);
+	_name->setFontSize(16);
+}
+
+void SelectRoleHeadUi::setMonster()
+{
+	_bg->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("touxaing1"));
+	//_hp->initWithSpriteFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("otherred1"));
+	CCSprite* one = CCSprite::createWithSpriteFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("otherred1"));
+	one->setAnchorPoint(ccp(0.5f,0.5f));
+	one->setPosition(_hpPt);
+
+	_hpProgress->initWithCCSprite(one);
+
+	//_hpProgress->initWithCCSprite(_hp);
+	_mpProgress->setVisible(false);
+	_headSprite->setVisible(false);
+	//_hpProgress->setPosition(ccp(361.0f,456.5f));
+	//_hpProgress->setLabelPosition(ccp(365.0f,456.5f));
+	//_bg->setPosition(ccp(374.0f,461.8f));
+	//_level->setPosition(ccp(433.0f,458.5f));
+	//_name->setPosition(ccp(410.0,473.0));
+	_hpProgress->setPosition(ccpAdd(_hpPt,ccp(10.0f,3)));
+	_hpProgress->setLabelPosition(ccpAdd(_hpPt,ccp(14.0f,2.0f)));
+
+	_bg->setPosition(ccpAdd(_bgPt,ccp(2.0f,16.5f)));
+
+	_level->setPosition(ccpAdd(_levelPt,ccp(31.0f,37.0f)));
+	_name->setPosition(ccpAdd(_namePt,ccp(5.0f,4.0f)));
+	_name->setFontSize(12);
+}
+
+bool SelectRoleHeadUi::isNeedShowXuanZhanBtn(int guild_ID)
+{
+	return GuildMgr::getInstance()->canShowDeclareWar(guild_ID,false)
+			&& (!GuildMgr::getInstance()->isWarGuild(guild_ID))
+			&& !(GuildMgr::getInstance()->getWarGuildNum() >= MAX_WAR_GUILD_NUM);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler SelectRoleHeadUiLoaderLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler SelectRoleHeadUiLoaderLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onBaiShiBtnPressed", SelectRoleHeadUiLoaderLayer::onBaiShiBtnPressed);//拜师
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this,"onShouTuBtnPressed", SelectRoleHeadUiLoaderLayer::onShouTuBtnPressed);//收徒
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGuanZhuBtnPressed", SelectRoleHeadUiLoaderLayer::onGuanZhuBtnPressed);//关注
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLaHeiBtnPressed", SelectRoleHeadUiLoaderLayer::onLaHeiBtnPressed);//拉黑
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onZuDuiBtnPressed", SelectRoleHeadUiLoaderLayer::onZuDuiBtnPressed);//组队
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLookUpBtnPressed", SelectRoleHeadUiLoaderLayer::onLookUpBtnPressed);//查看
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSiliaoBtnPressed", SelectRoleHeadUiLoaderLayer::onSiliaoBtnPressed);//私聊
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onShunagxiuBtnPressed", SelectRoleHeadUiLoaderLayer::onShunagxiuBtnPressed);//双休
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onSonghuaBtnPressed", SelectRoleHeadUiLoaderLayer::onSonghuaBtnPressed);//送花
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onTradeBtnPressed", SelectRoleHeadUiLoaderLayer::onTradeBtnPressed);//交易
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRuHuiBtnPressed", SelectRoleHeadUiLoaderLayer::onRuHuiBtnPressed);//入会
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onXuanZhanBtnPressed", SelectRoleHeadUiLoaderLayer::onXuanZhanBtnPressed);//入会
+
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onGuanxiBtnPressed", SelectRoleHeadUiLoaderLayer::onGuanxiBtnPressed);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onJiaohuBtnPressed", SelectRoleHeadUiLoaderLayer::onJiaohuBtnPressed);
+
+	return NULL;
+}
+
+bool SelectRoleHeadUiLoaderLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+
+void SelectRoleHeadUiLoaderLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	//_btnGroupSrcPosY[0] = getChildByTag(NT_BtnGroupMain)->getPositionY();
+// 	_btnGroupSrcPosY[1] = getChildByTag(NT_BtnGroupGuanxi)->getPositionY();
+// 	_btnGroupSrcPosY[2] = getChildByTag(NT_BtnGroupJiaohu)->getPositionY();
+
+	//setBtnVisible(false);
+
+	/*baishibtn = dynamic_cast<CCControlButton*>(getChildByTag(NT_BtnGroupMain)->getChildByTag(14));
+ 	_shoutubtn = dynamic_cast<CCControlButton*>(getChildByTag(NT_BtnGroupMain)->getChildByTag(15));
+	CC_ASSERT(_baishibtn != NULL && _shoutubtn != NULL);
+	_baishibtn->setVisible(false);
+	_shoutubtn->setVisible(false);*/
+
+	TouchSprite* touchSprite = dynamic_cast<TouchSprite*>(getChildByTag(13));
+	CC_ASSERT(touchSprite != NULL);
+	touchSprite->signalTouched.connect(this, &SelectRoleHeadUiLoaderLayer::onRoleHeadPressed);
+
+	return;
+}
+
+void SelectRoleHeadUiLoaderLayer::onBaiShiBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	//发送拜师请求;
+	unsigned int roleId = RoleManager::getInstance()->get_select_role_id();
+	Role *role = RoleManager::getInstance()->findRole(roleId);
+	if(role != NULL)
+	{
+		MasterPrenticeMgr::getInstance()->Send_add_master(roleId);
+	}
+}
+
+void SelectRoleHeadUiLoaderLayer::onShouTuBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	//发送收徒qingqiu;
+	unsigned int roleId = RoleManager::getInstance()->get_select_role_id();
+	Role *role = RoleManager::getInstance()->findRole(roleId);
+	if(role != NULL)
+	{
+		MasterPrenticeMgr::getInstance()->Send_add_prentice(roleId);
+	}
+}
+
+void SelectRoleHeadUiLoaderLayer::onGuanZhuBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	unsigned int roleId = RoleManager::getInstance()->get_select_role_id();
+	Role *role = RoleManager::getInstance()->findRole(roleId);
+	if(role != NULL)
+	{
+		LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+		if(!ploc)
+			return;
+		if (ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))//摆摊交易中禁止操作
+		{
+			ToolTip::getInstance()->push(GET_STR(7209));
+			return;
+		}
+		SocialMgr::getInstance()->onAddFriend(roleId);
+	}
+}
+
+void SelectRoleHeadUiLoaderLayer::onLaHeiBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	unsigned int roleId = RoleManager::getInstance()->get_select_role_id();
+	Role *role = RoleManager::getInstance()->findRole(roleId);
+	if(role != NULL)
+	{
+		LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+		if(!ploc)
+			return;
+		if (ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))//摆摊交易中禁止操作
+		{
+			ToolTip::getInstance()->push(GET_STR(7209));
+			return;
+		}
+		SocialMgr::getInstance()->onAddBlack(roleId);
+	}
+}
+
+void SelectRoleHeadUiLoaderLayer::onZuDuiBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	unsigned int roleId = RoleManager::getInstance()->get_select_role_id();
+	Role *role = RoleManager::getInstance()->findRole(roleId);
+	if(role != NULL)
+	{
+		LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+		if(!ploc)
+			return;
+		if (ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))//摆摊交易双修中禁止操作
+		{
+			ToolTip::getInstance()->push(GET_STR(7209));
+			return;
+		}
+		TeamMgr::getInstance()->MakeTeammate(roleId);
+	}
+}
+
+void SelectRoleHeadUiLoaderLayer::onLookUpBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	unsigned int roleId = RoleManager::getInstance()->get_select_role_id();
+	Role *role = RoleManager::getInstance()->findRole(roleId);
+	if(role != NULL)
+	{
+		LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+		if(!ploc)
+			return;
+		if (ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))//摆摊交易中禁止操作
+		{
+			ToolTip::getInstance()->push(GET_STR(7209));
+			return;
+		}
+
+		//OPEN_UI(WCT_ROLEEQUIPUI);
+		//GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI)->setPlayerId(roleId);
+// 		showBtnGroup(NT_BtnGroupGuanxi, false);
+// 		showBtnGroup(NT_BtnGroupJiaohu,false);
+		RemoteRoleStateMgr::getInstance()->RefreshRemoteRoleAllInfo(roleId);
+	}
+}
+
+void SelectRoleHeadUiLoaderLayer::onSiliaoBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	unsigned int roleId = RoleManager::getInstance()->get_select_role_id();
+	Role *role = RoleManager::getInstance()->findRole(roleId);
+	if(role != NULL)
+	{
+		LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+		if(!ploc)
+			return;
+		if (ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))//摆摊交易中禁止操作
+		{
+			ToolTip::getInstance()->push(GET_STR(7209));
+			return;
+		}
+		GET_UI(ChatUi, WCT_ChatUi)->sendMessageTo(role->getId(), convertName(role->getName()));
+		//showBtnGroup(NT_BtnGroupJiaohu,false);
+		CLOSE_UI(WCT_ROLEEQUIPUI);
+	}
+}
+
+void SelectRoleHeadUiLoaderLayer::onShunagxiuBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	if (ploc->isRoleInStaticState())//摆摊交易双修中禁止操作
+	{
+		ToolTip::getInstance()->push(GET_STR(7209));
+		return;
+	}
+	SocialMgr::getInstance()->InvitePlayerCompractice(RoleManager::getInstance()->get_select_role_id());
+}
+
+void SelectRoleHeadUiLoaderLayer::onSonghuaBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	if (ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))//摆摊交易中禁止操作
+	{
+		ToolTip::getInstance()->push(GET_STR(7209));
+		return;
+	}
+	OPEN_UI(WCT_SonghuaUi);
+	GET_UI(SonghuaUi, WCT_SonghuaUi)->setRoleId(RoleManager::getInstance()->get_select_role_id());
+}
+
+void SelectRoleHeadUiLoaderLayer::onTradeBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	if (ploc->isRoleInStaticState())//摆摊交易双修中禁止操作
+	{
+		ToolTip::getInstance()->push(GET_STR(7209));
+		return;
+	}
+	//TradeUi::getInstace()->open();
+	ExchangeBusinessMgr::getInstance()->InvitePlayerExchange(RoleManager::getInstance()->get_select_role_id());
+}
+
+void SelectRoleHeadUiLoaderLayer::onRuHuiBtnPressed(cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+		//gx add 2013.11.12 摆摊，交易，双修状态锁死
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7209));
+		return;
+	}
+
+	int nOpenLevel = GetFunOpenLevel(EFOL_Guild);
+
+	//如果等级不够,则不可以创建公会
+	if( ploc->getLevel() < nOpenLevel )
+	{
+		ToolTip::getInstance()->push(GET_STR(7141).c_str());
+		return;
+	}
+	else
+	{
+		if(RoleManager::getInstance()->getLocalPlayer()->getGuildID() == 0xffffffff)
+		{
+			AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+			//OPEN_UI(WCT_GuildListUi);
+			//目标id
+			unsigned int roleId  = RoleManager::getInstance()->get_select_role_id();
+			GuildMgr::getInstance()->setRuihuiBySelectRoleHead(roleId);
+		}
+		else
+		{
+			AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+			OPEN_UI(WCT_GuildFrameUi);
+		} 
+   }	
+/*
+	int selectId = RoleManager::getInstance()->getSelectRole();
+	Role *role = RoleManager::getInstance()->findRole(selectId);
+	role->getGuildID();
+	bool isAskFor = false;
+	int tempConditionLevel = 0;
+	int tempCuildId = 0;
+	const std::vector<GuildInfo>& guilds = GuildMgr::getInstance()->getAllGuilds();
+	for(std::vector<GuildInfo>::const_iterator iter = guilds.begin(); iter != guilds.end(); ++ iter)
+	{
+		if (iter->id == role->getGuildID())
+		{
+			tempConditionLevel = iter->conditionLevel;
+			tempCuildId = iter->id;
+		}
+/ *
+		const GuildInfo &guild = *iter;
+		if(guild.isStateAskFor)
+		{
+			isAskFor = true;
+			break;
+		}* /
+	}
+	if(!isAskFor)
+	{
+		//TODO:
+		//客户端应预判断是否满足该行会的申请等级
+		LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+		if(!ploc)
+			return;
+		GuildMgr::getInstance()->getAllGuilds();
+		if (ploc->getLevel() < tempConditionLevel)//不满足这个行会的申请等级
+		{
+			ToolTip::getInstance()->push("\xE7\xAD\x89\xE7\xBA\xA7\xE4\xB8\x8D\xE8\xB6\xB3\xEF\xBC\x8C\xE6\x97\xA0\xE6\xB3\x95\xE7\x94\xB3\xE8\xAF\xB7\xE5\x8A\xA0\xE5\x85\xA5\xE8\xAF\xA5\xE8\xA1\x8C\xE4\xBC\x9A");
+			return;
+		}
+		if (tempCuildId != 0)
+		{
+			GuildMgr::getInstance()->sendJoinGuild(tempCuildId);
+		}
+	}
+	else//若已经申请了某个行会
+	{
+		ToolTip::getInstance()->push("\xE6\x82\xA8\xE5\xB7\xB2\xE5\x9C\xA8\xE8\xA1\x8C\xE4\xBC\x9A\xE6\x8B\x9B\xE5\x8B\x9F\xE6\xA6\x9C\xE4\xB8\xAD\xEF\xBC\x8C\xE6\x97\xA0\xE6\xB3\x95\xE5\x86\x8D\xE6\xAC\xA1\xE7\x94\xB3\xE8\xAF\xB7");
+	}*/
+
+}
+
+void SelectRoleHeadUiLoaderLayer::onXuanZhanBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	unsigned int roleId = RoleManager::getInstance()->get_select_role_id();
+	Role *role = RoleManager::getInstance()->findRole(roleId);
+	if(role != NULL)
+	{
+		if ( !GuildMgr::getInstance()->canDeclareWar(role->getGuildID()) )
+			return;
+
+
+		CCScene* scene = World::getInstance()->getScene();
+		if (scene)
+		{
+			std::string strBasic = GET_STR(9483);
+			std::string guildName;
+			if (!NameMgr2::getInstance()->queryGuildName(role->getGuildID(),guildName))
+				return;
+
+			std::string str1 = replaceStr(strBasic,"*",guildName); //替换
+			int time = NumericalIniMgr::getInstance()->Get_Guild_War_Continue_Time_Limit();
+			char strTime[10];
+			sprintf(strTime,"%d",time);
+			std::string str2 = replaceStr(str1,"**",strTime); //替换
+			int needFund = NumericalIniMgr::getInstance()->Get_Guild_War_Cost_Money();
+			char strFund[10];
+			sprintf(strFund,"%d",needFund);
+			std::string str = replaceStr(str2,"***",strFund); //替换
+			MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,str.c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+			scene->addChild(msgUi, WZ_MESSAGEBOX);
+			msgUi->signalOkBtnPressed.connect(this, &SelectRoleHeadUiLoaderLayer::confirmXuanZhan);
+		}
+
+
+
+	}
+	
+}
+
+
+// void SelectRoleHeadUiLoaderLayer::onGuanxiBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+// {
+// 	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+// 	if(!ploc)
+// 		return;
+// 	if (ploc->isRoleInStaticState())//摆摊交易双修中禁止操作
+// 	{
+// 		return;
+// 	}
+
+// 	unsigned int roleId  = RoleManager::getInstance()->getSelectRole();
+// 	if (roleId != INVALID_ID)
+// 	{
+// 		Role *role = RoleManager::getInstance()->findRole(roleId);
+// 		if (ploc->getLevel() > role->getLevel())
+// 		{
+// 			showShiTu(true);
+// 		}
+// 		else
+// 		{
+// 			showShiTu(false);
+// 		}
+// 	}
+
+
+// 	showBtnGroup(NT_BtnGroupGuanxi, true);
+// 	showBtnGroup(NT_BtnGroupJiaohu, false);
+// 	CLOSE_UI(WCT_ROLEEQUIPUI);
+// }
+
+// void SelectRoleHeadUiLoaderLayer::onJiaohuBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+// {
+// 	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+// 	if(!ploc)
+// 		return;
+// 	if (ploc->isRoleInStaticState())//摆摊交易双修中禁止操作
+// 	{
+// 		return;
+// 	}
+// 	showBtnGroup(NT_BtnGroupGuanxi, false);
+// 	showBtnGroup(NT_BtnGroupJiaohu, true);
+// 	CLOSE_UI(WCT_ROLEEQUIPUI);
+// }
+
+void SelectRoleHeadUiLoaderLayer::setBtnVisible( bool visible )
+{
+	//showBtnGroup(NT_BtnGroupMain, visible);
+// 	showBtnGroup(NT_BtnGroupGuanxi, false);
+// 	showBtnGroup(NT_BtnGroupJiaohu, false);
+	CCSprite* basetSprite = dynamic_cast<CCSprite*>(getChildByTag(9));
+	CC_ASSERT(basetSprite != NULL);
+	basetSprite->setVisible(visible);
+
+}
+
+void SelectRoleHeadUiLoaderLayer::showBtnGroup( eNodeTag tag, bool show )
+{
+	CCNode *btnGroup = getChildByTag(tag);
+	if(show)
+		btnGroup->setPositionY(_btnGroupSrcPosY[tag - NT_BtnGroupMain]);
+	else
+		btnGroup->setPositionY(-_btnGroupSrcPosY[tag - NT_BtnGroupMain]);
+	_btnGroupShow[tag - NT_BtnGroupMain] = show;
+}
+
+void SelectRoleHeadUiLoaderLayer::onRoleHeadPressed( TouchSprite *, bool )
+{
+	//modify by lpf 2015-09-11
+	int curMapid = MapManager::getInstance()->getCurMapId();
+	if (curMapid == JJC_MAP_CRC_ID ||curMapid == BF_BATTLE_MAP || SBKSDManager::get_singleton_ptr()->isInShenDianMap(curMapid) )
+		return;
+	//end
+
+	Role *role = RoleManager::getInstance()->findRole(RoleManager::getInstance()->get_select_role_id());
+	if(role != NULL && role->getCreatureType() == CT_PLAYER)
+	{
+		/*if(_btnGroupShow[0])
+		{
+			setBtnVisible(false);
+		}
+		else
+		{*/
+			OPEN_UI(WCT_SelectFunction);
+			//showBtnGroup(NT_BtnGroupMain, true);
+
+		//	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+		//	if(!ploc)
+		//		return;
+		//	 /*if (ploc->isRoleInStaticState())//摆摊交易双修中禁止操作
+		//	 {
+		//	 	return;
+		//	 }*/
+
+		//	//目标id
+		//	unsigned int roleId  = RoleManager::getInstance()->getSelectRole();
+		//	if (roleId != INVALID_ID)
+		//	{
+		//		//目标角色
+		//		Role *role = RoleManager::getInstance()->findRole(roleId);
+		//		if( role != NULL )
+		//		{
+		//			if (ploc->getLevel() > role->getLevel())
+		//			{
+
+		//				showShiTu(true);
+		//			}
+		//			else
+		//			{
+		//				showShiTu(false);
+		//			}
+		//		}
+		//	}
+   //   }
+	}
+}
+
+void SelectRoleHeadUiLoaderLayer::showShiTu( bool show )
+{
+	/*_baishibtn->setVisible(!show);
+	_shoutubtn->setVisible(show);*/
+}
+
+void SelectRoleHeadUiLoaderLayer::confirmXuanZhan()
+{
+	unsigned int roleId = RoleManager::getInstance()->get_select_role_id();
+	Role *role = RoleManager::getInstance()->findRole(roleId);
+	if(role != NULL)
+	{
+		GuildMgr::getInstance()->sendDeclareWar(role->getGuildID());
+	}
+	
+}

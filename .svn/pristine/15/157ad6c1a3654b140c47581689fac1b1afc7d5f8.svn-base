@@ -1,0 +1,2808 @@
+#include "cocos2d.h"
+#include "TCPClient.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "MapManager.h"
+#include "TaskTraceUi.h"
+#include "MessageBoxUi.h"
+#include "StringMgr.h"
+#include "World.h"
+#include "TeamMgr.h"
+#include "BaseDefine.h"
+#include "Player.h"
+#include "RoleInfoProto.h"
+#include "ToolTip.h"
+#include "NameMgr2.h"
+#include "MasterPrenticeMgr.h"
+#include "TeamStateUi.h"
+#include "UiTools.h"
+#include "StringMgr.h"
+#include "SQLCommand.h"
+#include "DBMgr.h"
+#include "InstanceProto.h"
+#include "NPCTalkUi.h"
+#include "Base.h"
+#include "PackageManager.h"
+#include "GameEventDefine.h"
+#include "RespItemView.h"
+#include "CommonDefine.h"
+#include "InstanceMgr.h"
+#include "FMBattleMgr.h"
+#include "f_string_table.h"
+#include "UsefulFunction.h"
+#include "QuickTeamUi.h"
+#include "QuestMgr.h"
+#include "ActivityMgr.h"
+#include "BossPKMgr.h"
+
+
+#if ENABLE_GOTYE==1
+#include "voice/VoiceMgr.h"
+#endif
+
+
+TeamMgr::TeamMgr():m_TeamID(-1)
+				   ,m_TeamLeaderID(-1)
+				   ,m_InviterID(-1)
+				   ,m_InviterTeamMenRoleID(-1)
+				   ,m_DestID(-1)
+				   ,m_ApplyID(-1)
+				   ,m_ChangingLeaderID(-1)
+				   ,m_bLeaderInviting(false)
+				   ,m_bMemberInviting(false)
+				   ,m_bInvitedReplay(false)
+				   ,m_bApply2Leader(false)
+				   ,m_bSignalRegister(false)
+				   ,m_nDesFubenID(0)
+				   ,_chatRoleId(-1)
+				   ,_chatRoomId(0)
+				   ,m_pIsFubenPrepare(false)
+				   ,m_pPrepareTime(0.0f)
+				   ,m_pMessageBox(NULL)
+				   ,m_bIsCanJoin(true)
+				   ,m_pLastDelTime(0.0f)
+				   ,m_temp_invite_to_role_id(0)
+				   ,m_temp_invite_ro_role_name_crc(0)
+				   ,m_temp_apply_player_id(0)
+				   ,m_temp_agree_leader_id(0)
+				   ,m_temp_agree_member_id(0)
+{
+	for (int i = 0;i < MAX_TEAM_NUM ;i++)
+	{
+		m_state[i].roleId = -1;
+		m_state[i].state = 0;
+	}
+	//创建队伍后的默认设置
+
+	clear_quick_team_info();
+
+	m_pInviteMap.clear();
+}
+TeamMgr::~TeamMgr()
+{
+	//m_TeammatesInfo.clear();
+	//NameMgr2::getInstance()->_sigGetName.disconnect(this , &TeamMgr::onGetName);
+	m_pInviteMap.clear();
+}
+void TeamMgr::Destroy()
+{
+	ClearInfo();
+	clear_quick_team_info();
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_invite_join_team" , this , &TeamMgr::onServerInviteJoinTeam);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_invite_to_leader" , this , &TeamMgr::onServerInvitetoLeader);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_team_leader_set" , this , &TeamMgr::onServerPlayerTeamSet);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_invite_reply" ,	this , &TeamMgr::onServerInviteReplay);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_role_state_to_team" , this , &TeamMgr::onServerRoleStateToTeammate);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_member_invite_join_team_to_leader" , this , &TeamMgr::onServerMemberInviteJoinTeamToLeader);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_apply_data" , this , &TeamMgr::onServerApplyJoinTeamToLeader);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_member_invite_join_team_reply" , this , &TeamMgr::onServerMemberInviteJoinTeamReply);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_member_invite_join_team" , this , &TeamMgr::onServerMemberInviteJoinTeam);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_apply_join_team" , this , &TeamMgr::onServerApplyJoinTeam);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_team_id" , this , &TeamMgr::onServerGetTeamID);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_apply_join_team_reply" , this , &TeamMgr::onServerApplyJoinTeamReply);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_kick_member" , this , &TeamMgr::onServerKickMember);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_change_leader" , this , &TeamMgr::onServerChangeLeader);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_leave_team" , this , &TeamMgr::onServerLeaveTeam);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_member_online" , this , &TeamMgr::onServerMemberOnline);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_single_remote_att_change" , this , &TeamMgr::onServerRemoteattChange_Signle);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_change_role_level" , this , &TeamMgr::onServerTeammateLevelChange);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_team_set_state", this, &TeamMgr::onServerTeamFubenState);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_team_chat_room", this, &TeamMgr::onTeamChatRoom);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_Fuben_Prepare", this, &TeamMgr::onServerFubenPrepare);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_own_create_team" , this , &TeamMgr::onServerOwnCreatTeam);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_change_team_att" , this , &TeamMgr::onServerChangeTeamTarget);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_change_team_can_join" , this , &TeamMgr::onServerTeamCanJoin);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_goto_leader_near" , this , &TeamMgr::onServerGotoLeaderNear);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_dismiss_team" , this , &TeamMgr::onServerDismissTeam);
+	TCP_CLIENT->unregister_net_cmd("NET_SIC_Team_RoleMatching" , this , &TeamMgr::onServerPlayerMatch);
+	TCP_CLIENT->unregister_net_cmd("NET_SIC_Team_CancelRoleMatching" , this , &TeamMgr::onServerPlayerCancelMatch);
+	TCP_CLIENT->unregister_net_cmd("NET_S2C_delete_apply_data" , this , &TeamMgr::onDeleteApplyData);
+
+	UNREG_NAME_CB(this , &TeamMgr::onGetName);
+
+	moRespQueue.clear();
+}
+TeamMgr* TeamMgr::getInstance()
+{
+	static TeamMgr mgr;
+	return &mgr;
+}
+void TeamMgr::Init()
+{
+	m_LocalPlayerID = RoleManager::getInstance()->getLocalPlayer()->getId();
+	TCP_CLIENT->register_net_cmd("NET_SIS_invite_join_team" , this , &TeamMgr::onServerInviteJoinTeam);
+	TCP_CLIENT->register_net_cmd("NET_SIS_invite_to_leader" , this , &TeamMgr::onServerInvitetoLeader);
+	//TCP_CLIENT->register_net_cmd("NET_SIS_team_leader_set" , this , &TeamMgr::onServerPlayerTeamSet);
+	//TCP_CLIENT->register_net_cmd("NET_SIS_get_team_id" , this , &TeamMgr::onServerGetTeamID);
+	//TCP_CLIENT->register_net_cmd("NET_SIS_role_state_to_team" , this , &TeamMgr::onServerRoleStateToTeammate);
+	TCP_CLIENT->register_net_cmd("NET_SIS_invite_reply" ,	this , &TeamMgr::onServerInviteReplay);
+	TCP_CLIENT->register_net_cmd("NET_SIS_member_invite_join_team_to_leader" , this , &TeamMgr::onServerMemberInviteJoinTeamToLeader);
+	TCP_CLIENT->register_net_cmd("NET_SIS_apply_data" , this , &TeamMgr::onServerApplyJoinTeamToLeader);
+	TCP_CLIENT->register_net_cmd("NET_SIS_member_invite_join_team_reply" , this , &TeamMgr::onServerMemberInviteJoinTeamReply);
+	TCP_CLIENT->register_net_cmd("NET_SIS_member_invite_join_team" , this , &TeamMgr::onServerMemberInviteJoinTeam);
+	TCP_CLIENT->register_net_cmd("NET_SIS_apply_join_team" , this , &TeamMgr::onServerApplyJoinTeam);
+	TCP_CLIENT->register_net_cmd("NET_SIS_apply_join_team_reply" , this , &TeamMgr::onServerApplyJoinTeamReply);
+	TCP_CLIENT->register_net_cmd("NET_SIS_kick_member" , this , &TeamMgr::onServerKickMember);
+	TCP_CLIENT->register_net_cmd("NET_SIS_change_leader" , this , &TeamMgr::onServerChangeLeader);
+	TCP_CLIENT->register_net_cmd("NET_SIS_leave_team" , this , &TeamMgr::onServerLeaveTeam);
+	TCP_CLIENT->register_net_cmd("NET_SIS_member_online" , this , &TeamMgr::onServerMemberOnline);
+	TCP_CLIENT->register_net_cmd("NET_SIS_single_remote_att_change" , this , &TeamMgr::onServerRemoteattChange_Signle);
+	TCP_CLIENT->register_net_cmd("NET_SIS_change_role_level" , this , &TeamMgr::onServerTeammateLevelChange);
+	TCP_CLIENT->register_net_cmd("NET_SIS_team_set_state", this, &TeamMgr::onServerTeamFubenState);
+	TCP_CLIENT->register_net_cmd("NET_SIS_Fuben_Prepare", this, &TeamMgr::onServerFubenPrepare);
+	TCP_CLIENT->register_net_cmd("NET_SIS_team_chat_room", this, &TeamMgr::onTeamChatRoom);
+	TCP_CLIENT->register_net_cmd("NET_SIS_own_create_team" , this , &TeamMgr::onServerOwnCreatTeam);
+	TCP_CLIENT->register_net_cmd("NET_SIS_change_team_can_join" , this , &TeamMgr::onServerTeamCanJoin);
+	TCP_CLIENT->register_net_cmd("NET_SIS_goto_leader_near" , this , &TeamMgr::onServerGotoLeaderNear);
+	TCP_CLIENT->register_net_cmd("NET_SIS_dismiss_team" , this , &TeamMgr::onServerDismissTeam);
+	TCP_CLIENT->register_net_cmd("NET_SIC_Team_RoleMatching" , this , &TeamMgr::onServerPlayerMatch);
+	TCP_CLIENT->register_net_cmd("NET_SIC_Team_CancelRoleMatching" , this , &TeamMgr::onServerPlayerCancelMatch);
+	TCP_CLIENT->register_net_cmd("NET_S2C_delete_apply_data" , this , &TeamMgr::onDeleteApplyData);
+
+	REG_NAME_CB(this , &TeamMgr::onGetName);
+
+	return;
+}
+void TeamMgr::Init_Signal()
+{
+	if (!m_bSignalRegister)//若还没有注册下述消息
+	{
+		m_bSignalRegister = true;
+		TCP_CLIENT->register_net_cmd("NET_SIS_change_team_att" , this , &TeamMgr::onServerChangeTeamTarget);
+		TCP_CLIENT->register_net_cmd("NET_SIS_role_state_to_team" , this , &TeamMgr::onServerRoleStateToTeammate);
+		TCP_CLIENT->register_net_cmd("NET_SIS_team_leader_set" , this , &TeamMgr::onServerPlayerTeamSet);
+		TCP_CLIENT->register_net_cmd("NET_SIS_get_team_id" , this , &TeamMgr::onServerGetTeamID);
+	}
+	clear_quick_team_info();
+
+	return;
+}
+void TeamMgr::ClearInfo()
+{
+	m_bSignalRegister = false;
+	m_TeamID = (unsigned int)INVALID;
+	m_TeamLeaderID_Extra = (unsigned int)INVALID;
+	m_InviterID = (unsigned int)INVALID;
+	m_InviterTeamMenRoleID = (unsigned int)INVALID;
+	m_DestID = (unsigned int)INVALID;
+	m_ApplyID = (unsigned int)INVALID;
+	m_KickingMemberID = (unsigned int)INVALID;
+	m_LocalPlayerID = (unsigned int)INVALID;
+	m_ChangingLeaderID = (unsigned int)INVALID;
+	m_bLeaderInviting = false;
+	m_bMemberInviting = false;
+	m_bInvitedReplay = false;
+	m_bApply2Leader = false;
+	_chatRoomId = 0;
+
+	m_team_target_info.reset();
+	m_TeammatesInfo.clear();
+	moTeamFilter.reset();
+}
+
+void TeamMgr::update(float dt)
+{
+	moRespQueue.update(dt);
+
+	if (m_pInviteMap.size() > 0)
+	{
+		m_pLastDelTime += dt;
+		if (m_pLastDelTime >= 10)
+		{
+			m_pLastDelTime = 0.0f;
+			DWORD nowTime = ServerTime::getInstance()->cal_current_server_dword_time();
+			for(std::map<UINT,DWORD>::iterator iter = m_pInviteMap.begin();iter != m_pInviteMap.end();)
+			{
+				if (CalcTimeDiff(nowTime,iter->second) >= 10)
+				{
+					m_pInviteMap.erase(iter++);
+				}
+				else
+				{
+					++iter;
+				}
+			}
+
+		}
+	}
+
+	if (m_pIsFubenPrepare == false)
+		return;
+	m_pPrepareTime += dt;
+	if(m_pPrepareTime >= 20)
+	{
+		CCScene* scene = World::getInstance()->getScene();
+		if (scene)
+		{
+			MessageBoxUi* messageBox = dynamic_cast<MessageBoxUi*>(scene->getChildByTag(WCT_TeamMessageBox));
+			if (messageBox)
+			{
+				m_pMessageBox->removeFromParentAndCleanup(true);
+				m_pMessageBox = NULL;
+				extern MessageBoxUi *g_msgUi;
+				g_msgUi = NULL;
+			}
+			fubenNoAgree();
+		}
+// 		if (m_pMessageBox != NULL)
+// 		{
+// 			m_pMessageBox->removeFromParentAndCleanup(true);
+// 			m_pMessageBox = NULL;
+// 			extern MessageBoxUi *g_msgUi;
+// 			g_msgUi = NULL;
+// 		}
+// 		fubenNoAgree();
+	}
+}
+
+
+
+/*******************client2sever*******************/
+//以远方玩家是否加入队伍来分情况，该函数考虑远方玩家未加入队伍的情况
+void TeamMgr::InviteRemoteRoleJoinTeam(unsigned int uDestRoleID, const std::string* name)
+{
+	if (!IS_VALID(uDestRoleID))
+	{
+		return;
+	}
+
+	if(FMBattleMgr::getInstance()->isBattleLeader())//封魔中，无法邀请队员
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["FM_TeamTip3"]);
+		return;
+	}
+
+	//自己不能邀请自己
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	if (uDestRoleID == ploc->getId())
+		return;
+	//若本地玩家队伍已满
+	if (is_team_full())
+	{
+		ToolTip::getInstance()->push(GET_STR(200));
+		return;
+	}
+	//若已经是队友
+	if (is_teammate(uDestRoleID))
+	{
+		ToolTip::getInstance()->push(GET_STR(201));
+		return;
+	}
+
+	if(name)
+	{
+		m_temp_invite_to_role_id = uDestRoleID;
+		m_temp_invite_ro_role_name_crc = name_crc32(convertWName(*name));
+
+		if(TeamMgr::getInstance()->is_player_in_match())
+		{
+			MessageBoxUi* ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, STRING_TABLE["sure_apply_team_cue"], TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+			World::getInstance()->getScene()->addChild(ui, WZ_MESSAGEBOX);
+			ui->signalOkBtnPressed.connect(this,&TeamMgr::send_send_invite_team_with_crc);
+		}
+		else
+		{	
+			send_send_invite_team_with_crc();
+		}
+		return;
+	}
+
+	//判断是否正在邀请
+	std::map<UINT,DWORD>::iterator iter = m_pInviteMap.find(uDestRoleID);
+	if (iter != m_pInviteMap.end())
+	{
+		ToolTip::getInstance()->push(GET_STR(210));
+		return;
+	}
+
+	m_apply_to_role_id = uDestRoleID;
+	if(TeamMgr::getInstance()->is_player_in_match())
+	{
+		MessageBoxUi* ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, STRING_TABLE["sure_apply_team_cue"], TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+		World::getInstance()->getScene()->addChild(ui, WZ_MESSAGEBOX);
+		ui->signalOkBtnPressed.connect(this,&TeamMgr::send_send_invite_team);
+	}
+	else
+	{	
+		send_send_invite_team();
+	}
+}
+void TeamMgr::ApplyJoinTeam(unsigned int uDestRoleID)
+{
+	//若本地玩家已有队伍，则不能申请
+	if (IS_VALID(m_TeamID))
+	{
+		//若已经是队友
+		if (is_teammate(uDestRoleID))
+		{
+			ToolTip::getInstance()->push(GET_STR(201));
+			return;
+		}
+		//提示信息，双方均有队伍，无法继续组队
+		ToolTip::getInstance()->push(GET_STR(269));
+		return;
+	}
+
+	m_temp_apply_player_id = uDestRoleID;
+	if(TeamMgr::getInstance()->is_player_in_match())
+	{
+		MessageBoxUi* ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, STRING_TABLE["sure_apply_team_cue"], TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+		World::getInstance()->getScene()->addChild(ui, WZ_MESSAGEBOX);
+		ui->signalOkBtnPressed.connect(this,&TeamMgr::send_apply_team);
+	}
+	else
+	{	
+		send_apply_team();
+	}
+}
+void TeamMgr::KickMember(unsigned int uDestRoleID)
+{
+	//有踢人权限的必是队长，需防护
+	if (m_LocalPlayerID != m_TeamLeaderID)
+	{
+		ToolTip::getInstance()->push(GET_STR(203));
+		return;
+	}
+	//不能踢自己
+	if (m_LocalPlayerID == uDestRoleID)
+		return;
+	m_KickingMemberID = uDestRoleID;
+	//是否显示姓名？
+	tagTeammateData const* data = get_teammate_data(m_KickingMemberID);
+	if (!IS_VALID_PTR(data))
+		return;
+	std::stringstream ss;
+	ss<<GET_STR(204).c_str()<<data->strName;
+	MessageBoxUi *kickMemUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, ss.str().c_str(), "\xE7\xA1\xAE\xE5\xAE\x9A","\xE5\x8F\x96\xE6\xB6\x88");
+	World::getInstance()->getScene()->addChild(kickMemUi, WZ_MESSAGEBOX);
+	kickMemUi->signalOkBtnPressed.connect(this, &TeamMgr::onSignalKickMemberConfirm);
+	kickMemUi->signalCancelBtnPressed.connect(this, &TeamMgr::onSignalKickMemberCancel);
+	return;
+}
+void TeamMgr::ChangerTeamLeader(unsigned int uDestRoleID)
+{
+	if (!IS_VALID(m_TeamID))
+	{
+		return;
+	}
+
+	if(FMBattleMgr::getInstance()->isBattleLeader())//封魔中，无法移交队长
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["FM_TeamTip1"]);
+		return;
+	}
+
+	//仅队长才可以变更队长
+	if (m_TeamLeaderID != m_LocalPlayerID)
+	{
+		ToolTip::getInstance()->push(GET_STR(203));
+		return;
+	}
+	if (!is_teammate(uDestRoleID))
+	{
+		ToolTip::getInstance()->push(GET_STR(205));
+		return;
+	}
+	tagTeammateData const* data = get_teammate_data(uDestRoleID);
+	//拟任命为队长的队员必须在线
+	if (!IS_VALID_PTR(data) || !data->b_online)
+	{
+		ToolTip::getInstance()->push(GET_STR(206));
+		return;
+	}
+	//需要给队长提示，
+	m_ChangingLeaderID = uDestRoleID;
+	std::stringstream ss;
+	ss<<GET_STR(207).c_str()<<data->strName;
+	MessageBoxUi *changeleaderUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, ss.str().c_str(), "\xE7\xA1\xAE\xE5\xAE\x9A","\xE5\x8F\x96\xE6\xB6\x88");
+	World::getInstance()->getScene()->addChild(changeleaderUi, WZ_MESSAGEBOX);
+	changeleaderUi->signalOkBtnPressed.connect(this, &TeamMgr::onSignalChangeTeamLeaderConfirm);
+	return;
+}
+void TeamMgr::LeaveTeam()
+{
+	if(FMBattleMgr::getInstance()->isBattleLeader())//封魔中，无法离开队伍
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["FM_TeamTip2"]);
+		return;
+	}
+	std::string str = GET_STR(208);
+	if (MapManager::getInstance()->getCurMapId() == UNDERGROUND_PALACE_MAP)
+	{
+		str = STRING_TABLE["palace_leave_team"];
+	}
+	//弹出对话框，提示用户确认或是取消
+	MessageBoxUi *leaveTeamUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, str.c_str(), "\xE7\xA1\xAE\xE5\xAE\x9A","\xE5\x8F\x96\xE6\xB6\x88");
+	World::getInstance()->getScene()->addChild(leaveTeamUi, WZ_MESSAGEBOX);
+	leaveTeamUi->signalOkBtnPressed.connect(this, &TeamMgr::onSignalLeaveTeamConfirm);
+	return;
+}
+/*******************sever2client*******************/
+unsigned int TeamMgr::onServerInviteJoinTeam(s_net_cmd *cmd)
+{
+	NET_SIS_invite_join_team* msg = (NET_SIS_invite_join_team*)cmd;
+	if (m_LocalPlayerID == msg->dwLeaderID)//主动邀请方
+	{
+		//邀请已发出，请耐心等待
+		ToolTip::getInstance()->push(STRING_TABLE["invite_send_wait_patience"]);
+	}
+	else if (m_LocalPlayerID == msg->dwDestRoleID)//被动邀请方
+	{
+		stParamTag tag;
+		tag.bMale = msg->sex==1;
+		tag.dwID = msg->dwLeaderID;
+		tag.dwID2 = msg->dwTeamMenRoleID;
+		tag.nClass = msg->roleType;
+		tag.nLv = msg->level;
+
+		moRespQueue.add(RespItem::EInvitation,tag);
+
+// 		//邀请成功才会发该消息，所以无需判断
+// 		m_InviterID = msg->dwLeaderID;//表明本地玩家正在被邀请，则不能被别人邀请
+// 		m_InviterTeamMenRoleID = msg->dwTeamMenRoleID;
+// 		//被邀请者画面弹出确认对话框
+// 
+// 		//查找本地保存的玩家名称
+// 		std::string tmpStr;
+// 		if (NameMgr2::getInstance()->queryName(m_InviterID,tmpStr))
+// 		{
+// 			std::stringstream ss;
+// 			ss<<tmpStr<<GET_STR(209).c_str();
+// 			MessageBoxUi *joinTeamUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, ss.str().c_str(), "\xE5\x90\x8C\xE6\x84\x8F","\xE6\x8B\x92\xE7\xBB\x9D");//应提示姓名
+// 			World::getInstance()->getScene()->addChild(joinTeamUi, WZ_MESSAGEBOX);
+// 			joinTeamUi->signalOkBtnPressed.connect(this, &TeamMgr::onSignalAgreeInvite);
+// 			joinTeamUi->signalCancelBtnPressed.connect(this,&TeamMgr::onSignalDisagreeInvite);
+// 		}
+// 		else
+// 		{
+// 			m_bLeaderInviting = true;
+// 		}
+	}
+	else
+	{
+		//do nothing
+	}
+	
+	return 0;
+}
+unsigned int TeamMgr::onServerInvitetoLeader(s_net_cmd *cmd)
+{
+	NET_SIS_invite_to_leader* msg = (NET_SIS_invite_to_leader*)cmd;
+// 	if ((m_LocalPlayerID != m_TeamLeaderID) && (m_TeammatesInfo.size() > 0))
+// 		return 0;
+
+	//这里应该处理由邀请对方入队而产生的错误信息
+	if (0 != msg->dw_error_code)
+	{
+		//主界面应该有相应的消息提示
+		if (E_Team_Target_Not_Online == msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(GET_STR(206));
+		}
+		else if (E_Team_Target_Have_Team == msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(GET_STR(202));
+		}
+		else if (E_Team_Target_Busy == msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(GET_STR(210));
+		}
+		else if(E_Team_Member_Full == msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(GET_STR(200));
+		}
+		else if (E_Team_Min_Level_Limit_Erroe == msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(GET_STR(259));
+		}
+		else if(E_Team_Max_Level_Limit_Erroe == msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(GET_STR(260));
+		}
+		else if(E_Team_role_type_Limit_Erroe == msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(GET_STR(261));
+		}
+		else if(E_Team_can_not_join == msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(GET_STR(262));
+		}
+		else if (E_Team_Have_Apply == msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(GET_STR(236));
+		}
+		else if (E_Team_Map_NoHave_Team == msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(GET_STR(9281));
+		}
+		else if (E_Team_Apply_Have_Team == msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(GET_STR(249));
+		}
+		else if (E_Team_apply_success == msg->dw_error_code)
+		{
+			DWORD dest_role_id = m_apply_to_role_id;
+			m_apply_team_map.insert(std::make_pair(dest_role_id, dest_role_id));
+
+			apply_team_success evt;
+			evt.leader_id = dest_role_id;
+			SEND_EVENT(&evt);
+
+			ToolTip::getInstance()->push(GET_STR(9036));
+		}
+		else if (E_Team_invite_success == msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(GET_STR(9035));
+		}
+		else if(E_Team_Map_CanNot_Invite==msg->dw_error_code)
+		{
+			unsigned int t_mapID = MapManager::getInstance()->getCurMapId();
+			if (BF_PREPARE_MAP == t_mapID || BF_BATTLE_MAP == t_mapID )
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inTeam"]);
+			}
+			else
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["FM_BattleTip11"]);
+			}
+		}
+		else if(E_Team_Xzdd_CanNot_Invite==msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inTeam"]);
+			m_pInviteMap.clear();
+		}
+		else if(E_Team_Xzdd_CanNot_Apply==msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inTeam"]);
+			m_pInviteMap.clear();
+		}
+		else if(E_Team_Xzdd_Target_CanNot_Invite==msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["BF_Team_Target_CanNot_Invite"]);
+			m_pInviteMap.clear();
+		}
+		else if(E_Team_Level_Limit_Erroe==msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["team_error_49"]);
+			m_pInviteMap.clear();
+		}
+		else
+		{
+			show_error_info(msg->dw_error_code);
+		}
+	}
+
+	m_apply_to_role_id = INVALID;
+
+	return 0 ;
+}
+unsigned int TeamMgr::onServerPlayerTeamSet(s_net_cmd *cmd)
+{
+	NET_SIS_team_leader_set* msg = (NET_SIS_team_leader_set*)cmd;
+	//若是发给本地
+	LocalPlayer* pLocPlayer = RoleManager::getInstance()->getLocalPlayer();
+	pLocPlayer->setPlayerTeamID(msg->dwTeamID);
+	pLocPlayer->setPlayerTeamLeader(msg->dwLeaderID == pLocPlayer->getId());
+	//add by xy
+#if ENABLE_GOTYE==1
+	unsigned int teamid = msg->dwTeamID;
+	int op = msg->dwTeamID == INVALID?0:1;
+	teamid = teamid == INVALID?m_TeamID:teamid;
+	stringstream param;
+	param << "operate="<< op;
+	param << "\tchannel="<< YYC_TEAM;
+	param << "\twildCard="<< teamid;
+	VoiceMgr::getSingleton()->process(YYS_CHANNEL, YY_OP_WILDCARD, param.str());
+#endif
+
+	//clear_info_when_join_team();
+	//clear_other_role_apply();
+	clearRespQueueAndCloseFrame();
+
+	m_TeamID = msg->dwTeamID;
+	m_TeamLeaderID_Extra = m_TeamLeaderID;
+	m_TeamLeaderID = msg->dwLeaderID;
+
+
+	QuickTeamUiLayer* layer = GET_UI(QuickTeamUi, QUICK_TEAM_UI)->getUiLayer();
+	if(IS_VALID_PTR(layer))
+	{
+		CLOSE_UI(QUICK_TEAM_UI);
+	}
+
+	if (msg->dwLeaderID == pLocPlayer->getId())
+	{
+		CreateTeamSucc evt;
+		SEND_EVENT(&evt);
+	}
+	if (msg->dwTeamID == INVALID)
+	{
+		if (World::getInstance()->getTaskTraceUi())
+		{
+			World::getInstance()->getTaskTraceUi()->updateGroupState(EGS_Null);
+		}
+	}
+	else
+	{
+		if (msg->dwLeaderID == pLocPlayer->getId())
+		{
+			if (World::getInstance()->getTaskTraceUi())
+			{
+				World::getInstance()->getTaskTraceUi()->updateGroupState(EGS_TeamLeader);
+			}
+		}
+		else
+		{
+			if (World::getInstance()->getTaskTraceUi())
+			{
+				World::getInstance()->getTaskTraceUi()->updateGroupState(EGS_Team);
+			}
+		}
+	}
+	return 0;
+
+}
+unsigned int TeamMgr::onServerInviteReplay(s_net_cmd *cmd)
+{
+	NET_SIS_invite_reply* msg = (NET_SIS_invite_reply*)cmd;
+	std::map<UINT,DWORD>::iterator iter = m_pInviteMap.find(msg->dwTeamMemID[0]);
+	if (iter != m_pInviteMap.end())
+	{
+		m_pInviteMap.erase(iter);
+	}
+	iter = m_pInviteMap.find(msg->dwTeamMemID[1]);
+	if (iter != m_pInviteMap.end())
+	{
+		m_pInviteMap.erase(iter);
+	}
+
+	delete_role_from_apply_list(msg->dwTeamMemID[0]);
+
+	//若对方同意，并且判断成功，则接收全体队伍消息
+	if ((0 == msg->dw_error_code) && (msg->bAgree))
+	{
+		for (int i = 0; i< MAX_TEAM_NUM;i++)
+		{
+			if (!IS_VALID(msg->dwTeamMemID[i]))
+				break;
+			if (m_LocalPlayerID == msg->dwTeamMemID[i])
+				continue;
+			if (NULL != get_teammate_data(msg->dwTeamMemID[i]))//已在本地队友信息中，无需再加
+				continue;
+			tagTeammateData tmpTeammateData;//未处理结构体其余字段
+			tmpTeammateData.uRoleID = msg->dwTeamMemID[i];
+			//获取该玩家的姓名，
+			//若已经存了该玩家的名称
+			if (NameMgr2::getInstance()->queryName(tmpTeammateData.uRoleID,tmpTeammateData.strName))
+			{
+			}
+			//end
+			m_TeammatesInfo.push_back(tmpTeammateData);
+			
+			/************************这里是不是需要给提示信息************************************/
+		}
+
+		ToolTip::getInstance()->push(GET_STR(211));
+
+		if (!IS_VALID(m_TeamLeaderID))
+		{
+			NET_SIS_change_leader ccmd;
+			ccmd.dwLeaderID = m_TeamLeaderID;
+			ccmd.dwNewLeaderID = msg->dwTeamMemID[0];
+			ccmd.dw_error_code = 0;
+			onServerChangeLeader(&ccmd);
+		}
+
+		TeammateStateRefresh evt;
+		SEND_EVENT(&evt);
+	}
+	//被邀请方不同意入队
+	else if(!msg->bAgree)
+	{
+		//仅在邀请人界面弹出对方不同意的对话框
+		if (msg->dwTeamMemID[0] == m_LocalPlayerID)
+		{
+			//查找本地保存的玩家名称
+			std::string tmpStr;
+			m_DestID = msg->dwTeamMemID[1];
+			if (!IS_VALID(m_DestID))
+			{
+				return 0;
+			}
+			if (NameMgr2::getInstance()->queryName(m_DestID,tmpStr))
+			{
+				std::stringstream ss;
+				ss<<tmpStr<<GET_STR(224).c_str();
+				ToolTip::getInstance()->push(ss.str());
+				m_DestID = INVALID;
+			}
+			else
+			{
+				m_bInvitedReplay = true;
+			}
+		}
+	}
+	else if(0 != msg->dw_error_code)
+	{
+		//根据错误信息提示错误内容,被邀请者
+		if (msg->dwTeamMemID[1] == m_LocalPlayerID)
+		{
+			if (E_Team_Target_Have_Team == msg->dw_error_code)
+			{
+				ToolTip::getInstance()->push(GET_STR(9285));
+			}
+			else if (E_Team_Not_Leader == msg->dw_error_code)
+			{
+				ToolTip::getInstance()->push(GET_STR(9288));
+			}
+			else if (E_Team_Member_Full == msg->dw_error_code)
+			{
+				ToolTip::getInstance()->push(GET_STR(200));
+			}
+			else if (E_Team_Min_Level_Limit_Erroe == msg->dw_error_code)
+			{
+				ToolTip::getInstance()->push(GET_STR(259));
+			}
+			else if(E_Team_Max_Level_Limit_Erroe == msg->dw_error_code)
+			{
+				ToolTip::getInstance()->push(GET_STR(260));
+			}
+			else if(E_Team_role_type_Limit_Erroe == msg->dw_error_code)
+			{
+				ToolTip::getInstance()->push(GET_STR(261));
+			}
+			else if (E_Team_can_not_join == msg->dw_error_code)
+			{
+				ToolTip::getInstance()->push(GET_STR(262));
+			}
+			else if(E_Team_Xzdd_CanNot_Invite==msg->dw_error_code)
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inTeam"]);
+			}
+			else if(E_Team_Xzdd_CanNot_Apply==msg->dw_error_code)
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inTeam"]);
+			}
+			else if(E_Team_Xzdd_Target_CanNot_Invite==msg->dw_error_code)
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["BF_Team_Target_CanNot_Invite"]);
+			}
+			else
+			{
+				show_error_info(msg->dw_error_code);
+			}
+		}
+		else if (msg->dwTeamMemID[0] == m_LocalPlayerID)
+		{
+			if (E_Team_Target_Have_Team == msg->dw_error_code)
+			{				//查找本地保存的玩家名称
+				std::string tmpStr;
+				if (!IS_VALID(msg->dwTeamMemID[1]))
+				{
+					return 0;
+				}
+				if (NameMgr2::getInstance()->queryName(msg->dwTeamMemID[1],tmpStr))
+				{
+					std::stringstream ss;
+					ss<<tmpStr<<GET_STR(9297).c_str();
+					ToolTip::getInstance()->push(ss.str());
+				}
+			}
+			else if(E_Team_Xzdd_CanNot_Invite==msg->dw_error_code)
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inTeam"]);
+			}
+			else if(E_Team_Xzdd_CanNot_Apply==msg->dw_error_code)
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inTeam"]);
+			}
+			else if(E_Team_Xzdd_Target_CanNot_Invite==msg->dw_error_code)
+			{
+				ToolTip::getInstance()->push(STRING_TABLE["BF_Team_Target_CanNot_Invite"]);
+			}
+			else
+			{
+				show_error_info(msg->dw_error_code);
+			}
+		}
+	}
+	
+	return 0 ;
+}
+//若仅一处使用，是不是应该提示入队信息
+unsigned int TeamMgr::onServerRoleStateToTeammate(s_net_cmd *cmd)
+{
+	NET_SIS_role_state_to_team* msg = (NET_SIS_role_state_to_team*)cmd;
+	size_t i;
+	//若是人物下线后再次上线，则需要往数组里添加信息
+	tagTeammateData const* teamData = get_teammate_data(msg->dw_role_id);
+	//如果是自己跳过
+	if (msg->dw_role_id == m_LocalPlayerID)
+	{
+		//Role* ploc = RoleManager::getInstance()->getLocalPlayer();
+		//m_LocalInfo.nHP = msg->nHP;
+		//m_LocalInfo.nMaxHp = msg->nMaxHP;
+		//m_LocalInfo.b_online = msg->b_online?true:false;
+		//m_LocalInfo.nLevel = msg->nLevel;
+		//m_LocalInfo.eClassEx = (EClassType)msg->eClassEx;
+		//m_LocalInfo.bySex = msg->bySex;
+		//m_LocalInfo.nRating = msg->st_EquipTeamInfo.n32_Rating;
+		//m_LocalInfo.dwJointime = msg->dwJointime;
+		//m_LocalInfo.uRoleID = msg->dw_role_id;
+		//m_LocalInfo.strName = ploc->getNameUtf8();
+		return 0;
+	}
+	//若不存在
+	if (!IS_VALID_PTR(teamData))
+	{
+		tagTeammateData tmpData;
+		tmpData.uRoleID = msg->dw_role_id;
+		//若已经存了该玩家的名称
+		if (NameMgr2::getInstance()->queryName(tmpData.uRoleID,tmpData.strName))
+		{
+		}
+		m_TeammatesInfo.push_back(tmpData);
+	}
+	if (msg->b_leader)
+	{
+		m_TeamLeaderID = msg->dw_role_id;
+	}
+	for (i = 0;i < m_TeammatesInfo.size();i++)
+	{
+		tagTeammateData& data = m_TeammatesInfo[i];
+		if (msg->dw_role_id == data.uRoleID)
+		{
+			data.nHP = msg->nHP;
+			data.nMaxHp = msg->nMaxHP;
+			data.b_online = msg->b_online?true:false;
+			data.nLevel = msg->nLevel;
+			data.eClassEx = (EClassType)msg->eClassEx;
+			data.bySex = msg->bySex;
+			data.nRating = msg->st_EquipTeamInfo.n32_Rating;
+
+			for(int i = 0; i < PDA_End; i++)
+			{
+				data.sDisplayInfo[i].byDisplayPos = ePlayerDisplayAttr(i);
+				data.sDisplayInfo[i].dw_data_id = msg->dwEquipTypeID[i];
+			}
+
+			data.dwJointime = msg->dwJointime;
+			//调用UI刷新
+			TaskTraceUi *ui = World::getInstance()->getTaskTraceUi();
+			if (ui != NULL && (!data.strName.empty()))
+			{
+				ui->addGroupMember(data.uRoleID);
+				ui->updateGroupList();
+			}
+			break;
+		}
+		/*if (msg->dw_role_id != data.uRoleID)
+			continue;
+		//掉线的玩家信息不更新
+		for(std::vector<unsigned int>::iterator it=m_troubles.begin();it!=m_troubles.end(); it++)
+		{
+			if(msg->dw_role_id==*it)
+				return 0;
+		}*/
+	}
+	
+	// 下线再上线的队员或新加入队伍的队员获取队伍信息
+	/*if( i == m_TeammatesInfo.size() && i<MAX_TEAM_NUM)
+	{
+		tagTeammateData data;
+		data.uRoleID = msg->dw_role_id;
+		data.eClassEx = (EClassType)(msg->eClassEx);
+		data.nLevel = msg->nLevel;
+		data.b_online = msg->b_online?true:false;
+		data.nHP = msg->nHP;
+		m_TeammatesInfo.push_back(data);
+		if(msg->b_leader)
+		{
+			m_TeamLeaderID = msg->dw_role_id;
+		}
+		if (!msg->b_online)
+		{
+			m_troubles.push_back(msg->dw_role_id);
+		}
+	}*/
+
+	TeammateStateRefresh evt;
+	SEND_EVENT(&evt);
+
+	return 0;
+}
+
+unsigned int TeamMgr::onServerMemberInviteJoinTeamToLeader(s_net_cmd *cmd)
+{
+	NET_SIS_member_invite_join_team_to_leader* msg = (NET_SIS_member_invite_join_team_to_leader*)cmd;
+ 	if (m_LocalPlayerID != m_TeamLeaderID)
+ 		return 0;
+
+	stParamTag tag;
+	tag.bMale = msg->sex ==1;
+	tag.dwID = msg->dwDestRoleID;
+	tag.dwID2 = msg->dwTeamMemID;
+	tag.nClass = msg->roleType;
+	tag.nLv = msg->level;
+	
+	moRespQueue.add(RespItem::EApplyFormTeammate,tag);
+// 	//防止多次邀请同一个
+// 	if (m_DestID == msg->dwDestRoleID)
+// 		return 0;
+// 	m_DestID = msg->dwDestRoleID;
+// 	m_InviterID = msg->dwTeamMemID;
+// 	m_InviterTeamMenRoleID = msg->dwTeamMemID;
+// 	//UI弹框，队长是否同意入队
+// 	//查找本地保存的玩家名称
+// 	std::string tmpStr;
+// 	if (NameMgr2::getInstance()->queryName(m_DestID,tmpStr))
+// 	{
+// 		std::stringstream ss;
+// 		ss<<tmpStr<<GET_STR(213).c_str();
+// 		MessageBoxUi *joinTeamUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, ss.str().c_str(), "\xE5\x90\x8C\xE6\x84\x8F","\xE6\x8B\x92\xE7\xBB\x9D");//应提示姓名
+// 		World::getInstance()->getScene()->addChild(joinTeamUi, WZ_MESSAGEBOX);
+// 		joinTeamUi->signalOkBtnPressed.connect(this, &TeamMgr::onSignalLeaderAgreeMemberInvite);
+// 		joinTeamUi->signalCancelBtnPressed.connect(this,&TeamMgr::onSignalLeaderDisagreeMemberInvite);
+// 	}
+// 	else
+// 	{
+// 		m_bMemberInviting = true;
+// 	}
+	return 0;
+}
+unsigned int TeamMgr::onServerApplyJoinTeamToLeader(s_net_cmd *cmd)
+{
+	NET_SIS_apply_data* msg = (NET_SIS_apply_data*)cmd;
+
+	stParamTag tag;
+	tag.bMale = msg->st_ApplyRoleData.bySex==1;
+	tag.dwID = msg->st_ApplyRoleData.dw_role_id;
+	tag.nClass = msg->st_ApplyRoleData.eClassEx;
+	tag.nLv = msg->st_ApplyRoleData.nLevel;
+	tag.n32_Rating = msg->st_ApplyRoleData.stEquipTeamInfo.n32_Rating;
+	moRespQueue.add(RespItem::EApply,tag);
+
+	refresh_team_list evt;
+	SEND_EVENT(&evt);
+
+// 	m_ApplyID = msg->st_ApplyRoleData.dw_role_id;//此处可能会做修改
+// 	//弹UI对话框
+// 	//查找本地保存的玩家名称
+// 	std::string tmpStr;
+// 	if (NameMgr2::getInstance()->queryName(m_ApplyID,tmpStr))
+// 	{
+// 		std::stringstream ss;
+// 		ss<<tmpStr<<GET_STR(213).c_str();
+// 		MessageBoxUi *applyJoinTeamUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, ss.str().c_str(), "\xE5\x90\x8C\xE6\x84\x8F","\xE6\x8B\x92\xE7\xBB\x9D");//应提示姓名 申请入队
+// 		World::getInstance()->getScene()->addChild(applyJoinTeamUi, WZ_MESSAGEBOX);
+// 		applyJoinTeamUi->signalOkBtnPressed.connect(this, &TeamMgr::onSignalLeaderAgreeApply);
+// 		applyJoinTeamUi->signalCancelBtnPressed.connect(this,&TeamMgr::onSignalLeaderDisagreeApply);
+// 	}
+// 	else
+// 	{
+// 		m_bApply2Leader= true;
+// 	}
+	return 0;
+}
+unsigned int TeamMgr::onServerMemberInviteJoinTeamReply(s_net_cmd *cmd)
+{
+	//NET_SIS_member_invite_join_team_reply* msg = (NET_SIS_member_invite_join_team_reply*)cmd;
+	//提示队长拒绝被邀请人入队
+	
+	ToolTip::getInstance()->push(GET_STR(2319));
+	return 0;
+}
+unsigned int TeamMgr::onServerMemberInviteJoinTeam(s_net_cmd *cmd)
+{
+	NET_SIS_member_invite_join_team* msg = (NET_SIS_member_invite_join_team*)cmd;
+	if (E_Team_Target_Have_Team == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(202));
+	}
+	else if (E_Team_Target_Busy == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(210));
+	}
+	else if(E_Team_Member_Full == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(200));
+	}
+	else if (E_Team_Min_Level_Limit_Erroe == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(259));
+	}
+	else if(E_Team_Max_Level_Limit_Erroe == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(260));
+	}
+	else if(E_Team_role_type_Limit_Erroe == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(261));
+	}
+	else if(E_Team_can_not_join == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(262));
+	}
+	else
+	{
+		//do nothing;
+	}
+	return 0;
+}
+unsigned int TeamMgr::onServerApplyJoinTeam(s_net_cmd *cmd)
+{
+	NET_SIS_apply_join_team* msg = (NET_SIS_apply_join_team*)cmd;
+	_chatRoleId = msg->dwApplyeeID;
+	if (0 == msg->dwError)
+	{
+		//这里是否需要在申请人界面显示已经申请的提示
+		ToolTip::getInstance()->push(GET_STR(214),1);
+	}
+	else if(E_Team_Target_Busy == msg->dwError)
+	{
+		//错误信息处理
+		ToolTip::getInstance()->push(GET_STR(215));
+	}
+	else if (E_Team_Member_Full == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(200));
+	}
+	else if (E_Team_Have_Apply == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(236));
+	}
+	else if (E_Team_Min_Level_Limit_Erroe == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(259));
+	}
+	else if(E_Team_Max_Level_Limit_Erroe == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(260));
+	}
+	else if(E_Team_role_type_Limit_Erroe == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(261));
+	}
+	else if(E_Team_can_not_join == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(262));
+	}
+	else if (E_Team_Map_NoHave_Team == msg->dwError)
+	{
+		//InviteRemoteRoleJoinTeam(_chatRoleId);
+		//setChatChannelRoleId();
+		ToolTip::getInstance()->push(GET_STR(9281));
+	}
+	else if (E_Team_Apply_Have_Team == msg->dwError)
+	{
+		//InviteRemoteRoleJoinTeam(_chatRoleId);
+		//setChatChannelRoleId();
+		ToolTip::getInstance()->push(GET_STR(249));
+	}
+	else if(E_Team_Xzdd_CanNot_Invite==msg->dwError)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inTeam"]);
+		m_pInviteMap.clear();
+	}
+	else if(E_Team_Xzdd_CanNot_Apply==msg->dwError)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inTeam"]);
+		m_pInviteMap.clear();
+	}
+	else if(E_Team_Xzdd_Target_CanNot_Invite==msg->dwError)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["BF_Team_Target_CanNot_Invite"]);
+		m_pInviteMap.clear();
+	}
+	else
+	{
+		show_error_info(msg->dwError);
+	}
+	return 0 ;
+}
+unsigned int TeamMgr::onServerGetTeamID(s_net_cmd *cmd)
+{
+	NET_SIS_get_team_id* msg = (NET_SIS_get_team_id*)cmd;
+	m_TeamID = msg->dwTeamID;
+	return 0;
+}
+unsigned int TeamMgr::onServerApplyJoinTeamReply(s_net_cmd *cmd)
+{
+	NET_SIS_apply_join_team_reply* msg = (NET_SIS_apply_join_team_reply*)cmd;
+	//此处统一处理错误消息，在申请人界面上显示这些提示内容
+	std::map<UINT,DWORD>::iterator iter = m_pInviteMap.find(msg->dwLeaderId);
+	if (iter != m_pInviteMap.end())
+	{
+		m_pInviteMap.erase(iter);
+	}
+
+	delete_role_from_apply_list(msg->dwLeaderId);
+
+	if (0 == msg->dwError)
+	{
+		delete_other_role_apply_by_id(msg->dwApplyRoleID);
+		return 0;
+	}
+	else if (E_Team_Target_Have_Team == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(9286));
+	}
+	else if (E_Team_Apply_Not_Online == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(9287));
+	}
+	else if (E_Team_Leader_Not_Agree == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(212));
+	}
+	else if (E_Team_Member_Full == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(200));
+	}
+	else if (E_Team_Min_Level_Limit_Erroe == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(259));
+	}
+	else if (E_Team_Max_Level_Limit_Erroe == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(260));
+	}
+	else if (E_Team_role_type_Limit_Erroe == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(261));
+	}
+	else if (E_Team_Not_Leader == msg->dwError)
+	{
+		ToolTip::getInstance()->push(GET_STR(9288));
+	}
+	else if(E_Team_Map_CanNot_Invite==msg->dwError)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["FM_BattleTip11"]);
+	}
+	else if(E_Team_Xzdd_CanNot_Invite==msg->dwError)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inTeam"]);
+		m_pInviteMap.clear();
+	}
+	else if(E_Team_Xzdd_CanNot_Apply==msg->dwError)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inTeam"]);
+		m_pInviteMap.clear();
+	}
+	else if(E_Team_Xzdd_Target_CanNot_Invite==msg->dwError)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["BF_Team_Target_CanNot_Invite"]);
+		m_pInviteMap.clear();
+	}
+	else
+	{
+		show_error_info(msg->dwError);
+	}
+	return 0;
+}
+unsigned int TeamMgr::onServerKickMember(s_net_cmd *cmd)
+{
+	NET_SIS_kick_member* msg = (NET_SIS_kick_member*)cmd;
+	if (0 != msg->dw_error_code)
+	{
+		//统一处理错误信息
+		return 0 ;
+	}
+	//若本地玩家是被踢的
+	if (m_LocalPlayerID == msg->dwDestRoleID)
+	{
+		initialTeamInfo();
+		
+		//是否需要提示玩家，您被某个队伍踢出
+		ToolTip::getInstance()->push(GET_STR(216));
+		//UI刷新
+		TaskTraceUi* ui = World::getInstance()->getTaskTraceUi();
+		if (ui != NULL)
+		{
+			ui->clearMemberGroup();
+		}
+		CLOSE_UI(WCT_TeamStateUi);
+		return 0;
+	}
+	//队伍其他玩家处理玩家被踢的消息
+	else
+	{
+		for (teammates_vector::iterator iter = m_TeammatesInfo.begin();iter!=m_TeammatesInfo.end();++iter)
+		{
+			if (msg->dwDestRoleID == iter->uRoleID)
+			{
+				//提示玩家，玩家被踢出队伍
+				std::stringstream ss;
+				ss<<iter->strName<<GET_STR(237).c_str();
+				ToolTip::getInstance()->push(ss.str());
+				m_TeammatesInfo.erase(iter);
+				//ui刷新,防止多次刷新
+				//if (m_TeammatesInfo.size() >= 1)
+				{
+					//UI刷新
+					TaskTraceUi* ui = World::getInstance()->getTaskTraceUi();
+					if (ui != NULL)
+					{
+						//ui->removeGroupMember(msg->dwDestRoleID);
+						//ui->updateGroupList();
+						ui->refreshAllGroupList();
+					}
+					GET_UI(TeamStateUi,WCT_TeamStateUi)->updateData();
+				}
+				break;
+			}
+		}
+
+		TeammateStateRefresh evt;
+		SEND_EVENT(&evt);
+	}
+	//remark by gh 队伍没有队友也可以存在
+// 	if ((m_TeammatesInfo.size()<1) /*|| (!IS_VALID(m_TeamID))*/)
+// 	{
+// 		initialTeamInfo();
+// 		/*LocalPlayer* pLocPlayer = (LocalPlayer*)(RoleManager::getInstance()->findRole(m_LocalPlayerID));
+// 		pLocPlayer->setPlayerTeamID(INVALID);
+// 		pLocPlayer->setPlayerTeamLeader(false);*/
+// 		ToolTip::getInstance()->push(GET_STR(217));
+// 		//UI刷新
+// 		TaskTraceUi* ui = World::getInstance()->getTaskTraceUi();
+// 		if (ui != NULL)
+// 		{
+// 			ui->removeAllMember();
+// 			ui->updateGroupList();
+// 		}
+// 		CLOSE_UI(WCT_TeamStateUi);
+// 	}
+	return 0;
+}
+unsigned int TeamMgr::onServerChangeLeader(s_net_cmd *cmd)
+{
+	NET_SIS_change_leader* msg = (NET_SIS_change_leader*)cmd;
+	if (0 != msg->dw_error_code)
+	{
+		//处理错误消息
+		if (E_Team_Not_Leader == msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(GET_STR(203));
+		}
+		return 0;
+	}
+	LocalPlayer* pLocPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if (pLocPlayer)
+	{
+		if (msg->dwNewLeaderID == pLocPlayer->getId())
+		{
+			World::getInstance()->getTaskTraceUi()->updateGroupState(EGS_TeamLeader);
+		}
+		else
+		{
+			World::getInstance()->getTaskTraceUi()->updateGroupState(EGS_Team);
+		}
+	}
+	m_TeamLeaderID = msg->dwNewLeaderID;
+
+	//提示新队长信息
+	//新队长界面
+	if (m_LocalPlayerID == m_TeamLeaderID)
+	{
+		ToolTip::getInstance()->push(GET_STR(218));
+	}
+	//只要是队长变更和本地玩家相关，就删除申请列表
+	if (msg->dwLeaderID==m_LocalPlayerID || m_LocalPlayerID== msg->dwNewLeaderID)
+	{
+		clearRespQueueAndCloseFrame();
+	}
+
+	swapTeamLeaderPosFirst(m_TeamLeaderID);
+	//ui刷新
+	//UI刷新
+	TaskTraceUi* ui = World::getInstance()->getTaskTraceUi();
+	if (ui != NULL)
+	{
+		ui->updateGroupList();
+		ui->updateTeamLeaderQiZhi();
+	}
+	//队伍成员界面
+	if ((m_LocalPlayerID != m_TeamLeaderID) && (m_TeammatesInfo.size() > 0))
+	{
+		std::stringstream ss;
+		ss<<m_TeammatesInfo[0].strName<<GET_STR(219).c_str();
+		ToolTip::getInstance()->push(ss.str());
+	}
+	//组队界面
+	GET_UI(TeamStateUi,WCT_TeamStateUi)->updateData();
+
+// 	// 清除申请数据
+// 	clear_other_role_apply();
+
+	TeammateStateRefresh evt;
+	SEND_EVENT(&evt);
+
+	return 0;
+}
+unsigned int TeamMgr::onServerLeaveTeam(s_net_cmd *cmd)
+{
+	NET_SIS_leave_team* msg = (NET_SIS_leave_team*)cmd;
+	if (msg->bLeaveLine)
+	{
+		//若是本地玩家离线
+		if (m_LocalPlayerID == msg->dw_role_id)
+		{
+		}
+		else
+		{
+			//即便队伍成员仅有一个在线，也不会解散队伍，这和离开队伍不一样
+			for (size_t i = 0;i<m_TeammatesInfo.size();i++)
+			{
+				tagTeammateData& data = m_TeammatesInfo[i];		
+				if (data.uRoleID == msg->dw_role_id)
+				{
+					data.b_online = false;
+					//师傅上下线，徒弟上下线不在这里提示 gx add 2013.12.13
+					if (MasterPrenticeMgr::getInstance()->Is_XiaoHuoBan(msg->dw_role_id))
+					{
+						LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+						if(!ploc)
+							return 0;
+						//本地玩家是师傅
+						if (MasterPrenticeMgr::getInstance()->IsMaster_Local(ploc->getId()))
+						{
+							break;
+						}
+						//本地玩家是徒弟
+						else
+						{
+							if (msg->dw_role_id == MasterPrenticeMgr::getInstance()->GetMasterID())
+							{
+								break;
+							}
+						}
+					}
+					//end
+					//data.b_online = false;
+					std::stringstream ss;
+					ss<<data.strName<<GET_STR(220).c_str();
+					ToolTip::getInstance()->push(ss.str());
+					//后期需要刷新UI
+					TaskTraceUi* ui = World::getInstance()->getTaskTraceUi();
+					const tagTeammateData* tempData = &data;
+					ui->modifyMemberData(tempData);
+					//组队界面
+					GET_UI(TeamStateUi,WCT_TeamStateUi)->updateData();
+					break;
+				}
+			}
+			// 队长离开了
+			if ((msg->dw_role_id == m_TeamLeaderID) && (m_TeammatesInfo.size() > 0))
+			{
+				NET_SIS_change_leader cmd2;
+				cmd2.dwLeaderID = m_TeamLeaderID;
+				cmd2.dwNewLeaderID = msg->dwLeaderID;
+				cmd2.dw_error_code = 0;
+				/*unsigned int ret =*/ onServerChangeLeader(&cmd2);
+			}
+			else
+			{
+				TeammateStateRefresh evt;
+				SEND_EVENT(&evt);
+			}
+		}
+		return 0;
+	}
+	if (0 != msg->dw_error_code)
+	{
+		//统一处理错误信息
+	}
+	//若是本地玩家离开队伍
+	if (m_LocalPlayerID == msg->dw_role_id)
+	{
+		CLOSE_UI(WCT_TeamUi);
+
+		initialTeamInfo();
+		//UI刷新
+		TaskTraceUi* ui = World::getInstance()->getTaskTraceUi();
+		if (ui != NULL)
+		{
+// 			ui->removeAllMember();
+// 			ui->updateGroupList();
+// 
+// 			mpCreateTeamBtn->setVisible(true);
+			ui->clearMemberGroup();
+		}
+		ToolTip::getInstance()->push(GET_STR(221));
+		return 0;
+		//应该有界面提示玩家离开某个队伍
+	}
+	else
+	{
+		for( teammates_vector::iterator itr = m_TeammatesInfo.begin(); itr != m_TeammatesInfo.end(); ++itr )
+		{
+			if (msg->dw_role_id == itr->uRoleID)
+			{
+				std::stringstream ss;
+				ss<<itr->strName<<GET_STR(222).c_str();
+				ToolTip::getInstance()->push(ss.str());
+
+				m_TeammatesInfo.erase(itr);
+				//UI刷新
+				TaskTraceUi* ui = World::getInstance()->getTaskTraceUi();
+				if (ui != NULL)
+				{
+					//ui->removeGroupMember(msg->dw_role_id);
+					//ui->updateGroupList();
+					ui->refreshAllGroupList();
+				}
+				//提示某个队友离队
+				//ui刷新
+				GET_UI(TeamStateUi,WCT_TeamStateUi)->updateData();
+				break;
+			}
+		}
+		//若是队长离开
+		if ((msg->dwLeaderID != m_TeamLeaderID) && (m_TeammatesInfo.size() > 0))
+		{
+			NET_SIS_change_leader cmd2;
+			cmd2.dwLeaderID = msg->dw_role_id;
+			cmd2.dwNewLeaderID = msg->dwLeaderID;
+			cmd2.dw_error_code = 0;
+			/*unsigned int ret =*/ onServerChangeLeader(&cmd2);
+		}
+		else
+		{
+			TeammateStateRefresh evt;
+			SEND_EVENT(&evt);
+		}
+	}
+	//remark by gh 
+// 	if ((m_TeammatesInfo.size() < 1) /*|| (!IS_VALID(m_TeamID))*/)
+// 	{
+// 		initialTeamInfo();
+// 		ToolTip::getInstance()->push(GET_STR(217));
+// 		//UI刷新
+// 		TaskTraceUi* ui = World::getInstance()->getTaskTraceUi();
+// 		if (ui != NULL)
+// 		{
+// 			ui->removeAllMember();
+// 			ui->updateGroupList();
+// 		}
+// 		/*LocalPlayer* pLocPlayer = (LocalPlayer*)(RoleManager::getInstance()->findRole(m_LocalPlayerID));
+// 		pLocPlayer->setPlayerTeamID(INVALID);
+// 		pLocPlayer->setPlayerTeamLeader(false);*/
+// 	}
+	return 0;
+}
+unsigned int TeamMgr::onServerMemberOnline(s_net_cmd *cmd)
+{
+	NET_SIS_member_online* msg = (NET_SIS_member_online*)cmd;
+	for (size_t i = 0;i<m_TeammatesInfo.size();i++)
+	{
+		tagTeammateData& data = m_TeammatesInfo[i];
+		if (msg->dw_role_id == data.uRoleID)
+		{
+			//师傅上下线，徒弟上下线不在这里提示 gx add 2013.12.13
+			if (MasterPrenticeMgr::getInstance()->Is_XiaoHuoBan(msg->dw_role_id))
+			{
+				LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+				if(!ploc)
+					return 0;
+				//本地玩家是师傅
+				if (MasterPrenticeMgr::getInstance()->IsMaster_Local(ploc->getId()))
+				{
+					return 0;
+				}
+				//本地玩家是徒弟
+				else
+				{
+					if (msg->dw_role_id == MasterPrenticeMgr::getInstance()->GetMasterID())
+					{
+						return 0;
+					}
+				}
+			}
+			//end
+
+			data.b_online = true;
+			std::stringstream ss;
+			ss<<data.strName <<GET_STR(223).c_str();
+			ToolTip::getInstance()->push(ss.str());
+			//可能需要UI刷新
+			TaskTraceUi* ui = World::getInstance()->getTaskTraceUi();
+			const tagTeammateData* tempData = &data;
+			ui->modifyMemberData(tempData);
+			break;
+		}
+	}
+	return 0;
+}
+unsigned int TeamMgr::onServerRemoteattChange_Signle(s_net_cmd *cmd)
+{
+	NET_SIS_single_remote_att_change* msg = (NET_SIS_single_remote_att_change*)cmd;
+	//非玩家则忽略
+	if (!IS_PLAYER(msg->dw_role_id))
+		return 0 ;
+	//若是本地玩家，血量的变化不再这里考虑
+	if (m_LocalPlayerID == msg->dw_role_id)
+		return 0;
+	//仅考虑血量(当前与最大)的变化情况
+	if ((ERRA_HP != (ERemoteRoleAtt)msg->eType) && (ERRA_MaxHP != (ERemoteRoleAtt)msg->eType))
+		return 0;
+	for (size_t i = 0;i<m_TeammatesInfo.size();i++)
+	{
+		tagTeammateData& data = m_TeammatesInfo[i];
+		if (data.uRoleID == msg->dw_role_id)
+		{
+			if (ERRA_HP == (ERemoteRoleAtt)msg->eType)
+			{
+				data.nHP = msg->nValue;
+			}
+			else
+			{
+				data.nMaxHp = msg->nValue;
+			}
+			//调用UI接口函数刷新界面
+			TaskTraceUi* ui = World::getInstance()->getTaskTraceUi();
+			if (ui != NULL)
+			{
+				ui->modifyMemberData(&data);
+			}
+			break;
+		}
+	}
+	return 0;
+}
+unsigned int TeamMgr::onServerTeammateLevelChange(s_net_cmd *cmd)
+{
+	NET_SIS_change_role_level* msg = (NET_SIS_change_role_level*)cmd;
+	if (m_LocalPlayerID == msg->dw_role_id)
+		return 0;
+	for (size_t i = 0;i<m_TeammatesInfo.size();i++)
+	{
+		tagTeammateData& data = m_TeammatesInfo[i];
+		if (data.uRoleID == msg->dw_role_id)
+		{
+			data.nLevel = msg->nLevel;
+			//调用UI接口函数刷新界面
+			break;
+		}
+	}
+	return 0;
+}
+void TeamMgr::onGetName(unsigned int roleid , const std::string& name)
+{
+	bool bneedrefresh = false;//是否需要刷新组队UI
+	//得到队伍成员的名称
+	for (size_t i = 0;i < m_TeammatesInfo.size();i++)
+	{
+		tagTeammateData& data = m_TeammatesInfo[i];
+		if (data.uRoleID == roleid)
+		{
+			if (data.strName.empty())
+			{
+				bneedrefresh = true;
+			}
+			data.strName = name;
+			if (data.nLevel > 0 && (!data.strName.empty()))
+			{
+				//调用UI刷新
+				TaskTraceUi *ui = World::getInstance()->getTaskTraceUi();
+				if (ui != NULL && bneedrefresh)
+				{
+					ui->addGroupMember(data.uRoleID);
+					ui->updateGroupList();
+				}
+			}
+			break;
+		}
+	}
+	//
+	if (m_bLeaderInviting && m_InviterID == roleid)
+	{
+		m_bLeaderInviting = false;
+		std::stringstream ss;
+		ss<<name<<GET_STR(225).c_str();
+		MessageBoxUi *joinTeamUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, ss.str().c_str(), "\xE5\x90\x8C\xE6\x84\x8F","\xE6\x8B\x92\xE7\xBB\x9D");
+		World::getInstance()->getScene()->addChild(joinTeamUi, WZ_MESSAGEBOX);
+		joinTeamUi->signalOkBtnPressed.connect(this, &TeamMgr::onSignalAgreeInvite);
+		joinTeamUi->signalCancelBtnPressed.connect(this,&TeamMgr::onSignalDisagreeInvite);
+		return;
+	}
+	if (m_bMemberInviting && m_DestID == roleid)
+	{
+		std::stringstream ss;
+		ss<<name<<GET_STR(213).c_str();
+		MessageBoxUi *joinTeamUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, ss.str().c_str(), "\xE5\x90\x8C\xE6\x84\x8F","\xE6\x8B\x92\xE7\xBB\x9D");
+		World::getInstance()->getScene()->addChild(joinTeamUi, WZ_MESSAGEBOX);
+		joinTeamUi->signalOkBtnPressed.connect(this, &TeamMgr::onSignalLeaderAgreeMemberInvite);
+		joinTeamUi->signalCancelBtnPressed.connect(this,&TeamMgr::onSignalLeaderDisagreeMemberInvite);
+		m_bMemberInviting = false;
+		return;
+	}
+	if (m_bInvitedReplay && m_DestID == roleid)
+	{
+		std::stringstream ss;
+		ss<<name<<GET_STR(224).c_str();
+		ToolTip::getInstance()->push(ss.str());
+		m_bInvitedReplay = false;
+		m_DestID = INVALID;
+		return;
+	}
+	if (m_bApply2Leader && m_ApplyID == roleid)
+	{
+		m_bApply2Leader = false;
+		std::stringstream ss;
+		ss<<name<<GET_STR(213).c_str();
+		MessageBoxUi *applyJoinTeamUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, ss.str().c_str(), "\xE5\x90\x8C\xE6\x84\x8F","\xE6\x8B\x92\xE7\xBB\x9D");
+		World::getInstance()->getScene()->addChild(applyJoinTeamUi, WZ_MESSAGEBOX);
+		applyJoinTeamUi->signalOkBtnPressed.connect(this, &TeamMgr::onSignalLeaderAgreeApply);
+		applyJoinTeamUi->signalCancelBtnPressed.connect(this,&TeamMgr::onSignalLeaderDisagreeApply);
+	}
+
+}
+
+/*******************MgsBox信号连接函数*******************/
+void TeamMgr::onSignalAgreeInvite()
+{
+	deal_with_team_apply(m_InviterID, m_InviterTeamMenRoleID, 1);
+
+	m_InviterID = INVALID;
+	m_InviterTeamMenRoleID = INVALID;
+}
+void TeamMgr::onSignalDisagreeInvite()
+{
+	deal_with_team_apply(m_InviterID, m_InviterTeamMenRoleID, 0);
+
+	m_InviterID = INVALID;
+	m_InviterTeamMenRoleID = INVALID;
+}
+void TeamMgr::onSignalLeaderAgreeMemberInvite()
+{
+	NET_SIC_member_invite_join_team_replay cmd;
+	cmd.dwDestRoleID = m_DestID;
+	cmd.dwTeamMemID = m_InviterID;
+	cmd.bAgree = 1;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+	m_DestID = INVALID;
+	m_InviterID = INVALID;
+	return;
+}
+void TeamMgr::onSignalLeaderDisagreeMemberInvite()
+{
+	NET_SIC_member_invite_join_team_replay cmd;
+	cmd.dwDestRoleID = m_DestID;
+	cmd.dwTeamMemID = m_InviterID;
+	cmd.bAgree = 0;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+	m_DestID = INVALID;
+	m_InviterID = INVALID;
+	return;
+}
+void TeamMgr::onSignalLeaderAgreeApply()
+{
+	NET_SIC_apply_join_team_reply cmd;
+	cmd.dwDestRoleID = m_ApplyID;
+	cmd.bApply = 1;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+	m_ApplyID = INVALID;
+	return;
+}
+void TeamMgr::onSignalLeaderDisagreeApply()
+{
+	NET_SIC_apply_join_team_reply cmd;
+	cmd.dwDestRoleID = m_ApplyID;
+	cmd.bApply = 0;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+	m_ApplyID = INVALID;
+	return;
+}
+void TeamMgr::onSignalKickMemberConfirm()
+{
+	NET_SIC_kick_member cmd;
+	cmd.dwDestRoleID = m_KickingMemberID;
+	cmd.dwSrcRoleID = m_TeamLeaderID;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+	m_KickingMemberID = INVALID;
+	return;
+}
+void TeamMgr::onSignalKickMemberCancel()
+{
+	m_KickingMemberID = INVALID;
+	return;
+}
+void TeamMgr::onSignalLeaveTeamConfirm()
+{
+	NET_SIC_leave_team cmd;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+	return;
+}
+void TeamMgr::onSignalChangeTeamLeaderConfirm()
+{
+	if (-1 == m_ChangingLeaderID)
+		return;
+	NET_SIC_change_leader cmd;
+	cmd.dwNewLeader = m_ChangingLeaderID;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+	m_ChangingLeaderID = -1;
+	return;
+}
+/*******************UI调用接口函数*******************/
+void TeamMgr::MakeTeammate(unsigned int uDestRoleID)
+{
+	if (moTeamFilter.bForbid)
+	{
+		ToolTip::getInstance()->push(GET_STR(9021));
+		return;
+	}
+	LocalPlayer* localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if (localPlayer == NULL)
+		return;
+	//bool isSurroundby = false;
+	//Player* pDestRole = NULL;
+	RoleManager::RoleMap::const_iterator iter = RoleManager::getInstance()->getRoleMap().begin();
+	for(;iter!= RoleManager::getInstance()->getRoleMap().end(); ++iter)
+	{
+		if (iter->first == uDestRoleID)
+		{
+			//isSurroundby = true;
+			//pDestRole = (Player*)(iter->second);
+			break;
+		}
+	}
+	//若当前视野中存在目标玩家
+// 	if (isSurroundby)
+// 	{
+// 		if (NULL == pDestRole)
+// 		{
+// 			return;
+// 		}
+// 		//若该玩家已在队伍中，则应该是本地玩家申请入队
+// 		if (IS_VALID(pDestRole->getPlayerTeamID()))
+// 		{
+// 			ApplyJoinTeam(uDestRoleID);
+// 		}
+// 		//该玩家未在队伍中，则应该是本地玩家邀请入队
+// 		else
+// 		{
+// 			InviteRemoteRoleJoinTeam(uDestRoleID);
+// 		}
+// 	}
+// 	else
+// 	{
+// 		//若不在视野中，则统一按邀请入队处理
+// 		InviteRemoteRoleJoinTeam(uDestRoleID);
+// 	}
+	InviteRemoteRoleJoinTeam(uDestRoleID);
+	return;
+}
+/*******************类辅助功能函数定义*******************/
+bool TeamMgr::is_teammate(unsigned int roleID)
+{
+	if (!IS_VALID(roleID))
+	{
+		return false;
+	}
+	for (size_t i = 0;i<m_TeammatesInfo.size();i++)
+	{
+		if (roleID == m_TeammatesInfo[i].uRoleID)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+const tagTeammateData* TeamMgr::get_teammate_data(unsigned int const roleID)
+{
+	for (size_t i = 0;i < m_TeammatesInfo.size();i++)
+	{
+		if (roleID == m_TeammatesInfo[i].uRoleID)
+		{
+			return &m_TeammatesInfo[i];
+		}
+	}
+	return NULL;
+}
+void TeamMgr::initialTeamInfo()
+{
+	//置空所有队伍信息
+	m_TeammatesInfo.clear();
+	moTeamFilter.reset();
+	m_TeamID = INVALID;
+	m_TeamLeaderID = INVALID;
+	m_ApplyID = INVALID;
+	m_InviterID = INVALID;
+	m_DestID = INVALID;
+	m_KickingMemberID = INVALID;
+	m_nDesFubenID = 0;
+	_chatRoomId = 0;
+	//创建队伍后的默认设置
+
+	clearRespQueueAndCloseFrame();
+	//clear_other_role_apply();
+	clear_quick_team_info();
+
+	TeammateStateRefresh evt;
+	SEND_EVENT(&evt);
+
+	return;
+}
+void TeamMgr::swapTeamLeaderPosFirst(unsigned int uLeaderID)
+{
+	int index = 0;
+	//仅有一个成员或是根本就没有，则无需置位
+	if (m_TeammatesInfo.size() <= 1)
+	{
+		return;
+	}
+
+	if (uLeaderID == m_TeammatesInfo[0].uRoleID)
+	{
+		return;
+	}
+	tagTeammateData const* data = get_teammate_data(m_TeamLeaderID);
+	//若本地玩家是新队长，则无需置位
+	if (!IS_VALID_PTR(data))
+	{
+		return;
+	}
+	for(teammates_vector::iterator iter = m_TeammatesInfo.begin();iter!=m_TeammatesInfo.end();++iter)
+	{
+		if (m_TeamLeaderID == iter->uRoleID)
+		{
+			break;
+		}
+		index++;
+	}
+	std::swap(m_TeammatesInfo[0],m_TeammatesInfo[index]);
+	return;
+}
+bool TeamMgr::is_teammate_online(unsigned int role_id)
+{
+	if (!IS_VALID(role_id))
+	{
+		return false;
+	}
+	tagTeammateData const* data = get_teammate_data(role_id);
+	if (!IS_VALID_PTR(data))
+	{
+		return false;
+	}
+	return data->b_online;
+}
+
+void TeamMgr::Refresh_GroupInfo()
+{
+	for (size_t i = 0;i < m_TeammatesInfo.size();i++)
+	{
+		tagTeammateData& data = m_TeammatesInfo[i];
+		if (data.nLevel > 0 && (!data.strName.empty()))
+		{
+			//调用UI刷新
+			TaskTraceUi *ui = World::getInstance()->getTaskTraceUi();
+			if (ui != NULL)
+			{
+				ui->addGroupMember(data.uRoleID);
+				ui->updateGroupList();
+			}
+		}
+	}
+}
+
+unsigned int TeamMgr::onServerTeamFubenState( s_net_cmd *cmd )
+{
+	
+	NET_SIS_team_set_state* msg = (NET_SIS_team_set_state*)cmd;
+	if (msg->bLeader)
+	{
+		ToolTip::getInstance()->push(GET_STR(7254));
+		CLOSE_UI(WCT_TeamStateUi);
+		return 0;
+	}
+	for (int i = 0;i < MAX_TEAM_NUM ;i++)
+	{
+		m_state[i].roleId = msg->state[i].roleId;
+		m_state[i].state = msg->state[i].state;
+		m_state[i].dwJointime= msg->state[i].dwJointime;
+	}
+	//OPEN_UI(WCT_TeamStateUi);
+	if (IS_UI_OPEN(WCT_TeamStateUi))
+	{
+		TeamStateUiLayer* pUI = getUiNodeByTag<TeamStateUiLayer>(WCT_TeamStateUi);
+		if (pUI)
+		{
+			pUI->updateData();
+		}
+	}
+	//GET_UI(TeamStateUi,WCT_TeamStateUi)->updateData();
+	return 0;
+}
+
+
+void TeamMgr::getTeammateLocalPlayerData(tagTeammateData &teammate )
+{
+	Role* ploc = RoleManager::getInstance()->getLocalPlayer();
+	teammate.uRoleID = ploc->getId();
+	teammate.bySex = ploc->GetRoleData(RA_SEX);
+	teammate.nLevel = ploc->getLevel();
+	teammate.nRating = ploc->GetRoleData(RA_BATTLE_POINT);
+
+	for(int i = 0; i < PDA_End; i++)
+	{
+		teammate.sDisplayInfo[i].byDisplayPos = ePlayerDisplayAttr(i);
+		teammate.sDisplayInfo[i].dw_data_id = RoleManager::getInstance()->getLocalPlayer()->getDisplayAttr(ePlayerDisplayAttr(i));
+	}
+
+	teammate.b_online = true;
+	//NameMgr2::getInstance()->queryName(ploc->getId(),teammate.strName);
+	teammate.strName = ploc->getNameUtf8();
+	if (RT_Warrior == ploc->GetRoleData(RA_ROLETYPE))
+	{
+		teammate.eClassEx = EV_Warrior;
+	}
+	if (RT_Mage == ploc->GetRoleData(RA_ROLETYPE))
+	{
+		teammate.eClassEx = EV_Mage;
+	}
+	if (RT_Taoist == ploc->GetRoleData(RA_ROLETYPE))
+	{
+		teammate.eClassEx = EV_Taoist;
+	}
+	//teammate.uRoleID = m_LocalInfo.uRoleID;
+	//teammate.bySex = m_LocalInfo.bySex;
+	//teammate.nLevel = m_LocalInfo.nLevel;
+	//teammate.nRating = m_LocalInfo.nRating;
+	//teammate.b_online = m_LocalInfo.b_online;
+	//teammate.strName = m_LocalInfo.strName;
+	//teammate.eClassEx = m_LocalInfo.eClassEx;
+	//teammate.dwJointime = m_LocalInfo.dwJointime;
+	//teammate.nRating = m_LocalInfo.nRating;
+
+
+}
+
+//void TeamMgr::getTeamPlayData( teammates_vector &teammate )
+//{
+//	memcpy(&teammate,&m_TeammatesInfo,sizeof(m_TeammatesInfo));
+//	//teammate = m_TeammatesInfo;
+//	//将队长放到第一个位置
+//	//teammate.clear();
+//	//tagTeammateData teammateLocal;
+//	//getTeammateLocalPlayerData(teammateLocal);
+//	//if (m_TeamLeaderID == m_LocalPlayerID)
+//	//{		
+//	//	teammate.push_back(teammateLocal);
+//	//	for (int i = 0;i < m_TeammatesInfo.size();i++)
+//	//	{
+//	//		teammate.push_back(m_TeammatesInfo[i]);
+//	//	}
+//	//}
+//	//else
+//	//{
+//	//	for (int i = 0;i < m_TeammatesInfo.size();i++)
+//	//	{
+//	//		if ( m_TeammatesInfo[i].uRoleID == m_TeamLeaderID)
+//	//		{
+//	//			teammate.push_back(m_TeammatesInfo[i]);
+//	//			break;
+//	//		}
+//	//	}
+//
+//	//	for (int i = 0;i < m_TeammatesInfo.size();i++)
+//	//	{
+//	//		if ( m_TeammatesInfo[i].uRoleID != m_TeamLeaderID)
+//	//		{
+//	//			teammate.push_back(m_TeammatesInfo[i]);
+//	//		}
+//	//	}
+//	//	teammate.push_back(teammateLocal);
+//
+//	//}
+//
+//	////加入其它队员
+//	//tagTeammateData teammateLocal;
+//	//getTeammateLocalPlayerData(teammateLocal);
+//	//teammate.push_back(teammateLocal);
+//}
+
+void TeamMgr::swapTeamLeaderPosFirst( unsigned int uLeaderID,teammates_vector &TeammatesInfo )
+{
+	size_t index = 0;
+	//仅有一个成员或是根本就没有，则无需置位
+	if (TeammatesInfo.size() <= 1)
+	{
+		return;
+	}
+
+	if (uLeaderID == TeammatesInfo[0].uRoleID)
+	{
+		return;
+	}
+
+	for(teammates_vector::iterator iter = TeammatesInfo.begin();iter!=TeammatesInfo.end();++iter)
+	{
+		if (m_TeamLeaderID == iter->uRoleID)
+		{
+			break;
+		}
+		index++;
+	}
+	if (index >= TeammatesInfo.size())
+	{
+		return;
+	}
+	std::swap(TeammatesInfo[0],TeammatesInfo[index]);
+	return ;
+}
+
+bool TeamMgr::isAllProfessionInTeam()
+{
+	bool zhanshi = false;
+	bool fashi = false;
+	bool daoshi = false;
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if (EV_Warrior == player->GetRoleData(RA_ROLETYPE))
+		zhanshi = true;
+	else if (EV_Mage == player->GetRoleData(RA_ROLETYPE))
+		fashi = true;
+	else if (EV_Taoist == player->GetRoleData(RA_ROLETYPE))
+		daoshi = true;
+	for (teammates_vector::iterator iter = m_TeammatesInfo.begin();iter != m_TeammatesInfo.end(); ++iter)
+	{
+		if (EV_Warrior == (*iter).eClassEx)
+			zhanshi = true;
+		else if (EV_Mage == (*iter).eClassEx)
+			fashi = true;
+		else if (EV_Taoist == (*iter).eClassEx)
+			daoshi = true;
+		if (zhanshi && fashi && daoshi)
+			return true;
+	}
+	return false;
+}
+
+// bool TeamMgr::isAllRoleInSameMap(unsigned int npcId)
+// {
+// 	Role* npc = RoleManager::getInstance()->findRole(npcId);
+// 	if (!npc)
+// 		return false;
+// 	unsigned int mapId = npc->getMapId();
+// 	for (teammates_vector::iterator iter = m_TeammatesInfo.begin();iter != m_TeammatesInfo.end(); ++iter)
+// 	{
+// 		unsigned int roleId = (*iter).uRoleID;
+// 		Role* role = RoleManager::getInstance()->findRole(roleId);
+// 	}
+// 	return true;
+// }
+
+unsigned int TeamMgr::onTeamChatRoom( s_net_cmd *cmd )
+{
+	NET_SIS_team_chat_room* msg = (NET_SIS_team_chat_room*)cmd;
+	_chatRoomId = msg->roomId;
+	if (_chatRoomId > 0)
+	{
+	}
+	return 0;
+}
+
+unsigned int TeamMgr::onServerFubenPrepare( s_net_cmd *cmd )
+{
+	NET_SIS_Fuben_Prepare* msg = (NET_SIS_Fuben_Prepare*)cmd;
+	if (!msg)
+		return 0;
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if (NULL == player)
+		return 0;
+	std::string strtmp = "";
+	if (msg->by_type == EFRT_customs)
+	{
+		strtmp = GET_STR(9552);
+	}
+	else
+	{
+		if (player->getId() == m_TeamLeaderID)
+		{
+			ToolTip::getInstance()->push(GET_STR(9062));
+			return 0;
+		}
+		std::string baseStr = GET_STR(7254);
+		std::string mapName = "";
+		c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM fubendata WHERE mapid = ?1");
+		cmd->set_integer64(1 ,msg->dw_map_id);
+		c_sql_table* table = c_db_manager::getSingleton()->create_table();
+		while(table->retrieve_row())
+		{
+			int idx = table->get_index("title");
+			mapName = table->get_text(idx);
+		}
+		c_db_manager::getSingleton()->destroy_table(table);
+		c_db_manager::getSingleton()->end_operation(cmd);
+		strtmp = replaceStr(baseStr,"**",mapName);
+	}
+
+	m_pIsFubenPrepare = true;
+	m_pPrepareTime = 0.0f;
+	CCScene* scene = World::getInstance()->getScene();
+	if (scene)
+	{
+		m_pMessageBox =  MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,strtmp.c_str(), TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+		scene->addChild(m_pMessageBox,WZ_MESSAGEBOX,WCT_TeamMessageBox);
+		m_pMessageBox->signalOkBtnPressed.connect(this, &TeamMgr::fubenAgree);
+		m_pMessageBox->signalCancelBtnPressed.connect(this, &TeamMgr::fubenNoAgree);
+	}
+	
+	//关闭对话界面
+	NPCTalkUi* ui = World::getInstance()->getNPCDialog();
+	if(ui)
+	{
+		ui->show(false);
+	}
+	return 0;
+}
+
+void TeamMgr::fubenAgree()
+{
+	m_pIsFubenPrepare = false;
+	m_pPrepareTime = 0.0f;
+	m_pMessageBox = NULL;
+	NET_SIC_Fuben_Prepare send;
+	send.by_is_agree = 1;
+	TCP_CLIENT->send_net_cmd(&send,NP_NORMAL,false);
+}
+
+void TeamMgr::fubenNoAgree()
+{
+	m_pIsFubenPrepare = false;
+	m_pPrepareTime = 0.0f;
+	m_pMessageBox = NULL;
+	NET_SIC_Fuben_Prepare send;
+	send.by_is_agree = 0;
+	TCP_CLIENT->send_net_cmd(&send,NP_NORMAL,false);
+}
+
+bool TeamMgr::tryToMakeTeammate( unsigned int dwRoleID ,bool isUiApply /*= false*/)
+{
+	unsigned int& roleId = dwRoleID;
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return false;
+	if (ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))//摆摊交易双修中禁止操作
+	{
+		ToolTip::getInstance()->push(GET_STR(7209));
+		return false;
+	}
+// 	Role *role = RoleManager::getInstance()->findRole(roleId);
+// 	if(role != NULL)
+// 	{
+// 		MakeTeammate(roleId);
+// 		return true;
+// 	}
+// 	else
+// 	{
+// 		MakeTeammate(roleId);
+// 	}
+	if (isUiApply)
+	{
+		ApplyJoinTeam(roleId);
+	}
+	else
+	{
+		MakeTeammate(roleId);
+	}
+
+	return false;
+}
+
+unsigned int TeamMgr::onServerOwnCreatTeam( s_net_cmd *cmd )
+{
+	NET_SIS_own_create_team* msg = (NET_SIS_own_create_team*)cmd;
+	if (msg == NULL)
+		return 0;
+	switch (msg->dwError)
+	{
+	case E_Success:
+		ToolTip::getInstance()->push(GET_STR(258));
+		{
+
+		}
+		break;
+	case E_Team_Target_Have_Team:
+		ToolTip::getInstance()->push(GET_STR(257));
+		break;
+	}
+	return 0;
+}
+
+void TeamMgr::sendOwnCreatTeam(e_team_target_type first, int second, int level_min, int level_max)
+{
+	NET_SIC_own_create_team cmd;
+	cmd.dwFatherTarget = first;
+	cmd.dwSonTarget = second;
+	cmd.dwMinLevel = level_min;
+	cmd.dwMaxLevel = level_max;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+
+	if(!IS_UI_OPEN(WCT_TeamUi))
+	{
+		OPEN_UI(WCT_TeamUi);
+	}
+}
+
+void TeamMgr::send_change_team_target(e_team_target_type target_type, int select_index , int level_min, int level_max)
+{
+	NET_SIC_change_team_att cmd;
+	cmd.dwFatherTarget = (DWORD)target_type;
+	cmd.dwSonTarget = (DWORD)select_index;
+	cmd.dwMinLevel = (DWORD)level_min;
+	cmd.dwMaxLevel = (DWORD)level_max;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+}
+
+unsigned int TeamMgr::onServerChangeTeamTarget( s_net_cmd *cmd )
+{
+	NET_SIS_change_team_att * msg = (NET_SIS_change_team_att*)cmd;
+	CC_ASSERT(msg);
+
+	if(msg->dwError != 0)
+	{
+		show_error_info(msg->dwError);
+		return 0;
+	}
+
+	clear_quick_team_info();
+
+	m_team_target_info.set_info((e_team_target_type)(msg->dwFatherTarget), (int)(msg->dwSonTarget), (int)(msg->dwMinLevel), (int)(msg->dwMaxLevel));
+	m_team_target_info.set_matching_state(msg->bMathing);
+
+	// 刷新界面
+	match_state_change evt;
+	SEND_EVENT(&evt);
+
+	TaskTraceUi* ui = World::getInstance()->getTaskTraceUi();
+	if(IS_VALID_PTR(ui))
+	{
+		ui->refreshAllGroupList();
+	}
+
+	// 进行提示
+	if(msg->byBroadcastType == 0)
+	{
+		// 创建成功
+	}
+	else if(msg->byBroadcastType == 1)
+	{
+		stTeamTargetInfo const& info = get_team_target_info();
+
+		string str;
+		if(!info.is_have_small_target())
+			safe_sprintf(str, STRING_TABLE["team_target_change_cue_1"], get_target_name_by_target_type(info.select_type), info.level_min, info.level_max);
+		else
+			safe_sprintf(str, STRING_TABLE["team_target_change_cue_2"], get_target_name_by_target_type(info.select_type), get_target_index_name_by_target_type_and_index(info.select_type, info.select_index), info.level_min, info.level_max);
+
+		ToolTip::getInstance()->push(str.c_str());
+	}
+	else if(msg->byBroadcastType == 2)
+	{
+		UsefulFunction::show_string_cur(msg->bMathing ? "open_team_match_state" : "end_team_match_state");
+	}
+
+	return 0;
+}
+
+void TeamMgr::sendTeamCanJoin(bool canJoin)
+{
+	NET_SIC_change_team_can_join cmd;
+	cmd.canJoin = canJoin;
+	TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+}
+
+unsigned int TeamMgr::onServerTeamCanJoin( s_net_cmd *cmd )
+{
+	NET_SIS_change_team_can_join* msg = (NET_SIS_change_team_can_join*)cmd;
+	if (msg == NULL)
+		return 0;
+	moTeamFilter.bForbid = !msg->canJoin;
+
+	if (!is_team_leader(RoleManager::getInstance()->getLocalPlayer()->getId()))
+	{
+		TeammateStateRefresh evt;
+		SEND_EVENT(&evt);
+	}
+	return 0;
+}
+
+void TeamMgr::sendGotoLeaderNear()
+{
+	LocalPlayer* player = RoleManager::getInstance()->getLocalPlayer();
+	if(player == NULL)
+	{
+		return;
+	}
+	if (!IS_VALID(m_TeamID))
+	{
+		ToolTip::getInstance()->push(GET_STR(264));
+		return;
+	}
+	if (!IS_VALID(m_TeamLeaderID))
+	{
+		ToolTip::getInstance()->push(GET_STR(265));
+		return;
+	}
+	if (player->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(7218));
+		return;
+	}
+	if (player->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(2101));
+		return;
+	}
+	if (player->isInRoleStateAny(RA_Stall))
+	{
+		ToolTip::getInstance()->push(GET_STR(2102));
+		return;
+	}
+	if (player->isDead())
+	{
+		ToolTip::getInstance()->push(GET_STR(9190));
+		return;
+	}
+	f_item * item = PackageManager::getInstance()->getItem(EICT_Bag, (unsigned int)Item_shoeId);
+	if (item == NULL)
+	{
+		ToolTip::getInstance()->push(GET_STR(263));
+	}
+	else
+	{
+		NET_SIC_goto_leader_near cmd;
+		cmd.itemId = item->get_item_id();
+		TCP_CLIENT->send_net_cmd(&cmd,NP_NORMAL,false);
+	}
+}
+
+unsigned int TeamMgr::onServerGotoLeaderNear( s_net_cmd *cmd )
+{
+	NET_SIS_goto_leader_near* msg = (NET_SIS_goto_leader_near*)cmd;
+	if (msg == NULL)
+		return 0;
+	switch (msg->dwError)
+	{
+	case E_Team_not_find:
+		ToolTip::getInstance()->push(GET_STR(264));
+		break;
+	case E_Team_not_find_leader:
+		ToolTip::getInstance()->push(GET_STR(265));
+		break;
+	case E_Team_not_find_fly_shoes:
+		ToolTip::getInstance()->push(GET_STR(263));
+		break;
+	case E_Team_goto_new_map_error:
+		ToolTip::getInstance()->push(GET_STR(266));
+		break;
+	case E_Team_leader_int_skb:
+		ToolTip::getInstance()->push(GET_STR(267));
+		break;
+	case E_Team_myself_int_skb:
+		ToolTip::getInstance()->push(GET_STR(268));
+		break;
+	case E_Team_is_dead:
+		ToolTip::getInstance()->push(GET_STR(9190));
+		break;
+	case E_Team_stall:
+		ToolTip::getInstance()->push(GET_STR(2102));
+		break;
+	case E_Team_exchange:
+		ToolTip::getInstance()->push(GET_STR(7218));
+		break;
+	case E_Team_compractice:
+		ToolTip::getInstance()->push(GET_STR(2101));
+		break;
+	case E_Team_myself_not_goto_new_map:
+		ToolTip::getInstance()->push(GET_STR(9083));
+		break;
+	case E_Team_dest_not_goto_new_map:
+		ToolTip::getInstance()->push(GET_STR(9223));
+		break;
+	case E_Team_dest_max_role_limit:
+		ToolTip::getInstance()->push(GET_STR(9221));
+		break;
+	case E_Team_dest_map_min_level_limit:
+		ToolTip::getInstance()->push(GET_STR(7274));
+		break;
+	case E_Team_Xzdd_CanNot_Invite:
+		ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inTeam"]);
+		break;
+	case E_Team_Xzdd_CanNot_Apply:
+		ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inTeam"]);
+		break;
+	case E_Team_Xzdd_Target_CanNot_Invite:
+		ToolTip::getInstance()->push(STRING_TABLE["BF_Team_Target_CanNot_Invite"]);
+		break;
+
+	}
+	return 0;
+}
+
+void TeamMgr::removeResp( boost::shared_ptr<RespItem> const& ptr )
+{
+	moRespQueue.remove(ptr);
+}
+
+void TeamMgr::clearRespQueueAndCloseFrame()
+{
+	bool is_remove = (!moRespQueue.getQueue().empty());
+	moRespQueue.clear();
+
+	CCScene* node =World::getInstance()->getScene();
+	if(!IS_VALID_PTR(node))
+	{
+		return;
+	}
+
+	RespListView* view  =dynamic_cast<RespListView*>(node->getChildByTag(WCT_TeamResp));
+	if (view)
+	{
+		view->close();
+	}
+
+	if(is_remove)
+	{
+		refresh_team_list evt;
+		SEND_EVENT(&evt);
+	}
+}
+
+bool TeamMgr::isAllRoleLevelEnough( int level )
+{
+	for (teammates_vector::iterator iter = m_TeammatesInfo.begin();iter != m_TeammatesInfo.end(); ++iter)
+	{
+		if (iter->nLevel < level)
+			return false;
+	}
+	return true;
+}
+
+void TeamMgr::delayDestroy()
+{
+	m_TeammatesInfo.clear();
+	m_troubles.clear();
+	m_pInviteMap.clear();
+	moRespQueue.clear();
+	clear_quick_team_info();
+}
+
+const string TeamMgr::get_target_name_by_target_type(e_team_target_type target_type)
+{
+	string str;
+	safe_sprintf(str, "team_target_%d", target_type);
+	return STRING_TABLE[str.c_str()];
+}
+
+const string TeamMgr::get_target_index_name_by_target_type_and_index(e_team_target_type target_type, int index)
+{
+	if(target_type == e_target_own_quest)
+	{
+		const s_quest_detail* quest_data = QuestMgr::getInstance()->getQuestDetail(index);
+		if(IS_VALID_PTR(quest_data))
+		{
+			return quest_data->title;
+		}
+	}
+	else if(target_type == e_target_limit_active)
+	{
+		DayActivityData* data = ActivityMgr::getInstance()->getDataById(index);
+		if(IS_VALID_PTR(data))
+		{
+			return data->name;
+		}
+	}
+	else if(target_type == e_target_world_boss || target_type == e_target_field_boss)
+	{
+		return BossPKMgr::getInstance()->get_boss_name_by_id(index);
+	}
+	else if(target_type == e_target_multi_instance)
+	{
+		map<unsigned int, string>& temp_map = InstanceMgr::getInstance()->get_mutil_instance();
+		map<unsigned int, string>::iterator iter = temp_map.find(index);
+		if(iter != temp_map.end())
+		{
+			return iter->second;
+		}
+	}
+	else if(target_type == e_target_auto_action)
+	{
+		return MapManager::getInstance()->getMapName(index);
+	}
+
+	return "";
+}
+
+void TeamMgr::delete_other_role_apply_by_id(DWORD role_id)
+{
+	BOOST_FOREACH(boost::shared_ptr<RespItem> const& one ,moRespQueue.getQueue())
+	{
+		if(one->getType() <= RespItem::EApplyFormTeammate)
+		{
+			if(one->mParam.dwID == role_id)
+			{
+				removeResp(one);
+
+				refresh_team_list evt;
+				SEND_EVENT(&evt);
+				
+				return;
+			}
+		}
+	}
+}
+
+void TeamMgr::clear_other_role_apply()
+{
+	bool is_remove = false;
+// 	BOOST_FOREACH(boost::shared_ptr<RespItem> const& one ,moRespQueue.getQueue())
+// 	{
+// 		if(one->getType() <= RespItem::EApplyFormTeammate)
+// 		{
+// 			removeResp(one);
+// 			is_remove = true;
+// 		}
+// 	}
+
+	clearRespQueueAndCloseFrame();
+
+	if(is_remove)
+	{
+		refresh_team_list evt;
+		SEND_EVENT(&evt);
+	}
+}
+
+void TeamMgr::show_error_info(DWORD error)
+{
+	int temp = int(error);
+	std::stringstream ss;
+	ss<<"team_error_"<<temp;
+	ToolTip::getInstance()->push(STRING_TABLE[ss.str().c_str()]);
+}
+
+unsigned int TeamMgr::onServerDismissTeam(s_net_cmd *cmd)
+{
+	NET_SIS_dismiss_team * msg = (NET_SIS_dismiss_team*)cmd;
+	CC_ASSERT(msg);
+
+	if(msg->dwError != 0)
+	{
+		show_error_info(msg->dwError);
+		return 0;
+	}
+
+	CLOSE_UI(WCT_TeamUi);
+
+	initialTeamInfo();
+
+	UsefulFunction::show_string_cur("dismiss_team_success");
+
+	TaskTraceUi* ui = World::getInstance()->getTaskTraceUi();
+	if (IS_VALID_PTR(ui))
+	{
+		ui->clearMemberGroup();
+		ui->updateGroupState(EGS_Null);
+	}
+
+	CLOSE_UI(WCT_TeamStateUi);
+
+	return 0;
+}
+
+void TeamMgr::send_player_match(e_team_target_type target_type, int index)
+{
+	m_player_match_type = target_type;
+	m_player_match_index = index;
+
+	NET_C2S_Team_RoleMatching send;
+	send.m_dwFatherTarget = target_type;
+	send.m_dwSonTarget = index;
+	TCP_CLIENT->send_net_cmd(&send, NP_NORMAL, false);
+}
+
+unsigned int TeamMgr::onServerPlayerMatch(s_net_cmd *cmd)
+{
+	NET_SIC_Team_RoleMatching* msg = (NET_SIC_Team_RoleMatching*)cmd;
+	CC_ASSERT(msg);
+
+	if(msg->m_nRes != 0)
+	{
+		m_player_match_type = e_target_null;
+		m_player_match_index = 0;
+
+		show_error_info(msg->m_nRes);
+	}
+	else
+	{
+		UsefulFunction::show_string_cur("role_match_success");
+	}
+
+	QuickTeamUiLayer* layer = GET_UI(QuickTeamUi, QUICK_TEAM_UI)->getUiLayer();
+	if(IS_VALID_PTR(layer))
+	{
+		layer->refresh_match_state();
+		layer->set_msg_return(true);
+	}
+
+	return 0;
+}
+
+unsigned int TeamMgr::onServerPlayerCancelMatch(s_net_cmd *cmd)
+{
+	NET_SIC_Team_CancelRoleMatching* msg = (NET_SIC_Team_CancelRoleMatching*)cmd;
+	CC_ASSERT(msg);
+
+	if(msg->m_nRes != 0)
+	{
+		show_error_info(msg->m_nRes);
+	}
+	else
+	{
+		m_player_match_type = e_target_null;
+		m_player_match_index = 0;
+
+		UsefulFunction::show_string_cur("role_cancel_match_success");
+	}
+
+	QuickTeamUiLayer* layer = GET_UI(QuickTeamUi, QUICK_TEAM_UI)->getUiLayer();
+	if(IS_VALID_PTR(layer))
+	{
+		layer->refresh_match_state();
+		layer->set_msg_return(true);
+	}
+
+	return 0;
+}
+
+unsigned int TeamMgr::onDeleteApplyData(s_net_cmd *cmd)
+{
+	NET_S2C_delete_apply_data* msg = (NET_S2C_delete_apply_data*)cmd;
+	CC_ASSERT(msg);
+
+	delete_other_role_apply_by_id(msg->dwRoleID);
+
+	return 0;
+}
+
+bool TeamMgr::get_is_have_apply_role()
+{
+	BOOST_FOREACH(boost::shared_ptr<RespItem> const& one, moRespQueue.getQueue())
+	{
+		if(one->getType() <= RespItem::EApplyFormTeammate)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void TeamMgr::send_send_invite_team()
+{
+	NET_SIC_invite_join_team cmd;
+	cmd.dwDestRoleID = m_apply_to_role_id;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+
+	DWORD time = ServerTime::getInstance()->cal_current_server_dword_time();
+	m_pInviteMap.insert(std::make_pair(m_apply_to_role_id,time));
+}
+
+void TeamMgr::send_send_invite_team_with_crc()
+{
+	NET_SIC_invite_join_team cmd;
+	cmd.dwDestRoleID = m_temp_invite_to_role_id;
+	cmd.dwRoleNameCrc = m_temp_invite_ro_role_name_crc;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+}
+
+void TeamMgr::send_apply_team()
+{
+	NET_SIC_apply_join_team cmd;
+	cmd.dwApplyeeID = m_temp_apply_player_id;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+}
+
+void TeamMgr::deal_with_team_apply(unsigned int leader_id, unsigned int menber_id, int is_agree)
+{
+	m_temp_agree_leader_id = leader_id;
+	m_temp_agree_member_id = menber_id;
+
+	if(is_agree == 0)
+	{
+		NET_SIC_invite_reply cmd;
+		cmd.dwLeaderID = leader_id;
+		cmd.dwTeamMenRoleID = menber_id;
+		cmd.bAgree = is_agree;
+		TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+	}
+	else
+	{
+		if(TeamMgr::getInstance()->is_player_in_match())
+		{
+			MessageBoxUi* ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, STRING_TABLE["sure_apply_team_cue"], TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+			World::getInstance()->getScene()->addChild(ui, WZ_MESSAGEBOX);
+			ui->signalOkBtnPressed.connect(this,&TeamMgr::send_deal_with_team_apply);
+		}
+		else
+		{	
+			send_deal_with_team_apply();
+		}
+	}
+}
+
+void TeamMgr::send_deal_with_team_apply()
+{
+	NET_SIC_invite_reply cmd;
+	cmd.dwLeaderID = m_temp_agree_leader_id;
+	cmd.dwTeamMenRoleID = m_temp_agree_member_id;
+	cmd.bAgree = 1;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+}
+
+bool TeamMgr::open_quick_team(e_quick_team_open_type type)
+{
+	if(is_inteam())
+	{
+		UsefulFunction::show_string_cur("you_are_already_in_team");
+		return false;
+	}
+
+	if(type < e_open_none || type >= e_open_num)
+	{
+		UsefulFunction::show_string_cur("select_type_error");
+		return false;
+	}
+
+	OPEN_UI(QUICK_TEAM_UI);
+
+	QuickTeamUiLayer* layer = GET_UI(QuickTeamUi, QUICK_TEAM_UI)->getUiLayer();
+	if(IS_VALID_PTR(layer))
+	{
+		layer->init_select(type);
+	}
+
+	return true;
+}
+
+void TeamMgr::delete_role_from_apply_list(DWORD role_id)
+{
+	std::map<DWORD,DWORD>::iterator iter1 = m_apply_team_map.find(role_id);
+	if (iter1 != m_apply_team_map.end())
+	{
+		m_apply_team_map.erase(iter1);
+	}
+}
+
+void TeamMgr::clear_quick_team_info()
+{
+	m_player_match_type = e_target_null;
+	m_player_match_index = 0;
+	m_apply_to_role_id = INVALID;
+	m_team_target_info.reset();
+
+	m_apply_team_map.clear();
+}

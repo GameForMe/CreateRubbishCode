@@ -1,0 +1,223 @@
+#include "UiTools.h"
+#include "ToolTip.h"
+#include "CfgReader.h"
+#include "UiManager.h"
+#include "StringMgr.h"
+#include "TradingUI.h"
+#include "ListControl.h"
+#include "CommonClient.h"
+#include "NumericalIniMgr.h"
+#include "TradingSetPlane.h"
+#include "TradingEquipItemTipUI.h"
+#include "f_string_util.h"
+#include "f_string_table.h"
+
+TradingSetPlane::TradingSetPlane()
+	:m_pOnterNode(NULL)
+	,m_pNumLabel(NULL)
+	,mpParentNode(NULL)
+	,m_pClickBtn(NULL)
+	,m_RecomNum(0)
+	,m_nKeyState(0)
+	,m_n64ItemId(0)
+	,m_nMinTotalPrice(0)
+	,m_nMaxNum(0)
+	,m_bShowMaxImage(false)
+	,m_pUpClickBtn(NULL)
+	,m_pNewNumLabel(NULL)
+	,m_pTotalNumLabel(NULL)
+	,m_unItemTypeId(0)
+{
+
+}
+
+TradingSetPlane::~TradingSetPlane()
+{
+
+}
+
+cocos2d::extension::SEL_CCControlHandler TradingSetPlane::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TradingSetPlane,onClickBtnPressed);
+	return NULL;
+}
+
+bool TradingSetPlane::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mNumLabel",CCLabelTTF*,m_pNumLabel);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"mClickBtn",CCControlButton*,m_pClickBtn);
+
+	return false;
+}
+
+void TradingSetPlane::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_pNewNumLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(m_pNumLabel);
+	CC_ASSERT(NULL != m_pNewNumLabel);
+}
+
+void TradingSetPlane::setZoomOnTouchDown(bool value)
+{
+	if(NULL != m_pClickBtn)
+		m_pClickBtn->setZoomOnTouchDown(value);
+}
+
+void TradingSetPlane::setClickEnabled(bool value)
+{
+	if(NULL != m_pClickBtn)
+		m_pClickBtn->setEnabled(value);
+}
+
+void TradingSetPlane::setUpClickBtn(CCControlButton* ClickBtn)
+{
+	m_pUpClickBtn = ClickBtn;
+}
+
+void TradingSetPlane::onClickBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	TradingEquipItemTipUILayer * uitip = getUiNodeByTag<TradingEquipItemTipUILayer>(WCT_TradingTipUI);
+	if(NULL == uitip)
+		return ;
+
+	if(ETT_BtnTypePriceDown == uitip->GetBtnType())
+		return ;
+
+	NumKeypad::getInstance()->close();
+	NumKeypad::getInstance()->open();
+	NumKeypad::getInstance()->setPositionByContent(mpParentNode);
+	NumKeypad::getInstance()->attachToDelegate(this);
+	NumKeypad::getInstance()->setMaxNum(m_nMaxNum);
+	NumKeypad::getInstance()->setRecomNum(m_RecomNum);
+	NumKeypad::getInstance()->setNumKeypadState((NumKeypad::NumKeypadState)m_nKeyState);
+	if(m_bShowMaxImage)
+		NumKeypad::getInstance()->setButtonImage("numkeypad_okbtnn","numkeypad_okbtnh","numkeypad_okbtnn");
+	else
+		NumKeypad::getInstance()->setButtonImage("numkeypad_tuijianbtnn","numkeypad_tuijianbtnh","numkeypad_tuijianbtnn");	
+}
+
+int TradingSetPlane::onAttach()
+{
+	return 0;
+}
+
+void TradingSetPlane::setUpBtnEnabled(bool value)
+{
+	if(NULL == m_pUpClickBtn)
+		return;
+
+	m_pUpClickBtn->setEnabled(value);
+}
+void TradingSetPlane::setItemTypeID(unsigned int ptypeId)
+{
+	m_unItemTypeId = ptypeId;
+}
+void TradingSetPlane::onNumChange( int num)
+{	
+	if(NULL == m_pOnterNode)
+		return ;
+
+	std::stringstream oss;
+	oss << num;
+
+	setValue(oss.str());
+
+// 	int totalNum = getValue() * m_pOnterNode->getValue();
+// 	if(m_nMinTotalPrice > totalNum)
+// 	{
+// 		ToolTip::getInstance()->push(GET_STR(9272));
+// 		return;
+// 	}
+// 	int numOfItem = m_pOnterNode->getValue();
+// 	CC_ASSERT(numOfItem != 0);
+	int t_OnePrice = getValue();
+	const ItemTypeData & pdate = PackageManager::getInstance()->getItemTypeData(m_unItemTypeId);
+	if (t_OnePrice < pdate.bottomPrice  || t_OnePrice > pdate.maxPrice )// ÅÐ¶ÏÊÇ·ñ¹óÖØ ZhangYajie TODO;
+	{
+		string strkey;
+		if (pdate.bottomPrice > t_OnePrice)
+		{
+			strkey = STRING_TABLE["Trade_Item_Cheap"];
+			safe_sprintf(strkey,strkey.c_str(),pdate.bottomPrice);
+		}
+		else if (pdate.maxPrice < t_OnePrice)
+		{
+			strkey = STRING_TABLE["Trade_Item_Expensive"];
+			safe_sprintf(strkey,strkey.c_str(),pdate.maxPrice);
+		}
+		ToolTip::getInstance()->push(strkey);
+
+		return ;
+	}
+
+	TradingEquipItemTipUILayer * uitip = getUiNodeByTag<TradingEquipItemTipUILayer>(WCT_TradingTipUI);
+	if(NULL == uitip || NULL == uitip->getPayDutyInfoNode() || NULL == m_pOnterNode)
+		return ;
+
+	int money = NumericalIniMgr::getInstance()->Get_trading_price_tax(atoi(oss.str().c_str()) * m_pOnterNode->getValue());
+	uitip->setCommonTitleText(uitip->getPayDutyInfoNode(),TradingEquipItemTipUILayer::ETT_payDutyPrice,money);
+}
+
+void TradingSetPlane::setMaxNumChangeFunCall(float dt)
+{
+
+}
+
+void TradingSetPlane::onFinished( int num, int srcNum )
+{
+
+}
+
+void TradingSetPlane::onCancel( int num )
+{
+
+}
+
+void TradingSetPlane::setParentNode(CCNode * node)
+{
+	CC_ASSERT(NULL != node);
+	mpParentNode = node;
+}
+
+void TradingSetPlane::setOtherData(TradingSetPlane *onther, LabelFT* totalLabel)
+{
+	CC_ASSERT(NULL != onther);
+	CC_ASSERT(NULL != totalLabel);
+	m_pOnterNode = onther;
+
+	m_pTotalNumLabel = 	totalLabel;
+}
+
+void TradingSetPlane::setValue(std::string value)
+{
+	m_pNewNumLabel->setString(value);
+
+	int totalNum = getValue() * m_pOnterNode->getValue();
+	std::stringstream oss;
+	oss << totalNum;
+	m_pTotalNumLabel->setString(oss.str());
+}
+
+int TradingSetPlane::getValue()
+{
+	return atoi(m_pNewNumLabel->getString());
+}
+
+void TradingSetPlane::SetItemData(INT64 itemId)
+{
+	m_n64ItemId = itemId;
+}
+
+TradingSetPlane* TradingSetPlane::createItem( const char* szFile,CCObject*pOwner,UiInterface* holder )
+{
+	CCNodeLoaderLibrary* lib  = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string strFullPath  = CFGReader::instance()->get_ui_ccbi_filepath(szFile);
+	CCNode* node = reader->readNodeGraphFromFile(strFullPath.c_str(),pOwner);
+	TradingSetPlane* item = dynamic_cast<TradingSetPlane*>(node);
+
+	if (holder)
+		holder->mergeSheet(reader->getLoadedSpriteSheet());
+
+	return item;
+}

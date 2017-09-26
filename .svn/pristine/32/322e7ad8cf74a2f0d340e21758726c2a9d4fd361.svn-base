@@ -1,0 +1,497 @@
+#include "LineSelectUi.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "BaseDefine.h"
+#include "CommonClient.h"
+#include "CfgReader.h"
+#include "CoverButton.h"
+#include "UiManager.h"
+#include "UiInterface.h"
+#include "GridAlignNode.h"
+#include "MapManager.h"
+#include "StringMgr.h"
+#include "ToolTip.h"
+#include "InstanceProto.h"
+#include "TCPClient.h"
+#include "LocalPlayer.h"
+
+LineItemUi* LineItemUi::createFormCCBI( const char* szFile,CCObject* pOwner/*=NULL*/,UiInterface* holder/*=NULL*/ )
+{
+	CCNodeLoaderLibrary* lib = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	//lib->registerCCNodeLoader("LineItemUi",LineItemUiLoader::loader());
+
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+
+	std::string uiFile =CFGReader::instance()->get_ui_ccbi_filepath(szFile);
+	CCNode* node = reader->readNodeGraphFromFile(uiFile.c_str(),pOwner);
+	CC_ASSERT(node);
+	LineItemUi* LineUi = dynamic_cast<LineItemUi*>(node);
+	holder->mergeSheet(reader->getLoadedSpriteSheet());
+	return LineUi;
+}
+
+LineItemUi::LineItemUi()
+	:m_pLineId(0)
+	,m_pRoleNum(0)
+	,m_label_replaced(NULL)
+	,m_pLineLabel(NULL)
+{
+
+}
+
+LineItemUi::~LineItemUi()
+{
+
+}
+
+cocos2d::extension::SEL_CCControlHandler LineItemUi::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLineBtnPressed", LineItemUi::onLineBtnPressed);
+	return NULL;
+}
+
+
+bool LineItemUi::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"lineBtn",CCControlButton*,m_pLineBtn);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"stateSp",CCSprite*,m_pStateSp);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"lineLabel",CCLabelTTF*,m_pLineLabel);
+	return true;
+}
+
+void LineItemUi::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_label_replaced = Helper::replaceLabelTTFWithLabelFTAndRemove(m_pLineLabel);
+	lineStr = GET_STR(9039);
+	setAllChildernButtonPriority(this, 10);
+}
+
+void LineItemUi::onEnter()
+{
+	CCSprite::onEnter();
+}
+
+void LineItemUi::onExit()
+{
+	CCSprite::onExit();
+
+}
+
+void LineItemUi::onLineBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isDead())
+	{
+		ToolTip::getInstance()->push(GET_STR(9044));
+		return;
+	}
+	if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(9045));
+		return;
+	}
+	if (ploc->isInRoleStateAny(RA_Stall))
+	{
+		ToolTip::getInstance()->push(GET_STR(9046));
+		return;
+	}
+	if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(9047));
+		return;
+	}
+	UINT16 curLine = MapManager::getInstance()->getCurLine();
+	if (curLine == 0)
+	{
+		ToolTip::getInstance()->push(GET_STR(9043));
+		return;
+	}
+	if (m_pLineId == curLine)
+	{
+		ToolTip::getInstance()->push(GET_STR(9040));
+		return;
+	}
+	UINT16 maxNum = MapManager::getInstance()->getMaxRoleNum();
+	if (m_pRoleNum >= maxNum)
+	{
+		ToolTip::getInstance()->push(GET_STR(9041));
+		return;
+	}
+	NET_SIC_select_line send;
+	send.mapId = MapManager::getInstance()->getCurMapId();
+	send.lineId = m_pLineId;
+	TCP_CLIENT->send_net_cmd(&send,NP_NORMAL,false);
+	UiMgr::getInstance()->closeUi(WCT_LineSelectUi,true);
+}
+
+void LineItemUi::setData( int index,int num,int maxRoleNum,int goodState,int busyState )
+{
+	m_pLineId = index;
+	m_pRoleNum = num;
+	std::string str;
+	safe_sprintf(str,lineStr.c_str(),index);
+	m_label_replaced->setString(str.c_str());
+	int goodNum = maxRoleNum * goodState / 100;
+	int busyNum = maxRoleNum * busyState / 100;
+	if (num < goodNum)
+	{
+		CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("xianlu_kongxian");
+		if (frame)
+		{
+			m_pStateSp->setDisplayFrame(frame);
+		}
+	}
+	else if (num < busyNum)
+	{
+		CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("xianlu_fanmang");
+		if (frame)
+		{
+			m_pStateSp->setDisplayFrame(frame);
+		}
+	}
+	else
+	{
+		CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("xianlu_baoman");
+		if (frame)
+		{
+			m_pStateSp->setDisplayFrame(frame);
+		}
+	}
+}
+
+bool LineItemUi::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (isTouchOnNodeContent(m_pLineBtn,pTouch))
+	{
+		m_pLineBtn->setHighlighted(true);
+	}
+	return true;
+}
+
+void LineItemUi::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (isTouchOnNodeContent(m_pLineBtn,pTouch))
+	{
+		m_pLineBtn->setHighlighted(false);
+		onLineBtnPressed(NULL,NULL);
+	}
+	else
+	{
+		m_pLineBtn->setHighlighted(false);
+	}
+}
+
+
+
+/////////////////////////////////////////////
+CCNode * LineSelectUi::openUi()
+{
+	CCNode *uiNode = LineSelectUiLayer::createFromCCBI("xianlu",NULL,this);;
+	CC_ASSERT(uiNode != NULL);
+	return uiNode;
+}
+
+LineSelectUiLayer * LineSelectUi::getUiLayer()
+{
+	return getUiNodeByTag<LineSelectUiLayer>(WCT_LineSelectUi);
+}
+
+
+LineSelectUiLayer::LineSelectUiLayer()
+	:m_line_label_replaced(NULL)
+{
+	m_pContainer	= NULL;
+	m_pStateSp		= NULL;
+	m_pLineLabel	= NULL;
+}
+
+LineSelectUiLayer::~LineSelectUiLayer()
+{
+
+}
+
+LineSelectUiLayer* LineSelectUiLayer::createFromCCBI( const char* szFile,CCObject* pOwner/*=NULL*/,UiInterface* holder/*=NULL*/ )
+{
+	CCNodeLoaderLibrary* lib = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string uiFile =CFGReader::instance()->get_ui_ccbi_filepath(szFile);
+	CCNode * node = reader->readNodeGraphFromFile(uiFile.c_str(),pOwner);
+	CC_ASSERT(node);
+	LineSelectUiLayer* layer  = dynamic_cast<LineSelectUiLayer*>(node);
+	holder->mergeSheet(reader->getLoadedSpriteSheet());
+
+	return layer;
+}
+
+cocos2d::extension::SEL_CCControlHandler LineSelectUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(LineSelectUiLayer,onCloseBtnPressed);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(LineSelectUiLayer,onLineBtnPressed);
+	return NULL;
+}
+
+bool LineSelectUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"container",CCNode*,m_pContainer);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"stateSp",CCSprite*,m_pStateSp);
+	CCB_MEMBERVARIABLEASSIGNER_GLUE_WEAK(this,"lineLabel",CCLabelTTF*,m_pLineLabel);
+	return true;
+}
+
+void LineSelectUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_line_label_replaced = Helper::replaceLabelTTFWithLabelFTAndRemove(m_pLineLabel);
+	lineStr = GET_STR(9039);
+	m_pSelectId = NULL;
+	CCSize size = m_pContainer->getContentSize();
+	m_pScrollView = CCScrollView::create(size);
+	m_pContainer->addChild(m_pScrollView);
+
+
+ 	m_pContainerLayer = CCNode::create();
+
+	m_pScrollView->setContainer(m_pContainerLayer);
+	m_pScrollView->setTouchEnabled(true);
+	m_pScrollView->setBounceable(true);
+	m_pScrollView->setContentSize(m_pScrollView->getViewSize());
+	m_pScrollView->setDirection(kCCScrollViewDirectionVertical);
+	m_pScrollView->setContentOffset(ccp(0,0));
+
+	m_pGridAlignNode = GridAlignNode::create_and_setup(GridAlignNode::ES_Vertical,5,size,size);
+	m_pGridAlignNode->setAnchorPoint(ccp(0.0,0.0));
+	m_pGridAlignNode->setPosition(ccp(0,m_pContainer->getContentSize().height));
+	
+	m_pContainerLayer->addChild(m_pGridAlignNode);
+	updateUi();
+	MapManager::getInstance()->sendSynchronizeLine();
+}
+
+void LineSelectUiLayer::onCloseBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	UiMgr::getInstance()->closeUi(WCT_LineSelectUi,true);
+}
+
+void LineSelectUiLayer::onLineBtnPressed( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isDead())
+	{
+		ToolTip::getInstance()->push(GET_STR(9044));
+		return;
+	}
+	if (ploc->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(9045));
+		return;
+	}
+	if (ploc->isInRoleStateAny(RA_Stall))
+	{
+		ToolTip::getInstance()->push(GET_STR(9046));
+		return;
+	}
+	if (ploc->isInRoleStateAny(RA_Exchange))
+	{
+		ToolTip::getInstance()->push(GET_STR(9047));
+		return;
+	}
+	UINT16 curLine = MapManager::getInstance()->getCurLine();
+	if (curLine == 0)
+	{
+		ToolTip::getInstance()->push(GET_STR(9043));
+		return;
+	}
+	if (m_pGoodLine == curLine)
+	{
+		ToolTip::getInstance()->push(GET_STR(9040));
+		return;
+	}
+	UINT16 maxNum = MapManager::getInstance()->getMaxRoleNum();
+	if (m_pRoleNum >= maxNum)
+	{
+		ToolTip::getInstance()->push(GET_STR(9041));
+		return;
+	}
+	NET_SIC_select_line send;
+	send.mapId = MapManager::getInstance()->getCurMapId();
+	send.lineId = m_pGoodLine;
+	TCP_CLIENT->send_net_cmd(&send,NP_NORMAL,false);
+	UiMgr::getInstance()->closeUi(WCT_LineSelectUi,true);
+}
+
+void LineSelectUiLayer::onEnter()
+{
+	NormalLayer::onEnter();
+}
+
+void LineSelectUiLayer::onExit()
+{
+	NormalLayer::onExit();
+}
+
+void LineSelectUiLayer::updateUi()
+{
+	LineSelectUi* holder = UiMgr::getInstance()->getUi<LineSelectUi>(WCT_LineSelectUi);
+	if (holder == NULL)
+		return;
+	LineStateMap lineStateMap = MapManager::getInstance()->getLineStateMap();
+	int stateSize = lineStateMap.size();
+	int itemSize = m_pLineItemMap.size();
+	if (stateSize == 0 && itemSize == 0)
+		return;
+	UINT16 maxRoleNum = MapManager::getInstance()->getMaxRoleNum();
+	UINT16 goodState = MapManager::getInstance()->getGoodState();
+	UINT16 busyState = MapManager::getInstance()->getBusyState();
+	UINT16 minLine = 0;
+	UINT16 minNum = 0;
+	if (stateSize >= itemSize)
+	{
+		LineStateMap::iterator iter = lineStateMap.begin();
+		minLine = iter->first;
+		minNum = iter->second;
+		for(;iter != lineStateMap.end();++iter)
+		{
+			if (iter->second < minNum)
+			{
+				minLine = iter->first;
+				minNum = iter->second;
+			}
+			LineItemMap::iterator newIter = m_pLineItemMap.find(iter->first);
+			if (newIter != m_pLineItemMap.end())
+			{
+				LineItemUi* temp = newIter->second;
+				if (temp == NULL)
+				{
+					temp = LineItemUi::createFormCCBI("xianluitem",NULL,holder);
+					m_pGridAlignNode->add_item(temp);
+					temp->setData(iter->first,iter->second,maxRoleNum,goodState,busyState);
+				}
+				else
+				{
+					temp->setData(iter->first,iter->second,maxRoleNum,goodState,busyState);
+				}
+			}
+			else
+			{
+				LineItemUi* temp = LineItemUi::createFormCCBI("xianluitem",NULL,holder);
+				m_pGridAlignNode->add_item(temp);
+				m_pLineItemMap.insert(std::make_pair(iter->first,temp));
+				temp->setData(iter->first,iter->second,maxRoleNum,goodState,busyState);
+			}
+		}
+	}
+	else
+	{
+		for(LineItemMap::iterator newIter = m_pLineItemMap.begin();newIter!=m_pLineItemMap.end();)
+		{
+			minLine = lineStateMap.begin()->first;
+			minNum = lineStateMap.begin()->second;
+			LineStateMap::iterator iter = lineStateMap.find(newIter->first);
+			if (iter != lineStateMap.end())
+			{
+				if (iter->second < minNum)
+				{
+					minLine = iter->first;
+					minNum = iter->second;
+				}
+				LineItemUi* temp = newIter->second;
+				if (temp == NULL)
+				{
+					temp = LineItemUi::createFormCCBI("xianluitem",NULL,holder);
+					m_pGridAlignNode->add_item(temp);
+					temp->setData(iter->first,iter->second,maxRoleNum,goodState,busyState);
+				}
+				else
+				{
+					temp->setData(iter->first,iter->second,maxRoleNum,goodState,busyState);
+				}
+				++newIter;
+			}
+			else
+			{
+				LineItemUi* temp = newIter->second;
+				if (temp)
+				{
+					m_pGridAlignNode->remove_item(temp);
+				}
+				m_pLineItemMap.erase(newIter++);
+			}
+		}
+	}
+	int count = stateSize / 5 + 1;
+	if (count > 4)
+	{
+		m_pScrollView->setContentSize(m_pGridAlignNode->getContentSize());
+		m_pScrollView->setContentOffset(ccp(0,m_pScrollView->getViewSize().height - m_pScrollView->getContentSize().height));
+		m_pGridAlignNode->setPositionY(m_pGridAlignNode->getContentSize().height);
+	}
+	std::string str;
+	safe_sprintf(str,lineStr.c_str(),minLine);
+	m_line_label_replaced->setString(str.c_str());
+	m_pGoodLine = minLine;
+	m_pRoleNum = minNum;
+	if (minNum < maxRoleNum * goodState / 100)
+	{
+		CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("xianlu_kongxian");
+		if (frame)
+		{
+			m_pStateSp->setDisplayFrame(frame);
+		}
+	}
+	else if (minNum < maxRoleNum * busyState / 100)
+	{
+		CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("xianlu_fanmang");
+		if (frame)
+		{
+			m_pStateSp->setDisplayFrame(frame);
+		}
+	}
+	else
+	{
+		CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("xianlu_baoman");
+		if (frame)
+		{
+			m_pStateSp->setDisplayFrame(frame);
+		}
+	}
+}
+
+bool LineSelectUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	m_pSelectId = NULL;
+	if (isTouchOnNodeContent(m_pContainer,pTouch))
+	{
+		for (LineItemMap::iterator iter = m_pLineItemMap.begin();iter!=m_pLineItemMap.end();++iter)
+		{
+			LineItemUi* temp = iter->second;
+			if (isTouchOnNodeContent(temp,pTouch))
+			{
+				if (temp)
+				{
+					temp->ccTouchBegan(pTouch,pEvent);
+					m_pSelectId = iter->first;
+					break;
+				}	
+			}
+		}
+	}
+	return true;
+}
+
+void LineSelectUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	LineItemMap::iterator iter = m_pLineItemMap.find(m_pSelectId);
+	if (iter != m_pLineItemMap.end())
+	{
+		LineItemUi* temp = iter->second;
+		if (temp)
+		{
+			temp->ccTouchEnded(pTouch,pEvent);
+		}
+	}
+}

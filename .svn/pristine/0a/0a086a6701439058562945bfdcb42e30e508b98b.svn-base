@@ -1,0 +1,897 @@
+#include "TeamUi.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "BaseDefine.h"
+#include "CommonClient.h"
+#include "CfgReader.h"
+#include "CoverButton.h"
+#include "UiManager.h"
+#include "TeamMgr.h"
+#include "Helper.h"
+#include "StringMgr.h"
+#include "TeamProto.h"
+#include "UIUtil.h"
+#include "TeammateHeadView.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "InviteListView.h"
+#include "TeamSettingPanel.h"
+#include "GameEventDefine.h"
+#include "TeamProto.h"
+#include "TeammateMenu.h"
+#include "CommonView.h"
+#include "SocialMgr.h"
+#include "ChatMgr.h"
+#include "RemoteRoleStateMgr.h"
+#include "TCPClient.h"
+#include "PackageManager.h"
+#include "ToolTip.h"
+#include "NameMgr2.h"
+#include "ChatUi.h"
+#include "RadioButton.h"
+#include "LabelEx.h"
+#include "BroadCastUi.h"
+#include "ListControl.h"
+#include "TeamApplyItem.h"
+#include "WaitRespQueue.h"
+#include "UsefulFunction.h"
+
+USING_NS_CC;
+USING_NS_CC_EXT;
+
+#pragma region TeamUi
+CCNode * TeamUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["TeamUiPanel"] = UiLayerLoader<TeamUiPanel>::loader();
+	nodeLoaders["CoverButton"] = UiNodeLoader <CoverButton>::loader();
+	nodeLoaders["CheckButton"] = CheckButtonLoader::loader();
+	nodeLoaders["RadioMutex"] = RadioMutexLoader::loader();
+	nodeLoaders["RadioButton"] = RadioButtonLoader::loader();
+	nodeLoaders["LabelEx"] = LabelExLoader::loader();
+	nodeLoaders["ListControl"] = ListControlLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("duiwu", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+TeamUiPanel * TeamUi::getUiLayer()
+{
+	return getUiNodeByTag<TeamUiPanel>(WCT_TeamUi);
+}
+#pragma endregion TeamUi
+
+
+#pragma region TeamUiPanel
+TeamUiPanel::TeamUiPanel()
+	:mpNum(NULL)
+	,mpTarget(NULL)
+	,mpLv(NULL)
+	,mpClass(NULL)
+	,mpShoes(NULL)
+	,mpInviteBtn(NULL)
+	,mpForbidBtn(NULL)
+	,mpFlyBtn(NULL)
+	,mpForbidText(NULL)
+	,mpCreateText(NULL)
+	//,mpSettingBtn(NULL)
+	,mpMenu(NULL)
+	,mdwSelTeammateIdD(INVALID)
+	,mbCreateLock(false)
+	,mbClosed(false)
+	,m_mutex_button(NULL)
+	,m_apply_list_button(NULL)
+	,m_dismiss_button(NULL)
+	,m_leave_button(NULL)
+	,m_match_button(NULL)
+	,m_cancel_match_button(NULL)
+	,m_target_text(NULL)
+	,m_list(NULL)
+	,m_red_point(NULL)
+	,m_no_apply_cue(NULL)
+	,m_list_node(NULL)
+	,m_team_node(NULL)
+{
+	//memset(mpHeadRoot,0,sizeof(CCNode*)*5);
+	mpHeadRoot.assign(MAX_TEAM_NUM,NULL);
+	mpHeads.assign(MAX_TEAM_NUM,NULL);
+}
+
+TeamUiPanel::~TeamUiPanel()
+{
+
+}
+
+cocos2d::extension::SEL_CCControlHandler TeamUiPanel::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onSetting);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onClickPlayer);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onInvite);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onForbid);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onTrans);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onCreate);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onClose);
+	//menu
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onAddFriend);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onAssignLeader);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onProfile);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onKick);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onPrivateTalk);
+
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onLeave);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onDismiss);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onMatch);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onCancelMatch);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onBroadcast);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onTeamInfo);
+	SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TeamUiPanel,onRequestList);
+
+	return NULL;
+}
+
+bool TeamUiPanel::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,mpNum);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,mpTarget);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,mpLv);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,mpClass);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelTTF*,mpShoes);
+
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CoverButton*,mpInviteBtn);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CoverButton*,mpForbidBtn);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CoverButton*,mpFlyBtn);
+
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,mpHeadRoot[0]);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,mpHeadRoot[1]);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,mpHeadRoot[2]);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,mpHeadRoot[3]);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,mpHeadRoot[4]);
+
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelBMFont*,mpForbidText);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCLabelBMFont*,mpCreateText);
+
+	//SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,mpSettingBtn);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,mpRedFlag);
+
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(RadioMutex*,m_mutex_button);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(RadioButton*,m_apply_list_button);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*,m_dismiss_button);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CoverButton*,m_leave_button);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*,m_match_button);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCControlButton*,m_cancel_match_button);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(LabelEx*,m_target_text);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(ListControl*,m_list);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCSprite*,m_red_point);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,m_no_apply_cue);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,m_list_node);
+	SIMPLE_MEMBERVARIABLEASSIGNER_GLUE_WEEK(CCNode*,m_team_node);
+
+	return false;
+}
+
+void TeamUiPanel::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_mutex_button->select(0);
+	m_target_text->set_text("");
+	m_target_text->set_top_down(true);
+	m_list->set_vertical_mode(true);
+	m_no_apply_cue->setVisible(false);
+	m_list_node->setVisible(false);
+	m_team_node->setVisible(true);
+
+	//初始化队员
+	initTeammateHead();
+
+	//load teammate head
+	//updateTargetString();
+	//refreshFilter();
+
+	refreshTeammate();
+	refreshPanelState();
+	check_red_point();
+	//onEnventTeamStateChange(NULL);
+}
+
+void TeamUiPanel::onSetting( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	TeamMgr* mgr = TeamMgr::getInstance();
+	if(mgr->is_inteam())
+	{
+		if(!mgr->is_team_leader(RoleManager::getInstance()->getLocalPlayer()->getId()))
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["select_target_need_team_leader"]);
+			return;
+		}
+
+		if(mgr->is_matching_state())
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["matching_can_not_select_target"]);
+			return;
+		}
+	}
+
+	OPEN_UI(SELECT_TARGET_UI);
+}
+
+void TeamUiPanel::onClickPlayer( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if (mbClosed)
+		return;
+	doBeforeMenuClose();
+	TeammateHeadView* head = dynamic_cast<TeammateHeadView*>(pSender);
+	CC_ASSERT(head);
+	unsigned int id = head->getID();
+	mdwSelTeammateIdD = id;
+	
+	if (id != INVALID)
+	{
+		LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+		unsigned int dwLpId = lp->getId();
+		if (dwLpId != id)
+		{
+			bool isLeader = TeamMgr::getInstance()->is_team_leader(dwLpId);
+			mpMenu = TeammateMenu::createMenu("groupbtn2",this);
+			mpMenu->set_close_fn(boost::bind(&TeamUiPanel::doBeforeMenuClose,this));
+
+			bool bFriend = SocialMgr::getInstance()->has_friend(id);
+
+			CCPoint ptPos  = head->getPosition();
+			ptPos = convert_point_to_node_space(head->getParent(),ptPos,this->getParent());
+			ptPos.x += head->getContentSize().width*0.5f;
+			ptPos.y +=  head->getContentSize().height*0.5f;
+
+			int win_width = CCDirector::sharedDirector()->getWinSize().width;
+			if(ptPos.x + head->getContentSize().width > win_width)
+			{
+				ptPos.x = win_width - head->getContentSize().width;
+			}
+
+			mpMenu->popByStyle(ptPos,isLeader,bFriend);
+			this->getParent()->addChild(mpMenu,WZ_POPUI);
+		}
+	}
+}
+
+void TeamUiPanel::onInvite( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	InviteListView* view = InviteListView::createFormCCBI("yaoqing",NULL);
+	view->popShow();
+
+	this->getParent()->addChild(view,WZ_POPUI);
+}
+
+void TeamUiPanel::onForbid( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	TeamMgr* mgr = TeamMgr::getInstance();
+	stTeamFilter tmpFilter = mgr->getTeamFilter();
+	tmpFilter.bForbid = !tmpFilter.bForbid;
+	mgr->setTeamFilter(tmpFilter);
+	
+	NET_SIC_change_team_can_join cmd;
+	cmd.canJoin = !tmpFilter.bForbid;
+	TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+
+	refreshPanelState();
+	refreshTeammate();
+}
+
+void TeamUiPanel::onTrans( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	f_item* item =PackageManager::getInstance()->getItem(EICT_Bag,(unsigned int)(Item_shoeId));
+	if (item)
+	{
+		MessageBoxUi *msgUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,
+			GET_STR(9022).c_str(), TEXT_UTF8_QUEDING, TEXT_UTF8_QUXIAO);
+		this->getParent()->addChild(msgUi, WZ_MESSAGEBOX);
+		msgUi->signalOkBtnPressed.connect(this, &TeamUiPanel::onMsgboxOK);
+	}
+	else
+	{
+		ToolTip::getInstance()->push(GET_STR(9023));
+	}
+}
+
+void TeamUiPanel::onCreate( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+// 	TeamMgr* mgr = TeamMgr::getInstance();
+// 	if (mgr->is_inteam())
+// 	{
+// 		mgr->LeaveTeam();
+// 	}
+// 	else
+// 	{
+// 		//创建队伍
+// 		if (!mbCreateLock)
+// 		{
+// 			mgr->sendOwnCreatTeam();
+// 
+// 			mbCreateLock = true;
+// 		}
+// 	}
+}
+
+void TeamUiPanel::onClose( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	close();
+}
+
+void TeamUiPanel::onAddFriend( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if(RoleManager::getInstance()->getLocalPlayer()->isInRoleStateAny(RA_Stall) || RoleManager::getInstance()->getLocalPlayer()->isInRoleStateAny(RA_Exchange))//摆摊交易中禁止操作
+	{
+		ToolTip::getInstance()->push(GET_STR(7209));
+		return;
+	}
+
+	SocialMgr::getInstance()->onAddFriend(mdwSelTeammateIdD);
+	closeMenu();
+}
+
+void TeamUiPanel::onAssignLeader( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	TeamMgr::getInstance()->ChangerTeamLeader(mdwSelTeammateIdD);
+	closeMenu();
+}
+
+void TeamUiPanel::onKick( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	TeamMgr::getInstance()->KickMember(mdwSelTeammateIdD);
+	closeMenu();
+}
+
+void TeamUiPanel::onProfile( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	//RemoteRoleStateMgr::getInstance()->tryToRefreshRemotePlayerInfo(mdwSelTeammateIdD);
+	//队友在线才能查看装备
+	if (TeamMgr::getInstance()->is_teammate_online(mdwSelTeammateIdD))
+	{
+		RemoteRoleStateMgr::getInstance()->RefreshRemoteRoleAllInfo(mdwSelTeammateIdD);
+	}
+	else
+	{
+		ToolTip::getInstance()->push(GET_STR(206));
+	}
+	closeMenu();
+}
+
+TeamUiPanel* TeamUiPanel::createFromCCBI( const char* szFile,CCObject* pOwner/*=NULL*/,UiInterface* holder/*=NULL*/ )
+{
+	CCNodeLoaderLibrary* lib = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string uiFile =CFGReader::instance()->get_ui_ccbi_filepath(szFile);
+	CCNode * node = reader->readNodeGraphFromFile(uiFile.c_str(),pOwner);
+
+	TeamUiPanel* panel  = dynamic_cast<TeamUiPanel*>(node);
+	//std::set<std::string>  list;
+	holder->mergeSheet(reader->getLoadedSpriteSheet());
+
+	return panel;
+}
+
+void TeamUiPanel::onPrivateTalk( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	if (mbClosed)
+		return;
+	//tryToPrivateTalk(mdwSelTeammateIdD);
+	//私聊
+	LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+	if(!ploc)
+		return;
+	if (mdwSelTeammateIdD == ploc->getId())//不与自己私聊
+		return;
+	std::string roleName("");
+	if (NameMgr2::getInstance()->queryName(mdwSelTeammateIdD,roleName))
+	{
+		GET_UI(ChatUi, WCT_ChatUi)->sendMessageTo(mdwSelTeammateIdD, roleName);
+	}
+	closeMenu();
+	close();
+}
+
+void TeamUiPanel::onLeave(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	TeamMgr* mgr = TeamMgr::getInstance();
+	if (mgr->is_inteam())
+	{
+		mgr->LeaveTeam();
+	}
+}
+
+void TeamUiPanel::onDismiss(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	bool is_leader = TeamMgr::getInstance()->is_team_leader(RoleManager::getInstance()->getLocalPlayer()->getId());
+	if(is_leader)
+	{
+		MessageBoxUi* ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, STRING_TABLE["you_sure_dismiss_team"], TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+		World::getInstance()->getScene()->addChild(ui, WZ_MESSAGEBOX);
+		ui->signalOkBtnPressed.connect(this,&TeamUiPanel::on_sure_dismiss_team);
+	}
+	else
+	{
+		UsefulFunction::show_string_cur("only_leader_can_dismiss_team");
+	}
+}
+
+void TeamUiPanel::onMatch(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	TeamMgr* mgr = TeamMgr::getInstance();
+	if(!mgr->is_inteam())
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["select_target_first"]);
+		return;
+	}
+
+	bool is_team_leader = mgr->is_team_leader(RoleManager::getInstance()->getLocalPlayer()->getId());
+	if(!is_team_leader)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["match_need_team_leader"]);
+		return;
+	}
+
+	if(mgr->is_team_full())
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["match_team_full"]);
+		return;
+	}
+
+	if(!mgr->get_team_target_info().is_have_target())
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["select_target_first"]);
+		return;
+	}
+
+	NET_C2S_Team_TeamMatching send;
+	TCP_CLIENT->send_net_cmd(&send, NP_NORMAL, false);
+}
+
+void TeamUiPanel::onCancelMatch(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	TeamMgr* mgr = TeamMgr::getInstance();
+	if(mgr->is_inteam())
+	{
+		bool is_team_leader = mgr->is_team_leader(RoleManager::getInstance()->getLocalPlayer()->getId());
+		if(is_team_leader)
+		{
+			NET_C2S_Team_CancelTeamMatching send;
+			TCP_CLIENT->send_net_cmd(&send, NP_NORMAL, false);
+		}
+		else
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["match_need_team_leader"]);
+		}
+	}
+	else
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["select_target_first"]);
+	}
+}
+
+void TeamUiPanel::onBroadcast(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	if(TeamMgr::getInstance()->is_inteam())
+	{
+		BroadCastUi::getInstace()->open();
+
+		stTeamTargetInfo const& info = TeamMgr::getInstance()->get_team_target_info();
+
+		if(info.is_have_target())
+		{
+			const string str1 = TeamMgr::getInstance()->get_target_name_by_target_type(info.select_type);
+			const string str2 = TeamMgr::getInstance()->get_target_index_name_by_target_type_and_index(info.select_type, info.select_index);
+			if(str2.empty())
+			{
+				string str;
+				safe_sprintf(str, STRING_TABLE["broadcast_text_2"], str1.c_str(), info.level_min, info.level_max);
+				BroadCastUi::getInstace()->setMessage(str.c_str());
+			}
+			else
+			{
+				string str;
+				safe_sprintf(str, STRING_TABLE["broadcast_text_1"], str1.c_str(), str2.c_str(), info.level_min, info.level_max);
+				BroadCastUi::getInstace()->setMessage(str.c_str());
+			}
+		}
+		else
+		{
+			BroadCastUi::getInstace()->setPlaceHolder(STRING_TABLE["broadcast_text_3"]);
+		}
+	}
+	else
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["broadcast_need_in_team"]);
+	}
+}
+
+void TeamUiPanel::onTeamInfo(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	m_team_node->setVisible(true);
+	m_list_node->setVisible(false);
+}
+
+void TeamUiPanel::onRequestList(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	m_team_node->setVisible(false);
+	m_list_node->setVisible(true);
+
+	refresh_list();
+}
+
+void TeamUiPanel::close()
+{
+// 	if(m_close_fn)
+// 	{
+// 		m_close_fn();
+// 	}
+	if (mbClosed)
+		return;
+	mbClosed = true;
+	if (!TeamMgr::getInstance()->is_inteam())
+	{
+		TeamMgr::getInstance()->resetFilter();
+	}
+	doBeforeMenuClose();
+	UiMgr::getInstance()->closeUi(WCT_TeamUi,true);
+}
+
+void TeamUiPanel::refreshFilter()
+{
+		stTeamFilter const& filter = TeamMgr::getInstance()->getTeamFilter();
+// 		//目标
+// 		std::string buff;
+// 		safe_sprintf(buff,GET_STR(9000).c_str(),GET_STR(9003).c_str());
+// 		mpTarget->setString(buff.c_str());
+		//等级
+		std::string buff;
+		if (filter.nLevelLower == 1 && filter.nLevelUpper == 100)
+		{
+			safe_sprintf(buff,GET_STR(9001).c_str(),GET_STR(9003).c_str());
+		}
+		else
+		{
+			std::string buff2;
+			safe_sprintf(buff2,"%d - %d",filter.nLevelLower,filter.nLevelUpper);
+			safe_sprintf(buff,GET_STR(9001).c_str(),buff2.c_str());
+		}
+		//mpLv->setString(buff.c_str());
+		//职业
+		safe_sprintf(buff,GET_STR(9002).c_str(),Helper::getHeroClassByType(filter.nClassType).c_str());
+		//mpClass->setString(buff.c_str());
+
+}
+
+void TeamUiPanel::refreshNum( int nMin,int nMax )
+{
+	std::stringstream ss;
+	ss<<nMin<<"/"<<nMax;
+	//mpNum->setString(ss.str().c_str());
+}
+
+void TeamUiPanel::refreshTeammate()
+{
+	TeamMgr* mgr = TeamMgr::getInstance();
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+	stTeamFilter const& filter = mgr->getTeamFilter();
+	int nMin = mgr->get_teammate_num();
+
+	bool bIsInTeam = mgr->is_inteam();
+	if (bIsInTeam)
+	{
+		mpRedFlag->setVisible(true);
+		refreshNum(nMin+1,MAX_TEAM_NUM);
+
+		TeamMgr::teammates_vector teammates = mgr->get_teammate_list();
+
+		bool bLpIsTeamLeader = mgr->is_team_leader(lp->getId());
+		if (bLpIsTeamLeader)
+		{
+
+			setLpToPos(0);
+
+			size_t headViewIndex  = 1;
+			for (size_t i =0; i <  teammates.size() ; ++i)
+			{
+				tagTeammateData& data = teammates[i];
+				setTeammate(headViewIndex,data);
+				++headViewIndex;
+			}
+
+			for (; headViewIndex <  MAX_TEAM_NUM; ++headViewIndex)
+			{
+				setEmpty(headViewIndex,filter.bForbid);
+			}
+		}
+		else
+		{
+			size_t headViewIndex  = 0;
+			//设置队长
+			setTeammate(headViewIndex++,teammates[0]);
+			//设置自己
+			setLpToPos(headViewIndex++);
+			for (size_t i =1; i <  teammates.size() ; ++i)
+			{
+				tagTeammateData& data = teammates[i];
+				setTeammate(headViewIndex,data);
+				++headViewIndex;
+			}
+
+			for (; headViewIndex <  MAX_TEAM_NUM; ++headViewIndex)
+			{
+				setEmpty(headViewIndex,filter.bForbid);
+			}
+		}
+	}
+	else
+	{
+		mpRedFlag->setVisible(false);
+		//把自己加在第一个位置
+		setLpToPos(0);
+		//余下的设置空或者锁定
+		for (size_t i = 1; i < MAX_TEAM_NUM ; ++i)
+		{
+			setEmpty(i,filter.bForbid);
+		}
+
+		refreshNum(0,MAX_TEAM_NUM);
+	}
+}
+
+void TeamUiPanel::initTeammateHead()
+{
+	TeamUi* holder = UiMgr::getInstance()->getUi<TeamUi>(WCT_TeamUi);
+	for (int i = 0; i < MAX_TEAM_NUM ; ++i)
+	{
+		TeammateHeadView* head = TeammateHeadView::createFormCCBI("DuiWuUIitem",NULL,holder);
+		CC_ASSERT(head);
+		mpHeads[i] = head;
+		UIUtil::childNodeAlign(mpHeadRoot[i] ,head,eha_center,eva_center,CCPointZero);
+		head->setEmpty(TeamMgr::getInstance()->is_matching_state());
+		head->addTargetWithActionForControlEvents(this, cccontrol_selector(TeamUiPanel::onClickPlayer), CCControlEventTouchUpInside);
+	}
+
+}
+
+void TeamUiPanel::onEnventTeamStateChange( TeammateStateRefresh* pEvent )
+{
+	refreshTeammate();
+	refreshPanelState();
+}
+
+void TeamUiPanel::onEnter()
+{
+	NormalLayer::onEnter();
+
+	REGISTER_EVENT(TeammateStateRefresh,TeamUiPanel,onEnventTeamStateChange);
+	REGISTER_EVENT(ChangeFilterSettingTargetType,TeamUiPanel,onEventChangeFilterSettingTargetType);
+	REGISTER_EVENT(CreateTeamSucc,TeamUiPanel,onEventCreateTeamSucc);
+	REGISTER_EVENT(team_target_change,TeamUiPanel,on_event_team_target_change);
+	REGISTER_EVENT(match_state_change,TeamUiPanel,on_event_match_state_change);
+	REGISTER_EVENT(refresh_team_list,TeamUiPanel,on_event_refresh_team_list);
+}
+
+void TeamUiPanel::onExit()
+{
+	NormalLayer::onExit();
+
+	UNREGISTER_EVENT(TeammateStateRefresh,TeamUiPanel,onEnventTeamStateChange);
+	UNREGISTER_EVENT(ChangeFilterSettingTargetType,TeamUiPanel,onEventChangeFilterSettingTargetType);
+	UNREGISTER_EVENT(CreateTeamSucc,TeamUiPanel,onEventCreateTeamSucc);
+	UNREGISTER_EVENT(team_target_change,TeamUiPanel,on_event_team_target_change);
+	UNREGISTER_EVENT(match_state_change,TeamUiPanel,on_event_match_state_change);
+	UNREGISTER_EVENT(refresh_team_list,TeamUiPanel,on_event_refresh_team_list);
+}
+
+void TeamUiPanel::setLpToPos(size_t pos)
+{
+	CC_ASSERT(pos < mpHeads.size());
+	LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+
+	bool bMale = lp->getAttribute(RA_SEX)==1;
+	mpHeads[pos]->setData(lp->getId(),
+		convertName(lp->getName()).c_str(),
+		lp->getAttribute(RA_ROLETYPE),
+		lp->getLevel(),
+		lp->getAttribute(RA_BATTLE_POINT),
+		bMale);
+
+	mpHeads[pos]->refreshOnLineState(true);
+
+	{
+		for(int i = 0; i < PDA_End; ++i)
+		{
+			mpHeads[pos]->update_display(ePlayerDisplayAttr(i), RoleManager::getInstance()->getLocalPlayer()->getDisplayAttr(ePlayerDisplayAttr(i)));
+		}
+		mpHeads[pos]->load_animate();
+	}
+}
+
+void TeamUiPanel::setTeammate( size_t nViewIndex,tagTeammateData const& data )
+{
+	CC_ASSERT(nViewIndex < mpHeads.size());
+	TeammateHeadView* head =mpHeads[nViewIndex];
+
+	head->setData(data.uRoleID,data.strName.c_str(),data.eClassEx,data.nLevel,data.nRating,data.bySex ==1);
+	head->refreshOnLineState(data.b_online);
+
+	{
+		for(int i = 0; i < PDA_End; ++i)
+		{
+			head->update_display(ePlayerDisplayAttr(data.sDisplayInfo[i].byDisplayPos), data.sDisplayInfo[i].dw_data_id);
+		}
+		head->load_animate();
+	}
+}
+
+void TeamUiPanel::setEmpty( size_t nIndex ,bool bForbid)
+{
+	CC_ASSERT(nIndex < mpHeads.size());
+	TeammateHeadView* head =mpHeads[nIndex];
+	head->setEmpty(TeamMgr::getInstance()->is_matching_state());
+}
+
+void TeamUiPanel::onEventChangeFilterSettingTargetType( ChangeFilterSettingTargetType* pEvent )
+{
+	updateTargetString();
+	refreshFilter();
+
+	refreshPanelState();
+}
+
+void TeamUiPanel::updateTargetString( /*std::string const& target*/ )
+{
+	stTeamFilter const& filter =  TeamMgr::getInstance()->getTeamFilter();
+	std::string buff;
+	std::string target =filter.nTarget ==0?GET_STR(9003):GET_STR(9006 + filter.nTarget);
+	safe_sprintf(buff,GET_STR(9000).c_str(),target.c_str());
+	//mpTarget->setString(buff.c_str());
+}
+
+void TeamUiPanel::refreshPanelState()
+{
+	TeamMgr* mgr = TeamMgr::getInstance();
+	bool bInTeam = mgr->is_inteam();
+	if (bInTeam)
+	{
+		stTeamFilter const& filter = TeamMgr::getInstance()->getTeamFilter();
+
+		bool is_team_leader = mgr->is_team_leader(RoleManager::getInstance()->getLocalPlayer()->getId());
+		//mpForbidBtn->setVisible(isTeamLeader);
+		//mpForbidText->setString(filter.bForbid?GET_STR(9015).c_str():GET_STR(9014).c_str());	
+		//mpSettingBtn->setVisible(bInTeam && isTeamLeader);
+
+		mpCreateText->setString(GET_STR(9012).c_str());
+		mpFlyBtn->setVisible(!is_team_leader);
+		m_dismiss_button->setVisible(is_team_leader);
+		m_leave_button->setVisible(true);
+		m_match_button->setVisible(!TeamMgr::getInstance()->is_matching_state());
+		m_cancel_match_button->setVisible(TeamMgr::getInstance()->is_matching_state());
+		m_apply_list_button->setVisible(is_team_leader);
+	}
+	else
+	{
+		//mpInviteBtn->setVisible(false);
+		//mpForbidBtn->setVisible(false);
+		//mpSettingBtn->setVisible(true);
+
+		mpCreateText->setString(GET_STR(9011).c_str());
+		mpFlyBtn->setVisible(false);
+		m_dismiss_button->setVisible(false);
+		m_leave_button->setVisible(false);
+		m_match_button->setVisible(true);
+		m_cancel_match_button->setVisible(false);
+		m_apply_list_button->setVisible(false);
+	}
+
+	check_red_point();
+
+	stTeamTargetInfo const& info = TeamMgr::getInstance()->get_team_target_info();
+	if(!info.is_have_target())
+	{
+		m_target_text->set_text(STRING_TABLE["team_target_dest"]);
+	}
+	else
+	{
+		const string str1 = TeamMgr::getInstance()->get_target_name_by_target_type(info.select_type);
+		const string str2 = TeamMgr::getInstance()->get_target_index_name_by_target_type_and_index(info.select_type, info.select_index);
+		if(str2.empty())
+		{
+			string str;
+			safe_sprintf(str, STRING_TABLE["team_target_dest_1"], str1.c_str(), info.level_min, info.level_max);
+			m_target_text->set_text(str.c_str());
+		}
+		else
+		{
+			string str;
+			safe_sprintf(str, STRING_TABLE["team_target_dest_2"], str1.c_str(), str2.c_str(), info.level_min, info.level_max);
+			m_target_text->set_text(str.c_str());
+		}
+	}
+}
+
+void TeamUiPanel::closeMenu()
+{
+	if (mbClosed)
+		return;
+
+	if (mpMenu)
+	{
+		mpMenu->close();
+	}
+}
+
+void TeamUiPanel::doBeforeMenuClose()
+{
+	mpMenu = NULL;
+	mdwSelTeammateIdD  = INVALID;
+}
+
+void TeamUiPanel::onEventCreateTeamSucc( CreateTeamSucc* pEvent )
+{
+	mbCreateLock   = false;
+
+	refreshPanelState();
+	refreshTeammate();
+}
+
+void TeamUiPanel::onMsgboxOK()
+{
+// 	PackageManager* mgr = PackageManager::getInstance();
+// 	f_item* item =mgr->getItem(EICT_Bag,(unsigned int)(FLY_SHOES_ITEM));
+// 	if (item)
+// 	{
+// 		mgr->useBagItem(item);
+// 	}
+	TeamMgr::getInstance()->sendGotoLeaderNear();
+}
+
+void TeamUiPanel::on_event_team_target_change(team_target_change* event)
+{
+	refreshPanelState();
+}
+
+void TeamUiPanel::on_event_match_state_change(match_state_change* event)
+{
+	refreshTeammate();
+	refreshPanelState();
+}
+
+void TeamUiPanel::on_event_refresh_team_list(refresh_team_list* event)
+{
+	refresh_list();
+	check_red_point();
+}
+
+void TeamUiPanel::check_red_point()
+{
+	bool is_have_apply_role = TeamMgr::getInstance()->get_is_have_apply_role();
+	m_red_point->setVisible(is_have_apply_role);
+}
+
+void TeamUiPanel::refresh_list()
+{
+	m_list->clear_list();
+
+	WaitRespQueue::RespQueue const& all = TeamMgr::getInstance()->getRespQueue();
+	BOOST_FOREACH(boost::shared_ptr<RespItem> const& one ,all)
+	{
+		if(one->getType() <= RespItem::EApplyFormTeammate)
+		{
+			TeamApplyItem* item = TeamApplyItem::create_item("duiwushenqingitem",NULL);
+			item->refresh_info(one);
+			m_list->add_item(item);
+		}
+	}
+	m_list->scroll_to_top();
+
+	m_no_apply_cue->setVisible(m_list->count() <= 0);
+	m_list->setVisible(m_list->count() > 0);
+}
+
+void TeamUiPanel::on_sure_dismiss_team()
+{
+	NET_SIC_dismiss_team send;
+	TCP_CLIENT->send_net_cmd(&send, NP_NORMAL, false);
+}
+
+
+#pragma endregion TeamUiPanel

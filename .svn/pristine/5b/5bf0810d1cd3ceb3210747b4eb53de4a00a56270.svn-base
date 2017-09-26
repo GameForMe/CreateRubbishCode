@@ -1,0 +1,444 @@
+#include "EquipFusionItemNode.h"
+#include "PackageManager.h"
+#include "ItemDefine.h"
+#include "BSAnimate.h"
+#include "AnimationCache.h"
+#include "UiTools.h"
+#include "item.h"
+#include "EquipFusionManager.h"
+
+bool EquipFusionItemNode::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if ( !isVisible() || !isRunning() || !hasVisibleParents() )
+	{
+		return false;
+	}
+	CCPoint framePoint = this->convertTouchToNodeSpace(pTouch);
+	//const CCSize &frameSize = this->getContentSize();
+	CCRect frameRect(-(this->getContentSize().width)/2,-(this->getContentSize().height)/2, this->getContentSize().width, this->getContentSize().height);
+	//CCRect frameRect(_scrollView->getContentSize().width);
+	if(frameRect.containsPoint(framePoint))
+	{
+		EquipFusionManager::getInstance()->setItemTagIndex(itemTag);
+		return false;
+	}
+	return false;
+}
+
+void EquipFusionItemNode::onEnter()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -1, true);
+}
+void EquipFusionItemNode::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+bool EquipFusionItemNode::init()
+{
+	_block = true;
+	_dataId = -1;
+	_num = 1;
+	_lv = 0;
+	_lock = false;
+
+	if(!CCNode::init())
+		return false;
+
+	CCSprite *main = CCSprite::createWithSpriteFrameName(PackageManager::getInstance()->getBlockFrameName().c_str());
+	main->setTag(IT_MAIN);
+	main->setVisible(true);
+	addChild(main);
+
+	CCSprite* sinEffect = CCSprite::create();
+	sinEffect->setTag(IT_SinEffect);
+	//sinEffect->setAnchorPoint(ccp(0.0f, 1.0f));
+	addChild(sinEffect);
+
+	_sprite = NULL;
+	_qualitybox = NULL;
+	_reciveIcon = NULL;
+
+	return true;
+}
+
+void EquipFusionItemNode::setBlock()
+{
+	if(_block)
+		return;
+
+	CCSprite *sprite = static_cast<CCSprite*>(getChildByTag(IT_MAIN));
+	CC_ASSERT(sprite != NULL);
+
+	setVisible(true);
+	if(_blockSpriteFrame.empty())
+		sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(PackageManager::getInstance()->getBlockFrameName().c_str()));
+	else
+		sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(_blockSpriteFrame.c_str()));
+
+	//没有用到的方框解锁 不显示数字;
+	setLock(false);
+	setNum(1);
+	setLevel(0);
+	setBind(false);
+
+	_block = true;
+	_dataId = -1;
+}
+
+void EquipFusionItemNode::setLock( bool lock )
+{
+	if(_lock == lock)
+		return;
+
+	_lock = lock;
+	CCNode *node = getChildByTag(IT_LOCK);
+	if(node == NULL)
+	{
+		if(!lock)//如果设置非锁定，直接退出;
+		{
+			return;
+		}
+		else
+		{
+			node = CCSprite::createWithSpriteFrameName(PackageManager::getInstance()->getLockFrameName().c_str());
+			//node->setAnchorPoint(ccp(0.0f, 0.0f));
+			node->setTag(IT_LOCK);
+			//node->setPosition(-ITEMNODE_CONTENTWIDTH / 2.0f + 2, -ITEMNODE_CONTENTHEIGHT / 2.0f + 2);
+			addChild(node);
+		}
+	}
+	CCSprite *lockSprite = static_cast<CCSprite*>(node);
+	CC_ASSERT(lockSprite != NULL);
+
+	lockSprite->setVisible(lock);
+}
+
+void EquipFusionItemNode::setDataId( unsigned int id )
+{
+	if (id != -1 && id != 0)
+	{
+		setVisible(true);
+		CCSprite *sprite = static_cast<CCSprite*>(getChildByTag(IT_MAIN));
+// 		_sprite = static_cast<CCSprite*>(getChildByTag(IT_MAIN));
+// 		_sprite->retain();
+		CC_ASSERT(sprite != NULL);
+	//	CC_ASSERT(_sprite != NULL);
+		std::string frame = PackageManager::getInstance()->getIconFrameName(id);
+		sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frame.c_str()));
+		sprite->setVisible(true);
+		//_sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frame.c_str()));
+		_dataId = id;
+		_block = false;
+	}
+}
+
+void EquipFusionItemNode::setNum( int num )
+{
+	if(num == _num)
+		return;
+
+	_num = num;
+	CCNode *node = getChildByTag(IT_LABEL);
+	if(node == NULL)
+	{
+		if(num <= 1)
+		{//1个不需要显示个数;
+			return;
+		}
+		else
+		{
+			CCLabelTTF *lab = CCLabelTTF::create();
+			lab->setFontSize(14);
+			lab->setTag(IT_LABEL);
+			lab->setAnchorPoint(ccp(1.0f, 0.0f));
+			lab->setPosition(ccp(EQUIPFUSIONITEMNODE_CONTENTWIDTH / 2.0f - 2.0f, -EQUIPFUSIONITEMNODE_CONTENTHEIGHT / 2.0f + 2.0f));
+			addChild(lab);
+			node = lab;
+		}
+	}
+
+	CCLabelTTF *label = static_cast<CCLabelTTF*>(node);
+	CC_ASSERT(label != NULL);
+	if(num <= 1)
+	{
+		label->setVisible(false);
+	}
+	else
+	{
+		CCString *str = CCString::createWithFormat("%d", num);
+		label->setString(str->getCString());
+		label->setVisible(true);
+	}
+}
+
+void EquipFusionItemNode::setLevel( int lv )
+{
+	if(lv == _lv)
+		return;
+	_lv = lv;
+	CCNode *node = getChildByTag(IT_LEVELLABEL);
+	if(node == NULL)
+	{
+		if (lv < 1 )
+		{
+			return;
+		}
+		else
+		{
+			CCLabelTTF *lab = CCLabelTTF::create();
+			lab->setFontSize(14);
+			lab->setTag(IT_LEVELLABEL);
+			lab->setColor(ccc3(0,255,0));
+			lab->setAnchorPoint(ccp(1.0f, 0.0f));
+			lab->setPosition(ccp(0.0f , -EQUIPFUSIONITEMNODE_CONTENTHEIGHT / 2.0f));
+			addChild(lab);
+			node = lab;
+		}
+	}
+
+	CCLabelTTF *label = static_cast<CCLabelTTF*>(node);
+	CC_ASSERT(label != NULL);
+	if(lv < 1)
+	{
+		label->setVisible(false);
+	}
+	else
+	{
+		CCString *str = CCString::createWithFormat("Lv:%d", lv);
+		label->setString(str->getCString());
+		label->setVisible(true);
+	}
+}
+
+void EquipFusionItemNode::changeItemNumPositon()
+{
+	getChildByTag(IT_LABEL)->setPosition(ccp(EQUIPFUSIONITEMNODE_CONTENTWIDTH / 2.0f - 10.0f, -EQUIPFUSIONITEMNODE_CONTENTHEIGHT / 2.0f + 10.0f));
+}
+
+void EquipFusionItemNode::setBlank()
+{
+	if(_blankSpriteFrame.empty())
+	{
+		setVisible(false);
+	}
+	else
+	{
+		CCSprite *sprite = static_cast<CCSprite*>(getChildByTag(IT_MAIN));
+		CC_ASSERT(sprite != NULL);
+		setVisible(true);
+		sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(_blankSpriteFrame.c_str()));
+	}
+	_block = false;
+	_dataId = -1;
+	setNum(1);
+	setLevel(0);
+	setLock(false);
+	setBind(false);
+}
+
+void EquipFusionItemNode::setBind(bool bind /*= true*/)
+{
+	CCNode *node = getChildByTag(IT_Bind);
+	if(node == NULL)
+	{
+		if(!bind)//如果设置非锁定，直接退出
+		{
+			return;
+		}
+		else
+		{
+			node = CCSprite::createWithSpriteFrameName(PackageManager::getInstance()->getBindFrameName().c_str());
+			node->setAnchorPoint(ccp(0.0f, 0.0f));
+			node->setTag(IT_Bind);
+			node->setPosition(-EQUIPFUSIONITEMNODE_CONTENTWIDTH / 2.0f + 2, -EQUIPFUSIONITEMNODE_CONTENTHEIGHT / 2.0f + 2);
+			addChild(node);
+		}
+	}
+	CCSprite *bindSprite = static_cast<CCSprite*>(node);
+	CC_ASSERT(bindSprite != NULL);
+
+	bindSprite->setVisible(bind);
+}
+
+void EquipFusionItemNode::copy(EquipFusionItemNode &node)
+{
+	node.setVisible(isVisible());
+	if(_dataId != -1)
+		node.setDataId(_dataId);
+	if(_num != 1)
+		node.setNum(_num);
+	node.setLock(_lock);
+	node.setVisible(isVisible());
+}
+
+void EquipFusionItemNode::initWithItem(  f_item *item )
+{
+	CC_ASSERT(item != NULL);
+	f_equipment *equip = dynamic_cast<f_equipment*>(item);
+	const ItemTypeData &typeData =PackageManager::getInstance()->getItemTypeData(item->get_item_type_id());
+	ePackageItemType eItemType = typeData.type;
+	unsigned int typeId = item->get_item_type_id();
+	setDataId(typeId);
+	//setLock(item->is_locked());
+//	setBind(item->is_item_binded());
+	if (eItemType == PIT_Kungfu  || eItemType == PIT_KungfuExp)
+	{
+		setLevel(equip->get_equip()->nLevel);
+		setNum(1);
+		setBind(false);
+	}
+	else
+	{
+		setNum(item->get_item_number());
+		setLevel(0);
+		setBind(item->is_item_binded());
+	}
+}
+
+void EquipFusionItemNode::initWithItem( const tagEquipViewInfo *equipInfo )
+{
+	CC_ASSERT(equipInfo != NULL);
+	unsigned int typeId = equipInfo->dw_data_id;
+	setDataId(typeId);
+	//在没有需求之前下面的值使用默认值;
+	setNum(1);
+	setLock(false);
+	//setBind(equipInfo->byBind?true:false);//gx modify
+	if (0 != equipInfo->byBind && 1 != equipInfo->byBind)
+	{
+		setBind(true);
+	}
+	else
+	{
+		setBind(false);
+	}
+}
+
+void EquipFusionItemNode::runAnimation( const char *animName )
+{
+	AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0,animName, anims);
+	BSAnimate *animste = anims[0];
+	getChildByTag(IT_SinEffect)->setVisible(true);
+	getChildByTag(IT_SinEffect)->runAction(CCRepeatForever::create(animste));
+}
+
+void EquipFusionItemNode::stopAnimation()
+{
+	getChildByTag(IT_SinEffect)->stopAllActions();
+	getChildByTag(IT_SinEffect)->setVisible(false);
+}
+
+void EquipFusionItemNode::runSpecialAnima(int id, const char *animName )
+{
+	AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0,animName, anims);
+	BSAnimate *animste = anims[0];
+	getChildByTag(IT_SinEffect)->setVisible(true);
+	getChildByTag(IT_SinEffect)->runAction(animste);
+}
+
+void EquipFusionItemNode::setQualityBox( const char* boxname )
+{
+	if (_qualitybox == NULL)
+	{
+		_qualitybox = CCSprite::create();
+		CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(boxname);
+		CC_ASSERT(spriteFrame != NULL);
+		_qualitybox->setVisible(true);
+		_qualitybox->setDisplayFrame(spriteFrame);
+		addChild(_qualitybox,-1);
+	}
+}
+
+void EquipFusionItemNode::removeQualityBox()
+{
+	if (_qualitybox != NULL)
+	{
+		removeChild(_qualitybox);
+		_qualitybox = NULL;
+	}
+		
+}
+
+void EquipFusionItemNode::showReciveIcon( const char *spritename )
+{
+	if (_reciveIcon == NULL)
+	{
+		_reciveIcon = CCSprite::create();
+		CCSpriteFrame *spriteFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(spritename);
+		CC_ASSERT(spriteFrame != NULL);
+		_reciveIcon->setVisible(true);
+		_reciveIcon->setDisplayFrame(spriteFrame);
+		_reciveIcon->setPosition(ccp(EQUIPFUSIONITEMNODE_CONTENTWIDTH / 8.0f, EQUIPFUSIONITEMNODE_CONTENTHEIGHT / 5.0f ));
+		addChild(_reciveIcon,1);
+	}
+	else
+	{
+		_reciveIcon->setVisible(true);
+		_reciveIcon->setPosition(ccp(EQUIPFUSIONITEMNODE_CONTENTWIDTH / 8.0f, EQUIPFUSIONITEMNODE_CONTENTHEIGHT / 5.0f ));
+		addChild(_reciveIcon,1);
+	}
+}
+
+void EquipFusionItemNode::removeReciveIcon()
+{
+	if (_reciveIcon != NULL)
+	{
+		removeChild(_reciveIcon);
+		_reciveIcon = NULL;
+	}
+}
+
+cocos2d::CCSprite* EquipFusionItemNode::getItemSprite(unsigned int id)
+{
+	if (id != -1 && id != 0)
+	{
+		setVisible(true);
+		CCSprite *sprite = static_cast<CCSprite*>(getChildByTag(IT_MAIN));
+		CC_ASSERT(sprite != NULL);
+		std::string frame = PackageManager::getInstance()->getIconFrameName(id);
+		sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frame.c_str()));
+		return sprite;
+	}
+	return NULL;
+}
+
+void EquipFusionItemNode::runMoveAction( const CCPoint &start, const CCPoint &end,int index,bool mulitpe)
+{
+	CCArray *actionArray = CCArray::create();
+	float dt = ccpDistance(start, end) / 250.f;
+	CCMoveTo *moveTo;
+	if (mulitpe)
+	{
+		moveTo =  CCMoveTo::create(dt * index,end);
+	}
+	else
+	{
+		moveTo =  CCMoveTo::create(dt ,end);
+	}
+
+	actionArray->addObject(moveTo);
+	CCCallFuncN *callFunc = CCCallFuncN::create(this, SEL_CallFuncN(&EquipFusionItemNode::animCallback))
+;
+	actionArray->addObject(callFunc);
+
+	CCSequence *sequence = CCSequence::create(actionArray);
+
+	stopAllActions();
+	runAction(sequence);
+}
+
+void EquipFusionItemNode::animCallback( CCNode* node )
+{
+	setVisible(false);
+}
+
+
+
+
+
+

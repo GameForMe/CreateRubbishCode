@@ -1,0 +1,318 @@
+#include "ArenaPKUi.h"
+#include "UiLoader.h"
+#include "World.h"
+#include "ArenaMainMgr.h"
+#include "WorldPacket.h"
+#include "TCPClient.h"
+#include "CommonMsgDefine.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "CfgReader.h"
+#include "UiResourceMgr.h"
+#include "Helper.h"
+//////////////////////////////////////////////////////////////////////////
+
+ArenaPKUi::ArenaPKUi()
+{
+
+}
+
+ArenaPKUi::~ArenaPKUi()
+{
+
+}
+
+CCNode* ArenaPKUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["ArenaPKUiLayer"] = UiLayerLoader<ArenaPKUiLayer>::loader();
+	CCNode* pNode = readUiFromCCBI("arenapkui", nodeLoaders, _loadSpriteSheet);
+
+	return pNode;
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler ArenaPKUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler ArenaPKUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+bool ArenaPKUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (!isVisible() || !hasVisibleParents() || !isRunning())
+	{
+		return false;
+	}
+	return true;
+}
+
+void ArenaPKUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_fightNumAcNode1 = NULL;
+	_fightNumAcNode2 = NULL;
+
+	liftBg = dynamic_cast<CCSprite*>(getChildByTag(LIFTBG));//左边所有
+	rightBg = dynamic_cast<CCSprite*>(getChildByTag(RIGHTBG));//右边所有
+	vBg = dynamic_cast<CCSprite*>(getChildByTag(V));//v
+	sBg = dynamic_cast<CCSprite*>(getChildByTag(S));//s
+	//左边人物
+	roleNameL = Helper::replaceLabelTTFWithLabelFTAndRemove((CCLabelTTF*)liftBg->getChildByTag(ROLENAMELR));
+	roleBodyL = dynamic_cast<CCSprite*>(liftBg->getChildByTag(ROLEBODY));
+	//roleBodyL->setPositionX(300);//vv
+	rolePowerL = Helper::replaceLabelTTFWithLabelFTAndRemove((CCLabelTTF*)liftBg->getChildByTag(ROLEPOWER));
+	//add by vvv 2014.11.19  战斗力艺术字左边
+	rolePowerL->setVisible(false);
+	_fightNumBLabelL = CCLabelBMFont::create();
+	_fightNumBLabelL->setFntFile("Art/Scene/fontNum.fnt");
+	_fightNumBLabelL->setAnchorPoint(ccp(0.0f, 0.5f));
+	_fightNumBLabelL->setScale(0.7f);
+	_fightNumBLabelL->setPosition(rolePowerL->getPosition());
+	liftBg->addChild(_fightNumBLabelL, RZN_EFFECT+1);
+	_fightNumBLabelL->setTag(APKT_BattlePointLab);
+
+	roleWinStreakL = Helper::replaceLabelTTFWithLabelFTAndRemove((CCLabelTTF*)liftBg->getChildByTag(ROLEWINSTREAK));//连胜
+	roleRankL = Helper::replaceLabelTTFWithLabelFTAndRemove((CCLabelTTF*)liftBg->getChildByTag(ROLERANK));//排名
+	hotL = Helper::replaceLabelTTFWithLabelFTAndRemove((CCLabelTTF*)liftBg->getChildByTag(HOT));//热力百分比
+	//右边人物
+	roleNameR = Helper::replaceLabelTTFWithLabelFTAndRemove((CCLabelTTF*)rightBg->getChildByTag(ROLENAMELR));
+	roleBodyR = dynamic_cast<CCSprite*>(rightBg->getChildByTag(ROLEBODY));
+	rolePowerR = Helper::replaceLabelTTFWithLabelFTAndRemove((CCLabelTTF*)rightBg->getChildByTag(ROLEPOWER));
+	//add by vvv 2014.11.19  战斗力艺术字右边
+	rolePowerR->setVisible(false);
+	_fightNumBLabelR = CCLabelBMFont::create();
+	_fightNumBLabelR->setFntFile("Art/Scene/fontNum.fnt");
+	_fightNumBLabelR->setAnchorPoint(ccp(0.0f, 0.5f));
+	_fightNumBLabelR->setScale(0.7f);
+	_fightNumBLabelR->setPosition(rolePowerR->getPosition());
+	rightBg->addChild(_fightNumBLabelR, RZN_EFFECT+1);
+	_fightNumBLabelR->setTag(APKT_BattlePointLab);
+
+	roleWinStreakR = Helper::replaceLabelTTFWithLabelFTAndRemove((CCLabelTTF*)rightBg->getChildByTag(ROLEWINSTREAK));//连胜
+	roleRankR = Helper::replaceLabelTTFWithLabelFTAndRemove((CCLabelTTF*)rightBg->getChildByTag(ROLERANK));//排名
+	hotR = Helper::replaceLabelTTFWithLabelFTAndRemove((CCLabelTTF*)rightBg->getChildByTag(HOT));//热力百分比
+
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	//CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEFightFire.c_str());
+	_fightNumAcNode1 = this->getFightSuperEffect();
+	_fightNumAcNode2 = this->getFightSuperEffect();
+	liftBg->addChild(_fightNumAcNode1, RZN_EFFECT);
+	_fightNumAcNode1->setPosition(liftBg->getChildByTag(APKT_FightNumSE)->getPosition());
+	_fightNumAcNode1->BeginAction(0.07f, true);
+	liftBg->getChildByTag(APKT_FightNumValue)->setZOrder(RZN_EFFECT+1);
+	liftBg->getChildByTag(APKT_FightNumSP)->setZOrder(RZN_EFFECT+1);
+	rightBg->addChild(_fightNumAcNode2, RZN_EFFECT);
+	_fightNumAcNode2->setPosition(rightBg->getChildByTag(APKT_FightNumSE)->getPosition());
+	_fightNumAcNode2->BeginAction(0.07f, true);
+	rightBg->getChildByTag(APKT_FightNumValue)->setZOrder(RZN_EFFECT+1);
+	rightBg->getChildByTag(APKT_FightNumSP)->setZOrder(RZN_EFFECT+1);
+
+	setUiData();
+
+	CCMoveBy* LtoR = CCMoveBy::create(1,ccp(480,0));//左右拉入的动画
+	CCMoveBy* RtoL = CCMoveBy::create(1,ccp(-480,0));
+
+	CCMoveBy* LtoR2 = CCMoveBy::create(0.5,ccp(800,0));//左右拉开的动画
+	CCMoveBy* RtoL2 = CCMoveBy::create(0.5,ccp(-800,0));
+
+	CCScaleBy* SmalltoBig = CCScaleBy::create(0.5f,2.0f,2.0f);//v的放大和缩小的动画
+	CCScaleBy* BigtoSmall= CCScaleBy::create(0.2f,0.5f,0.5f);
+
+	CCScaleBy* SmalltoBig2 = CCScaleBy::create(0.5f,2.0f,2.0f);//s的放大和缩小的动画
+	CCScaleBy* BigtoSmall2= CCScaleBy::create(0.2f,0.5f,0.5f);
+
+	CCMoveBy* smallRtoL = CCMoveBy::create(0.03f,ccp(5,0));//左右抖动的动画
+	CCMoveBy* smallLtoR = CCMoveBy::create(0.03f,ccp(-5,0));
+
+	CCMoveBy* smallRtoL2 = CCMoveBy::create(0.03f,ccp(5,0));//左右抖动的动画
+	CCMoveBy* smallLtoR2 = CCMoveBy::create(0.03f,ccp(-5,0));
+	
+	CCAction* callbackFun = CCCallFunc::create(liftBg, SEL_CallFunc(&ArenaPKUiLayer::sendPkMsg));
+	liftBg->runAction(CCSequence::create(LtoR,CCDelayTime::create(2.5),RtoL2,callbackFun,NULL));
+	rightBg->runAction(CCSequence::create(RtoL,CCDelayTime::create(2.5),LtoR2,NULL));
+	
+	CCFadeOut* out = CCFadeOut::create(1);
+	CCFadeOut* out2 = CCFadeOut::create(1);
+
+	vBg->runAction(CCSequence::create(CCDelayTime::create(1),SmalltoBig2,BigtoSmall2,smallRtoL2,smallLtoR2,smallRtoL2,smallLtoR2,smallRtoL2,smallLtoR2,smallRtoL2,smallLtoR2,smallRtoL2,smallLtoR2,smallRtoL2,smallLtoR2,smallRtoL2,smallLtoR2,smallRtoL2,smallLtoR2,smallRtoL2,smallLtoR2,smallRtoL2,smallLtoR2,smallRtoL2,smallLtoR2,out,NULL));
+	sBg->runAction(CCSequence::create(CCDelayTime::create(1),SmalltoBig,BigtoSmall,smallRtoL,smallLtoR,smallRtoL,smallLtoR,smallRtoL,smallLtoR,smallRtoL,smallLtoR,smallRtoL,smallLtoR,smallRtoL,smallLtoR,smallRtoL,smallLtoR,smallRtoL,smallLtoR,smallRtoL,smallLtoR,smallRtoL,smallLtoR,smallRtoL,smallLtoR,smallRtoL,smallLtoR,out2,NULL));
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	/*CCParticleSystemQuad* m_particle = CCParticleSystemQuad::create("Art/Effect/tt.plist");
+	m_particle->retain();
+	vBg->addChild(m_particle,10);
+	m_particle->setPosition(ccp(50,50));*/
+}
+
+// std::string ArenaPKUiLayer::getChangeRoleNameType(wchar_t* roleName)
+// {
+// 	char vStr[128];
+// 	memset(vStr, 0, sizeof(char) * 128);
+// 	Utf16ToUtf8(roleName, vStr, 128, 0);
+// 	return vStr;
+// }
+
+void ArenaPKUiLayer::setUiData()
+{
+	//左边人物
+	std::string tmpName = Helper::convert_wstr_to_string<128>(ArenaMainMgr::getInstance()->getLocalPlayerAttr().szRoleName);
+	roleNameL->setString(tmpName.c_str());
+	//roleBodyL = dynamic_cast<CCSprite*>(liftBg->getChildByTag(ROLEBODY));
+	LocalPlayer *pl = RoleManager::getInstance()->getLocalPlayer();
+	if( !pl )
+		return;
+	eRoleType _roleType = pl->getRoleType();
+	std::string banshenxiangPicPath = "";
+	switch(_roleType)//选择角色类型
+	{
+	case RT_MWARRIOR:
+		banshenxiangPicPath = CCString::createWithFormat("%s","Art/Portrait/pkrolewarriornan.png")->getCString();
+		break;
+	case RT_WWARRIOR:
+		banshenxiangPicPath = CCString::createWithFormat("%s","Art/Portrait/pkrolewarriornv.png")->getCString();
+		break;
+	case RT_MMAGE:
+		banshenxiangPicPath = CCString::createWithFormat("%s","Art/Portrait/pkrolemagenan.png")->getCString();
+		break;
+	case RT_WMAGE:
+		banshenxiangPicPath = CCString::createWithFormat("%s","Art/Portrait/pkrolemagenv.png")->getCString();
+		break;
+	case RT_MTAOIST:
+		banshenxiangPicPath = CCString::createWithFormat("%s","Art/Portrait/pkroletaoistnan.png")->getCString();
+		break;
+	case RT_WTAOIST:
+		banshenxiangPicPath = CCString::createWithFormat("%s","Art/Portrait/pkroletaoistnv.png")->getCString();
+		break;
+	default:
+		CC_ASSERT(0);
+	}
+	roleBodyL->initWithFile(banshenxiangPicPath.c_str());
+	roleBodyL->setFlipX(true);
+	roleBodyL->setPosition(ccp(175,230.0f));//add by vvv 2014.11.21
+
+	rolePowerL->setString(CCString::createWithFormat("%d",ArenaMainMgr::getInstance()->getLocalPlayerAttr().n32Rating)->getCString());
+
+	//获取角色战斗力
+	std::ostringstream ostr;
+	if( pl )
+	{
+		ostr << pl->getAttribute(RA_BATTLE_POINT);
+		_fightNumBLabelL->setString(ostr.str().c_str());//战斗力
+	}
+	else
+		_fightNumBLabelL->setString(CCString::createWithFormat("%d",ArenaMainMgr::getInstance()->getLocalPlayerAttr().n32Rating)->getCString());//add by vvv 2014.11.19
+
+	roleWinStreakL->setString(CCString::createWithFormat("%d",ArenaMainMgr::getInstance()->getLocalPlayerAttr().nWinnerCount)->getCString());//连胜
+	roleRankL->setString(CCString::createWithFormat("%d",ArenaMainMgr::getInstance()->getLocalPlayerAttr().nRank)->getCString());//排名
+	hotL->setString(CCString::createWithFormat("%d",ArenaMainMgr::getInstance()->getLocalPlayerAttr().nPowerCount)->getCString());//热力百分比
+	
+	_hotProgressL = new ProgressBar;
+	_hotProgressL->initBarWithSprite((CCSprite*)liftBg->getChildByTag(HOTPROGRESSLR)->getChildByTag(0));
+	_hotProgressL->addToParent(liftBg->getChildByTag(HOTPROGRESSLR));
+	_hotProgressL->setRotate(-90.0f);
+	_hotProgressL->setProgress(ArenaMainMgr::getInstance()->getLocalPlayerAttr().nPowerCount,5);
+	//右边人物
+	tmpName = Helper::convert_wstr_to_string<128>(ArenaMainMgr::getInstance()->getChallengePlayerAttr(ArenaMainMgr::getInstance()->getCheckedChallengeIndex()).szRoleName);
+	roleNameR->setString(tmpName.c_str());
+	//roleBodyR = dynamic_cast<CCSprite*>(rightBg->getChildByTag(ROLEBODY));
+	roleBodyR->setPosition(ccp(327.f,230.0f));//add by vvv 2014字
+	EClassType _roleTypeR_1 = ArenaMainMgr::getInstance()->getChallengePlayerAttr(ArenaMainMgr::getInstance()->getCheckedChallengeIndex()).eClassType;
+	//0是女 
+	int bySex = ArenaMainMgr::getInstance()->getChallengePlayerAttr(ArenaMainMgr::getInstance()->getCheckedChallengeIndex()).bySex;
+
+
+	switch(_roleTypeR_1)
+	{
+	case EV_Warrior:
+		if (bySex == 0)
+		{
+			banshenxiangPicPath = CCString::createWithFormat("%s","Art/Portrait/pkrolewarriornv.png")->getCString();
+		} 
+		else
+		{
+			banshenxiangPicPath = CCString::createWithFormat("%s","Art/Portrait/pkrolewarriornan.png")->getCString();
+		}
+		break;
+	case EV_Mage:
+		if (bySex == 0)
+		{
+			banshenxiangPicPath = CCString::createWithFormat("%s","Art/Portrait/pkrolemagenv.png")->getCString();
+		} 
+		else
+		{
+			banshenxiangPicPath = CCString::createWithFormat("%s","Art/Portrait/pkrolemagenan.png")->getCString();
+		}
+		break;
+	case EV_Taoist:
+		if (bySex == 0)
+		{
+			banshenxiangPicPath = CCString::createWithFormat("%s","Art/Portrait/pkroletaoistnv.png")->getCString();
+		} 
+		else
+		{
+			banshenxiangPicPath = CCString::createWithFormat("%s","Art/Portrait/pkroletaoistnan.png")->getCString();
+		}
+		break;
+	default:
+		banshenxiangPicPath = CCString::createWithFormat("%s","Art/Portrait/pkrolewarriornv.png")->getCString();
+		break;
+	}
+
+	roleBodyR->initWithFile(banshenxiangPicPath.c_str());
+
+	rolePowerR->setString(CCString::createWithFormat("%d",ArenaMainMgr::getInstance()->getChallengePlayerAttr(ArenaMainMgr::getInstance()->getCheckedChallengeIndex()).n32Rating)->getCString());
+	_fightNumBLabelR->setString(CCString::createWithFormat("%d",ArenaMainMgr::getInstance()->getChallengePlayerAttr(ArenaMainMgr::getInstance()->getCheckedChallengeIndex()).n32Rating)->getCString());//add by vvv 2014.11.19
+	//roleWinStreakR->setString(CCString::createWithFormat("%d",ArenaMainMgr::getInstance()->getChallengePlayerAttr(ArenaMainMgr::getInstance()->getCheckedChallengeIndex()).)->getCString());//连胜
+	roleRankR->setString(CCString::createWithFormat("%d",ArenaMainMgr::getInstance()->getChallengePlayerAttr(ArenaMainMgr::getInstance()->getCheckedChallengeIndex()).nRank)->getCString());//排名
+
+	_hotProgressR = new ProgressBar;
+	_hotProgressR->initBarWithSprite((CCSprite*)rightBg->getChildByTag(HOTPROGRESSLR)->getChildByTag(0));
+	_hotProgressR->addToParent(rightBg->getChildByTag(HOTPROGRESSLR));
+	_hotProgressR->setRotate(-90.0f);
+	_hotProgressR->setProgress(0,5);
+	//hotR->setString(CCString::createWithFormat("%d",ArenaMainMgr::getInstance()->getChallengePlayerAttr(ArenaMainMgr::getInstance()->getCheckedChallengeIndex()).nRank)->getCString());//热力百分比
+}
+
+void ArenaPKUiLayer::sendPkMsg()
+{//OP(INT)[0=验证,1=进入] + 对手角色ID(DWORD) + 排名(INT)
+	WorldPacket SIC_Msg(NET_C2G_REQUEST_JJC_PK);	//组装消息头
+	SIC_Msg << 1;
+	unsigned int tmpRoleId = ArenaMainMgr::getInstance()->getChallengePlayerAttr(ArenaMainMgr::getInstance()->getCheckedChallengeIndex()).dwRoleID;
+	SIC_Msg << tmpRoleId;
+	int tmpRank = ArenaMainMgr::getInstance()->getChallengePlayerAttr(ArenaMainMgr::getInstance()->getCheckedChallengeIndex()).nRank;
+	SIC_Msg << tmpRank;										//发送信息内容
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)SIC_Msg.contents(), NP_IDLE, false); //发送
+}
+
+void ArenaPKUiLayer::onEnter()
+{
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+//	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+}
+
+void ArenaPKUiLayer::onExit()
+{
+//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+}
+
+GameActionNode* ArenaPKUiLayer::getFightSuperEffect()
+{
+	GameActionNode* fireSEAcNode = GameActionNode::create();
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string sSEFightFire = sSEDir + "E1_50.plist";
+
+	fireSEAcNode->InitWithPList(sSEFightFire.c_str(), "E1_50");
+
+	return fireSEAcNode;
+}

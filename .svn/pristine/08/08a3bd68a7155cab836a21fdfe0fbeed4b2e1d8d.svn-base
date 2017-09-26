@@ -1,0 +1,785 @@
+#include "CreateRoleUi.h"
+#include "CfgReader.h"
+#include "TouchSprite.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "GameActionNode.h"
+#include "UiResourceMgr.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "CreateRole.h"
+#include "BSAnimate.h"
+
+CreateRoleUi::CreateRoleUi()
+	: _selRoleType(RT_NULL)
+	,lastTemp(1)
+{
+
+}
+
+CreateRoleUi::~CreateRoleUi()
+{
+
+}
+
+cocos2d::SEL_MenuHandler CreateRoleUi::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler CreateRoleUi::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBackBtnPressed", CreateRoleUi::onBackBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBeginBtnPressed", CreateRoleUi::onBeginBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRandNameBtnPressed", CreateRoleUi::onRandNameBtnPressed);
+	return NULL;
+}
+
+void CreateRoleUi::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	setPositionX(getPositionX() + UiMgr::getInstance()->getOffsetX());
+	setPositionY(getPositionY() + UiMgr::getInstance()->getOffsetY());
+
+	getTouchSprite(NT_WarriorHeadNan)->signalTouched.connect(this, &CreateRoleUi::onHeadWarriorNanTouch);//男
+	getTouchSprite(NT_WarriorHeadNv)->signalTouched.connect(this, &CreateRoleUi::onHeadWarriorNvTouch);//女
+	getTouchSprite(NT_MageHeadNan)->signalTouched.connect(this, &CreateRoleUi::onHeadMageNanTouch);//点击战士
+	getTouchSprite(NT_MageHeadNv)->signalTouched.connect(this, &CreateRoleUi::onHeadMageNvTouch);//点击法师
+	getTouchSprite(NT_TaoistHeadNan)->signalTouched.connect(this, &CreateRoleUi::onHeadTaoistNanTouch);//点击道士
+	getTouchSprite(NT_TaoistHeadNv)->signalTouched.connect(this, &CreateRoleUi::onHeadTaoistNvTouch);
+	
+	selJobWarrior = dynamic_cast<CCSprite*>(getChildByTag(NT_MageHeadNan));
+	selJobMage = dynamic_cast<CCSprite*>(getChildByTag(NT_MageHeadNv));
+	selJobTaoist = dynamic_cast<CCSprite*>(getChildByTag(NT_TaoistHeadNan));
+
+	selJobWarrior->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_warriorbtnh"));
+	//调整界面上图片的显示层次  vv.2014.9.2
+	CCSprite *sprite16 = dynamic_cast<CCSprite*>(getChildByTag(11));
+	sprite16->setZOrder(2);
+	CCControlButton *button3= dynamic_cast<CCControlButton*>(getChildByTag(36));
+	button3->setZOrder(2);
+
+	_inputNode = getChildByTag(NT_InputNode);
+	CC_ASSERT(_inputNode != NULL);
+	_inputNode->setZOrder(2);
+	_inputLabel = createInputWithContent(_inputNode, 20);
+	_inputLabel->setZOrder(2);
+	_inputLabel->setDelegate(this);
+	addChild(_inputLabel);
+
+ 	m_RoleFrame = GameActionNode::create();
+
+	ding = dynamic_cast<CCSprite*>(getChildByTag(55));
+	ding->setZOrder(1);
+	CCSprite *zhao1= dynamic_cast<CCSprite*>(getChildByTag(57));
+	zhao1->setZOrder(1);
+	CCSprite *zhao2= dynamic_cast<CCSprite*>(getChildByTag(58));
+	zhao2->setZOrder(1);
+	CCSprite *ding2= dynamic_cast<CCSprite*>(getChildByTag(56));
+	ding2->setZOrder(1);
+
+    //调整界面上图片的显示层次  vv.2014.9.2
+	CCSprite *sprite9 = dynamic_cast<CCSprite*>(getChildByTag(32));
+	sprite9->setZOrder(2);
+	CCSprite *sprite7 = dynamic_cast<CCSprite*>(getChildByTag(30));
+	sprite7->setZOrder(2);
+	CCSprite *sprite8 = dynamic_cast<CCSprite*>(getChildByTag(31));
+	sprite8->setZOrder(2);
+	CCSprite *sprite10 = dynamic_cast<CCSprite*>(getChildByTag(34));
+	sprite10->setZOrder(2);
+	CCSprite *sprite1 = dynamic_cast<CCSprite*>(getChildByTag(NT_DescText));
+	sprite1->setZOrder(2);
+	CCSprite *sprite2 = dynamic_cast<CCSprite*>(getChildByTag(1));
+	sprite2->setZOrder(2);
+	CCSprite *sprite14 = dynamic_cast<CCSprite*>(getChildByTag(0));
+	sprite14->setZOrder(2);
+	CCSprite *sprite15 = dynamic_cast<CCSprite*>(getChildByTag(12));
+	sprite15->setZOrder(2);
+	CCSprite *sprite3 = dynamic_cast<CCSprite*>(getChildByTag(6));
+	sprite3->setZOrder(2);
+	CCSprite *sprite4 = dynamic_cast<CCSprite*>(getChildByTag(7));
+	sprite4->setZOrder(2);
+	CCSprite *sprite12 = dynamic_cast<CCSprite*>(getChildByTag(2));
+	sprite12->setZOrder(2);
+	CCSprite *sprite13 = dynamic_cast<CCSprite*>(getChildByTag(8));
+	sprite13->setZOrder(2);
+	CCSprite *sprite5 = dynamic_cast<CCSprite*>(getChildByTag(3));
+	sprite5->setZOrder(2);
+	CCSprite *sprite6 = dynamic_cast<CCSprite*>(getChildByTag(4));
+	sprite6->setZOrder(2);
+	
+	CCControlButton *button1= dynamic_cast<CCControlButton*>(getChildByTag(33));
+	button1->setZOrder(2);
+	CCControlButton *button2= dynamic_cast<CCControlButton*>(getChildByTag(17));
+	button2->setZOrder(2);
+	//火的特效
+	m_FireLiftEffect = GameActionNode::create();
+	m_FireLiftEffect->setPosition(ccp(getChildByTag(50)->getPosition().x+10,getChildByTag(50)->getPosition().y + 30));
+	m_FireRightEffect = GameActionNode::create();
+	m_FireRightEffect->setPosition(ccp(getChildByTag(51)->getPosition().x,getChildByTag(51)->getPosition().y + 30));
+	addChild(m_FireLiftEffect,0);
+	addChild(m_FireRightEffect,0);
+	//加载俩边的火焰特效
+	std::string uiDirFire = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string uiDirPathFire = uiDirFire + "login_e_fire.plist";
+
+	m_FireLiftEffect->InitWithPList(uiDirPathFire.c_str(), "login_e_fire");
+	m_FireRightEffect->InitWithPList(uiDirPathFire.c_str(), "login_e_fire");
+
+	m_FireLiftEffect->BeginAction(0.03f, true);
+	m_FireRightEffect->BeginAction(0.03f, true);
+	
+	//加载两边球的特效
+	std::string uiDirBall = CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	//增加开始按钮特效
+	std::string sSEBegin = uiDirBall + "E1_80.plist";
+	//_plist.insert(sSEBegin);
+	//CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEBegin.c_str());
+	m_BeginAcNode = GameActionNode::create();
+	m_BeginAcNode->InitWithPList(sSEBegin.c_str(), "E1_80");
+//	CCPoint sePos = ccp(CCDirector::sharedDirector()->getWinSize().width / 100.0f * 81.0f, CCDirector::sharedDirector()->getWinSize().height / 3.0f);
+	CCPoint sePos = this->getChildByTag(17)->getPosition();
+	m_BeginAcNode->setPosition(sePos - ccp(0, CCDirector::sharedDirector()->getWinSize().height / 100.0f));
+	this->addChild(m_BeginAcNode, RZN_EFFECT);
+	m_BeginAcNode->setScaleX(0.8f);
+	m_BeginAcNode->BeginAction(0.08f, true);
+	//选择特效
+	std::string sSESelect = uiDirBall + "E1_48.plist";
+	m_SelectAcNode = GameActionNode::create();
+	m_SelectAcNode->InitWithPList(sSESelect.c_str(), "E1_48");
+	//CCPoint selectSEPos = ccp(CCDirector::sharedDirector()->getWinSize().width * 4.0f / 5.0f, CCDirector::sharedDirector()->getWinSize().height * 1.0f / 5.0f);
+	m_SelectAcNode->setPosition(this->getChildByTag(2)->getPosition());
+	this->addChild(m_SelectAcNode, RZN_EFFECT);
+
+	m_pShadow = CCSprite::create();
+	m_pShadow->setZOrder(-1);
+	m_RoleFrame->addChild(m_pShadow);
+	getChildByTag(NT_RolePhoto)->removeFromParentAndCleanup(true);
+	//[bing] 加载3个职业动态图片从plist
+	std::string uiDir = CFGReader::instance()->get_profile_string("Art", "Role", "");
+
+	std::string uiDirPath = uiDir + "male_zhanshi.plist";
+	_plist.insert(uiDirPath);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(uiDirPath.c_str());
+
+	uiDirPath = uiDir + "female_zhanshi.plist";
+	_plist.insert(uiDirPath);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(uiDirPath.c_str());
+
+	uiDirPath = uiDir + "male_daoshi.plist";
+	_plist.insert(uiDirPath);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(uiDirPath.c_str());
+
+	uiDirPath = uiDir + "female_daoshi.plist";
+	_plist.insert(uiDirPath);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(uiDirPath.c_str());
+
+	uiDirPath = uiDir + "male_fashi.plist";
+	_plist.insert(uiDirPath);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(uiDirPath.c_str());
+
+	uiDirPath = uiDir + "female_fashi.plist";
+	_plist.insert(uiDirPath);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(uiDirPath.c_str());
+
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+
+	m_Sex = 1;
+
+	AnimationCache::createDefList(1, m_pAnimateFireM, false);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_174", m_pAnimateFireM);
+	AnimationCache::createDefList(1, m_pAnimateFireW, false);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_175", m_pAnimateFireW);
+
+	setSelectHead(RT_MWARRIOR);
+	schedule(SEL_SCHEDULE(&CreateRoleUi::updateBtn), 0.2);
+	this->scheduleOnce(schedule_selector(CreateRoleUi::runSelectAction), 0.9f);
+	cur_number = 0;
+	cur_world_number = 0;
+	//CCSize screenSize = CCEGLView::sharedOpenGLView()->getFrameSize();
+	CCNode* sprite = getChildByTag(66);
+	if(sprite != NULL)
+	{
+		sprite->setVisible(false);
+	}
+}
+
+void CreateRoleUi::onBackBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_1);
+	signalBackBtnClicked.emit();
+	_inputLabel->detachWithIME();
+}
+
+void CreateRoleUi::onRandNameBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	signalRandNameBtnClicked.emit();
+}
+
+void CreateRoleUi::onBeginBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_3);
+	signalBeginBtnClicked.emit();
+	_inputLabel->detachWithIME();
+}
+
+void CreateRoleUi::onHeadWarriorNanTouch( TouchSprite*, bool )
+{//男
+	AudioPlayer::getSigletonPtr()->stopSoundUIEffect(0);//每次选择停止所有特效
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	m_Sex = 1;
+	setSelectHead(RT_MWARRIOR);
+	getTouchSprite(NT_SelHead)->setVisible(false);
+	switch(selectTemp)
+	{
+	case 1:
+		getTouchSprite(NT_WarriorHeadNan)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nanheadbtnh"));
+		getTouchSprite(NT_WarriorHeadNv)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nvheadbtnn"));
+		//_selRoleType = RT_MWARRIOR;
+#if		(CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(MANWARRIOR_A);
+#else
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(MANWARRIOR);
+#endif
+		setSelectHead(RT_MWARRIOR);
+		break;
+	case 2:
+		getTouchSprite(NT_WarriorHeadNan)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nanheadbtnh"));
+		getTouchSprite(NT_WarriorHeadNv)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nvheadbtnn"));
+		//getTouchSprite(NT_WarriorHeadNan)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_magebtnh"));
+		//getTouchSprite(NT_WarriorHeadNv)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_magebtnn"));
+		//_selRoleType = RT_MMAGE;
+#if		(CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(MANMAGE_A);
+#else
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(MANMAGE);
+#endif
+		setSelectHead(RT_MMAGE);
+		break;
+	case 3:
+		getTouchSprite(NT_WarriorHeadNan)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nanheadbtnh"));
+		getTouchSprite(NT_WarriorHeadNv)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nvheadbtnn"));
+		//getTouchSprite(NT_WarriorHeadNan)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_taoistbtnh"));
+		//getTouchSprite(NT_WarriorHeadNv)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_taoistbtnn"));//createroleui_taoistnvheadn
+		//_selRoleType = RT_MTAOIST;
+#if		(CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(MANMTAOIST_A);
+#else
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(MANMTAOIST);
+#endif
+		setSelectHead(RT_MTAOIST);
+		break;
+	default:
+		getTouchSprite(NT_WarriorHeadNan)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nanheadbtnh"));
+		getTouchSprite(NT_WarriorHeadNv)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nvheadbtnn"));
+		//_selRoleType = RT_MWARRIOR;
+#if		(CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(MANWARRIOR_A);
+#else
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(MANWARRIOR);
+#endif
+		setSelectHead(RT_MWARRIOR);
+	}
+//	CreateRole::getInstance()->onRandNameBtnPressed();
+	_inputLabel->detachWithIME();
+}
+
+void CreateRoleUi::onHeadWarriorNvTouch( TouchSprite*, bool )
+{//女
+	AudioPlayer::getSigletonPtr()->stopSoundUIEffect(0);//每次选择停止所有特效
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	m_Sex = 2;
+	setSelectHead(RT_WWARRIOR);
+	getTouchSprite(NT_SelHead)->setVisible(false);
+	switch(selectTemp)
+	{
+	case 1:
+		getTouchSprite(NT_WarriorHeadNan)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nanheadbtnn"));
+		getTouchSprite(NT_WarriorHeadNv)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nvheadbtnh"));
+		//_selRoleType = RT_WWARRIOR;
+#if		(CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(WOMANWARRIOR_A);
+#else
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(WOMANWARRIOR);
+#endif
+		setSelectHead(RT_WWARRIOR);
+		break;
+	case 2:
+		getTouchSprite(NT_WarriorHeadNan)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nanheadbtnn"));
+		getTouchSprite(NT_WarriorHeadNv)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nvheadbtnh"));
+		//_selRoleType = RT_WMAGE;
+#if		(CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(NVMAGE_A);
+#else
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(NVMAGE);
+#endif
+		setSelectHead(RT_WMAGE);
+		break;
+	case 3:
+		getTouchSprite(NT_WarriorHeadNan)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nanheadbtnn"));
+		getTouchSprite(NT_WarriorHeadNv)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nvheadbtnh"));
+		//_selRoleType = RT_WTAOIST;
+#if		(CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(NVMTAOIST_A);
+#else
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(NVMTAOIST);
+#endif
+		setSelectHead(RT_WTAOIST);
+		break;
+	default:
+		getTouchSprite(NT_WarriorHeadNan)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nanheadbtnn"));
+		getTouchSprite(NT_WarriorHeadNv)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nvheadbtnh"));
+		setSelectHead(RT_WWARRIOR);
+#if		(CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(WOMANWARRIOR_A);
+#else
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(WOMANWARRIOR);
+#endif
+		break;
+	}
+//	CreateRole::getInstance()->onRandNameBtnPressed();
+	_inputLabel->detachWithIME();
+}
+
+void CreateRoleUi::onHeadMageNanTouch( TouchSprite*, bool )
+{//战士
+	m_SelectAcNode->setPosition(this->getChildByTag(2)->getPosition());
+	AudioPlayer::getSigletonPtr()->stopSoundUIEffect(0);//每次选择停止所有特效
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	selectTemp = 1;
+	if (lastTemp!=selectTemp)
+	{
+		CreateRole::getInstance()->runSelectjobAction();
+	}
+	lastTemp=selectTemp;
+	if (m_Sex == 1)//1是男 2是女的
+	{
+		selJobWarrior->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_warriorbtnh"));
+		selJobMage->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_magebtnn"));
+		selJobTaoist->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_taoistbtnn"));
+#if		(CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(MANWARRIOR_A);
+#else
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(MANWARRIOR);
+#endif
+		setSelectHead(RT_MWARRIOR);
+	}
+	else
+	{
+		selJobWarrior->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_warriorbtnh"));
+		selJobMage->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_magebtnn"));
+		selJobTaoist->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_taoistbtnn"));
+#if		(CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(WOMANWARRIOR_A);
+#else
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(WOMANWARRIOR);
+#endif
+		setSelectHead(RT_WWARRIOR);
+	}
+	_inputLabel->detachWithIME();
+}
+
+void CreateRoleUi::onHeadMageNvTouch( TouchSprite*, bool )
+{//法师
+	m_SelectAcNode->setPosition(this->getChildByTag(3)->getPosition());
+	AudioPlayer::getSigletonPtr()->stopSoundUIEffect(0);//每次选择停止所有特效
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	selectTemp = 2;
+	if (lastTemp!=selectTemp)
+	{
+		CreateRole::getInstance()->runSelectjobAction();
+	}
+	lastTemp=selectTemp;
+	if (m_Sex == 1)//1是男 2是女的
+	{
+		selJobWarrior->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_warriorbtnn"));
+		selJobMage->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_magebtnh"));
+		selJobTaoist->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_taoistbtnn"));
+#if		(CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(MANMAGE_A);
+#else
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(MANMAGE);
+#endif
+		setSelectHead(RT_MMAGE);
+	} 
+	else
+	{
+		selJobWarrior->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_warriorbtnn"));
+		selJobMage->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_magebtnh"));
+		selJobTaoist->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_taoistbtnn"));
+#if		(CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(NVMAGE_A);
+#else
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(NVMAGE);
+#endif
+		setSelectHead(RT_WMAGE);
+	}
+	_inputLabel->detachWithIME();
+}
+
+void CreateRoleUi::onHeadTaoistNanTouch( TouchSprite*, bool )
+{//道士
+	m_SelectAcNode->setPosition(this->getChildByTag(4)->getPosition());
+	AudioPlayer::getSigletonPtr()->stopSoundUIEffect(0);//每次选择停止所有特效
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	selectTemp = 3;
+	if (lastTemp!=selectTemp)
+	{
+		CreateRole::getInstance()->runSelectjobAction();
+	}
+	lastTemp=selectTemp;
+	if (m_Sex == 1)//1是男 2是女的
+	{
+//		getTouchSprite(NT_WarriorHeadNan)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nanheadbtnh"));
+//		getTouchSprite(NT_WarriorHeadNv)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nvheadbtnn"));
+
+		selJobWarrior->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_warriorbtnn"));
+		selJobMage->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_magebtnn"));
+		selJobTaoist->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_taoistbtnh"));
+#if		(CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(MANMTAOIST_A);
+#else
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(MANMTAOIST);
+#endif
+		setSelectHead(RT_MTAOIST);
+	} 
+	else
+	{
+//		getTouchSprite(NT_WarriorHeadNan)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nanheadbtnh"));
+//		getTouchSprite(NT_WarriorHeadNv)->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_nvheadbtnn"));
+
+		selJobWarrior->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_warriorbtnn"));
+		selJobMage->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_magebtnn"));
+		selJobTaoist->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("createroleui_taoistbtnh"));
+#if		(CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(NVMTAOIST_A);
+#else
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(NVMTAOIST);
+#endif
+		setSelectHead(RT_WTAOIST);
+	}
+	_inputLabel->detachWithIME();
+}
+
+void CreateRoleUi::onHeadTaoistNvTouch( TouchSprite*, bool )
+{
+	setSelectHead(RT_WTAOIST);
+}
+
+void CreateRoleUi::setSelectHead( eRoleType tag )
+{
+	if(_selRoleType == tag)
+		return;
+
+	_selRoleType = tag;
+
+	switch(_selRoleType)
+	{
+	case RT_MWARRIOR:
+		setMaskPos(0);
+		setSelHeadFrame("createroleui_warriorbtnh", NT_WarriorHeadNan);
+		setRoleAction(NT_WarriorHeadNan);
+		//setPhotoFrame("createroleui_warriornanheadh");
+		setTextFrame("createroleui_warriortext");
+		break;
+	case RT_WWARRIOR:
+		setMaskPos(0);
+		setSelHeadFrame("createroleui_warriorbtnh", NT_WarriorHeadNv);
+		setRoleAction(NT_WarriorHeadNv);
+		//setPhotoFrame("createroleui_warriornvheadh");
+		setTextFrame("createroleui_warriortext");
+		break;
+	case RT_MMAGE:
+		setMaskPos(1);
+		setSelHeadFrame("createroleui_warriorbtnh", NT_MageHeadNan);
+		setRoleAction(NT_MageHeadNan);
+		//setPhotoFrame("createroleui_magenanheadh");
+		setTextFrame("createroleui_magetext");
+		break;
+	case RT_WMAGE:
+		setMaskPos(1);
+		setSelHeadFrame("createroleui_warriorbtnh", NT_MageHeadNv);
+		setRoleAction(NT_MageHeadNv);
+		//setPhotoFrame("createroleui_magenvheadh");
+		setTextFrame("createroleui_magetext");
+		break;
+	case RT_MTAOIST:
+		setMaskPos(2);
+		setSelHeadFrame("createroleui_warriorbtnh", NT_TaoistHeadNan);
+		setRoleAction(NT_TaoistHeadNan);
+		//setPhotoFrame("createroleui_taoistnanheadh");
+		setTextFrame("createroleui_taoisttext");
+		break;
+	case RT_WTAOIST:
+		setMaskPos(2);
+		setSelHeadFrame("createroleui_warriorbtnh", NT_TaoistHeadNv);
+		setRoleAction(NT_TaoistHeadNv);
+		//setPhotoFrame("createroleui_taoistnvheadh");
+		setTextFrame("createroleui_taoisttext");
+		break;
+	}
+}
+
+void CreateRoleUi::setMaskPos( int index )
+{
+	if(index < 0 || index > 2)
+		return;
+
+	//for(int i = 0; i < NT_HeadMaskNum; i ++)
+	//{
+	//	if(i == index)
+	//		getChildByTag(i + NT_HeadMask)->setVisible(true);
+	//	else
+	//		getChildByTag(i + NT_HeadMask)->setVisible(false);
+	//}
+
+/*
+	dynamic_cast<CCSprite*>(getChildByTag(NT_WarriroLab))->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(index == 0 ? "createroleui_warriorlabh" : "createroleui_warriorlabn"));
+	dynamic_cast<CCSprite*>(getChildByTag(NT_MageLab))->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(index == 1 ? "createroleui_magelabh" : "createroleui_magelabn"));
+	dynamic_cast<CCSprite*>(getChildByTag(NT_TaoistLab))->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(index == 2 ? "createroleui_taoistlabh" : "createroleui_taoistlabn"));*/
+}
+
+void CreateRoleUi::setSelHeadFrame( const std::string &frameName, eNodeTag tag )
+{
+	CCSprite *sprite = dynamic_cast<CCSprite*>(getChildByTag(NT_SelHead));
+	CC_ASSERT(sprite != NULL);
+}
+
+void CreateRoleUi::setPhotoFrame( const std::string &frameName )
+{
+	CCSprite *sprite = dynamic_cast<CCSprite*>(getChildByTag(NT_RolePhoto));
+	CC_ASSERT(sprite != NULL);
+	sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName.c_str()));
+}
+
+void CreateRoleUi::setTextFrame( const std::string &frameName )
+{
+	CCSprite *sprite = dynamic_cast<CCSprite*>(getChildByTag(NT_DescText));
+	CC_ASSERT(sprite != NULL);
+	sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName.c_str()));
+}
+
+void CreateRoleUi::setRoleAction( eNodeTag e )
+{
+	m_RoleFrame->StopAction(true);
+	std::string strjob;
+	CCSprite* fa_shi_fire = dynamic_cast<CCSprite*>(m_RoleFrame->getChildByTag(202));
+	if(fa_shi_fire != NULL)
+	{
+		fa_shi_fire->stopAllActions();
+		fa_shi_fire->retain();
+		fa_shi_fire->removeFromParentAndCleanup(true);
+		fa_shi_fire = NULL;
+	}
+	switch(e)
+	{
+	case RT_MWARRIOR:
+		{
+			strjob = "male_zhanshi_";
+			m_pShadow->initWithSpriteFrame( CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("nanzhanshi_shadow"));
+		}
+		break;
+	case RT_WWARRIOR:
+		{
+			strjob = "female_zhanshi_";
+			m_pShadow->initWithSpriteFrame( CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("nvzhanshi_shadow"));
+		}
+		break;
+	case RT_MMAGE:
+		{
+			strjob = "male_fashi_";
+			m_pShadow->initWithSpriteFrame( CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("nanfashi_shadow"));
+			BSAnimate *animate = m_pAnimateFireM[0];
+			if (animate)
+			{
+				CCSprite* m_pFashiFire = CCSprite::create();
+				m_pFashiFire->setZOrder(100);
+				m_pFashiFire->setTag(202);
+				m_RoleFrame->addChild(m_pFashiFire);
+				m_pFashiFire->runAction(CCRepeatForever::create(animate));
+				m_RoleFrame->InitTextureWithSpriteFrame(strjob.c_str());
+				CreateRole::getInstance()->setRoleAnim(m_RoleFrame,0.1f,true,202,0.16,0.12);
+				return;
+			}
+		}
+		break;
+	case RT_WMAGE:
+		{
+			strjob = "female_fashi_";
+			m_pShadow->initWithSpriteFrame( CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("nvfashi_shadow"));
+			BSAnimate *animate = m_pAnimateFireW[0];
+			if (animate)
+			{
+				CCSprite* m_pFashiFire = CCSprite::create();
+				m_pFashiFire->setZOrder(100);
+				m_pFashiFire->setTag(202);
+				m_RoleFrame->addChild(m_pFashiFire);
+				m_pFashiFire->runAction(CCRepeatForever::create(animate));
+				m_RoleFrame->InitTextureWithSpriteFrame(strjob.c_str());
+				CreateRole::getInstance()->setRoleAnim(m_RoleFrame,0.1f,true,202,-0.18,0.09);
+				return;
+			}
+		}
+		break;
+	case RT_MTAOIST:
+		{
+			strjob = "male_daoshi_";
+			m_pShadow->initWithSpriteFrame( CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("nandaoshi_shadow"));
+		}
+		break;
+	case RT_WTAOIST:
+		{
+			strjob = "female_daoshi_";
+			m_pShadow->initWithSpriteFrame( CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("nvdaoshi_shadow"));
+		}
+		break;
+	default:
+		{
+			strjob = "male_zhanshi_";
+			m_pShadow->initWithSpriteFrame( CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("nanzhanshi_shadow"));
+		}
+		break;
+	}
+	m_RoleFrame->InitTextureWithSpriteFrame(strjob.c_str());
+	CreateRole::getInstance()->setRoleAnim(m_RoleFrame,0.1f,true);
+}
+TouchSprite * CreateRoleUi::getTouchSprite( eNodeTag tag )
+{
+	return dynamic_cast<TouchSprite*>(getChildByTag(tag));
+}
+
+bool CreateRoleUi::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if ( !isVisible() || !isRunning() || !hasVisibleParents() )
+	{
+		return false;
+	}
+	if(isTouchOnNodeContent(_inputNode, pTouch))
+	{
+		_inputLabel->attachWithIME();
+		return true;
+	}
+	else
+	{
+		_inputLabel->detachWithIME();
+		return false;
+	}
+}
+
+void CreateRoleUi::onEnter()
+{
+//	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+}
+
+void CreateRoleUi::onExit()
+{
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+	AnimationCache::getInstance()->releaseDefList(m_pAnimateFireM);
+	AnimationCache::getInstance()->releaseDefList(m_pAnimateFireW);
+	AnimationCache::getInstance()->releaseSinEffect("E1_174",true);
+	AnimationCache::getInstance()->releaseSinEffect("E1_175",true);
+	_plist.clear();
+	CCLayer::onExit();
+//	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	unschedule(SEL_SCHEDULE(&CreateRoleUi::updateBtn));
+}
+
+void CreateRoleUi::updateBtn( float dt )
+{
+	CCControlButton *btn = static_cast<CCControlButton*>(getChildByTag(NT_BeginBtn));
+	CC_ASSERT(btn != NULL);
+	if(_inputLabel->getCharCount() == 0)
+		btn->setEnabled(false);
+	else
+		btn->setEnabled(true);
+}
+
+void CreateRoleUi::setRoleName( const std::string &roleName )
+{
+	_inputLabel->setString(roleName.c_str());
+}
+
+void CreateRoleUi::runSelectAction(float dt)
+{
+	m_SelectAcNode->BeginAction(0.1f, true);
+}
+
+void CreateRoleUi::setBtnTouch( bool isToush )
+{
+	 CCControlButton *btn=dynamic_cast<CCControlButton*>(getChildByTag(NT_BeginBtn));
+	 if (btn)
+	 {
+		 if (!isToush)
+		 {
+			unschedule(SEL_SCHEDULE(&CreateRoleUi::updateBtn));
+		 }
+		 else
+		 {
+			 schedule(SEL_SCHEDULE(&CreateRoleUi::updateBtn));
+		 }
+		 btn->setEnabled(isToush);
+	 }
+}
+
+//当用户启动虚拟键盘是的回调
+bool CreateRoleUi::onTextFieldAttachWithIME(CCTextFieldTTF *pSender)
+{
+	return false;
+}
+//当用户进行输入是的回调函数
+bool CreateRoleUi::onTextFieldInsertText(CCTextFieldTTF *pSender, const char* text, int nLen)
+{
+	if (cur_number < MAX_NAME_WORD * 3)
+	{
+		if(cur_number == 0)
+		{
+			_inputLabel->setString("");
+		}
+		if(_utf_length(text) == 1)
+		{
+			++cur_world_number;
+		}
+		if(cur_world_number > 12)
+		{
+			cur_world_number = 12;
+			return true;
+		}
+		cur_number += _utf_length(text);
+		return false;
+	}else
+	{
+		return true;
+	}
+}
+//当用户关闭虚拟键盘时的回调
+bool CreateRoleUi::onTextFieldDetachWithIME(CCTextFieldTTF * sender)
+{
+	return false;
+	//return true; 不关闭虚拟键盘
+}
+//当用户删除文字时的回调
+bool CreateRoleUi::onTextFieldDeleteBackward(CCTextFieldTTF *pSender, const char* text, int nLen)
+{
+	CCLog("TextField Delete text:%s, nLen:%d", text, nLen);
+	if ((size_t)cur_number >= _utf_length(text))
+	{
+		cur_number -= _utf_length(text);
+		if(_utf_length(text) == 1)
+		{
+			--cur_world_number;
+			if(cur_world_number < 0)
+			{
+				cur_world_number = 0;
+			}
+		}
+		CCLog("TextField Delete _curInputNum:%d", cur_number);
+	}else
+	{
+		cur_number = 0;
+	}
+	return false;
+	//return true; 不删除
+}

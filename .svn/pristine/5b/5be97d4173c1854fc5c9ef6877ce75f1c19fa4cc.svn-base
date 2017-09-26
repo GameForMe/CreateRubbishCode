@@ -1,0 +1,258 @@
+#include "KaifuhuodongUi.h"
+#include "World.h"
+#include "UiTools.h"
+#include "UiLoader.h"
+#include "ItemNode.h"
+#include "KaifuHuodongMgr.h"
+#include "Helper.h"
+KaifuhuodongUi::KaifuhuodongUi()
+{
+
+}
+
+KaifuhuodongUi::~KaifuhuodongUi()
+{
+
+}
+
+CCNode * KaifuhuodongUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["KaifuhuodongUiLayer"] = UiNodeLoader<KaifuhuodongUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("kaifuhuodong", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+KaifuhuodongUiLayer * KaifuhuodongUi::getUiLayer()
+{
+	return getUiNodeByTag<KaifuhuodongUiLayer>(WCT_KaifuActivity);
+}
+
+void KaifuhuodongUi::updateData()
+{
+	KaifuhuodongUiLayer * pLayer = getUiLayer();
+	if (pLayer)
+	{
+		pLayer->updateData();
+	}
+}
+
+KaifuhuodongUiLayer::KaifuhuodongUiLayer():_item(NULL)
+{
+
+}
+
+KaifuhuodongUiLayer::~KaifuhuodongUiLayer()
+{
+	if(_verticalList != NULL)
+	{
+		_verticalList->clear();
+		delete _verticalList;
+		_verticalList = NULL;
+	}
+	if(_verticalList2 != NULL)
+	{
+		_verticalList2->clear();
+		delete _verticalList2;
+		_verticalList2 = NULL;
+	}
+}
+
+cocos2d::SEL_MenuHandler KaifuhuodongUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler KaifuhuodongUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", KaifuhuodongUiLayer::onCloseBtnPressed);
+	return NULL;
+}
+
+void KaifuhuodongUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	m_pMainNode = getChildByTag(Kaifu_Main);
+	CC_ASSERT(m_pMainNode != NULL);
+	m_pBiaoQian = m_pMainNode->getChildByTag(Kaifu_BiaoQian);
+	m_pLabel1 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(m_pMainNode->getChildByTag(Kaifu_Label1))));
+	m_pLabel2 = Helper::replaceLabelTTFWithLabelFTAndRemove((dynamic_cast<CCLabelTTF*>(m_pMainNode->getChildByTag(Kaifu_Label2))));
+	m_pContext = m_pMainNode->getChildByTag(Kaifu_Context);
+
+	_btn_group_sv = CCScrollView::create(m_pBiaoQian->getContentSize());
+	m_pBiaoQian->addChild(_btn_group_sv);
+
+	_container = CCNode::create();
+	_container->setContentSize(CCSize(m_pBiaoQian->getContentSize().width,m_pBiaoQian->getContentSize().height));
+
+	_btn_group_sv->setContainer(_container);
+	_btn_group_sv->setTouchEnabled(true);
+	_btn_group_sv->setBounceable(true);
+	_btn_group_sv->setContentSize(_container->getContentSize());
+	_btn_group_sv->setDirection(kCCScrollViewDirectionVertical);
+	_btn_group_sv->setContentOffset(_btn_group_sv->minContainerOffset());
+	_verticalList = new VerticalList<KaifuhuodongListItem>;
+	_verticalList->addToScrollView(_btn_group_sv);
+	_verticalList->setMinSize(m_pBiaoQian->getContentSize());
+	_verticalList->setEnableSelect(true);
+
+	_scrollView2 = createScrollViewWithContent(m_pContext);
+	m_pContext->addChild(_scrollView2);
+	_scrollView2->setContentSize(m_pContext->getContentSize());
+	_verticalList2 = new VerticalList<KaifuhuodongListItemChild>;
+	_verticalList2->addToScrollView(_scrollView2);
+	_verticalList2->setMinSize(m_pContext->getContentSize());
+	//_verticalList2->setItemOffsetY(-75.f);
+	_verticalList2->setEnableSelect(true);
+
+	TTFConfig config;
+	config.fontFilePath=  FT_FONTFACE;
+	config.fontSize = 18;
+	config.outlineSize = 1;
+
+	ziti = LabelFT::createWithTTF(config,"");
+	ziti->setAnchorPoint(ccp(0.0f, 1.0f));
+	ziti->setDimensions(m_pContext->getContentSize().width - 19,0);
+	ziti->setPosition(ccp(10,m_pContext->getContentSize().height - 3));
+	m_pContext->addChild(ziti, 1);
+	ziti->setVisible(false);
+
+	if (KaifuHuodongMgr::getInstance()->requestData())
+		updateData();
+}
+
+void KaifuhuodongUiLayer::onExit()
+{
+	CCLayer::onExit();
+}
+
+bool KaifuhuodongUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (isTouchOnNodeContent(m_pMainNode,pTouch))
+	{
+		if (isTouchOnNodeContent(m_pBiaoQian,pTouch))
+		{
+			//_verticalList->onTouch(pTouch);
+			return true;
+		}
+		if (isTouchOnNodeContent(m_pContext,pTouch))
+		{
+			if (_verticalList2->getItemCount() == 0)
+			{
+				return true;
+			}
+			return false;
+		}
+		return true;
+	}
+	return false;
+}
+
+void KaifuhuodongUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (pTouch->cancel_in_scrollview())
+	{
+		return;
+	}
+
+	if (isTouchOnNodeContent(m_pMainNode,pTouch))
+	{
+		if (isTouchOnNodeContent(m_pBiaoQian,pTouch))
+		{
+			_verticalList->onTouch(pTouch);
+		}
+	}
+}
+
+void KaifuhuodongUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CLOSE_UI(WCT_KaifuActivity);
+}
+
+void KaifuhuodongUiLayer::onEnter()
+{
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1, true);
+	setTouchEnabled(false);
+	CCLayer::onEnter();
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	setAllChildernButtonPriority(this,0);
+}
+
+void KaifuhuodongUiLayer::updateData()
+{
+	_verticalList->clear();
+	std::map<int, SPacket_Activity> activityList = KaifuHuodongMgr::getInstance()->GetActivityList();
+	std::map<int, SPacket_Activity>::iterator it = activityList.begin();
+	for (; it != activityList.end(); it++)
+	{
+		KaifuhuodongListItem* item = new KaifuhuodongListItem;
+		item->setData((*it).second, this);
+		item->updateDataListItem(true);
+		_verticalList->addItem(item);
+	}
+	_verticalList->setSelectItem(0);
+	_verticalList->updateDisplay();
+	_btn_group_sv->setContentOffset(_btn_group_sv->minContainerOffset());
+}
+
+void KaifuhuodongUiLayer::setSelectActivity(int m_iId, KaifuhuodongListItem* item)
+{
+	_verticalList2->clear();
+	std::map<int, SPacket_Activity> activityList = KaifuHuodongMgr::getInstance()->GetActivityList();
+	std::map<int, SPacket_Activity>::iterator it = activityList.find(m_iId);
+	_item = item;
+	if (it != activityList.end() && item)
+	{
+		item->updateData(m_pContext, _verticalList2, ziti);
+		item->updateDataListItem(false);
+		
+
+		if (m_pLabel1 && m_pLabel2)
+		{
+			SProtoKaifuActivity* pInfo = KaifuHuodongMgr::getInstance()->getKaifuActivity((*it).second.m_iId);
+			if (pInfo)
+			{
+				m_pLabel1->setString(pInfo->title.c_str());
+
+				SPacket_Activity* pPacketInfo = KaifuHuodongMgr::getInstance()->getKaifuPacketActivity((*it).second.m_iId);
+				if (pPacketInfo)
+				{
+					tagDWORDTime beginTime = pPacketInfo->beginTime;
+					tagDWORDTime endTime = pPacketInfo->endTime;
+					CCString* str = CCString::createWithFormat("20%02d-%02d-%02d 00:00 -- 20%02d-%02d-%02d 00:00", beginTime.year, beginTime.month, beginTime.day
+						, endTime.year, endTime.month, endTime.day);
+					m_pLabel2->setString(str->getCString());
+				}
+			}
+		}
+		_verticalList2->updateDisplay();
+		_scrollView2->setContentOffset(_scrollView2->minContainerOffset());
+	}
+	_scrollView2->update_child_touch_clip_rect();
+}
+
+void KaifuhuodongUiLayer::updateReceiveRewardBtnState(int sendBefore)
+{
+	if (_item)
+	{
+		_item->updateBtnState(sendBefore);
+		_item->updateDataListItem(false);
+
+		if (sendBefore == 2)
+		{
+			updateSelectData();
+		}
+	}
+}
+
+void KaifuhuodongUiLayer::updateSelectData()
+{
+	_verticalList2->clear();
+
+	_item->updateData(m_pContext, _verticalList2, ziti);
+	_item->updateDataListItem(false);
+
+	_verticalList2->updateDisplay();
+	_scrollView2->setContentOffset(_scrollView2->minContainerOffset());
+	_scrollView2->update_child_touch_clip_rect();
+}

@@ -1,0 +1,1340 @@
+#include "EquipLevelUpUi.h"
+#include "item.h"
+#include "CfgReader.h"
+#include "UiResourceMgr.h"
+#include "World.h"
+#include "PackageManager.h"
+#include "DBMgr.h"
+#include "MessageBoxUi.h"
+#include "StringMgr.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "UiManager.h"
+#include "ToolTip.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "EquipLevelUpUiMgr.h"
+#include "BuySetUi.h"
+#include "Shop_define.h"
+#include "WorldPacket.h"
+#include "CommonMsgDefine.h"
+#include "TCPClient.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "NumericalIniMgr.h"
+#include "EquipFusionManager.h"
+#include "EquipLevelUpNoticeMgr.h"
+#include "EquipLevelUpNoticeUi.h"
+#include "EquipUpStarUIMgr.h"
+#include "PackageUi.h"
+#include "RoleEquipUi.h"
+#include "ItemTip.h"
+#include "Helper.h"
+#include "PlacardManager.h"
+
+CCNode * EquipLevelUpUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["EquipLevelUpUiLayer"] = UiLayerLoader<EquipLevelUpUiLayer>::loader();
+	nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+	CCNode *uiNode = readUiFromCCBI("equiplevelupui", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+EquipLevelUpUiLayer * EquipLevelUpUi::getUiLayer()
+{
+	return getUiNodeByTag<EquipLevelUpUiLayer>(WCT_EquipLevelUpUi);
+}
+
+void EquipLevelUpUi::onServerResult( bool isOk )
+{
+	if (isOk)
+	{
+		//std::string ss = "\xE5\x8D\x87\xE7\xBA\xA7\xE6\x88\x90\xE5\x8A\x9F\xEF\xBC\x81";
+		//ToolTip::getInstance()->push(ss);
+		EquipLevelUpUiLayer* ui = getUiNodeByTag<EquipLevelUpUiLayer>(WCT_EquipLevelUpUi);
+		if (ui == NULL)
+		{
+			return;
+		}
+		CC_ASSERT(ui != NULL);
+		ui->playLvUpSE(EquipLevelUpUiMgr::getInstance()->getLevelupPower());
+		PackageUi* layer=getUiNodeByTag<PackageUi>(WCT_PACKAGEUI);
+		//RoleEquipUi* roleEquipUi=getUiNodeByTag<RoleEquipUi>(WCT_ROLEEQUIPUI);
+		RoleEquipUi* roleEquipUi=GET_UI(RoleEquipUi, WCT_ROLEEQUIPUI);
+		if(layer)
+		{
+			layer->updatePackage();
+		}
+		if(roleEquipUi)
+		{
+			roleEquipUi->updateEquipment();
+			roleEquipUi->updateDisplay();
+		}
+		//		CLOSE_UI(WCT_EquipLevelUpUi);
+	}
+	else
+	{
+		std::string ss = "\xE5\x8D\x87\xE7\xBA\xA7\xE5\xA4\xB1\xE8\xB4\xA5\x2D\x20\x2D\x2E";
+		ToolTip::getInstance()->push(ss);
+		//		CLOSE_UI(WCT_EquipLevelUpUi);
+	}
+}
+
+void EquipLevelUpUi::updateUplevelEquipAttr()
+{
+	EquipLevelUpUiLayer* ui = getUiNodeByTag<EquipLevelUpUiLayer>(WCT_EquipLevelUpUi);
+
+	if(ui != NULL)
+		ui->setUplevelEquipAttr();
+	else
+		return;
+}
+
+void EquipLevelUpUi::getLevelupStuff( int stuffResult )
+{
+	switch( stuffResult)
+	{
+	case 0:
+		{
+			std::string ss = "\xE8\xB4\xAD\xE4\xB9\xB0\xE6\x88\x90\xE5\x8A\x9F\xEF\xBC\x81";
+			ToolTip::getInstance()->push(ss);
+			EquipLevelUpUiLayer* ui = getUiNodeByTag<EquipLevelUpUiLayer>(WCT_EquipLevelUpUi);
+			if(ui != NULL)
+				ui->updateStuffNumLabel();
+			break;
+		}
+	case E_LvUP_Item_Not_Exist:
+		{
+			std::string ss = "\xE8\xAF\xA5\xE7\x89\xA9\xE5\x93\x81\xE4\xB8\x8D\xE5\xAD\x98\xE5\x9C\xA8";
+			ToolTip::getInstance()->push(ss);
+			break;
+		}
+	case E_LvUp_Bag_Count_Error:
+		{
+			std::string ss = "\xE8\xB4\xAD\xE4\xB9\xB0\xE6\x95\xB0\xE9\x87\x8F\xE9\x94\x99\xE8\xAF\xAF";
+			ToolTip::getInstance()->push(ss);
+			break;
+		}
+	case E_LvUp_Bag_YuanBao_Not_Enough:
+		{
+			//std::string ss = "\xE5\x85\x83\xE5\xAE\x9D\xE4\xB8\x8D\xE8\xB6\xB3";
+			//ToolTip::getInstance()->push(ss);
+			//add by vvv 2014.11.05
+			//MessageBoxUi *messageBox = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,GET_STR(7024).c_str(), TEXT_UTF8_RECHARGE, TEXT_UTF8_QUXIAO);//充值，取消
+			//messageBox->signalOkBtnPressed.connect(this, &EquipLevelUpUi::noticeRecharge);
+			//World::getInstance()->getScene()->addChild(messageBox, WZ_MESSAGEBOX, WCT_MessageBox);
+			RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+			break;
+		}
+	case E_LvUp_Bag_Buy_Not_Enough:
+		{
+			std::string ss = "\xE8\x83\x8C\xE5\x8C\x85\xE7\xA9\xBA\xE9\x97\xB4\xE4\xB8\x8D\xE8\xB6\xB3\x2C\xE6\x97\xA0\xE6\xB3\x95\xE8\xB4\xAD\xE4\xB9\xB0";
+			ToolTip::getInstance()->push(ss);
+			break;
+		}
+	default:
+		{
+			std::string ss = "\xE6\x9C\xAA\xE7\x9F\xA5\xE9\x94\x99\xE8\xAF\xAF\xEF\xBC\x81";
+			ToolTip::getInstance()->push(ss);
+			break;
+		}
+	}
+}
+void EquipLevelUpUi::noticeRecharge()
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_4);
+	OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+}
+
+cocos2d::SEL_MenuHandler EquipLevelUpUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{	
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler EquipLevelUpUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", EquipLevelUpUiLayer::onCloseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLevelUpBtnPressed", EquipLevelUpUiLayer::onLevelUpBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLevelupDescPressed", EquipLevelUpUiLayer::onLevelupDescPressed);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed2", EquipLevelUpUiLayer::onCloseBtnPressed2);
+	//CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", EquipLevelUpUiLayer::onOkBtnPressed);
+	return NULL;
+}
+
+void EquipLevelUpUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	_equipId = -1;
+	_n64EquipId = 0;
+	//_descframe = NULL;
+	m_bTouchFunc = true;
+	m_bIsPotential = true;
+	//_newEquip = NULL;
+	_lvupCenterAcNode = NULL;
+	_lvupAroundAcNode1 = NULL;
+	_lvupAroundAcNode2 = NULL;
+	_lvupAroundAcNode3 = NULL;
+	_lvupAroundAcNode4 = NULL;
+	_stuffIndex = 0;
+
+	std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+	std::string sSEEquipLvUpCenter = sSEDir + "E1_73.plist";
+	std::string sSEEquipLvUpAround = sSEDir + "E1_99.plist";
+	_plist.insert(sSEEquipLvUpCenter);
+	_plist.insert(sSEEquipLvUpAround);
+	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEEquipLvUpCenter.c_str());
+	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSEEquipLvUpAround.c_str());
+
+	_stuffArray = CCArray::create();
+	_stuffArray ->retain();
+	_frame = dynamic_cast<CCSprite*>(getChildByTag(EUUT_Frame));
+	_itemBgSp = dynamic_cast<CCNode*>(_frame->getChildByTag(EUUT_ItemBGSP));
+	//_descframe = dynamic_cast<FrameSprite*>(_frame->getChildByTag(EUUT_DescFrame));
+	//_descframe->retain();
+	//_descframe->removeFromParent();
+	//CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	//_descframe->setPosition(ccp(winSize.width / 2.0f, winSize.height / 2.0f));
+	CC_ASSERT(_frame != NULL);
+
+	bgsprite=dynamic_cast<CCSprite*>(_frame->getChildByTag(89));
+	CCRotateBy* rotateto = CCRotateBy::create(20, 360);
+	bgsprite->runAction(CCRepeatForever::create(rotateto));
+
+	_lvupCenterAcNode = this->getCenterLevelupEffect();
+	_lvupCenterAcNode->setPosition(_frame->getChildByTag(88)->getPositionX(),_frame->getChildByTag(88)->getPositionY());//add by vvv 2014.11.12 特效位置
+	_frame->addChild(_lvupCenterAcNode, RZN_EFFECT);
+	_lvupAroundAcNode1 = this->getAroundLevelupEffect();
+	_lvupAroundAcNode1->setPosition(_itemBgSp->getChildByTag(EUUT_Stuff1)->getPosition());
+	_itemBgSp->addChild(_lvupAroundAcNode1, RZN_EFFECT);
+	_lvupAroundAcNode2 = this->getAroundLevelupEffect();
+	_lvupAroundAcNode2->setPosition(_itemBgSp->getChildByTag(EUUT_Stuff2)->getPosition());
+	_itemBgSp->addChild(_lvupAroundAcNode2, RZN_EFFECT);
+	_lvupAroundAcNode3 = this->getAroundLevelupEffect();
+	_lvupAroundAcNode3->setPosition(_itemBgSp->getChildByTag(EUUT_Stuff3)->getPosition());
+	_itemBgSp->addChild(_lvupAroundAcNode3, RZN_EFFECT);
+	_lvupAroundAcNode4 = this->getAroundLevelupEffect();
+	_lvupAroundAcNode4->setPosition(_itemBgSp->getChildByTag(EUUT_EquipAItem)->getPosition());
+	_itemBgSp->addChild(_lvupAroundAcNode4, RZN_EFFECT);
+
+
+	//5个物品的名称
+	itemName_1 = dynamic_cast<CCLabelTTF*>(_itemBgSp->getChildByTag(EUUT_ITEMNAME_1));
+	itemName_2 = (CCLabelTTF*)(_itemBgSp->getChildByTag(EUUT_ITEMNAME_2));
+	itemName_3 = (CCLabelTTF*)(_itemBgSp->getChildByTag(EUUT_ITEMNAME_3));
+	itemName_4 = (CCLabelTTF*)(_itemBgSp->getChildByTag(EUUT_ITEMNAME_4));
+	itemName_5 = (CCLabelTTF*)(_itemBgSp->getChildByTag(EUUT_ITEMNAME_5));
+
+	equipLvUpCoin = (CCLabelTTF*)_frame->getChildByTag(11);
+	CCLabelTTF* currentLable =dynamic_cast<CCLabelTTF*> (_frame->getChildByTag(108));
+	x=currentLable->getPositionX();
+	y=currentLable->getPositionY();
+	//战斗力特效
+	_fightNumBLabel = CCLabelBMFont::create();
+	_fightNumBLabel->setFntFile("Art/Scene/fontNum.fnt");
+	_fightNumBLabel->setAnchorPoint(ccp(0.f, 0.5f));
+	_fightNumBLabel->setScale(0.5f);
+	_frame->addChild(_fightNumBLabel, RZN_EFFECT + 1);
+
+	//战斗力三个字
+	FightFont=CCSprite::createWithSpriteFrameName("EquipLevelUpui_zhandoulismall");
+	FightFont->setPosition(ccp(x+70,y-13));
+	FightFont->setScale(0.6f);
+    _frame->addChild(FightFont,RZN_EFFECT + 1);
+	initBaseAttrNameStr();
+	initAppAttNameStr();
+
+	updateEquipData();
+}
+
+void EquipLevelUpUiLayer::updateHideEquipLevelUpControl()
+{
+	_frame->getChildByTag(12)->setVisible(false);
+	_frame->getChildByTag(13)->setVisible(false);
+	_frame->getChildByTag(103)->setVisible(false);
+	_frame->getChildByTag(999)->setVisible(false);
+	_frame->getChildByTag(888)->setVisible(true);
+	this->updateEquipData();
+}
+
+void EquipLevelUpUiLayer::onEnter()
+{
+	//CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this,1, true);
+	setTouchPriority(1);
+	setTouchEnabled(true);
+	CCLayer::onEnter();
+}
+
+void EquipLevelUpUiLayer::onExit()
+{
+	CC_SAFE_RELEASE(_stuffArray);
+	//CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+
+	//CC_SAFE_RELEASE(_descframe);
+
+	clearStoneItem();
+
+	clearBaseAtt();
+	clearAppAtt();
+
+	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+}
+
+void EquipLevelUpUiLayer::onCloseBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_EquipLevelUpUi);
+}
+
+void EquipLevelUpUiLayer::onLevelUpBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_17);
+	bool bMark = true;
+	std::stringstream ss;
+	int num1 = PackageManager::getInstance()->getItemNumber(EICT_Bag, _equipData.stuffId[0]);
+
+	//【ji】：：：：：：：：：：：：：：：：：：：：：：：：：：：：：：检查升级材料是否满足升级条件
+	int num2 = PackageManager::getInstance()->getItemNumber(EICT_Bag, _equipData.stuffId[1]);
+	int num3 = PackageManager::getInstance()->getItemNumber(EICT_Bag, _equipData.stuffId[2]);
+	if (num1 < _equipData.stuffNum[0] || num2 < _equipData.stuffNum[1] || num3 < _equipData.stuffNum[2])
+	{
+		ss<<"\xE5\x8D\x87\xE7\xBA\xA7\xE6\x9D\x90\xE6\x96\x99\xE4\xB8\x8D\xE8\xB6\xB3";
+		bMark = false;
+	}
+
+	//提示用户，装备升级后会，由于当前角色等级限制无法穿戴
+	
+	if (_equipData.equipLevelUpId != (unsigned int)INVALID && _equipData.equipLevelUpId != 0)
+	{
+		const EquipTypeData* equipTypeData = PackageManager::getInstance()->getEquipTypeData(_equipData.equipLevelUpId);
+		CC_ASSERT(equipTypeData);
+		LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+		if (!ploc)
+			return;
+		if (equipTypeData->minUseLevel > ploc->getLevel())//若升级后的装备大于玩家当前等级，则拒绝升级该武器同时给玩家提示
+		{
+			ToolTip::getInstance()->push(GET_STR(2185));
+			return;
+		}
+	}
+	//f_equipment* equip = EquipLevelUpUiMgr::getInstance()->getEquipment();
+	if(bMark)                                   //【ji】弹出提示框让玩家确认是否升级
+	{
+		/*
+		if(equip->get_equip_consolidate_level()>0){
+			MessageBoxUi *levelUpUi = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, GET_STR(2057).c_str(), "\xE7\xA1\xAE\xE5\xAE\x9A","\xE5\x8F\x96\xE6\xB6\x88");
+			World::getInstance()->getScene()->addChild(levelUpUi, WZ_MESSAGEBOX);
+			levelUpUi->signalOkBtnPressed.connect(this, &EquipLevelUpUiLayer::confirmLevelUp);
+		}
+		else{
+			confirmLevelUp();
+		}*/
+		confirmLevelUp();
+	}
+	else
+	{
+		ToolTip::getInstance()->push(ss.str());                               //【ji】不满足升级条件，提示玩家
+	}
+}
+// gx add
+void EquipLevelUpUiLayer::confirmLevelUp()
+{
+	PackageManager::getInstance()->equipLevelUp(_n64EquipId, _equipData.stuffId);
+	return;
+}
+
+
+void EquipLevelUpUiLayer::updateEquipData()
+{
+	
+	//【ji】::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	f_equipment* equip = EquipLevelUpUiMgr::getInstance()->getEquipment();
+	tagEquip spec;
+	if(equip->get_star_num()<3){
+		spec.equipSpec.nStarLv=equip->get_star_num()+1;
+	}else{
+		spec.equipSpec.nStarLv=equip->get_star_num();
+	}
+	spec.equipSpec.nRating=equip->get_fightli();
+	spec.equipSpec.byQuality=equip->get_item_quality();
+	spec.dw_data_id=equip->get_item_type_id();
+
+	f_equipment* _newEquip= new f_equipment(spec);
+
+	_equipId = equip->get_item_type_id();
+	_n64EquipId = equip->get_item_id(); //装备流水号，用去发给服务器进行装备升级
+	CC_ASSERT(equip != NULL);
+
+	//客户端请求装备升级
+
+	//Src装备ID(INT64)
+	WorldPacket C2G_Msg(NET_C2G_REQUEST_EQUIP_LEVEL_UP);//组装消息头
+	C2G_Msg << _n64EquipId; //装备流水号
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);//发送
+
+	int tempEquipLv = EquipFusionManager::getInstance()->getCurEquipLevel(_equipId);
+	equipLvUpCoin->setString(CCString::createWithFormat("%lld",NumericalIniMgr::getInstance()->GetEquipLevelUpMoney(tempEquipLv))->getCString());
+	const EquipTypeData* typeData = PackageManager::getInstance()->getEquipTypeData(equip->get_item_type_id());  //【ji】获取此种装备的类型数据
+	CC_ASSERT(typeData);
+	const EquipTypeData& equipTypeData = *typeData;
+
+	const EquipTypeData* levelTypeData = PackageManager::getInstance()->getEquipTypeData(equip->get_item_type_id());       //下一级装备id
+	CC_ASSERT(levelTypeData);
+	const EquipTypeData& upLevelEquipTypeData = *levelTypeData;
+
+	CCLabelTTF* currentLable =dynamic_cast<CCLabelTTF*> (_frame->getChildByTag(108));
+	int uplevelEquipStrengthenLevel = equip->get_equip_consolidate_level();                                          //下一级装备强化等级
+	//现在升级装备改为不掉强化等级------2015年12月19日
+	/*
+	if (!isShowLeftTime())
+	{
+		if(uplevelEquipStrengthenLevel > 4)
+		{
+			uplevelEquipStrengthenLevel -= 2;
+		}
+	}*/
+	CCString* uplevelEquipName;
+	if (uplevelEquipStrengthenLevel < 0)
+	{
+		uplevelEquipStrengthenLevel = 0;
+	}
+	if(uplevelEquipStrengthenLevel == 0)
+	{
+		uplevelEquipName = CCString::createWithFormat("%s",(PackageManager::getInstance()->GetNameByLevel(upLevelEquipTypeData,_newEquip->get_star_num())+equip->GetItemName()).c_str());
+	}else{
+		uplevelEquipName = CCString::createWithFormat("%s + %d",(PackageManager::getInstance()->GetNameByLevel(upLevelEquipTypeData,_newEquip->get_star_num())+equip->GetItemName()).c_str(),uplevelEquipStrengthenLevel);
+	}
+	currentLable->setPosition(ccp(x,y+15));
+	currentLable->setString(uplevelEquipName->getCString());                                    //装备名称
+
+	setEquipQuality((EItemQuality)equip->get_item_quality());
+
+	GameActionNode* actionNode=getBattleSuperEffect();
+	actionNode->setPosition(ccp(x+100,y-10));
+	_frame->addChild(actionNode);
+	actionNode->BeginAction(0.07f,true);                                              //战斗力特效
+	actionNode->setScale(0.6f);
+
+	setFightText(equip->get_fightli());
+
+	currentLable = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(104));    
+	currentLable->setString(upLevelEquipTypeData.profession.c_str());                       //装备职业
+
+	CCString* upLevelEquipLevel = CCString::createWithFormat("%d",upLevelEquipTypeData.minUseLevel);
+	currentLable = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(105));                                   
+	currentLable->setString(upLevelEquipLevel->getCString());                                 //装备等级
+
+	currentLable = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(106));
+	currentLable->setString(upLevelEquipTypeData.pos.c_str());                                 //装备位置
+
+	currentLable = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(107));
+	CCString* upLevelEquipDuration = CCString::createWithFormat("%d",upLevelEquipTypeData.durability);    
+	currentLable->setString(upLevelEquipDuration->getCString());                                //装备耐久
+
+ 	_equipData.equipId = equip->get_item_type_id();
+ 	_equipData.equipLevelUpId = equipTypeData.levelUpId;
+ 	_equipData.stuffId[0] = equipTypeData.stuffId[3*equip->get_star_num()+0];
+ 	_equipData.stuffNum[0] = equipTypeData.stuffNum[3*equip->get_star_num()+0];
+ 	_equipData.stuffId[1] = equipTypeData.stuffId[3*equip->get_star_num()+1];
+ 	_equipData.stuffNum[1] = equipTypeData.stuffNum[3*equip->get_star_num()+1];
+ 	_equipData.stuffId[2] = equipTypeData.stuffId[3*equip->get_star_num()+2];
+ 	_equipData.stuffNum[2] = equipTypeData.stuffNum[3*equip->get_star_num()+2];	
+	CCNode* lastIcon = _itemBgSp->getChildByTag(EUUT_OriginEquipIcon);
+	if (lastIcon != NULL)
+		lastIcon->removeFromParent();
+	ItemNode* equipAItem = ItemNode::create();
+	equipAItem->setPosition(_itemBgSp->getChildByTag(EUUT_EquipAItem)->getPosition());
+	equipAItem->initWithItem(equip,false);
+	_itemBgSp->addChild(equipAItem);
+	equipAItem->setTag(EUUT_OriginEquipIcon);
+
+	if(_frame->getChildByTag(EUUT_NextEquipItemNodeRight)!=NULL){
+		_frame->removeChildByTag(EUUT_NextEquipItemNodeRight);
+	}
+	ItemNode* equipBItem = ItemNode::create();
+	equipBItem->setPosition(_frame->getChildByTag(EUUT_EquipBItem)->getPosition());
+   	equipBItem->initWithItem(_newEquip,false);
+	equipBItem->setTag(EUUT_NextEquipItemNodeRight);
+	_frame->addChild(equipBItem);
+//	equipBItem->VisibleBlock(false);
+//	ItemNode* stuff1Item = getItemNode(EUUT_Stuff1);
+	if (equip->get_star_num() < MAX_EQUIP_LEVEL)
+	{
+		ItemNode* stuff1Item = ItemNode::create();
+		stuff1Item->setPosition(_itemBgSp->getChildByTag(EUUT_Stuff1)->getPosition());
+		stuff1Item->setDataId(_equipData.stuffId[0]);
+		_itemBgSp->addChild(stuff1Item);
+		stuff1Item->VisibleBlock(false);
+		_stuffArray->addObject(stuff1Item);
+		//	ItemNode* stuff2Item = getItemNode(EUUT_Stuff2);
+		ItemNode* stuff2Item = ItemNode::create();
+		stuff2Item->setPosition(_itemBgSp->getChildByTag(EUUT_Stuff2)->getPosition());
+		stuff2Item->setDataId(_equipData.stuffId[1]);
+		_itemBgSp->addChild(stuff2Item);
+		stuff2Item->VisibleBlock(false);
+		_stuffArray->addObject(stuff2Item);
+		//	ItemNode* stuff3Item = getItemNode(EUUT_Stuff3);
+		ItemNode* stuff3Item = ItemNode::create();
+		stuff3Item->setPosition(_itemBgSp->getChildByTag(EUUT_Stuff3)->getPosition());
+		stuff3Item->setDataId(_equipData.stuffId[2]);
+		_itemBgSp->addChild(stuff3Item);
+		stuff3Item->VisibleBlock(false);
+		_stuffArray->addObject(stuff3Item);
+	}
+//	ItemNode *nextequipItem = getItemNode(EUUT_NextEquipItem);
+	ItemNode* nextequipItem = ItemNode::create();
+	CC_ASSERT(nextequipItem != NULL);
+	//nextequipItem->initWithItem(equip,false);
+	if(_frame->getChildByTag(EUUT_NextEquipItemNodeLeft)!=NULL){
+		_frame->removeChildByTag(EUUT_NextEquipItemNodeLeft);
+	}
+	nextequipItem->initWithItem(_newEquip,false);
+	nextequipItem->setPosition(_frame->getChildByTag(EUUT_NextEquipItem)->getPosition());
+	nextequipItem->setTag(EUUT_NextEquipItemNodeLeft);
+	_frame->addChild(nextequipItem);
+
+	CC_SAFE_DELETE(_newEquip);
+//	nextequipItem->VisibleBlock(false);
+		
+	//清除stoneitem
+	clearStoneItem();
+
+	//加载镶嵌的宝石   首先判断装备是否有镶嵌孔，没有则不添加宝石框
+	if (upLevelEquipTypeData.gemHole)
+	{
+		for (int i = 0; i < MAX_EQUIPHOLE_NUM; i++ )
+		{//宝石;
+			unsigned int id = equip->get_equip_hold_gem_id(i);
+			if(id != (unsigned int) -1 && id != (unsigned int) 0)
+			{
+				EquipTipUiStoneItem *item = new EquipTipUiStoneItem(id);
+				//_equipLevelUpStoneList.push_back(item);
+				item->setPosition(ccp(i * 48+62,51));
+				item->addToParent(_frame);
+
+				_equipLevelUpStoneList.push_back(item);
+			}
+			else
+			{
+				EquipTipUiStoneItem *item = new EquipTipUiStoneItem();
+				//_equipLevelUpStoneList.push_back(item);
+				item->setPosition(ccp(i * 48+62,51));
+				item->addToParent(_frame);
+
+				_equipLevelUpStoneList.push_back(item);
+			}
+		}
+	}
+
+	//setEquipQuality((EItemQuality)equip->get_item_quality());
+	//设置本级装备名称和下一级装备名称
+	//本级
+	itemName_1->setString((PackageManager::getInstance()->GetNameByLevel(upLevelEquipTypeData,equip->get_star_num())+equip->GetItemName()).c_str());
+	//下一级
+	itemName_5->setString(uplevelEquipName->getCString());
+	updateStuffNumLabel();
+	//设置魔戒的附加属性
+	//this->getEquipDesc(_equipId);
+
+	
+}
+
+
+void EquipLevelUpUiLayer::setEquipQuality( EItemQuality eQuality )
+{
+	ccColor3B textColor;
+	CCLabelTTF* qLabel = dynamic_cast<CCLabelTTF*>(_frame->getChildByTag(EUUT_Quality));
+	switch(eQuality)
+	{
+	case EIQ_Null:
+		textColor = ccc3(0xfe, 0xf8, 0xd8);
+		qLabel->setColor(textColor);
+		qLabel->setString(converQualityToString(EIQ_Null).c_str());
+		break;
+	case EIQ_Quality0:
+		textColor = ccc3(0xfe, 0xf8, 0xd8);
+		qLabel->setColor(textColor);
+		qLabel->setString(converQualityToString(EIQ_Quality0).c_str());
+		break;
+	case EIQ_Quality1:
+		textColor = ccc3(42, 141, 15);
+		qLabel->setColor(textColor);
+		qLabel->setString(converQualityToString(EIQ_Quality1).c_str());
+		break;
+	case EIQ_Quality2:
+		textColor = ccc3(0x12, 0x7d, 0xa9 );
+		qLabel->setColor(textColor);
+		qLabel->setString(converQualityToString(EIQ_Quality2).c_str());
+		break;
+	case EIQ_Quality3:
+		textColor = ccc3(144, 19, 188);
+		qLabel->setColor(textColor);
+		qLabel->setString(converQualityToString(EIQ_Quality3).c_str());
+		break;
+	case EIQ_Quality4:
+		textColor = ccc3(224, 120, 9);
+		qLabel->setColor(textColor);
+		qLabel->setString(converQualityToString(EIQ_Quality4).c_str());
+		break;
+	case EIQ_Quality5:
+		textColor = ccc3(225, 228, 0);
+		qLabel->setColor(textColor);
+		qLabel->setString(converQualityToString(EIQ_Quality5).c_str());
+		break;
+	default:
+		break;
+	}
+	qLabel->setPosition(ccp(x,y-10));
+}
+
+void EquipLevelUpUiLayer::updateStuffNumLabel()
+{
+	if( _itemBgSp == NULL )
+		return;
+	//const char *str = "\xE4\xB8\xAA";	//个
+	const char *str="";
+	CCLabelTTF *stuff1Label = dynamic_cast<CCLabelTTF*>(_itemBgSp->getChildByTag(EUUT_Stuff1Num));
+	CCLabelTTF *stuff2Label = dynamic_cast<CCLabelTTF*>(_itemBgSp->getChildByTag(EUUT_Stuff2Num));
+	CCLabelTTF *stuff3Label = dynamic_cast<CCLabelTTF*>(_itemBgSp->getChildByTag(EUUT_Stuff3Num));
+	CC_ASSERT(stuff1Label != NULL && stuff2Label != NULL && stuff3Label != NULL);
+	int num1, num2, num3;
+	num1 = PackageManager::getInstance()->getItemNumber(EICT_Bag, _equipData.stuffId[0]);
+	num2 = PackageManager::getInstance()->getItemNumber(EICT_Bag, _equipData.stuffId[1]);
+	num3 = PackageManager::getInstance()->getItemNumber(EICT_Bag, _equipData.stuffId[2]);
+	//设置材料的名称
+	itemName_2->setString(getEquipLevelUpItemName(_equipData.stuffId[0]).c_str());
+	itemName_3->setString(getEquipLevelUpItemName(_equipData.stuffId[1]).c_str());
+	itemName_4->setString(getEquipLevelUpItemName(_equipData.stuffId[2]).c_str());
+	std::ostringstream str1, str2, str3;
+	str1 << num1 << "/" << (_equipData.stuffNum[0]>=0 ? _equipData.stuffNum[0]:0) << str;
+	str2 << num2 << "/" << (_equipData.stuffNum[1]>=0 ? _equipData.stuffNum[1]:0) << str;
+	str3 << num3 << "/" << (_equipData.stuffNum[2]>=0 ? _equipData.stuffNum[2]:0) << str;
+	if (_equipData.stuffNum[0] - num1 > 0)
+	{
+		stuff1Label->setColor(ccc3(255,0,0));
+	}
+	else
+	{
+		stuff1Label->setColor(ccc3(0,255,0));
+	}
+	stuff1Label->setString(str1.str().c_str());
+
+	if (_equipData.stuffNum[1] - num2 > 0)
+	{
+		stuff2Label->setColor(ccc3(255,0,0));
+	}
+	else
+	{
+		stuff2Label->setColor(ccc3(0,255,0));
+	}
+	stuff2Label->setString(str2.str().c_str());
+
+	if (_equipData.stuffNum[2] - num3 > 0)
+	{
+		stuff3Label->setColor(ccc3(255,0,0));
+	}
+	else
+	{
+		stuff3Label->setColor(ccc3(0,255,0));
+	}
+	stuff3Label->setString(str3.str().c_str());
+	
+	//modify by lpf 2015-09-18
+// 	EquipLevelupNoticeUiMgr::getInstance()->setNeedItemNum(0,_equipData.stuffNum[0] - num1 > 0 ? _equipData.stuffNum[0] - num1 : 0);
+// 	EquipLevelupNoticeUiMgr::getInstance()->setNeedItemNum(1,_equipData.stuffNum[1] - num2 > 0 ? _equipData.stuffNum[1] - num2 : 0);
+// 	EquipLevelupNoticeUiMgr::getInstance()->setNeedItemNum(2,_equipData.stuffNum[2] - num3 > 0 ? _equipData.stuffNum[2] - num3 : 0);
+}
+
+std::string EquipLevelUpUiLayer::getEquipLevelUpItemName(unsigned int itemId)
+{
+	std::string itemName = "";
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM ItemTipData WHERE id = ?1");
+	cmd->set_integer32(1 , itemId);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("name");
+		itemName = table->get_text(idx);
+	}
+
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	return itemName;
+}
+std::string EquipLevelUpUiLayer::getEquipDesc(unsigned int itemId)
+{
+	std::string desc = "";
+	EEquipPos equipPosIndex;
+
+	const EquipTypeData* t_data = PackageManager::getInstance()->getEquipTypeDataPointer(itemId);
+	if (t_data != NULL)
+	{
+		desc = t_data->equipDesc;
+		equipPosIndex = t_data->posIndex;
+	}
+//已完成 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 	cmd->set_integer32(1 , itemId);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx  = table->get_index("Desc");
+// 		desc = table->get_text(idx);
+// 		idx = table->get_index("PosIndex");
+// 		equipPosIndex = (EEquipPos)table->get_integer32(idx);
+// 	}
+// 
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+	//
+	if ( EEP_Spcial_Finger_ZZ == equipPosIndex || EEP_Spcial_Finger_TZ == equipPosIndex || EEP_Spcial_Finger_DZ == equipPosIndex || EEP_Spcial_Finger_JL == equipPosIndex )
+	{
+		
+		//setSpecialRingDesc(equipDesc);
+		//addBaseAttr(desc.c_str(),-1,-1);
+		CCLabelTTF* currentLable =dynamic_cast<CCLabelTTF*> (_frame->getChildByTag(200));
+		if (currentLable!=NULL)
+		{
+			currentLable->setString(desc.c_str());
+		}
+	}
+	else
+	{
+		setUpLevelEquipAppAtt();
+	}
+	return desc;
+}
+
+
+void EquipLevelUpUiLayer::clearEquipData()
+{
+	_equipData.clear();
+}
+
+void EquipLevelUpUiLayer::onLevelupDescPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+// 	CC_ASSERT(_descframe != NULL);
+//  	if(_descframe->getParent() == NULL)
+//  	{
+// 		_descframe->setVisible(true);
+// 		_descframe->setTouchPriority(-1);
+// 		setAllChildernButtonPriority(_descframe,-1);
+// 		_descframe->setTouchEnable(true);
+// 		World::getInstance()->getScene()->addChild(_descframe,WZ_POPUI);
+// 	}
+	PlacardManager::getInstance()->open_placard_node(7);
+}
+
+// void EquipLevelUpUiLayer::onCloseBtnPressed2( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+// {
+// 	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+// 	CC_ASSERT(_descframe != NULL);
+// 	_descframe->setTouchEnable(false);
+// 	_descframe->removeFromParent();
+// }
+
+// void EquipLevelUpUiLayer::onOkBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+// {
+// 	CC_ASSERT(_descframe != NULL);
+// 	_descframe->setTouchEnable(false);
+// 	_descframe->removeFromParent();
+// }
+
+void EquipLevelUpUiLayer::setUplevelEquipAttr()
+{
+	CC_ASSERT(_frame != NULL);
+// 	if(!_uplevelEquipbaseAttr.empty())
+// 	{
+// 		for(AttrItemList::iterator iter = _uplevelEquipbaseAttr.begin(); iter != _uplevelEquipbaseAttr.end(); ++ iter)
+// 			(*iter)->setLabelVisible(false);
+// 		_uplevelEquipbaseAttr.clear();
+// 	}
+	clearBaseAtt();
+	GetAttrByUpLevel();
+	//设置魔戒的附加属性
+	f_equipment* equip = EquipLevelUpUiMgr::getInstance()->getEquipment();
+	this->getEquipDesc(equip->get_item_type_id());
+
+	float xCoordinateL = _frame->getChildByTag(EUUT_AttrProfession)->getPositionX()-24;
+	float xCoordinateR = _frame->getChildByTag(EUUT_AttrPos)->getPositionX()-21;
+	float yCoordinateRefer = (_frame->getChildByTag(111)->getPositionY()-10);
+	int attrIndex = 0;
+	for(AttrItemList::iterator iter = _uplevelEquipbaseAttr.begin(); iter != _uplevelEquipbaseAttr.end(); ++ iter)
+	{
+		EquipTipUiAttrItem* item = *iter;
+		if(item != NULL)
+		{
+			LabelFT* label = dynamic_cast<LabelFT*>(item->getChildByTag(EUUT_GetAttrAfterLvUp));
+			if(label != NULL)
+			{
+				if(item == _uplevelEquipbaseAttr.back() && equip->get_star_num() < 3)
+				{
+					label->setVisible(true);
+				}
+				else
+				{
+					label->setVisible(false);
+				}
+			}
+			if (0 == attrIndex %2)
+			{
+				item->setPosition(ccp(xCoordinateL,yCoordinateRefer));
+				item->addToParent(_frame);	
+			}
+			else
+			{
+				item->setPosition(ccp(xCoordinateR,yCoordinateRefer));
+				item->addToParent(_frame);
+			}
+			attrIndex += 1;
+			if (0 == attrIndex % 2)
+			{
+				yCoordinateRefer -= ATTRYMOVE;
+				attrIndex = 0;
+			}
+		}
+	}
+}
+void EquipLevelUpUiLayer::GetAttrByUpLevel(){
+	typedef std::map<ERoleAttribute, INT32> TempAttrMap;
+	typedef std::vector<ERoleAttribute> TempAttrVector;
+	TempAttrMap baseAttr;
+	TempAttrVector baseAttrVector;
+	if (EquipLevelUpUiMgr::getInstance()->getUplevelEquip() != NULL)
+	{
+		//加载右边的装备数据
+		if (EquipLevelUpUiMgr::getInstance()->getUplevelEquip()->isSuccess == 0)
+		{
+			//int tempIndex = 0;
+			for (int y = 0;y < EquipLevelUpUiMgr::getInstance()->getUplevelEquip()->attrCount;y++)
+			{
+				ERoleAttribute attr = (ERoleAttribute)EquipLevelUpUiMgr::getInstance()->getUplevelEquip()->TypeAndData[y].attrType;
+
+				if(attr != ERA_Null)
+				{
+					if(attr != ERA_Luck)
+					{
+						//add by XSea 2014.10.29 服务器发来的属性就是计算完强化等级的 所以这里不再去计算了
+						if(EquipLevelUpUiMgr::getInstance()->getUplevelEquip()->TypeAndData->attrType != ERA_Null && EquipLevelUpUiMgr::getInstance()->getUplevelEquip()->TypeAndData[y].attrData > 0)
+						{
+							baseAttr[attr] = EquipLevelUpUiMgr::getInstance()->getUplevelEquip()->TypeAndData[y].attrData; // + getConsolidateAtt(EquipUpStarUIMgr::getInstance()->getEquipNext()->TypeAndData[y].attrData, EquipUpStarUIMgr::getInstance()->getEquipment()->get_equip_consolidate_level())
+							baseAttrVector.push_back(attr);
+						}
+					}
+				}
+			}
+
+			for(TempAttrVector::iterator iter = baseAttrVector.begin(); iter != baseAttrVector.end(); ++ iter)
+			{
+				int iterValue = baseAttr[*iter];
+				if(iterValue == -1)
+					continue;
+				switch(*iter)
+				{
+				case ERA_ExAttackMin:
+					{
+						int v1 = iterValue;
+						int v2 = baseAttr[ERA_ExAttackMax];
+						baseAttr[ERA_ExAttackMax] = -1;
+						addBaseAttr(_uplevelEquipBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_ExAttackMax:
+					{
+						int v2 = iterValue;
+						int v1 = baseAttr[ERA_ExAttackMin];
+						baseAttr[ERA_ExAttackMin] = -1;
+						addBaseAttr(_uplevelEquipBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_InAttackMin:
+					{
+						int v1 = iterValue;
+						int v2 = baseAttr[ERA_InAttackMax];
+						baseAttr[ERA_InAttackMax] = -1;
+						addBaseAttr(_uplevelEquipBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_InAttackMax:
+					{
+						int v2 = iterValue;
+						int v1 = baseAttr[ERA_InAttackMin];
+						baseAttr[ERA_InAttackMin] = -1;
+						addBaseAttr(_uplevelEquipBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_ArmorEx:
+					{
+						int v1 = iterValue;
+						int v2 = baseAttr[ERA_ArmorIn];
+						baseAttr[ERA_ArmorIn] = -1;
+						addBaseAttr(_uplevelEquipBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_ArmorIn:
+					{
+						int v2 = iterValue;
+						int v1 = baseAttr[ERA_ArmorEx];
+						baseAttr[ERA_ArmorEx] = -1;
+						addBaseAttr(_uplevelEquipBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_ExMaxDefense:
+					{
+						int v2 = iterValue;
+						int v1 = baseAttr[ERA_ExMinDefense];
+						baseAttr[ERA_ExMinDefense] = -1;
+						addBaseAttr(_uplevelEquipBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_ExMinDefense:
+					{
+						int v1 = iterValue;
+						int v2 = baseAttr[ERA_ExMaxDefense];
+						baseAttr[ERA_ExMaxDefense] = -1;
+						addBaseAttr(_uplevelEquipBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_InMaxDefense:
+					{
+						int v2 = iterValue;
+						int v1 = baseAttr[ERA_InMinDefense];
+						baseAttr[ERA_InMinDefense] = -1;
+						addBaseAttr(_uplevelEquipBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				case ERA_InMinDefense:
+					{
+						int v1 = iterValue;
+						int v2 = baseAttr[ERA_InMaxDefense];
+						baseAttr[ERA_InMaxDefense] = -1;
+						addBaseAttr(_uplevelEquipBaseAttrNameStr[*iter].c_str(), v1, v2);
+					}
+					break;
+				default:
+					addBaseAttr(_uplevelEquipBaseAttrNameStr[*iter].c_str(), iterValue);
+					break;
+				}
+			}
+			//=================================================================================================================================
+			/*if (tempBaseAttrIndex > 0)
+			{
+				attrData_1_2->setString(tempNextBaseAttr[tempBaseAttrIndex - 1]->getCString());//只显示一个属性
+			}*/
+
+		}
+	}
+}
+EquipTipUiAttrItem * EquipLevelUpUiLayer::createAttrItem( const char *attrName, int v1, int v2 /*= -1*/, const char *split /*= "-"*/ )
+{
+	CCString *str = NULL;
+	if(v2 < 0)
+		str = CCString::createWithFormat("%s %d", attrName, v1);
+	else
+		str = CCString::createWithFormat("%s %d %s %d", attrName, v1, split, v2);
+
+	EquipTipUiAttrItem *item = new EquipTipUiAttrItem;
+	item->setString(str->getCString());
+
+	TTFConfig config;
+	config.fontFilePath=  FT_FONTFACE;
+	config.fontSize = 16;
+	config.outlineSize = 1;
+
+	LabelFT* label = LabelFT::createWithTTF(config,"");
+	label->setTextColor(Helper::converColor3B_2_4B(ccc3(0x88,0xe5,0x00)));
+	label->setString(GET_STR(9189).c_str());
+	label->setVisible(false);
+	item->addChildByTag(label, EUUT_GetAttrAfterLvUp);
+	label->setPosition(ccp(item->getPosition().x + item->getContentSize().width + label->getContentSize().width * 0.6, item->getPosition().y + 10));
+	return item;
+}
+
+void EquipLevelUpUiLayer::addBaseAttr( const char *attrName, int v1, int v2 /*= -1*/, const char *split /*= "-"*/ )
+{
+	EquipTipUiAttrItem *item = createAttrItem(attrName, v1, v2, split);
+	_uplevelEquipbaseAttr.push_back(item);
+}
+void EquipLevelUpUiLayer::initBaseAttrNameStr()
+{
+	if(_uplevelEquipBaseAttrNameStr.empty())
+	{
+		_uplevelEquipBaseAttrNameStr[ERA_MaxHP] = "\xE7\x94\x9F\xE5\x91\xBD\x3A"; //生命：
+		_uplevelEquipBaseAttrNameStr[ERA_MaxMP] = "\xE9\xAD\x94\xE5\x8A\x9B\x3A"; //魔力：
+		_uplevelEquipBaseAttrNameStr[ERA_ExAttackMin] = "\xE7\x89\xA9\xE6\x94\xBB\x3A"; //物攻：
+		_uplevelEquipBaseAttrNameStr[ERA_ExAttackMax] = "\xE7\x89\xA9\xE6\x94\xBB\x3A"; //物攻：
+		_uplevelEquipBaseAttrNameStr[ERA_InAttackMin] = "\xE9\xAD\x94\xE6\x94\xBB\x3A"; //魔攻：
+		_uplevelEquipBaseAttrNameStr[ERA_InAttackMax] = "\xE9\xAD\x94\xE6\x94\xBB\x3A"; //魔攻：
+		_uplevelEquipBaseAttrNameStr[ERA_ArmorIn] = "\xE9\x81\x93\xE6\x94\xBB\x3A"; //道功：
+		_uplevelEquipBaseAttrNameStr[ERA_ArmorEx] = "\xE9\x81\x93\xE6\x94\xBB\x3A"; //道功：
+		_uplevelEquipBaseAttrNameStr[ERA_ExMinDefense] = "\xE7\x89\xA9\xE9\x98\xB2\x3A"; //物防：
+		_uplevelEquipBaseAttrNameStr[ERA_ExMaxDefense] = "\xE7\x89\xA9\xE9\x98\xB2\x3A"; //物防：
+		_uplevelEquipBaseAttrNameStr[ERA_InMinDefense] = "\xE9\xAD\x94\xE9\x98\xB2\x3A"; //魔防：
+		_uplevelEquipBaseAttrNameStr[ERA_InMaxDefense] = "\xE9\xAD\x94\xE9\x98\xB2\x3A"; //魔防：
+		_uplevelEquipBaseAttrNameStr[ERA_HitRate] = "\xE5\x91\xBD\xE4\xB8\xAD\x3A"; //命中
+		_uplevelEquipBaseAttrNameStr[ERA_Dodge] = "\xE9\x97\xAA\xE9\x81\xBF\x3A"; //闪避
+		_uplevelEquipBaseAttrNameStr[ERA_Crit_Rate] = "\xE6\x9A\xB4\xE5\x87\xBB\x3A"; //暴击
+		_uplevelEquipBaseAttrNameStr[ERA_UnCrit_Rate] = "\xE5\x85\x8D\xE6\x9A\xB4\x3A"; //免暴
+		_uplevelEquipBaseAttrNameStr[ERA_UnCrit_Amount] = "\xE5\x85\x8D\xE6\x9A\xB4\x3A"; //免暴
+		_uplevelEquipBaseAttrNameStr[ERA_Luck] = "\xE5\xB9\xB8\xE8\xBF\x90\x3A"; //幸运：
+	}
+}
+
+bool EquipLevelUpUiLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if ( !isVisible() || !isRunning() || !hasVisibleParents() )
+	{
+		return false;
+	}
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f,0.0f,frameSize.width,frameSize.height);
+	if (frameRect.containsPoint(framePoint))
+	{
+		if(m_bTouchFunc)
+		{
+			for (int i = 0; i < 3; ++i)
+			{
+				CCNode* stuffNode = dynamic_cast<CCNode*>(_stuffArray->objectAtIndex(i));
+
+				CCPoint stuffPoint = stuffNode->convertTouchToNodeSpace(pTouch);
+				CCRect stuff1(0.0f,0.0f,stuffNode->getContentSize().width,stuffNode->getContentSize().height);
+				if (stuff1.containsPoint(stuffPoint))
+				{
+					AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+					_stuffIndex = i;
+// 					EquipLevelupNoticeUiMgr::getInstance()->setTouchIndex(_stuffIndex/* - 1*/);//EUUT_Stuff1是从1开始的
+// 					EquipLevelupNoticeUiMgr::getInstance()->setNoticeDataItemId(_equipData.stuffId[_stuffIndex/*-1*/]);
+// 					EquipLevelupNoticeUiMgr::getInstance()->setNoticeDataItemYuanbao(_stuffInfo.nPrice);
+// 					EquipLevelupNoticeUiMgr::getInstance()->setGotoBtnShow(true);
+// 					EquipLevelupNoticeUiMgr::getInstance()->setOpenUiId(WCT_EquipLevelUpUi);
+// 					OPEN_UI(WCT_EQUIPLEVELUPNOTICEUI);
+					//CLOSE_UI(WCT_EquipLevelUpUi);
+					ItemTip::getInstace()->open();
+					ItemTip::getInstace()->setPosition((stuffNode->getParent())->convertToWorldSpace(stuffNode->getPosition()));
+					ItemTip::getInstace()->setDataId(_equipData.stuffId[_stuffIndex/*-1*/]);
+					ItemTip::getInstace()->showTipsButton(PackageManager::getInstance()->getItemTypeData(_equipData.stuffId[_stuffIndex]).byTipsBtnIdx);
+					ItemTip::getInstace()->setOpenUiId(WCT_EquipLevelUpUi);
+					return true;
+				}
+			}
+		}
+		
+
+		return true;
+	}
+	//CLOSE_UI(WCT_EquipLevelUpUi);
+	return true;
+}
+
+void EquipLevelUpUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	
+}
+
+void EquipLevelUpUiLayer::toBuyStuff()
+{
+	const MallMgr::Mall_SingleItem_Map* mallDataMap = MallMgr::getInstance()->GetNotSaleItems(); //获取商城不出售的物品
+	CC_ASSERT(mallDataMap != NULL);
+	{
+		MallMgr::Mall_SingleItem_Map::const_iterator iter = mallDataMap->find(_equipData.stuffId[_stuffIndex-1]);
+		if(iter != mallDataMap->end())
+		{
+			_stuffInfo = iter->second;
+		}
+	}
+	BuySetUi::getInstance()->open();
+	BuySetUi::getInstance()->setDataId(_equipData.stuffId[_stuffIndex-1]);
+	BuySetUi::getInstance()->setPrice(_stuffInfo.nPrice);
+	BuySetUi::getInstance()->setNum(1);
+	BuySetUi::getInstance()->_signalBtnPressed->connect(this, &EquipLevelUpUiLayer::onBuyOkPressed);
+	
+ }
+
+void EquipLevelUpUiLayer::onBuyStuffSeverResult( int stuffResult )
+{
+
+}
+
+void EquipLevelUpUiLayer::onBuyOkPressed(bool isOk, int num)
+{
+	if (isOk == false)
+	{
+		return;
+	}
+	INT16 buyNum = (INT16)num;
+	WorldPacket C2G_Msg(NET_C2G_PROC_BUY_EQUIP_LEVEL_UP_ITEM);//组装消息头
+	C2G_Msg << _stuffInfo.uItemTypeID;
+	C2G_Msg << buyNum;
+	C2G_Msg << (BYTE)_stuffInfo.byIndexInServer;
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);//发送
+}
+
+cocos2d::CCRect EquipLevelUpUiLayer::GetEquipLevelUpBtnPos()
+{
+	SetNodeTintTo(_frame->getChildByTag(999));
+	CCPoint cp = _frame->getChildByTag(999)->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = _frame->getChildByTag(999)->getContentSize();
+
+	return CCRect(cp.x, cp.y, cs.width, cs.height);
+}
+
+cocos2d::CCRect EquipLevelUpUiLayer::GetCloseBtnPos()
+{
+	SetNodeTintTo(_frame->getChildByTag(998));
+	CCPoint cp = _frame->getChildByTag(998)->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = _frame->getChildByTag(998)->getContentSize();
+
+	return CCRect(cp.x, cp.y, cs.width, cs.height);
+}
+
+void EquipLevelUpUiLayer::onLevelupCalback( float dt )
+{
+	if (m_bIsPotential)
+	{
+		f_equipment* equip = EquipLevelUpUiMgr::getInstance()->getEquipment();
+		//int nextLvTypeId = 0;
+//已完成 照以前逻辑来看 这次读表 木有一点用，有用的nextLvTypeId = table->get_integer32(idx);还被注掉了 所以整段就注掉 提高性能
+//		c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+// 		cmd->set_integer32(1 , equip->get_item_type_id());
+// 		c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 		while(table->retrieve_row())
+// 		{
+// 			unsigned int idx = table->get_index("levelUpId");
+// 			//nextLvTypeId = table->get_integer32(idx);
+// 		}
+// 		c_db_manager::getSingleton()->destroy_table(table);
+// 		c_db_manager::getSingleton()->end_operation(cmd);
+
+		if(equip->get_star_num()!=3)
+		{
+			if(_stuffArray->count() != 0)
+			{
+				for(unsigned int i = 0; i < _stuffArray->count(); ++i)
+					dynamic_cast<CCNode*>(_stuffArray->objectAtIndex(i))->removeFromParent();
+				_stuffArray->removeAllObjects();
+			}
+			this->updateEquipData();
+			m_bTouchFunc = true;
+			return;
+		}
+		else
+		{
+			updateHideEquipLevelUpControl();
+		}
+	}
+	(dynamic_cast<CCControlButton*>(_frame->getChildByTag(999)))->setEnabled(false);
+	if(_itemBgSp->isVisible())
+		_itemBgSp->setVisible(false);
+	if(m_bTouchFunc)
+		m_bTouchFunc = false;
+	if(!EquipLevelUpUiMgr::getInstance()->getLevelupPower())
+		EquipLevelUpUiMgr::getInstance()->setLevelupPotency(true);
+}
+
+GameActionNode* EquipLevelUpUiLayer::getCenterLevelupEffect()
+{
+	GameActionNode* levelupSEAcNode = GameActionNode::create();
+// 	for (int i = 1; i < 99; ++i)
+// 	{
+// 		CCString* levelupStr = CCString::createWithFormat("%s%02d", "E1_73", i);
+// 		if(!levelupSEAcNode->AddTexture(levelupStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+	levelupSEAcNode->InitTextureWithSpriteFrame("E1_73");
+	return levelupSEAcNode;
+}
+
+GameActionNode* EquipLevelUpUiLayer::getAroundLevelupEffect()
+{
+	GameActionNode* lvupSEAcNode = GameActionNode::create();
+// 	for (int j = 1; j < 99; ++j)
+// 	{
+// 		CCString* lvupStr = CCString::createWithFormat("%s%02d", "E1_99", j);
+// 		if(!lvupSEAcNode->AddTexture(lvupStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+	lvupSEAcNode->InitTextureWithSpriteFrame("E1_99");
+	return lvupSEAcNode;
+}
+
+void EquipLevelUpUiLayer::playLvUpSE( bool isPotential )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundSceneEffect(SCENE_EQUIPLEVELUP);
+	m_bTouchFunc = false;
+	_lvupCenterAcNode->playAnimOnce(0.08f, false);
+	_lvupAroundAcNode1->playAnimOnce(0.1f, false);
+	_lvupAroundAcNode2->playAnimOnce(0.1f, false);
+	_lvupAroundAcNode3->playAnimOnce(0.1f, false);
+	_lvupAroundAcNode4->playAnimOnce(0.1f, false);
+	m_bIsPotential = isPotential;
+	this->scheduleOnce(schedule_selector(EquipLevelUpUiLayer::onLevelupCalback), 1.0f);
+}
+
+void EquipLevelUpUiLayer::setUpLevelEquipAppAtt()
+{
+	CC_ASSERT(_frame != NULL);
+
+	clearAppAtt();
+
+	typedef std::map<ERoleAttribute, INT32> TempAttrMap;
+	typedef std::vector<ERoleAttribute> TempAttrVector;
+	TempAttrMap indentifyAttr;
+	//
+	TempAttrVector indentifyAttrVector;
+	f_equipment* equip = EquipLevelUpUiMgr::getInstance()->getEquipment();
+	//得到装备升阶获得的属性
+	tagRoleAttEffect tempTagRoleAttEffect;
+	for (INT32 i = MAX_BASE_ATT; i < MAX_ADDITIONAL_EFFECT ; i++)
+	{
+		if (equip == NULL || equip->get_equip() == NULL)
+			break;
+		tempTagRoleAttEffect = equip->get_equip()->EquipAttitionalAtt[i];
+
+		if (tempTagRoleAttEffect.eRoleAtt != ERA_Null && tempTagRoleAttEffect.nValue > 0)
+		{
+			indentifyAttr[tempTagRoleAttEffect.eRoleAtt] = tempTagRoleAttEffect.nValue;
+			indentifyAttrVector.push_back(tempTagRoleAttEffect.eRoleAtt);
+		}
+
+	}
+	for(TempAttrVector::iterator iter = indentifyAttrVector.begin(); iter != indentifyAttrVector.end(); ++ iter)
+	{
+		int iterValue = indentifyAttr[*iter];
+			addAppAtt(_indentifyAttrStr[*iter].c_str(), iterValue);
+	}
+	float xCoordinateL = _frame->getChildByTag(EUUT_AttrProfession)->getPositionX()-20;
+	float xCoordinateR = _frame->getChildByTag(EUUT_AttrPos)->getPositionX()-20;
+	float yCoordinateRefer = (_frame->getChildByTag(EUUT_AdditionalSymbol)->getPositionY()-23);
+	int attrIndex = 0;
+	int IndexNum=0;
+	for(AttrItemList::iterator iter = _uplevelEquipappAttr.begin(); iter != _uplevelEquipappAttr.end(); ++ iter)
+	{
+		if (IndexNum>=4)
+		{
+			return;
+		}
+		EquipTipUiAttrItem* item = *iter;
+		if (0 == attrIndex %2)
+		{
+			item->setPosition(ccp(xCoordinateL,yCoordinateRefer));
+			item->addToParent(_frame);	
+		}
+		else
+		{
+			item->setPosition(ccp(xCoordinateR,yCoordinateRefer));
+			item->addToParent(_frame);
+		}
+		attrIndex += 1;
+		if (0 == attrIndex % 2)
+		{
+			yCoordinateRefer -= ATTRYMOVE;
+			attrIndex = 0;
+		}
+		IndexNum++;
+	}
+}
+
+void EquipLevelUpUiLayer::addAppAtt( const char *attrName, int v1, int v2 /*= -1*/, const char *split /*= "-"*/ )
+{
+	EquipTipUiAttrItem *item = createAttrItem(attrName, v1, v2, split);
+	_uplevelEquipappAttr.push_back(item);
+}
+
+void EquipLevelUpUiLayer::initAppAttNameStr()
+{
+	_indentifyAttrStr[ERA_ExAttackMax] = "\xE7\x89\xA9\xE6\x94\xBB\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";//物攻上限：
+	_indentifyAttrStr[ERA_ExAttackMin] = "\xE7\x89\xA9\xE6\x94\xBB\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";//物攻下限：
+	_indentifyAttrStr[ERA_ExMaxDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";//物防上限：
+	_indentifyAttrStr[ERA_ExMinDefense] = "\xE7\x89\xA9\xE9\x98\xB2\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";//物防下限：
+	_indentifyAttrStr[ERA_InAttackMax] = "\xE9\xAD\x94\xE6\x94\xBB\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";//魔攻上限：
+	_indentifyAttrStr[ERA_InAttackMin] = "\xE9\xAD\x94\xE6\x94\xBB\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";//魔攻下限：
+	_indentifyAttrStr[ERA_ArmorIn] = "\xE9\x81\x93\xE6\x94\xBB\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";//道攻上限：
+	_indentifyAttrStr[ERA_ArmorEx] = "\xE9\x81\x93\xE6\x94\xBB\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";//道攻下限：
+	_indentifyAttrStr[ERA_InMaxDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xE4\xB8\x8A\xE9\x99\x90\xEF\xBC\x9A";//魔防上限：
+	_indentifyAttrStr[ERA_InMinDefense] = "\xE9\xAD\x94\xE9\x98\xB2\xE4\xB8\x8B\xE9\x99\x90\xEF\xBC\x9A";//魔防下限：
+	_indentifyAttrStr[ERA_HitRate] = "\xE5\x91\xBD\xE4\xB8\xAD\xEF\xBC\x9A";//命中
+	_indentifyAttrStr[ERA_Dodge] = "\xE9\x97\xAA\xE9\x81\xBF\xEF\xBC\x9A";//闪避
+	_indentifyAttrStr[ERA_Crit_Rate] = "\xE6\x9A\xB4\xE5\x87\xBB\xEF\xBC\x9A";//暴击
+	_indentifyAttrStr[ERA_UnCrit_Rate] = "\xE5\x85\x8D\xE6\x9A\xB4\xEF\xBC\x9A";//免暴
+	_indentifyAttrStr[ERA_UnCrit_Amount] = "\xE5\x85\x8D\xE7\x88\x86\xEF\xBC\x9A";//免爆
+	_indentifyAttrStr[ERA_MaxHP] = "\xE7\x94\x9F\xE5\x91\xBD\xE5\x80\xBC\xEF\xBC\x9A";//生命值：
+	_indentifyAttrStr[ERA_MaxMP] = "\xE9\xAD\x94\xE5\x8A\x9B\xE5\x80\xBC\xEF\xBC\x9A";//魔力值：
+}
+
+// void EquipLevelUpUiLayer::setFrameSpriteClick( bool flag )
+// {
+// 	if(_descframe->getParent() == NULL)
+// 	{
+// 		return;
+// 	}
+// 	CC_ASSERT(_descframe != NULL);
+// 	if (flag)
+// 	{
+// 		if(_descframe->getParent() == NULL)
+// 		{
+// 			_descframe->setVisible(true);
+// 			_descframe->setTouchPriority(-1);
+// 			setAllChildernButtonPriority(_descframe,-1);
+// 			_descframe->setTouchEnable(flag);
+// 			World::getInstance()->getScene()->addChild(_descframe,WZ_POPUI);
+// 		}
+// 	}
+// 	else
+// 	{
+// 		_descframe->setTouchEnable(false);
+// 		_descframe->removeFromParent();
+// 	}
+// 	
+// }
+
+GameActionNode* EquipLevelUpUiLayer::getBattleSuperEffect()
+{
+	GameActionNode* fireSEAcNode = GameActionNode::create();
+// 	for (int i=1; i<99; ++i)
+// 	{
+// 		CCString* fireStr = CCString::createWithFormat("%s%02d", "E1_50", i);
+// 		if(!fireSEAcNode->AddTexture(fireStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+	fireSEAcNode->InitTextureWithSpriteFrame("E1_50");
+ 	return fireSEAcNode;
+}
+
+void EquipLevelUpUiLayer::setFightText( int v ,bool showAdd)
+{
+	std::ostringstream ostr2;
+	if (showAdd)
+	{
+		ostr2<<v<<"\x2B";
+	}
+	else
+	{
+		ostr2<<v;
+	}
+	CCNode* posLabel = CCNode::create();
+	posLabel->setPosition(ccp(x+100,y-13));
+	_fightNumBLabel->setPosition(posLabel->getPosition());
+	_fightNumBLabel->setString(ostr2.str().c_str());
+	posLabel->removeFromParent();
+}
+
+CCRect EquipLevelUpUiLayer::getEquipAttrRect()
+{
+	CCPoint cp = _frame->getChildByTag(111)->convertToWorldSpace(ccp(0, 0));
+	CCSize cs = CCSize(_frame->getContentSize().width / 3, 50.f );
+	return CCRect(cp.x, cp.y - 50.f, cs.width, cs.height);
+}
+
+void EquipLevelUpUiLayer::clearBaseAtt()
+{
+	std::for_each(_uplevelEquipbaseAttr.begin(),_uplevelEquipbaseAttr.end(),[](EquipTipUiAttrItem* p){CC_SAFE_DELETE(p);});
+	_uplevelEquipbaseAttr.clear();
+}
+
+void EquipLevelUpUiLayer::clearAppAtt()
+{
+	std::for_each(_uplevelEquipappAttr.begin(),_uplevelEquipappAttr.end(),[](EquipTipUiAttrItem* p){CC_SAFE_DELETE(p);});
+	_uplevelEquipappAttr.clear();
+}

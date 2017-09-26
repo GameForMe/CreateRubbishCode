@@ -1,0 +1,613 @@
+#include "ShopMgr.h"
+#include "DBMgr.h"
+#include "RingShopUi.h"
+#include "ShopProtocol.h"
+#include "TCPClient.h"
+#include "World.h"
+#include "NPCTalkUi.h"
+#include "ShopUi.h"
+#include "PackageManager.h"
+#include "UiManager.h"
+#include "BaseDefine.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "MessageBoxUi.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ExchangeMgr.h"
+#include "tools.h"
+#include "QuickSaleUI.h"
+#include "SecondVerifyMgr.h"
+#include "f_string_util.h"
+ShopMgr::ShopMgr():_n64CurTalkNpcID(-1),_isFollowShop(0),nSellType(0)
+{
+	init_shop_data();
+}
+ShopMgr* ShopMgr::getInstance()
+{
+	static ShopMgr mgr;
+	return &mgr;
+}
+
+bool	ShopMgr::init()
+{
+	//m_map_shop_data.clear();
+	m_map_ringshop_data.clear();
+
+	
+
+
+	c_sql_command* cmd2 = NULL;
+	c_sql_table* table2 = NULL;
+	cmd2 = c_db_manager::getSingleton()->begin_operation("SELECT * FROM RingShopData");
+	table2 = c_db_manager::getSingleton()->create_table();
+
+	CCLOG("enter ringshopdata");
+
+	while(table2->retrieve_row())
+	{
+		tagRingShopProto proto2;
+		unsigned int idx2= table2->get_index("id");
+		proto2.dwID = table2->get_integer32(idx2);
+
+		idx2 = table2->get_index("spend_type");
+		proto2.eCostType = (ECurCostType)table2->get_integer32(idx2);
+
+		char buffer2[64] = {0};
+		for (int i=0; i< MAX_SHOP_COMMON_ITEM; ++i)
+		{
+			sprintf(buffer2, "send_id%d", i+1);
+			idx2 = table2->get_index(buffer2);
+			if (idx2 == -1)
+				break;
+			proto2.Item[i].send_id = table2->get_integer32( idx2 );
+
+			sprintf(buffer2, "item_id%d", i+1);
+			idx2 = table2->get_index(buffer2);
+			if (idx2 == -1)
+				break;
+			proto2.Item[i].dw_data_id = table2->get_integer32( idx2 );
+
+			CCLOG("dw_data_id: %d",proto2.Item[i].dw_data_id);
+
+			sprintf(buffer2, "item_money%d",	i+1);
+			idx2 = table2->get_index(buffer2);
+			proto2.Item[i].nMoney	= table2->get_integer32( idx2 );
+
+			sprintf(buffer2, "item_num%d",	i+1);
+			idx2 = table2->get_index(buffer2);
+			proto2.Item[i].nCount	= table2->get_integer32( idx2 );
+
+			sprintf(buffer2, "item_currency%d", i+1);
+			idx2 = table2->get_index(buffer2);
+			proto2.Item[i].nCurrency = table2->get_text( idx2 );
+
+			sprintf(buffer2, "item_index%d", i+1);
+			idx2 = table2->get_index(buffer2);
+			proto2.Item[i].index = table2->get_integer32( idx2 );
+		}
+		m_map_ringshop_data.insert(std::make_pair(proto2.dwID, proto2));
+
+	}
+
+	CCLOG("enter ringshopdata end");
+
+	c_db_manager::getSingleton()->destroy_table(table2);
+	c_db_manager::getSingleton()->end_operation(cmd2);
+
+
+	TCP_CLIENT->register_net_cmd("NET_SIS_feedback_from_shop" , this , &ShopMgr::onServerFeedbackFromShop);
+	TCP_CLIENT->register_net_cmd("NET_SIS_equip_repair" , this , &ShopMgr::onServerRepair);
+	return true;
+}
+void ShopMgr::destroy()
+{
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_feedback_from_shop" , this , &ShopMgr::onServerFeedbackFromShop);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_equip_repair" , this , &ShopMgr::onServerRepair);
+	return;
+}
+const tagShopProto* ShopMgr::get_shop_data( unsigned int id )
+{
+	std::map<unsigned int, tagShopProto>::iterator pIter = m_map_shop_data.find(id);
+	if(pIter != m_map_shop_data.end())
+		return &pIter->second;
+	return NULL;
+}
+
+const tagRingShopProto* ShopMgr::get_ring_shop_data( unsigned int id )
+{
+	std::map<unsigned int, tagRingShopProto>::iterator pIter = m_map_ringshop_data.find(id);
+	if (pIter != m_map_ringshop_data.end())
+		return &pIter->second;
+	return NULL;
+}
+
+
+void ShopMgr::onBuyItem(const tagShopItemProto* pShopItemProto, INT64 n64NPCID, short num )
+{
+	if (!IS_VALID_PTR(pShopItemProto))
+		return;
+	if (num < 1)
+		return;
+	unsigned int itemDataID = pShopItemProto->dw_data_id;
+	//客户端预判断;
+	int nBagSpace = PackageManager::getInstance()->getBlankCount();
+	if (nBagSpace <= 0)
+	{
+		ToolTip::getInstance()->push(GET_STR(161));
+		return;
+	}
+	INT64 nbagMoney = 0;
+	int nPrice = pShopItemProto->nSilver;//获取该商品价格;
+	switch(pShopItemProto->nMoneyType)
+	{
+	case SILVER:
+		{
+			nbagMoney = PackageManager::getInstance()->getJinBi();
+			if (nPrice*num > nbagMoney)
+			{
+				ToolTip::getInstance()->push(GET_STR(2007));
+				return;
+			}
+			break;
+
+		}
+	case DIAMOND:
+		{
+			nbagMoney = PackageManager::getInstance()->getDiamond();
+			if (nPrice*num > nbagMoney)
+			{
+				RechargeNewUiMgr::GetInstance()->openRechargeNewUi(false);
+				return;
+			}
+			break;
+		}
+	case YUANBAO:
+		{
+			nbagMoney = PackageManager::getInstance()->getYuanBao();
+			if (nPrice*num > nbagMoney)
+			{
+				RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+				return;
+			}
+			break;
+		}
+	default:
+		break;
+
+	}
+	tagShopItemProto t_Proto = *pShopItemProto;
+	std::function<void(bool)> func = [t_Proto,itemDataID,num,this](bool isSuccess){
+		if (isSuccess)
+		{
+			// 买装备
+			if(MIsEquipment(itemDataID))
+			{
+				NET_SIC_buy_shop_equip cmd;
+				cmd.byShelf = 0;
+				cmd.uMoneyTpye = t_Proto.nMoneyType;
+				cmd.dwNPCID = _n64CurTalkNpcID;
+				cmd.n64_serial = 0;
+				cmd.dw_data_id = itemDataID;
+				cmd.isFollowShop=_isFollowShop;
+				TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);	
+			}
+			else
+			{
+				NET_SIC_buy_shop_item cmd;
+				cmd.byShelf = 0;
+				cmd.uMoneyTpye = t_Proto.nMoneyType;
+				cmd.dwNPCID = _n64CurTalkNpcID;
+				cmd.n16ItemNum = num;
+				cmd.dw_data_id = itemDataID;
+				cmd.isFollowShop=_isFollowShop;
+				TCP_CLIENT->send_net_cmd(&cmd , NP_NORMAL , false);
+			}
+		}
+	};
+	SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+	
+}
+
+void ShopMgr::onBuyRing( const tagRingShopItemProto* pRingShopItemProto )
+{
+	if (!IS_VALID_PTR(pRingShopItemProto))
+		return;
+	//unsigned int itemDataID = pRingShopItemProto->dw_data_id;
+	//int index = pRingShopItemProto->index;
+	ExchangeMgr::getInstance()->sendProduceMsg(pRingShopItemProto->send_id,_n64CurTalkNpcID,pRingShopItemProto->index);
+
+}
+
+void ShopMgr::onSellItem( INT64 n64NPCID, INT64 n64ItemID )
+{
+	//客户端应首先预判断是否能卖出，给相应的提示
+	if (-1 == n64ItemID)
+		return;
+	f_item *pItem = PackageManager::getInstance()->getItem(EICT_Bag,n64ItemID);
+	if(!IS_VALID_PTR(pItem))
+		return;
+	ItemTypeData data = PackageManager::getInstance()->getItemTypeData(pItem->get_item_type_id());
+	//出售成功所需显示的数据
+	//unsigned int temp = pItem->get_item_type_id();
+	int tempNum = pItem->get_item_number();
+	setItemID(pItem->get_item_type_id());
+	setItemNum(pItem->get_item_number());
+	if (0 == data.canSell)
+	{
+		ToolTip::getInstance()->push(GET_STR(2050));
+		return;
+	}
+	PackageManager::getInstance()->lockItem(EICT_Bag, n64ItemID);
+	_n64TempItemID = n64ItemID;
+
+	int itemTypeId = pItem->get_item_type_id();
+	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM PackageData WHERE TypeId = ?1");
+	cmd->set_integer32(1, itemTypeId);
+	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+	int itemPrice;
+	while(table->retrieve_row())
+	{
+		unsigned int idx = table->get_index("price");
+		itemPrice = table->get_integer32(idx);
+	}
+	c_db_manager::getSingleton()->destroy_table(table);
+	c_db_manager::getSingleton()->end_operation(cmd);
+
+	//给二次确认提示
+	std::ostringstream oss;
+	oss << data.name <<"\xE5\x94\xAE\xE4\xBB\xB7"<<itemPrice*tempNum<<"\xE9\x87\x91\xE5\xB8\x81\xEF\xBC\x8C"<<GET_STR(2369);
+	MessageBoxUi *shopUI = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,oss.str().c_str(), TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+	World::getInstance()->getScene()->addChild(shopUI, WZ_MESSAGEBOX);
+	shopUI->signalOkBtnPressed.connect(this, &ShopMgr::confirmSelSignleItem);
+	shopUI->signalCancelBtnPressed.connect(this,&ShopMgr::concelSellSignleItem);
+}
+void ShopMgr::confirmSelSignleItem()
+{
+	std::function<void(bool)> func = [this](bool isSuccess){
+		if (isSuccess)
+		{
+			NET_SIC_sell_to_shop send;
+			send.dwNPCID = _n64CurTalkNpcID;
+			send.nNum = 1;
+			send.n64_itemserial = _n64TempItemID;
+			send.isFollowShop = _isFollowShop;
+			send.IsQuickSell = false;
+			TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+		}
+		else
+		{
+			PackageManager::getInstance()->unLockItem(EICT_Bag, _n64TempItemID);
+		}
+		
+		_n64TempItemID = INVALID;
+	};
+	SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+}
+
+void ShopMgr::concelSellSignleItem()
+{
+	PackageManager::getInstance()->unLockItem(EICT_Bag, _n64TempItemID);
+	_n64TempItemID = INVALID;
+}
+void ShopMgr::onSellAll()
+{
+	std::vector<const tagItem*>vec;
+	PackageManager::getInstance()->getSellAll(vec);
+	if(vec.size() == 0)
+	{
+		ToolTip::getInstance()->push(GET_STR(9191));
+	}
+	else
+	{
+		OPEN_UI(WCT_QuickSale);
+	}
+}
+
+void ShopMgr::onNpcTalk( unsigned int dw_data_id, INT64 n64NPCID )
+{
+	//gx add 2013.11.12 摆摊，交易，双修状态锁死
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isRoleInStaticState())
+		return;
+
+	unsigned int dwShopId = getShopID(dw_data_id);
+	if (dwShopId != -1)
+	{
+		World::getInstance()->getNPCDialog()->appendItem(dwShopId , "\xE8\xB4\xAD\xE4\xB9\xB0\xE5\x95\x86\xE5\x93\x81", true , true, NPCTalkUi::TEXTT_SHOP);
+		_n64CurTalkNpcID = dw_data_id;
+	}
+}
+
+unsigned int ShopMgr::getShopID( unsigned int dw_data_id )
+{
+// 	c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM CreatureInfo WHERE AnimaterId = ?1");
+// 	cmd->set_integer32(1 , dw_data_id);
+// 	c_sql_table* table = c_db_manager::getSingleton()->create_table();
+// 
+// 	unsigned int dataID = -1;
+// 	while(table->retrieve_row())
+// 	{
+// 		unsigned int idx= table->get_index("funtype");
+// 		int nFuntype = table->get_integer32(idx);
+// 
+// 		if (nFuntype == 0)
+// 		{
+// 			idx = table->get_index("funid");
+// 			dataID =  table->get_integer32(idx);
+// 		}
+// 	}
+// 
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+	stCreateProto const* proto = RoleManager::getInstance()->getCreatureProto(dw_data_id);
+	if (proto)
+	{
+		if (proto->nFuncType == 0)
+		{
+			return proto->nFunid;
+		}
+		else
+			return INVALID;
+	}
+	else
+		return INVALID;
+}
+
+void ShopMgr::onSelect( unsigned int qid )
+{
+	//gx add 2013.11.12 摆摊，交易，双修状态锁死
+	LocalPlayer *ploc = RoleManager::getInstance()->getLocalPlayer();
+	if (!ploc)
+		return;
+	if (ploc->isRoleInStaticState())
+		return;
+
+	if (101 == qid || 102 == qid)
+	{
+		OPEN_UI(WCT_RINGSHOPUI);
+		GET_UI(RingShopUi,WCT_RINGSHOPUI)->setData(qid);
+	}
+	else
+	{
+		OPEN_UI(WCT_SHOPUI);
+		if (qid!=9)
+			setFollowShop(0);
+		else
+			setFollowShop(1);	
+		GET_UI(ShopUi, WCT_SHOPUI)->setData(qid);
+	}
+}
+
+void ShopMgr::onRepair()
+{
+	std::string str1 = GET_STR(9187).substr(0,GET_STR(9187).size()-26);
+	std::string str2 = GET_STR(9187).substr(str1.size() + 2,GET_STR(9187).size()-str1.size());
+	int nTotalNumber = 0;//维修总价
+    PackageManager::ItemMap* TmpItemMap = PackageManager::getInstance()->getItemMap(EICT_Equip);
+	PackageManager::ItemMap::iterator iter = TmpItemMap->begin();
+	for(; iter!=TmpItemMap->end(); ++iter){
+		const tagItem* item = iter->second->get_data();
+		const EquipTypeData* data = PackageManager::getInstance()->getEquipTypeData(item->dw_data_id);
+		nTotalNumber += 100*(data->durability - GetEquipNewness(data->posIndex,item->nUseTimes,data->durability));
+	}
+	//需要修理再弹出二次确认界面
+	if(nTotalNumber == 0)
+	{
+		//无需修理的提示
+		ToolTip::getInstance()->push(GET_STR(9192));
+	}
+	else
+	{
+		std::ostringstream ostr;
+		ostr<<nTotalNumber;
+		string repairNotice = replaceStr(GET_STR(9187), "**", ostr.str().c_str());
+		//全部修理二次确认界面
+		MessageBoxUi *shopUI = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI,repairNotice.c_str(), TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+		World::getInstance()->getScene()->addChild(shopUI, WZ_MESSAGEBOX);
+		shopUI->signalOkBtnPressed.connect(this, &ShopMgr::comfirmRepairAll);
+	}
+	
+}
+void ShopMgr::comfirmRepairAll(){
+	NET_SIC_equip_repair send;
+	send.dwNPCID = _n64CurTalkNpcID;
+	send.isFollowShop=_isFollowShop;
+	TCP_CLIENT->send_net_cmd(&send , NP_NORMAL , false);
+}
+unsigned int ShopMgr::onServerFeedbackFromShop( s_net_cmd* cmd )
+{
+	NET_SIS_feedback_from_shop* msg = (NET_SIS_feedback_from_shop*)cmd;
+	switch (msg->dw_error_code)
+	{
+	case E_Shop_Sell_Success:
+		{
+			unsigned char byType; //0=购买,1=出售
+			byType = msg->byType;
+			if (byType == 1)
+			{
+				INT64 n64TotalPrice = 0;		//出售总价
+				n64TotalPrice = msg->n64TotalPrice;
+				//CCLOG("=========size:%d, %d:%d", sizeof(NET_SIS_feedback_from_shop), msg->n64TotalPrice, n64TotalPrice);
+				CCString *str=CCString::createWithFormat("%lld",n64TotalPrice);
+				ToolTip::getInstance()->pushMessage(str->getCString(),"\xE5\x87\xBA\xE5\x94\xAE\xE6\x88\x90\xE5\x8A\x9F\x2C\xE8\x8E\xB7\xE5\xBE\x97",2,1);
+				//ToolTip::getInstance()->push(CCString::createWithFormat("%s%lld%s","\xE5\x87\xBA\xE5\x94\xAE\xE6\x88\x90\xE5\x8A\x9F\x2C\xE8\x8E\xB7\xE5\xBE\x97",n64TotalPrice,"\xE9\x87\x91\xE5\xB8\x81")->getCString());
+			}
+			if(IS_UI_OPEN(WCT_QuickSale))
+			{
+				CLOSE_UI(WCT_QuickSale);
+				QuickSaleUI* ui = GET_UI(QuickSaleUI, WCT_QuickSale);
+				if(ui != NULL)
+				{
+					ui->SetCanClick(false);
+				}
+				
+			}
+			return 0 ;
+		}
+		break;
+	case E_Shop_NotEnough_SpaceInBag:
+		ToolTip::getInstance()->push(GET_STR(161));
+		break;
+	case E_Shop_ItemMaxHold:
+		ToolTip::getInstance()->push(GET_STR(2009));
+		break;
+	case E_Shop_NotEnough_SilverInBag:
+		ToolTip::getInstance()->push(GET_STR(2007));
+		break;
+	case E_Shop_NotEnough_diamond:
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi(false);
+		break;
+	case E_Shop_NotEnough_yuanbao:
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+		break;
+	}
+	QuickSaleUI* ui = GET_UI(QuickSaleUI, WCT_QuickSale);
+	if(ui != NULL)
+	{
+		ui->SetCanClick(true);
+	}
+	return 0;
+}
+
+void ShopMgr::comfirmSellAll()
+{
+	if(GET_UI(QuickSaleUI,WCT_QuickSale)->getUiLayer() == NULL)
+	{
+		return;
+	}
+	
+	std::vector<INT16> vSellTypeVector = GET_UI(QuickSaleUI,WCT_QuickSale)->getUiLayer()->GetSellTypeVector();
+	//PackageManager::getInstance()->getSellAll(vec);
+
+	if (vSellTypeVector.size() <= 0)
+		return;
+
+
+	NET_SIC_sell_to_shop Send;
+	Send.id = message_id_crc("NET_SIC_sell_to_shop");
+	Send.dwNPCID = _n64CurTalkNpcID;
+	Send.nNum = vSellTypeVector.size();
+	Send.isFollowShop = _isFollowShop;
+	Send.IsQuickSell = true;
+
+	for (size_t i = 0; i < vSellTypeVector.size(); i++)
+	{
+		Send.n64_serial[i] = vSellTypeVector[i];
+	}
+
+	TCP_CLIENT->send_net_cmd(&Send, NP_NORMAL , false);
+	vSellTypeVector.clear();
+	
+}
+
+unsigned int ShopMgr::onServerRepair( s_net_cmd* cmd )
+{
+	NET_SIS_equip_repair* msg = (NET_SIS_equip_repair*)cmd;
+	if (0 != msg->dw_error_code)
+	{
+		if (E_Repair_NotEnough_Money == msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(GET_STR(2155));
+		}
+		else if(E_Compose_NPC_Distance ==  msg->dw_error_code)
+		{
+			ToolTip::getInstance()->push(GET_STR(7164));
+		}
+
+	}
+	else
+	{
+		ToolTip::getInstance()->push(GET_STR(2156));
+	}
+	return 0;
+}
+
+void ShopMgr::unLockItem()
+{
+	if(IS_VALID(_n64TempItemID))
+	{
+		concelSellSignleItem();
+	}
+}
+
+void ShopMgr::init_shop_data()
+{
+	f_data_set data_set;
+	std::list<std::string> fields;
+	bool ret =data_set.load("Config/db/ShopData.xml","id",&fields);
+	CC_ASSERT(ret);
+	std::for_each(	fields.begin(),
+					fields.end(),
+					[&](std::string const& one)
+	{
+		tagShopProto proto;
+		proto.dwID = data_set.get_int("id",one.c_str());
+		proto.eCostType = (ECurCostType)data_set.get_int("spend_type",one.c_str());
+		
+		std::string tmp;
+		for (int i=0; i < MAX_SHOP_COMMON_ITEM; ++i)
+		{
+			safe_sprintf(tmp, "item_id%d", i+1);
+			int item_id = data_set.get_int(tmp.c_str(),one.c_str(),-1);
+			if (item_id == -1 || item_id ==0)
+			{
+				break;
+			}
+			proto.Item[i].dw_data_id = item_id;
+
+			safe_sprintf(tmp, "money_Type%d", i+1);
+			proto.Item[i].nMoneyType = data_set.get_int(tmp.c_str(),one.c_str(),-1);
+
+			safe_sprintf(tmp, "money_number%d", i+1);
+			proto.Item[i].nSilver = data_set.get_int(tmp.c_str(),one.c_str(),-1);
+
+			safe_sprintf(tmp, "special_cost_number%d", i+1);
+			proto.Item[i].nCostNum = data_set.get_int(tmp.c_str(),one.c_str(),-1);
+
+		}
+
+		m_map_shop_data.insert(std::make_pair(proto.dwID, proto));
+	});
+// 	c_sql_command* cmd = NULL;
+// 	c_sql_table* table = NULL;
+// 	cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM ShopData");
+// 	table = c_db_manager::getSingleton()->create_table();
+// 	while(table->retrieve_row())
+// 	{
+// 		tagShopProto proto;
+// 		unsigned int idx= table->get_index("id");
+// 		proto.dwID = table->get_integer32(idx);
+// 
+// 		idx = table->get_index("spend_type");
+// 		proto.eCostType = (ECurCostType)table->get_integer32(idx);
+// 
+// 		char buffer[64] = {0};
+// 		for (int i=0; i < MAX_SHOP_COMMON_ITEM; ++i)
+// 		{
+// 
+// 			sprintf(buffer, "item_id%d", i+1);
+// 			idx = table->get_index(buffer);
+// 			if (idx == -1||idx == 0)
+// 				break;
+// 			proto.Item[i].dw_data_id	= table->get_integer32( idx );
+// 			sprintf(buffer, "money_Type%d", i+1);
+// 			idx = table->get_index(buffer);
+// 			proto.Item[i].nMoneyType = table->get_integer32( idx );
+// 			sprintf(buffer, "money_number%d",i+1);
+// 			idx = table->get_index(buffer);
+// 			proto.Item[i].nSilver	= table->get_integer32( idx );
+// 
+// 			sprintf(buffer, "special_cost_number%d", i+1);
+// 			idx = table->get_index(buffer);
+// 			proto.Item[i].nCostNum	= table->get_integer32( idx );
+// 
+// 		}
+// 		m_map_shop_data.insert(std::make_pair(proto.dwID, proto));
+// 
+// 	}
+// 	c_db_manager::getSingleton()->destroy_table(table);
+// 	c_db_manager::getSingleton()->end_operation(cmd);
+}

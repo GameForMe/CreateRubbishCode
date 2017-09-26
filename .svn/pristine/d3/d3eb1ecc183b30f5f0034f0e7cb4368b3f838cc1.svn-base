@@ -1,0 +1,579 @@
+#include "VIPUi.h"
+#include "UiTools.h"
+#include "UiLoader.h"
+#include "UiManager.h"
+#include "VIPMgr.h"
+#include "VIPProto.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "CfgReader.h"
+#include "PackageManager.h"
+#include "RechargeUi.h"
+#include "AnimationCache.h"
+#include "BSAnimate.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+
+CCNode* VIPUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["vipuilayer"] = UiLayerLoader<VIPUiLayer>::loader();
+	CCNode* uiNode = readUiFromCCBI("vipui", nodeLoaders, _loadSpriteSheet);
+	return uiNode;
+}
+
+VIPUi::VIPUi()
+{
+
+}
+
+VIPUi::~VIPUi()
+{
+
+}
+
+void VIPUi::setshowShouchongUi( bool visible )
+{
+	getUiNodeByTag<VIPUiLayer>(WCT_VIPUI)->setShowShonchongUi(visible);
+}
+
+VIPUiLayer::VIPUiLayer():_mLocalPlayer(NULL)
+{
+
+}
+
+VIPUiLayer::~VIPUiLayer()
+{
+
+}
+
+
+
+cocos2d::extension::SEL_CCControlHandler VIPUiLayer::onResolveCCBCCControlSelector( CCObject* pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onChargeYuanbaoPressed", VIPUiLayer::onChargeYuanbaoPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onLeftPressed", VIPUiLayer::onLeftPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onRightPressed", VIPUiLayer::onRightPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", VIPUiLayer::onCloseBtnPressed);
+	return NULL;
+}
+
+cocos2d::SEL_MenuHandler VIPUiLayer::onResolveCCBCCMenuItemSelector( CCObject* pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+void VIPUiLayer::onNodeLoaded( cocos2d::CCNode* pNode, cocos2d::extension::CCNodeLoader* pNodeLoader )
+{
+	//初始化数据：
+	m_nLvIndex = 0;
+	_uiBgSp = dynamic_cast<CCSprite*>(this->getChildByTag(EVT_UIBackground));
+	_upLayer = dynamic_cast<CCLayer*>(_uiBgSp->getChildByTag(EVT_UpLayer));
+	_vip16Sp = dynamic_cast<CCSprite*>(_uiBgSp->getChildByTag(EVT_Vip16Bg));
+	_nowLevelBigUpSp = dynamic_cast<CCSprite*>(_upLayer->getChildByTag(EVT_NowLevelBigUp));
+	_expLengthSp = dynamic_cast<CCSprite*>(_upLayer->getChildByTag(EVT_NowLevelExp));
+	_needYuanbaoLabel = dynamic_cast<CCLabelTTF*>(_upLayer->getChildByTag(EVT_UplevelNeedYB));
+	_uplevelSp = dynamic_cast<CCSprite*>(_upLayer->getChildByTag(EVT_NextLevelSmaUp));
+
+	_instructionLayer = dynamic_cast<CCLayer*>(_uiBgSp->getChildByTag(EVT_InstructionLayer));
+	_nowLevelBigSp = dynamic_cast<CCSprite*>(_uiBgSp->getChildByTag(EVT_BigNowLevel));
+	_nowLevelBigDownSp = dynamic_cast<CCSprite*>(_uiBgSp->getChildByTag(EVT_NowLevelBigDown));
+	_lastLevelSmaDownSp = dynamic_cast<CCSprite*>(_uiBgSp->getChildByTag(EVT_LastLevelSmaDown));
+	_nextLevelSmaDownSp = dynamic_cast<CCSprite*>(_uiBgSp->getChildByTag(EVT_NextLevelSmaDown));
+	//_spriteLeftChakan = dynamic_cast<CCSprite*>(_uiBgSp->getChildByTag(EVT_LeftChakan));
+	//_spriteRightChakan = dynamic_cast<CCSprite*>(_uiBgSp->getChildByTag(EVT_RightChakan));
+	_leftButton = dynamic_cast<CCControlButton*>(_uiBgSp->getChildByTag(EVT_LeftButtonSprite));
+	_rightButton = dynamic_cast<CCControlButton*>(_uiBgSp->getChildByTag(EVT_RightButtonSprite));
+
+	_scrollView = createScrollViewWithContent(_instructionLayer);
+	_instructionLayer->addChild(_scrollView);
+	_vipDataList = new VerticalList<VipDataListItem>;
+	_vipDataList->addToScrollView(_scrollView);
+	_vipDataList->setMinSize(_instructionLayer->getContentSize());
+	_vipDataList->setEnableSelect(true);
+
+	//储存各等级大小图标
+	_bigLevelAry = CCArray::create();
+	_bigLevelAry->retain();
+	_smallLevelAry = CCArray::create();
+	_smallLevelAry->retain();
+	_NumLevelAry=CCArray::create();
+	_NumLevelAry->retain();
+	for (int i = 0; i<=16; ++i)			//大图标比小图标多一个VIP0的显示，所以下标有区别
+	{
+		CCString* bigIconStr = CCString::createWithFormat("vipui_%d",i);
+		CCSpriteFrame* bigIconFram = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(bigIconStr->getCString());
+		_NumLevelAry->addObject(bigIconFram);
+	}
+	for (int i = 0; i<=16; ++i)			//大图标比小图标多一个VIP0的显示，所以下标有区别
+	{
+		CCString* bigIconStr = CCString::createWithFormat("vipui_VIP%d",i);
+		CCSpriteFrame* bigIconFram = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(bigIconStr->getCString());
+		_bigLevelAry->addObject(bigIconFram);
+	}
+	for (int i = 1;i <=16; ++i)
+	{
+		CCString* smallIconStr = CCString::createWithFormat("vipui_small%d",i);
+		CCSpriteFrame* smallIconFram = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(smallIconStr->getCString());
+		_smallLevelAry->addObject(smallIconFram);
+	}
+	//设置面板显示
+	if (!_expLengthSp->isVisible())
+	{
+		_expLengthSp->setVisible(true);
+	}
+	int viplevel = VIPMgr::getInstance()->getVIPLv();
+	m_nLvIndex = viplevel;
+	//unsigned int vipexp = VIPMgr::getInstance()->getVIPExperience();
+	if (1 <= viplevel && 16 >= viplevel)
+	{
+		if (16 == viplevel)
+		{
+			_upLayer->setVisible(false);
+			_vip16Sp->setVisible(true);
+			_nowLevelBigSp->setDisplayFrame(dynamic_cast<CCSpriteFrame*>(_NumLevelAry->objectAtIndex(m_nLvIndex)));
+		}
+		else
+		{
+			unsigned int nowYuanbao = VIPMgr::getInstance()->getVIPExperience();
+			unsigned int nowLvYuanbao = VIPMgr::getInstance()->GetVipDataByIndex(viplevel, NEEDYUANBAO);
+			unsigned int nextLvYuanbao = VIPMgr::getInstance()->GetVipDataByIndex(viplevel+1, NEEDYUANBAO);
+			//int nextLevelYB = VIPMgr::getInstance()->GetVipDataByIndex(viplevel+1, NEEDYUANBAO);
+			int needYuanbao = nextLvYuanbao - nowYuanbao;
+			CCString* needYBStr = CCString::createWithFormat("%d",needYuanbao/10);
+			float expLength = (static_cast<float>(nowYuanbao-nowLvYuanbao)) / (static_cast<float>(nextLvYuanbao-nowLvYuanbao));
+			_expLengthSp->setScaleX(expLength);
+			_needYuanbaoLabel->setString(needYBStr->getCString());
+			_nowLevelBigSp->setDisplayFrame(dynamic_cast<CCSpriteFrame*>(_NumLevelAry->objectAtIndex(m_nLvIndex)));
+			_nowLevelBigUpSp->setDisplayFrame(dynamic_cast<CCSpriteFrame*>(_bigLevelAry->objectAtIndex(m_nLvIndex)));
+			_uplevelSp->setDisplayFrame(dynamic_cast<CCSpriteFrame*>(_smallLevelAry->objectAtIndex(m_nLvIndex)));
+		}
+	}
+	else				//不是VIP，作VIP0显示
+	{
+		int lv1Yuanbao = VIPMgr::getInstance()->GetVipDataByIndex(1, NEEDYUANBAO);
+		CCString* lv1YBStr = CCString::createWithFormat("%d", lv1Yuanbao);
+		unsigned int nowYuanbao = VIPMgr::getInstance()->getVIPExperience();
+		unsigned int nowLvYuanbao = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, NEEDYUANBAO);
+		unsigned int nextLvYuanbao = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex+1, NEEDYUANBAO);
+		float expLength = (static_cast<float>(nowYuanbao-nowLvYuanbao)) / (static_cast<float>(nextLvYuanbao-nowLvYuanbao));
+		_expLengthSp->setScaleX(expLength);
+		_needYuanbaoLabel->setString(lv1YBStr->getCString());
+		_nowLevelBigSp->setDisplayFrame(dynamic_cast<CCSpriteFrame*>(_NumLevelAry->objectAtIndex(m_nLvIndex)));
+		_nowLevelBigUpSp->setDisplayFrame(dynamic_cast<CCSpriteFrame*>(_bigLevelAry->objectAtIndex(m_nLvIndex)));
+		_uplevelSp->setDisplayFrame(dynamic_cast<CCSpriteFrame*>(_smallLevelAry->objectAtIndex(m_nLvIndex)));
+		m_nLvIndex = 1;
+	}
+	
+	//m_sBlingSENmae = CFGReader::instance()->get_profile_string("Art", "Effect", "") + "E1_144.plist";
+	//_chargeAcNode = GameActionNode::create();
+	//_chargeAcNode->InitWithPList(m_sBlingSENmae.c_str(), "E1_144");
+	//CCPoint pt = _uiBgSp->getChildByTag(EVT_ChargeBtn)->getPosition();
+	//_chargeAcNode->setPosition(ccp(pt.x,pt.y + 5));
+	//_uiBgSp->addChild(_chargeAcNode);
+	//_chargeAcNode->playAnimOnce(0.12f, false);
+
+	m_pRechargeNodeEffect = CCSprite::create();
+	CCPoint pt = _uiBgSp->getChildByTag(EVT_ChargeBtn)->getPosition();
+	m_pRechargeNodeEffect->setPosition(ccp(pt.x,pt.y + 5));
+	_uiBgSp->addChild(m_pRechargeNodeEffect);
+
+	AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_144", anims);
+	BSAnimate *animate = anims[0];
+	float offestX = 0.0f;
+	float offestY = 0.0f;
+	getModelOffest("E1_144", offestX, offestY);
+	m_pRechargeNodeEffect->stopAllActions();
+	m_pRechargeNodeEffect->runAction(CCRepeatForever::create(animate));
+
+	this->updateInstruction();
+
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+	setAllChildernButtonPriority(this, -1);
+	_showShouchongUi=false;
+	//this->schedule(schedule_selector(VIPUiLayer::displaySE), 5.0f );
+	int temp = RechargeNewUiMgr::GetInstance()->getCurrentRechargeState();
+	if (temp != 0)
+	{
+		GoToPage(temp);
+	}
+
+	if(NULL == _mLocalPlayer)
+		_mLocalPlayer = RoleManager::getInstance()->getLocalPlayer();
+	
+}
+
+void VIPUiLayer::onExit()
+{
+	CC_SAFE_DELETE(_bigLevelAry);
+	CC_SAFE_DELETE(_smallLevelAry);
+	CC_SAFE_DELETE(_NumLevelAry);
+	AnimationCache::getInstance()->releaseSinEffect("E1_144",true);
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+
+void VIPUiLayer::onChargeYuanbaoPressed(cocos2d::CCObject* pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+	int yuanbaoNum=PackageManager::getInstance()->getTotalChargeYuanBao();
+	if (yuanbaoNum<=0)
+	{
+		OPEN_UI(WCT_ShouChongUi);
+	}
+	else
+	{
+		OPEN_UI(WCT_ChongZhiActivityFarmeUI);
+	}
+}
+
+void VIPUiLayer::onLeftPressed(cocos2d::CCObject* pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_21);
+	m_nLvIndex -= 1;
+	if (1 >= m_nLvIndex)
+	{
+		m_nLvIndex = 1;
+		SetLeftButtonState(false);
+	}
+
+	SetRightButtonState(true);
+	this->updateInstruction();
+}
+
+void VIPUiLayer::onRightPressed(cocos2d::CCObject* pSender, cocos2d::extension::CCControlEvent pCCControlEvent)
+{
+	CC_ASSERT(NULL != _mLocalPlayer);
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_21);
+	m_nLvIndex += 1;
+	
+	if(13 <= m_nLvIndex)
+	{
+		if(13 >= _mLocalPlayer->getVIPLevel())
+		{
+			m_nLvIndex = 12;
+			ToolTip::getInstance()->push(GET_STR(7263));
+			return ;
+		}	
+	}
+	
+	if (17 <= m_nLvIndex)
+	{
+		m_nLvIndex = 16;	
+		SetRightButtonState(false);
+	}
+
+	SetLeftButtonState(true);
+	this->updateInstruction();
+}
+void VIPUiLayer::GoToPage(int temp)
+{
+	m_nLvIndex = temp;
+	if (1 >= m_nLvIndex)
+	{
+		m_nLvIndex = 1;
+		SetLeftButtonState(false);
+	}
+	if (17 <= m_nLvIndex)
+	{
+		m_nLvIndex = 16;	
+		SetRightButtonState(false);
+	}
+	SetRightButtonState(true);
+	this->updateInstruction();
+	RechargeNewUiMgr::GetInstance()->setCurrentRechargeState(0);
+}
+void VIPUiLayer::onCloseBtnPressed( cocos2d::CCObject* pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_5);
+	CLOSE_UI(WCT_VIPUI);
+	if(_showShouchongUi)
+	{
+		OPEN_UI(WCT_ShouChongUi);
+	}
+}
+
+bool VIPUiLayer::ccTouchBegan( CCTouch* pTouch, CCEvent* pEvent )
+{
+	CCPoint framPoint = _uiBgSp->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _uiBgSp->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if (frameRect.containsPoint(framPoint))
+	{
+		return true;
+	}
+	else
+	{
+		CLOSE_UI(WCT_VIPUI);
+		return false;
+	}
+	return true;
+}
+void VIPUiLayer::SetLeftButtonState(bool isDis)
+{
+	_leftButton->setVisible(isDis);	
+	_lastLevelSmaDownSp->setVisible(isDis);
+	//_spriteLeftChakan->setVisible(isDis);
+}
+void VIPUiLayer::SetRightButtonState(bool isDis)
+{
+	_rightButton->setVisible(isDis);
+	_nextLevelSmaDownSp->setVisible(isDis);
+	//_spriteRightChakan->setVisible(isDis);
+}
+void VIPUiLayer::updateInstruction()
+{
+	//int saodang = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, SAODANG);
+	////int wuxing = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, PTLINGWU);
+	//int kuaisu = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, KSLINGWU);
+	//int shuangxiu = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, SHUANGXIU);
+	//int junxu = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, JUNXU);
+	//int tilimax = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, TILIMAX);
+	//int tilitimes = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, TILITIMES);
+	//int yinjiu = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, YINJIU);
+	//int shangxiang = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, SHANGXIANG);
+	//int daguai = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, DAGUAIEXP) ;
+	//int jingyanFB = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, JINGYANFB);
+	//int jinqianFB = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, JINQIANFB);
+	//float daguaiExp = static_cast<float>(daguai) / 100.0f;
+	//float jingyanFBExp = static_cast<float>(jingyanFB) / 100.0f;
+	//float jinqianFBExp = static_cast<float>(jinqianFB) / 100.0f;
+	
+	updateList();
+
+	_nowLevelBigDownSp->setDisplayFrame(dynamic_cast<CCSpriteFrame*>(_bigLevelAry->objectAtIndex(m_nLvIndex)));
+	if (1 == m_nLvIndex)
+	{
+		_lastLevelSmaDownSp->setDisplayFrame(dynamic_cast<CCSpriteFrame*>(_smallLevelAry->objectAtIndex(0)));
+		SetLeftButtonState(false);
+	}
+	else
+	{
+		SetLeftButtonState(true);
+		_lastLevelSmaDownSp->setDisplayFrame(dynamic_cast<CCSpriteFrame*>(_smallLevelAry->objectAtIndex(m_nLvIndex-2)));
+	}
+	if (16 == m_nLvIndex)
+	{
+		SetRightButtonState(false);
+		_nextLevelSmaDownSp->setDisplayFrame(dynamic_cast<CCSpriteFrame*>(_smallLevelAry->objectAtIndex(15)));
+	}
+	else
+	{
+		SetRightButtonState(true);
+		_nextLevelSmaDownSp->setDisplayFrame(dynamic_cast<CCSpriteFrame*>(_smallLevelAry->objectAtIndex(m_nLvIndex)));
+	}
+}
+
+void VIPUiLayer::displaySE( float dt )
+{
+	//_chargeAcNode->playAnimOnce(0.12f,false);
+}
+
+void VIPUiLayer::updateList()
+{
+	_vipDataList->clear();
+	int needYuanBao = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, NEEDYUANBAO);
+	int kuaisu = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, KSLINGWU);
+	int shuangxiu = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, SHUANGXIU);
+	int junxu = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, JUNXU);
+	int tilimax = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, TILIMAX);
+	int tilitimes = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, TILITIMES);
+	int yinjiu = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, YINJIU);
+	int shangxiang = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, SHANGXIANG);
+	int daguai = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex, DAGUAIEXP) ;
+	int daguaiExp = static_cast<int>(daguai) / 100.0f;
+	int treasure = VIPMgr::getInstance()->GetVipDataByIndex(m_nLvIndex,TREASURE);
+	std::string openStr = VIPMgr::getInstance()->GetVipStrByIndex(m_nLvIndex,OPEN);
+
+	CCString* need1 = CCString::create("\xE7\xB4\xAF\xE8\xAE\xA1\xE5\x85\x85\xE5\x80\xBC");
+	CCString* need2 = CCString::createWithFormat("%d",needYuanBao);
+	CCString* need3 = CCString::create("\xE5\x8F\xAF\xE5\x8D\x87\xE7\xBA\xA7\xE8\x87\xB3");
+	VipDataListItem* needItem=new VipDataListItem(need1->getCString(),need2->getCString(),need3->getCString(),m_nLvIndex); 
+	_vipDataList->addItem(needItem);
+
+	std::string openStr1 = openStr.substr(0,6);
+	if (openStr1 == "\xE5\xBC\x80\xE5\x90\xAF")
+	{
+		std::string openStr2 = openStr.substr(6,openStr.length()-6);
+		VipDataListItem* openItem=new VipDataListItem(openStr1.c_str(),openStr2.c_str()); 
+		_vipDataList->addItem(openItem);
+	}
+	else if (openStr != "\xE6\x97\xA0")
+	{
+		VipDataListItem* openItem=new VipDataListItem(openStr.c_str()); 
+		_vipDataList->addItem(openItem);
+	}
+
+	CCString* shangxiangStr = CCString::createWithFormat("\xE6\xAF\x8F\xE6\x97\xA5\xE5\x8F\xAF\xE8\xA1\x8C\xE4\xBC\x9A\xE7\x83\xA7\xE9\xA6\x99%d\xE6\xAC\xA1", shangxiang);
+	VipDataListItem* shangxiangItem=new VipDataListItem(); 
+	shangxiangItem->setData(shangxiangStr->getCString());
+	_vipDataList->addItem(shangxiangItem);
+	
+	CCString* yinjiuStr = CCString::createWithFormat("\xE6\xAF\x8F\xE6\x97\xA5\xE5\x8F\xAF\xE9\xA5\xAE\xE9\x85\x92\xE6\xAC\xA1\xE6\x95\xB0%d\xE6\xAC\xA1", yinjiu);
+	VipDataListItem* yinjiuItem=new VipDataListItem(); 
+	yinjiuItem->setData(yinjiuStr->getCString());
+	_vipDataList->addItem(yinjiuItem);
+
+	CCString* shuangxiuStr = CCString::createWithFormat("\xE6\xAF\x8F\xE6\x97\xA5\xE5\x8F\xAF\xE5\x8F\x8C\xE4\xBF\xAE\xE6\xAC\xA1\xE6\x95\xB0%d\xE6\xAC\xA1", shuangxiu);
+	VipDataListItem* shuangxiuItem=new VipDataListItem(); 
+	shuangxiuItem->setData(shuangxiuStr->getCString());
+	_vipDataList->addItem(shuangxiuItem);
+
+	CCString* kuaisuStr = CCString::createWithFormat("\xE6\xAF\x8F\xE6\x97\xA5\xE5\xBF\xAB\xE9\x80\x9F\xE9\xA2\x86\xE6\x82\x9F\xE6\xAC\xA1\xE6\x95\xB0%d\xE6\xAC\xA1", kuaisu);
+	VipDataListItem* kuaisuItem=new VipDataListItem(); 
+	kuaisuItem->setData(kuaisuStr->getCString());
+	_vipDataList->addItem(kuaisuItem);
+
+	CCString* junxuStr = CCString::createWithFormat("\xE6\xAF\x8F\xE6\x97\xA5\xE5\x86\x9B\xE9\x9C\x80\xE4\xBB\xBB\xE5\x8A\xA1\xE6\xAC\xA1\xE6\x95\xB0%d\xE6\xAC\xA1", junxu);
+	VipDataListItem* junxuItem=new VipDataListItem(); 
+	junxuItem->setData(junxuStr->getCString());
+	_vipDataList->addItem(junxuItem);
+
+	CCString* tilimaxStr = CCString::createWithFormat("\xE4\xBD\x93\xE5\x8A\x9B\xE4\xB8\x8A\xE9\x99\x90%d", tilimax);
+	VipDataListItem* tilimaxItem=new VipDataListItem(); 
+	tilimaxItem->setData(tilimaxStr->getCString());
+	_vipDataList->addItem(tilimaxItem);
+
+	CCString* daguaiExpStr = CCString::createWithFormat("\xE6\x89\x93\xE6\x80\xAA\xE7\xBB\x8F\xE9\xAA\x8C%d\x25\x25", daguaiExp);
+	VipDataListItem* daguaiExpItem=new VipDataListItem(); 
+	daguaiExpItem->setData(daguaiExpStr->getCString());
+	_vipDataList->addItem(daguaiExpItem);
+
+	CCString* tilitimesStr = CCString::createWithFormat("\xE6\xAF\x8F\xE6\x97\xA5\xE5\x8F\xAF\xE5\xA2\x9E\xE5\x8A\xA0\xE4\xBD\x93\xE5\x8A\x9B\xE6\xAC\xA1\xE6\x95\xB0%d\xE6\xAC\xA1", tilitimes);
+	VipDataListItem* tilitimesItem=new VipDataListItem(); 
+	tilitimesItem->setData(tilitimesStr->getCString());
+	_vipDataList->addItem(tilitimesItem);
+
+	CCString* treasureStr = CCString::createWithFormat("\xE6\xAF\x8F\xE6\x97\xA5\xE7\xA5\x9E\xE7\xA7\x98\xE5\xAE\x9D\xE8\x97\x8F\xE6\x8A\xBD\xE5\xA5\x96\xE6\xAC\xA1\xE6\x95\xB0%d\xE6\xAC\xA1", treasure);
+	VipDataListItem* treasureItem=new VipDataListItem(); 
+	treasureItem->setData(treasureStr->getCString());
+	_vipDataList->addItem(treasureItem);
+
+	_vipDataList->updateDisplay();
+}
+
+void VIPUiLayer::setShowShonchongUi( bool visible )
+{
+	_showShouchongUi=visible;
+}
+
+
+VipDataListItem::VipDataListItem()
+{
+	CCLabelTTF *label = CCLabelTTF::create();
+	label->setFontSize(14);
+	label->setAnchorPoint(ccp(0.0f, 1.0f));
+	label->setPosition(ccp(LP_common,0.0f));
+	label->setTag(NT_Att);
+	_node->addChild(label);
+}
+
+VipDataListItem::VipDataListItem( const char* str1,const char* str2,const char* str3 ,int level)
+{
+	CCLabelTTF *label1 = CCLabelTTF::create();
+	label1->setFontSize(16);
+	//label1->setAnchorPoint(ccp(0.0f, 1.0f));
+	//label1->setPosition(ccp(LP_VIP,0.0f));
+	label1->setTag(NT_Att);
+	label1->setString(str1);
+	_node->addChild(label1);
+
+	CCLabelTTF *label2 = CCLabelTTF::create();
+	label2->setFontSize(16);
+	//label2->setAnchorPoint(ccp(0.0f, 1.0f));
+	//label2->setPosition(ccp(label1->getPosition().x + label1->getContentSize().width,0.0f));
+	label2->setColor(ccc3(246,255,0));
+	label2->setTag(NT_Att2);
+	label2->setString(str2);
+	_node->addChild(label2);
+
+	CCSprite* yuanbao = CCSprite::createWithSpriteFrameName("vipui_yuanbao");
+	yuanbao->setAnchorPoint(ccp(0.0f,0.5f));
+	//yuanbao->setPosition(ccp(label2->getPosition().x + label2->getContentSize().width, -5.0f));
+	_node->addChild(yuanbao);
+
+	CCLabelTTF *label3 = CCLabelTTF::create();
+	label3->setFontSize(16);
+	label3->setAnchorPoint(ccp(0.0f, 1.0f));
+	//label3->setPosition(ccp(yuanbao->getPosition().x + yuanbao->getContentSize().width,0.0f));
+	label3->setTag(NT_Att3);
+	label3->setString(str3);
+	_node->addChild(label3);
+
+	CCString* str4 = CCString::createWithFormat("\x56\x49\x50%d",level);
+	CCLabelTTF *label4 = CCLabelTTF::create();
+	label4->setFontSize(16);
+	label4->setAnchorPoint(ccp(0.0f, 1.0f));
+	//label4->setPosition(ccp(label3->getPosition().x + label3->getContentSize().width,0.0f));
+	label4->setColor(ccc3(246,255,0));
+	label4->setTag(NT_Att4);
+	label4->setString(str4->getCString());
+	_node->addChild(label4);
+
+	label1->setAnchorPoint(ccp(1.0f, 1.0f));
+	label2->setAnchorPoint(ccp(1.0f, 1.0f));
+	yuanbao->setPosition(ccp(LP_yuanbao, -5.0f));
+	label2->setPosition(ccp(yuanbao->getPosition().x,0.0f));
+	label1->setPosition(ccp(label2->getPosition().x - label2->getContentSize().width,0.0f));
+	label3->setPosition(ccp(yuanbao->getPosition().x + yuanbao->getContentSize().width,0.0f));
+	label4->setPosition(ccp(label3->getPosition().x + label3->getContentSize().width,0.0f));
+}
+
+VipDataListItem::VipDataListItem( const char* str1,const char* str2)
+{
+	CCLabelTTF *label1 = CCLabelTTF::create();
+	label1->setFontSize(14);
+	label1->setAnchorPoint(ccp(0.0f, 1.0f));
+	label1->setPosition(ccp(LP_kaiqi,0.0f));
+	label1->setTag(NT_Att);
+	label1->setString(str1);
+	_node->addChild(label1);
+
+	CCLabelTTF *label2 = CCLabelTTF::create();
+	label2->setFontSize(14);
+	label2->setAnchorPoint(ccp(0.0f, 1.0f));
+	label2->setPosition(ccp(label1->getPosition().x + label1->getContentSize().width,0.0f));
+	label2->setColor(ccc3(0,255,0));
+	label2->setTag(NT_Att2);
+	label2->setString(str2);
+	_node->addChild(label2);
+}
+
+VipDataListItem::VipDataListItem( const char* str )
+{
+	CCLabelTTF *label = CCLabelTTF::create();
+	label->setFontSize(14);
+	label->setAnchorPoint(ccp(0.0f, 1.0f));
+	label->setPosition(ccp(LP_kaiqi,0.0f));
+	label->setColor(ccc3(0,255,0));
+	label->setTag(NT_Att);
+	label->setString(str);
+	_node->addChild(label);
+}
+
+VipDataListItem::~VipDataListItem()
+{
+
+}
+
+void VipDataListItem::onTouch( CCTouch *touck )
+{
+
+}
+
+void VipDataListItem::setData(const char* str )
+{
+	getLabel(NT_Att)->setString(str);
+}
+
+CCLabelTTF * VipDataListItem::getLabel( eVipDataListItemTag tag )
+{
+	return dynamic_cast<CCLabelTTF*>(_node->getChildByTag(tag));
+}
+
+float VipDataListItem::getItemHeight()
+{
+	return getContentSize().height + 20;
+}

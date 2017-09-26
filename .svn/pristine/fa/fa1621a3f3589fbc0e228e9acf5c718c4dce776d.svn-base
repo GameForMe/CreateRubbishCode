@@ -1,0 +1,593 @@
+#include "cocos2d.h"
+#include "TCPClient.h"
+#include "BaseDefine.h"
+#include "CommonMsgDefine.h"
+#include "WorldPacket.h"
+#include "PlayerStallMgr.h"
+#include "ItemDefine.h"
+#include "item.h"
+#include "PackageManager.h"
+#include "UiManager.h"
+#include "PlayerStallUi.h"
+#include "LocalPlayer.h"
+#include "Stall_define.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "Base.h"
+#include "FilterMgr.h"
+#include "StallProto.h"
+#include "RechargeUi.h"
+#include "SecondVerifyMgr.h"
+#include "f_string_table.h"
+
+static const int MAX_STALL_NAME_SIZE = 11; 
+
+PlayerStallMgr::PlayerStallMgr()
+{
+}
+PlayerStallMgr::~PlayerStallMgr()
+{
+}
+
+void PlayerStallMgr::register_net_cmd()
+{
+	TCP_CLIENT->register_net_cmd("NET_G2C_REQUEST_NEW_STALL_START_RESULT", \
+		this, &PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_START_RESULT);
+	TCP_CLIENT->register_net_cmd("NET_G2C_REQUEST_NEW_STALL_UP_RESULT", \
+		this, &PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_UP_RESULT);
+	TCP_CLIENT->register_net_cmd("NET_G2C_REQUEST_NEW_STALL_DOWN_RESULT", \
+		this, &PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_DOWN_RESULT);
+	TCP_CLIENT->register_net_cmd("NET_G2C_REQUEST_NEW_STALL_END_RESULT", \
+		this, &PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_END_RESULT);
+	TCP_CLIENT->register_net_cmd("NET_G2C_REQUEST_NEW_STALL_LOOK_OTHER_RESULT", \
+		this, &PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_LOOK_OTHER_RESULT);
+	TCP_CLIENT->register_net_cmd("NET_G2C_REQUEST_NEW_STALL_BUY_RESULT", \
+		this, &PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_BUY_RESULT);
+	TCP_CLIENT->register_net_cmd("NET_G2C_NEW_STALL_UPDATE_ITEM", \
+		this, &PlayerStallMgr::on_NET_G2C_NEW_STALL_UPDATE_ITEM);
+}
+
+void PlayerStallMgr::unregister_net_cmd()
+{
+	TCP_CLIENT->unregister_net_cmd("NET_G2C_REQUEST_NEW_STALL_START_RESULT", \
+		this, &PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_START_RESULT);
+	TCP_CLIENT->unregister_net_cmd("NET_G2C_REQUEST_NEW_STALL_UP_RESULT", \
+		this, &PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_UP_RESULT);
+	TCP_CLIENT->unregister_net_cmd("NET_G2C_REQUEST_NEW_STALL_DOWN_RESULT", \
+		this, &PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_DOWN_RESULT);
+	TCP_CLIENT->unregister_net_cmd("NET_G2C_REQUEST_NEW_STALL_END_RESULT", \
+		this, &PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_END_RESULT);
+	TCP_CLIENT->unregister_net_cmd("NET_G2C_REQUEST_NEW_STALL_LOOK_OTHER_RESULT", \
+		this, &PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_LOOK_OTHER_RESULT);
+	TCP_CLIENT->unregister_net_cmd("NET_G2C_REQUEST_NEW_STALL_BUY_RESULT", \
+		this, &PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_BUY_RESULT);
+	TCP_CLIENT->unregister_net_cmd("NET_G2C_NEW_STALL_UPDATE_ITEM", \
+		this, &PlayerStallMgr::on_NET_G2C_NEW_STALL_UPDATE_ITEM);
+}
+
+void PlayerStallMgr::destory(unsigned int id)
+{
+	unregister_net_cmd();
+	clear(id);
+
+	CC_SAFE_DELETE(mSaleData);
+}
+
+void PlayerStallMgr::clear(unsigned int id)
+{
+	removeByid(id);
+	PackageManager::getInstance()->destoryCon(EICT_StallItem);
+}
+
+void PlayerStallMgr::send_NET_C2G_REQUEST_NEW_STALL_START(const std::string& name,const StallData_Vec& list)
+{
+	if (name.empty())
+	{
+		return;
+	}
+
+	wchar_t char_name[MAX_STALL_NAME_SIZE];
+	memset(char_name, 0, sizeof(wchar_t) * MAX_STALL_NAME_SIZE);
+	Utf8ToUtf16(name.c_str(), char_name, MAX_STALL_NAME_SIZE, 0);
+	//int size2 = _utf_length(char_name);
+	//给服务器发送摆摊  摊位名称(TCHAR 10)
+	WorldPacket sendmsg(NET_C2G_REQUEST_NEW_STALL_START);
+	sendmsg << char_name;
+
+	StallData_Vec::const_iterator i, iend = list.end();
+	int size = list.size();
+	sendmsg << size;
+	for ( i = list.begin(); i != iend;++i)
+	{
+		sendmsg << *i;
+	}
+	std::function<void(bool)> func = [sendmsg](bool isSuccess){
+		if (isSuccess)
+		{
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)sendmsg.contents(), NP_NORMAL, false);		//发送
+		}
+	};
+	SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+
+	
+}
+
+void PlayerStallMgr::send_NET_C2G_REQUEST_NEW_STALL_END()
+{
+	WorldPacket sendmsg(NET_C2G_REQUEST_NEW_STALL_END);
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)sendmsg.contents(), NP_NORMAL, false);
+}
+
+void PlayerStallMgr::send_NET_C2G_REQUEST_NEW_STALL_UP(const tagNewStallData &data)
+{
+	WorldPacket sendmsg(NET_C2G_REQUEST_NEW_STALL_UP);
+	sendmsg << data;
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)sendmsg.contents(), NP_NORMAL, false);
+}
+void PlayerStallMgr::send_NET_C2G_REQUEST_NEW_STALL_DOWN(int idx)
+{
+	WorldPacket sendmsg(NET_C2G_REQUEST_NEW_STALL_DOWN);
+	sendmsg << idx;
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)sendmsg.contents(), NP_NORMAL, false);
+}
+
+void PlayerStallMgr::send_NET_C2G_REQUEST_NEW_STALL_LOOK_OTHER(unsigned int id)
+{
+	initUI(id);
+	WorldPacket sendmsg(NET_C2G_REQUEST_NEW_STALL_LOOK_OTHER);
+	sendmsg << id;
+	TCP_CLIENT->send_net_cmd((const s_net_cmd*)sendmsg.contents(), NP_NORMAL, false);
+}
+void PlayerStallMgr::send_NET_C2G_REQUEST_NEW_STALL_BUY(unsigned int id, const tagNewStallData &data)
+{
+	std::function<void(bool)> func = [data,id](bool isSuccess){
+		if (isSuccess)
+		{
+			WorldPacket sendmsg(NET_C2G_REQUEST_NEW_STALL_BUY);
+			sendmsg << id;
+			sendmsg << data.byIndex;
+			sendmsg << data.dwItemID;
+			sendmsg << data.n64Serial;
+			sendmsg << data.nCount;
+			sendmsg << data.n32YuanBao;
+			TCP_CLIENT->send_net_cmd((const s_net_cmd*)sendmsg.contents(), NP_NORMAL, false);
+		}
+	};
+	SecondVerifyMgr::getInstance()->try_request_safe_verify(func);
+}
+
+////////////////////////////////////////
+unsigned int PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_START_RESULT( s_net_cmd* cmd )
+{
+	WorldPacket Msg((const void*)cmd);
+	unsigned int isSuccess;
+	Msg >> isSuccess;
+
+	switch(isSuccess)
+	{
+	case E_Stall_Mall_Trad_Bag_Not_Enough:
+		ToolTip::getInstance()->push("\xE8\x83\x8C\xE5\x8C\x85\xE7\xA9\xBA\xE9\x97\xB4\xE4\xB8\x8D\xE8\xB6\xB3");
+		break;
+	case E_Stall_Mall_Trad_Item_Is_Not_Trad:
+		ToolTip::getInstance()->push("\xE6\x9C\x89\xE5\x95\x86\xE5\x93\x81\xE5\xB0\x9A\xE6\x9C\xAA\xE9\x80\x89\xE6\x8B\xA9\xE5\x85\x91\xE6\x8D\xA2\xE7\x89\xA9\xE5\x93\x81");
+		break;
+	case E_Stall_Area_NotAllowed:
+		ToolTip::getInstance()->push(GET_STR(166));
+		break;
+	}
+	if (isSuccess == E_Success)
+	{
+		PlayerStallUiLayer* pUI = getUiNodeByTag<PlayerStallUiLayer>(WCT_StallUi);
+		pUI->setStallState(1);
+		PlayerStallMgr::getInstance()->updateStallName();
+	}
+	return 0;
+}
+unsigned int PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_UP_RESULT( s_net_cmd* cmd )
+{
+	WorldPacket Msg((const void*)cmd);
+	unsigned int isSuccess;
+	Msg >> isSuccess;
+	return 0;
+}
+unsigned int PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_DOWN_RESULT( s_net_cmd* cmd )
+{
+	WorldPacket Msg((const void*)cmd);
+	unsigned int isSuccess;
+	Msg >> isSuccess;
+	return 0;
+}
+unsigned int PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_END_RESULT( s_net_cmd* cmd )
+{
+	WorldPacket Msg((const void*)cmd);
+	unsigned int isSuccess;
+	Msg >> isSuccess;
+	//if (isSuccess == 0)
+	//{
+	//	closeUI();
+	//}
+	return 0;
+}
+unsigned int PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_LOOK_OTHER_RESULT( s_net_cmd* cmd )
+{
+	WorldPacket Msg((const void*)cmd);
+	unsigned int isSuccess;
+	Msg >> isSuccess;
+	return 0;
+}
+unsigned int PlayerStallMgr::on_NET_G2C_REQUEST_NEW_STALL_BUY_RESULT( s_net_cmd* cmd )
+{
+	WorldPacket Msg((const void*)cmd);
+	unsigned int isSuccess;
+	Msg >> isSuccess;
+	switch(isSuccess)
+	{
+	case E_Success:
+		ToolTip::getInstance()->push("\xE8\xB4\xAD\xE4\xB9\xB0\xE6\x88\x90\xE5\x8A\x9F");
+		break;
+	case E_New_Stall_Item_Buy_Is_Not:		//购买失败，物品已售完
+		ToolTip::getInstance()->push("\xE8\xB4\xAD\xE4\xB9\xB0\xE5\xA4\xB1\xE8\xB4\xA5\xEF\xBC\x8C\xE7\x89\xA9\xE5\x93\x81\xE5\xB7\xB2\xE5\x94\xAE\xE5\xAE\x8C");
+		break;
+	case E_New_Stall_YuanBao_Not_Enough:	//购买失败，元宝不足
+		//ToolTip::getInstance()->push("\xE8\xB4\xAD\xE4\xB9\xB0\xE5\xA4\xB1\xE8\xB4\xA5\xEF\xBC\x8C\xE5\x85\x83\xE5\xAE\x9D\xE4\xB8\x8D\xE8\xB6\xB3");
+		RechargeNewUiMgr::GetInstance()->openRechargeNewUi();
+		break;
+	case E_New_Stall_Bag_Not_Enough:		//购买失败，背包空间不足
+		ToolTip::getInstance()->push("\xE8\xB4\xAD\xE4\xB9\xB0\xE5\xA4\xB1\xE8\xB4\xA5\xEF\xBC\x8C\xE8\x83\x8C\xE5\x8C\x85\xE7\xA9\xBA\xE9\x97\xB4\xE4\xB8\x8D\xE8\xB6\xB3");
+		break;
+	case E_New_Stall_Bag_Item_List_Update:	//购买失败，物品出售列表已改变
+		ToolTip::getInstance()->push("\xE8\xB4\xAD\xE4\xB9\xB0\xE5\xA4\xB1\xE8\xB4\xA5\xEF\xBC\x8C\xE7\x89\xA9\xE5\x93\x81\xE5\x87\xBA\xE5\x94\xAE\xE5\x88\x97\xE8\xA1\xA8\xE5\xB7\xB2\xE6\x94\xB9\xE5\x8F\x98");
+		break;
+	case E_New_Stall_Bag_Item_Price_Update:	//购买失败，物品出售价格已改变
+		ToolTip::getInstance()->push("\xE8\xB4\xAD\xE4\xB9\xB0\xE5\xA4\xB1\xE8\xB4\xA5\xEF\xBC\x8C\xE7\x89\xA9\xE5\x93\x81\xE5\x87\xBA\xE5\x94\xAE\xE4\xBB\xB7\xE6\xA0\xBC\xE5\xB7\xB2\xE6\x94\xB9\xE5\x8F\x98");
+		break;
+	}
+	return 0;
+}
+
+void PlayerStallMgr::lockPackageItem(INT64 itemId)
+{
+	PackageManager::getInstance()->lockItem(EICT_Bag, itemId);
+}
+void PlayerStallMgr::unlockPackageItem(INT64 itemId)
+{
+	PackageManager::getInstance()->unLockItem(EICT_Bag, itemId);
+}
+
+void PlayerStallMgr::add(unsigned int id,const tagNewStallData& data)
+{
+	StallData_Map::iterator i = mMap.find(id);
+	tagNewStallData d = data;
+	if (i == mMap.end())
+	{
+		StallData_Vec list;
+		list.push_back(d);
+		mMap.insert(StallData_Map::value_type(id,list));
+	}
+	else
+	{
+		tagNewStallData* old = getByItemId(id,data.n64Serial);
+		if (!old)
+		{
+			i->second.push_back(d);
+		}
+		else
+		{
+			updateByid(id,data);
+		}
+	}
+
+	unsigned int pid = RoleManager::getInstance()->getLocalPlayer()->getId();
+	if (pid == id)
+	{
+		lockPackageItem(data.n64Serial);
+	}
+}
+
+void PlayerStallMgr::removeByid(unsigned int id)
+{
+	StallData_Map::iterator i = mMap.find(id);
+	if (i != mMap.end())
+	{
+		StallData_Vec::iterator vi,viend = i->second.end();
+		for (vi = i->second.begin(); vi != viend; ++vi)
+		{
+			unlockPackageItem(vi->n64Serial);
+		}
+		mMap.erase(i);
+	}
+}
+
+void PlayerStallMgr::updateByid(unsigned int id, const tagNewStallData& data)
+{
+	tagNewStallData* old = getByItemId(id,data.n64Serial);
+	if (old)
+	{
+		if (data.nCount == 0)
+		{
+			removeByItemId(id,data.n64Serial);
+		}
+		else
+		{
+			old->byIndex = data.byIndex;
+			old->dwItemID = data.dwItemID;
+			old->n32YuanBao = data.n32YuanBao;
+			old->n64Serial = data.n64Serial;
+			old->nCount = data.nCount;
+		}
+	}
+}
+
+void PlayerStallMgr::removeByItemId(unsigned int id, INT64 itemId)
+{
+	StallData_Vec *v = getByid(id);
+	if (!v)
+		return;
+	StallData_Vec::iterator i, iend = v->end();
+	for (i = v->begin(); i != iend; ++i)
+	{
+		if (i->n64Serial == itemId)
+		{
+			unsigned int pid = RoleManager::getInstance()->getLocalPlayer()->getId();
+			if (pid != id)
+			{
+				PackageManager::getInstance()->removeByConType(EICT_StallItem,itemId);
+			}
+			else
+			{
+				unlockPackageItem(i->n64Serial);
+			}
+			v->erase(i);
+			break;
+		}
+	}
+}
+
+PlayerStallMgr::tagNewStallData* 
+	PlayerStallMgr::getByItemId(unsigned int id, INT64 itemId)
+{
+	StallData_Vec *v = getByid(id);
+	if (!v)
+		return 0;
+	StallData_Vec::iterator i,iend = v->end();
+	for (i = v->begin(); i != iend; ++i)
+	{
+		if (i->n64Serial == itemId)
+			return &*i;
+	}
+	return 0;
+}
+
+PlayerStallMgr::StallData_Vec * PlayerStallMgr::getByid(unsigned int id)
+{
+	StallData_Map::iterator i = mMap.find(id);
+	if (i != mMap.end())
+	{
+		return &i->second;
+	}
+	else
+	{
+		return 0;
+	}
+}
+
+unsigned int PlayerStallMgr::on_NET_G2C_NEW_STALL_UPDATE_ITEM(s_net_cmd* cmd)
+{
+	WorldPacket msg((const void*)cmd);
+	int size;
+	int state;
+	int error;
+	unsigned int id;
+	tagNewStallData data;
+	msg >> state;
+	msg >> error;
+	msg >> id;
+	msg >> size;
+	for (int i = 0; i < size; ++i)
+	{
+		msg >> data;
+		if (state == E_NEWSTALL_BUY )
+		{
+			updateByid(id,data);
+		}
+		else if (state == E_NEWSTALL_ITEMDOWN)
+		{
+			removeByItemId(id,data.n64Serial);
+		}
+		else
+		{
+			add(id,data);
+		}
+	}
+	PlayerStallUiLayer* pLayer = getUiNodeByTag<PlayerStallUiLayer>(WCT_StallUi);
+	if (pLayer)
+	{
+		initUI(id);
+	}
+	return 0;
+}
+
+void PlayerStallMgr::initUI(unsigned int id)
+{
+	PlayerStallUiLayer* pLayer = getUiNodeByTag<PlayerStallUiLayer>(WCT_StallUi);
+	if(!pLayer)
+	{
+		OPEN_UI(WCT_StallUi);
+		pLayer = getUiNodeByTag<PlayerStallUiLayer>(WCT_StallUi);
+		pLayer->setStallState(3);
+	}
+	pLayer->updateItem(id);
+	//pLayer->updateItem(id);
+	//if (pLayer)
+	//{
+	//	pLayer->updateItem(id);
+	//}
+}
+
+void PlayerStallMgr::closeUI()
+{
+	UiMgr::getInstance()->closeUi(WCT_StallUi);
+}
+
+//////////////////////////////////////////
+void PlayerStallMgr::bag2stall(int srcConType, int destConType, short src, short dest, int num /*= 0*/ )
+{
+	if (!mMap.empty())
+	{
+		unsigned int id = RoleManager::getInstance()->getLocalPlayer()->getId();
+		StallData_Map::iterator i = mMap.find(id);
+		if (i == mMap.end())
+		{
+			return;
+		}
+		StallData_Vec *v = getByid(id);
+		if (v)
+		{
+			if (v->size() == 10)
+			{
+				ToolTip::getInstance()->push("\xE6\x91\x86\xE6\x91\x8A\xE6\xA0\x8F\xE5\xB7\xB2\xE6\xBB\xA1");
+				return;
+			}
+		}
+	}
+	f_item *tmpSrcItem = PackageManager::getInstance()->getItem((EItemConType)srcConType, src);
+	if( tmpSrcItem == NULL )
+	{
+		return;
+	}
+
+	if (tmpSrcItem->is_locked())
+	{
+		return;
+	}
+	if (tmpSrcItem->is_item_binded())
+	{
+		ToolTip::getInstance()->push(/*"\xE7\xBB\x91\xE5\xAE\x9A\xE7\x89\xA9\xE5\x93\x81\xE4\xB8\x8D\xE8\x83\xBD\xE5\x87\xBA\xE5\x94\xAE"*/STRING_TABLE["need_not_binded"]);
+		return;
+	}
+	if (MIsEquipment(tmpSrcItem->get_item_type_id()))
+	{
+		f_equipment* equip = dynamic_cast<f_equipment*>(tmpSrcItem);
+		if (equip && equip->is_posy())
+		{
+			ToolTip::getInstance()->push(STRING_TABLE["need_no_gems"]);
+			return;
+		}
+	}
+
+	CC_SAFE_DELETE(mSaleData);
+
+	mSaleData = new tagNewStallData;
+	mSaleData->byIndex = dest;
+	mSaleData->dwItemID = tmpSrcItem->get_item_type_id();
+	mSaleData->n64Serial = tmpSrcItem->get_item_id();
+	mSaleData->nCount = tmpSrcItem->get_item_number();
+	mSaleData->n32YuanBao = 99;
+
+	OPEN_UI(WCT_Stallbuyui);
+	StallBuyUiLayer* pLayer = getUiNodeByTag<StallBuyUiLayer>(WCT_Stallbuyui);
+	if(pLayer)
+	{
+		pLayer->setItemNodeData(tmpSrcItem,0);
+		_playerStall_connected.connect(this, &PlayerStallMgr::onSale);
+	}
+}
+
+void PlayerStallMgr::onSale(INT64 id, const tagNewStallData& data)
+{
+	if (!mSaleData)
+	{
+		return;
+	}
+	if (mSaleData->n64Serial != data.n64Serial)
+	{
+		return;
+	}
+	mSaleData->n32YuanBao = data.n32YuanBao;
+	bag2stallImp(*mSaleData);
+
+	CC_SAFE_DELETE(mSaleData);
+}
+void PlayerStallMgr::onBuy(INT64 id, const tagNewStallData& data)
+{
+	send_NET_C2G_REQUEST_NEW_STALL_BUY(id,data);
+}
+
+void PlayerStallMgr::bag2stallImp(const tagNewStallData &data)
+{
+	//LocalPlayer *localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	//unsigned int id = localPlayer->getId();
+	send_NET_C2G_REQUEST_NEW_STALL_UP(data);
+}
+
+PlayerStallMgr* PlayerStallMgr::getInstance()
+{
+	static PlayerStallMgr mgr;
+	return &mgr;
+}
+
+
+void PlayerStallMgr::getStallName( unsigned int roleId )
+{
+	for(std::list<unsigned int>::iterator iter = _needGetStallName.begin(); iter != _needGetStallName.end(); ++ iter)
+	{
+		if(*iter == roleId)
+			return;
+	}
+
+	_needGetStallName.push_back(roleId);
+}
+
+void PlayerStallMgr::updateStallName()
+{
+	if(_needGetStallName.empty())
+		return;
+
+	unsigned char byTemp[sizeof(NET_SIC_stall_get_title)+sizeof(unsigned int)*50];
+	NET_SIC_stall_get_title* pSend = (NET_SIC_stall_get_title*)byTemp;
+	pSend->id = message_id_crc("NET_SIC_stall_get_title");
+	pSend->nNumber = 0;
+	while( !_needGetStallName.empty() )
+	{
+		unsigned int dwID = _needGetStallName.front();
+		pSend->dwStallRoleID[pSend->nNumber++] = dwID;
+		_needGetStallName.pop_front();
+		if( pSend->nNumber >= 50)
+			break;
+	}
+	if( pSend->nNumber > 0 )
+	{
+		pSend->size = sizeof(NET_SIC_stall_get_title)
+			+ sizeof(unsigned int) * (pSend->nNumber - 1);
+		TCP_CLIENT->send_net_cmd(pSend, NP_INSIGNIFICANT, false);
+	}
+}
+
+void PlayerStallMgr::openStall()
+{
+	OPEN_UI(WCT_StallUi);
+	PlayerStallUiLayer* pUI = getUiNodeByTag<PlayerStallUiLayer>(WCT_StallUi);
+	if(pUI)
+	{
+		int localId = RoleManager::getInstance()->getLocalPlayer()->getId();
+		if (pUI->getId() == localId)
+		{
+			if(RoleManager::getInstance()->getLocalPlayer()->isInRoleStateAny(RA_Stall))
+			{
+				pUI->setStallState(1);
+				return;
+			}
+			else
+			{
+				pUI->setStallState(2);
+				return;
+			}
+		}
+		else
+		{
+			PlayerStallMgr::getInstance()->clear(pUI->getId());
+			pUI->setStallState(2);
+			pUI->updateItem(localId);
+		}
+	}
+}

@@ -1,0 +1,132 @@
+#ifndef CHATMGR_H
+#define CHATMGR_H
+
+/**
+ *	@file		ChatMgr.h
+ *	@author		gx
+ *	@date		2013/6/15
+ *	@version	
+ *	@brief		聊天管理类
+ */
+#include "ChatProtocol.h"
+#include "ChatDefine.h"
+#include "BaseDefine.h"
+#include "ItemDefine.h"
+#include "ChatUi.h"
+
+using namespace std;
+class ChatMgr
+{
+public:
+	typedef vector<s_send_chat_info> send_chat_record;
+	typedef vector<s_receive_chat_info> receive_chat_record;
+private:
+	receive_chat_record				m_receive_chat_array[ERCC_END];	//接受的聊天数据缓存
+	send_chat_record				m_vector_speak[ERCC_END];		//已经发出的发言，仅用于判断指定时间内是否重复发送
+	receive_chat_record				m_receive_Temp;				//临时保存需要向服务器请求玩家姓名的聊天信息
+	unsigned int					m_local_player_id;			//本地玩家ID
+	unsigned int					m_last_world_chat_time;		//上次通过世界频道成功发言的时间
+	unsigned int					m_last_map_chat_time;		//上次通过附件频道成功发言的时间
+	unsigned int					m_last_yyTianXia_chat_time;	//上次通过天下号令频道成功发语言的时间
+	unsigned int					m_last_yyQili_chat_time;		//上次通过千里传音频道成功发语言的时间
+	unsigned int					m_last_yyGuild_chat_time;		//上次通过行会频道成功发语言的时间
+	unsigned int					m_last_yyTeam_chat_time;		//上次通过组队频道成功发语言的时间
+	unsigned int					m_last_yyPrivate_chat_time;		//上次通过密语频道成功发语言的时间
+	unsigned int					m_last_yyWorld_chat_time;			//上次通过YY世界频道成功发言的时间
+
+	//std::vector<unsigned long long>		m_vecItemId;				//[bing] 要发送聊天内的物品id列表
+	std::map<unsigned long long, tagItem>			m_mapChatItem;				//[bing] 物品信息
+	std::map<unsigned long long, tagEquip>			m_mapChatEquip;				//[bing] 装备信息
+	bool m_bIsWorldSpeak;
+	bool m_bIsGuildSpeak;
+	bool m_bIsTeamSpeak;
+	bool m_bIsNeedSetPrivateId;
+	int m_bIsNoticeDeleteGold;
+	unsigned int m_IsWorldCharDeleteMoney;
+	unsigned int m_WorldCharDeleteMoneyNum;
+	std::string m_WorldMsg;
+	tstring m_Message;
+	ESendChatChannel channel;
+	bool m_IsYY;
+	bool m_ClearText;
+	//std::map<unsigned int,int>			m_bossInMap;
+	std::vector<char*> m_chatList;
+	bool m_isShowMap;//是否在预览显示附近聊天
+private:
+	void CheckSendChatIsDeleteSendChat(bool IsCheck);
+	void CheckSendChatIsDeleteOkBtnPressed();
+	void CheckSendChatIsDeleteCancelBtnPressed();
+public:
+	ChatMgr();
+	~ChatMgr();
+	static ChatMgr* getInstance();
+	void Destroy();
+	void Init();
+	void Update();//天下号令更新
+	bool GetIsClearText(){return m_ClearText;}
+	void SetIsClearText(bool IsClearText){m_ClearText = IsClearText;}
+	/*各频道发送函数*/
+	void SetIsWorldCharDeleteMoney(unsigned int uIsDelete){m_IsWorldCharDeleteMoney = uIsDelete;}
+	void SetWorldCharDeleteMoneyNum(unsigned int uMoneyNum){m_WorldCharDeleteMoneyNum = uMoneyNum;}
+	void Send_Decree_Chat(const tstring &strMsg,ESendChatChannel eChannel,bool isYY = false);//天下号令
+	void Send_Qili_Chat(const tstring &strMsg,ESendChatChannel eChannel,bool isYY = false);//千里传音
+	void Send_World_Chat(const tstring &strMsg,ESendChatChannel eChannel,bool isYY = false);//世界
+	void Send_Guild_Chat(const tstring &strMsg,ESendChatChannel eChannel,bool isYY = false);//行会
+	void Send_Team_Chat(const tstring &strMsg,ESendChatChannel eChannel,bool isYY = false);//组队
+	void Send_Map_Chat(const tstring &strMsg,ESendChatChannel eChannel);//附件
+	void Send_Private_Chat(const tstring &strMsg,ESendChatChannel eChannel,unsigned int dest_id_ = INVALID, unsigned int destName_crc = INVALID,bool isYY = false);//私聊
+	void setYYChannelBeginTime(unsigned int &yyTime);
+	unsigned int getYYChannelSpeakTime(unsigned int yyTime);
+	unsigned int getYYIntervalTimeByChannel(eFrameTag yyChannel);
+	void setWorldSpeak(bool speak) {m_bIsWorldSpeak = speak;}
+	void setGuildSpeak(bool speak) {m_bIsGuildSpeak = speak;}
+	void setTeamSpeak(bool speak) {m_bIsTeamSpeak = speak;}
+	bool getWorldSpeak() {return m_bIsWorldSpeak;}
+	bool getGuildSpeak() {return m_bIsGuildSpeak;}
+	bool getTeamSpeak() {return m_bIsTeamSpeak;}
+	/*向服务器发送聊天内容*/
+	void Send_ChatMsg2Server(const tstring &strMsg,ESendChatChannel eChannel,unsigned int dest_id_ = INVALID, unsigned char auto_reply_=0, unsigned int destName_crc = INVALID);
+	/*UI按钮响应函数*/
+	void Send_Chat(const tstring &strMsg,ESendChatChannel eChannel,unsigned int dest_id_ = INVALID, unsigned int destName_crc = INVALID,bool isYY = false);
+	/*服务器返回的消息*/
+	unsigned int onServer_Receive_Chat_Info(s_net_cmd *cmd);
+	unsigned int onServer_Receive_Chat_ItemInfo(s_net_cmd *cmd); //接收聊天中的物品信息
+	unsigned int onServer_GetPlayerName(s_net_cmd *cmd);
+	/*UI调用函数*/
+	vector<s_receive_chat_info>* GetChatInfoByChannel(EReceiveChatChannel eChannel);//根据频道获取该频道当前保存的全部聊天记录
+	/*辅助函数*/
+	bool is_resaid(const tstring &str,ESendChatChannel eChannel);//是否重复发言
+	bool is_gmorder(const tstring &str);//是否是GM命令
+	void pushChatRecord(const tstring &str,unsigned int utime,ESendChatChannel eChannel);
+	void pushReceiveInfo2Channel(NET_SIS_role_char* pMsg, const std::string* sendName = NULL, int _time = 0, const std::string* recvName = NULL);
+
+	void ShowInfoByChatChannel(const s_receive_chat_info &info);
+	void OpenMall();
+	void HLTXItemGet();//号令天下道具购买及使用
+	void QLCYItemGet();//千里传音道具购买及使用
+
+	std::string getRandMessage(int n);
+	void onGetName(unsigned int roleid , const std::string& name);
+	void updateRandMessgae();
+	void updateBossMassage();
+	//void getBossInMap();
+	void* getItemInfo(long long nSerialId , bool& bIsEquip ); //获取物品信息
+	void EraseItemInfo( UINT64 n64id ); //移除物品信息
+	//void InputItemId( unsigned long long nSerialId ); //加入物品容器
+	//void ErseBackItemId( ); //清空物品容器
+
+	void sendChatEmotcion(int emotcion);
+	unsigned int onServerChatEmotcion(s_net_cmd *cmd);
+	unsigned int getYYChannelSpeakTimeByChannel(eFrameTag yyChannel);
+	void setYYChannelBeginTimeByChannel(eFrameTag yyChannel);
+
+	void setNeedPrivate(bool isNeed);
+	bool isNeedPrivate();
+
+	void setShowMap(bool isShow) { m_isShowMap = isShow; }
+	bool getShowMap() { return m_isShowMap; }
+};
+
+void tryToPrivateTalk( unsigned int targetID );
+#endif
+

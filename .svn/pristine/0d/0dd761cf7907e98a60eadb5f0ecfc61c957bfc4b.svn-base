@@ -1,0 +1,2814 @@
+#include "TaskTraceUi.h"
+#include "CfgReader.h"
+#include "GroupBtnUi.h"
+#include "World.h"
+#include "Auto_ActionMgr.h"
+#include "UiTools.h"
+#include "RoleManager.h"
+#include "LocalPlayer.h"
+#include "ExchangeBusinessMgr.h"
+#include "UiManager.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+//#include "UiResourceMgr.h"
+#include "QuestMgr.h"
+#include "FubenInfoUi.h"
+#include "FubenUI.h"
+#include "VIPMgr.h"
+#include "InstanceMgr.h"
+#include "ToolTip.h"
+#include "StringMgr.h"
+#include "UIUtil.h"
+#include "CommonDefine.h"
+#include "CommonClient.h"
+#include "ListControl.h"
+#include "RewardQuestMgr.h"
+#include "GameEventDefine.h"
+#include "InviteListView.h"
+#include "CmdAdapter.h"
+#include "BossPKMgr.h"
+#include "WorldPacket.h"
+#include "CommonMsgDefine.h"
+#include "TCPClient.h"
+
+#include "NewPlayerGuide.h"
+#include "CrossSceneUI.h"
+#include "NPCTalkUi.h"
+#define  MUBIAOSPRITETAG 1231
+
+bool sort_task_list(TaskTraceItem* item1,TaskTraceItem* item2)
+{
+	if(item1->getQuestType() < item2->getQuestType())
+	{
+		return true;
+	}
+	return false;
+}
+void TaskTraceItem::init( const char *title, const char *info, float viewWidth,questState state,bool isMain,bool isAccpet)
+{
+	isRunEffect = false;
+	_canAccpet = isAccpet;
+
+	//bg and bg select pic
+	CCSprite *sprite = CCSprite::createWithSpriteFrameName("rendui_wenzidi");
+	CC_ASSERT(sprite != NULL);
+	_node->setAnchorPoint(ccp(0,1));
+	_node->setContentSize(sprite->getContentSize());
+	_contentSize  = _node->getContentSize();
+
+	if (sprite!= NULL)
+	{
+		sprite->setTag(TTLT_BG);
+		sprite->setZOrder(TTZ_Bottom);
+		UIUtil::childNodeAlign(_node,sprite,eha_center,eva_center,ccp(-10,-5));
+	}
+	_wenzidiSprite = CCSprite::createWithSpriteFrameName("rendui_clickback");
+	UIUtil::childNodeAlign(sprite,_wenzidiSprite,eha_center,eva_center,CCPointZero);
+	_wenzidiSprite->setVisible(false);
+
+	//trace eft
+	if (isMain && isAccpet)
+	{
+		setTaskSE(isAccpet);
+	}
+
+	//quest title label
+	TTFConfig config;
+	config.fontFilePath=  FT_FONTFACE;
+	config.fontSize = 14;
+	config.outlineSize = 1;
+	LabelFT* titleLabel = LabelFT::createWithTTF(config,"");
+	CC_ASSERT(titleLabel != NULL);
+	if(titleLabel == NULL)
+	{
+		return;
+	}
+
+	_title = title;
+	titleLabel->setString(title);
+	titleLabel->setTag(TTLT_TITLE);
+	titleLabel->setZOrder(TTZ_LabelTTF);
+	UIUtil::childNodeAlign(_node,titleLabel,eha_left,eva_top,ccp(-10,-3));
+
+	update_title_color(titleLabel,state);
+
+
+	//quest desc text
+	LabelFT *infoLabel = LabelFT::createWithTTF(config,"");
+	CC_ASSERT(infoLabel != NULL);
+	if(infoLabel != NULL)
+	{
+		//infoLabel->setAnchorPoint(ccp(0.0f, 1.0f));
+		infoLabel->setTag(TTLT_INFO);
+		infoLabel->setZOrder(TTZ_LabelTTF);
+		ccColor3B infoColor;
+		infoColor.r = 0xfe;
+		infoColor.g = 0xf8;
+		infoColor.b = 0xd8;
+		infoLabel->setColor(infoColor);
+		infoLabel->setString(info);
+
+		UIUtil::childNodeAlign(_node,infoLabel,eha_left,eva_top,ccp(5.0f,titleLabel->getContentSize().height -3));
+	}
+}
+
+TaskTraceItem * TaskTraceItem::create( const char *title, const char *info, float viewWidth ,questState state ,bool isMain,bool isAccpet)
+{
+	TaskTraceItem *item = new TaskTraceItem;
+	item->init(title, info, viewWidth,state,isMain,isAccpet);
+	return item;
+}
+CCSize TaskTraceItem::getContentSize(){
+	return _contentSize;
+}
+void TaskTraceItem::updateContent(CCSprite* sprite){
+	_contentSize.width=sprite->getContentSize().width;
+	_contentSize.height=0.7*sprite->getContentSize().height;
+}
+void TaskTraceItem::setTitle( const char *title, questState state,bool bCanAccpet /*= true*/ , bool isMain)
+{
+	LabelFT *titleLabel = static_cast<LabelFT*>(_node->getChildByTag(TTLT_TITLE));
+	CC_ASSERT(titleLabel != NULL);
+	if(titleLabel == NULL)
+	{
+		return;
+	}
+	if (title)
+	{
+		_title = title;
+		titleLabel->setString(title);
+	}
+	//更新位置;
+	LabelFT *infoLabel = static_cast<LabelFT*>(_node->getChildByTag(TTLT_INFO));
+	CC_ASSERT(infoLabel != NULL);
+	if(infoLabel == NULL)
+	{
+		return;
+	}
+	//titleLabel->setPosition(ccp(-5.0f, 0.0f));
+	//infoLabel->setPosition(ccp(5.0f, -titleLabel->getContentSize().height));
+
+	if (isMain)
+	{
+		setTaskSE(bCanAccpet);
+	}
+
+	update_title_color(titleLabel,state);
+	// 	if (state == NOACCEPT)//可接
+	// 	{
+	// 		titleLabel->setTextColor(Helper::converColor3B_2_4B(ccc3(0,176,240)));
+	// 	}
+	// 	else if (state == ACCEPTING)//进行中
+	// 	{
+	// 		titleLabel->setTextColor(Helper::converColor3B_2_4B(ccc3(255,192,0)));
+	// 	}
+	// 	else if (state == Q_COMPLETE)//完成
+	// 	{
+	// 		titleLabel->setTextColor(Helper::converColor3B_2_4B(ccc3(255,255,0)));
+	// 	}
+	// 	else
+	// 	{
+	// 		titleLabel->setTextColor(Helper::converColor3B_2_4B(ccc3(255,255,255)));
+	// 	}
+	_canAccpet = bCanAccpet;
+
+	if (!bCanAccpet)
+	{
+		ccColor3B infoColor;
+		infoColor.r = 0xff;
+		infoColor.g = 0x00;
+		infoColor.b = 0x00;
+		titleLabel->setTextColor(Helper::converColor3B_2_4B(infoColor));
+	}
+}
+
+void TaskTraceItem::setInfo( const char *info ,questState state )
+{
+	LabelFT *infoLabel = static_cast<LabelFT*>(_node->getChildByTag(TTLT_INFO));
+	CC_ASSERT(infoLabel != NULL);
+	if(infoLabel != NULL)
+	{
+		infoLabel->setString(info);
+	}
+}
+
+void TaskTraceItem::setTaskSE(bool isBegan)
+{
+	CCNode* bg = _node->getChildByTag(TTLT_BG);
+	CC_ASSERT(bg);
+
+	CCSprite* taskEffectSprite = static_cast<CCSprite*>(bg->getChildByTag(TTLT_EFFECT));
+	if (!taskEffectSprite)
+	{
+		taskEffectSprite = CCSprite::create();
+		//taskEffectSprite->setPosition(ccp(70.0f, -18.0f));
+		taskEffectSprite->setTag(TTLT_EFFECT);
+		taskEffectSprite->setZOrder(TTZ_LabelTTF);
+		taskEffectSprite->setVisible(true);
+		UIUtil::childNodeAlign(bg,taskEffectSprite,eha_center,eva_center,/*ccp(-1.5f,0.0f)*/CCPointZero);
+		//_node->addChild(taskEffectSprite,TTZ_LabelTTF);
+	}
+
+	if (!isBegan)
+	{
+		taskEffectSprite->setVisible(false);
+		taskEffectSprite->stopAllActions();
+	}
+	else if(isBegan && !isRunEffect)
+	{
+		isRunEffect = true;
+		taskEffectSprite->stopAllActions();//先停止，否则可能出现重播导致加快
+		AnimationCache::AnimateList& anims = World::getInstance()->getTaskTraceUi()->getAnimate();
+		BSAnimate *animate = anims[0];
+		taskEffectSprite->runAction(CCRepeatForever::create(animate));
+		taskEffectSprite->setVisible(true);
+	}
+}
+
+void TaskTraceItem::setHighLight(bool isHighLight)
+{
+	if (_wenzidiSprite)
+	{
+		_wenzidiSprite->setVisible(isHighLight);
+	}
+}
+
+void TaskTraceItem::update_title_color( LabelFT* label,int state )
+{
+	if (state == NOACCEPT || state == ACCEPTING)
+	{
+		if (state == NOACCEPT)//可接
+		{
+			label->setColor(ccc3(0,176,240));
+		}
+		else if (state == ACCEPTING)//进行中
+		{
+			label->setColor(ccc3(255,192,0));
+		}
+	}
+	else if (state == Q_COMPLETE)//完成
+	{
+		label->setColor(ccc3(255,255,0));
+	}
+	else
+	{
+		label->setColor(ccc3(255,255,255));
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+GroupPlayerItem::GroupPlayerItem()
+	:  _node(NULL)
+	,  _teamLeaderSprite(NULL)
+	,mpClass(NULL)
+	,mpHpBar(NULL)
+	,mpName(NULL)
+	,mpEmpty(NULL)
+	,mpNotEmpty(NULL)
+	,mpNameft(NULL)
+	,mpMatchCue(NULL)
+	,mpAddPic(NULL)
+{
+
+}
+
+GroupPlayerItem::~GroupPlayerItem()
+{
+
+	if(_node != NULL)
+	{
+		_node->release();
+		_node = NULL;
+	}
+}
+
+float GroupPlayerItem::getContentHeight()
+{
+	if(_node == NULL)
+	{
+		return 0.0f;
+	}
+	else
+	{
+		//CCNode *label = _node->getChildByTag(GIT_Name);
+		//CCNode *hp = _node->getChildByTag(GIT_Hp);
+		//return label->getContentSize().height + hp->getContentSize().height + GROUPMEMBERLINESPACE+9;////add by vvv 2014.11.18 队友间距
+		return /*_node->getChildByTag(GIT_EmptySlot)->getContentSize().height*/_node->getContentSize().height;
+	}
+}
+
+CCProgressTimer * GroupPlayerItem::initHProgressBar( CCSprite * sprite )
+{
+	CCProgressTimer *progress = CCProgressTimer::create(sprite);
+	progress->setType(kCCProgressTimerTypeBar);
+	progress->setMidpoint(ccp(0.0, 0.0));
+	progress->setBarChangeRate(ccp(1.0, 0.0));
+	progress->setPercentage(0.0f);
+	progress->setPosition(sprite->getPosition());
+	progress->setAnchorPoint(sprite->getAnchorPoint());
+	return progress;
+}
+
+void GroupPlayerItem::addToParent( CCNode *parent )
+{
+	if(_node != NULL)
+	{
+		//ListControl* list = dynamic_cast<ListControl*>(parent);
+		//list->add_item(_node);
+		parent->addChild(_node);
+	}
+}
+
+void GroupPlayerItem::removeFromParent()
+{
+	if(_node != NULL)
+	{
+		_node->removeFromParent();
+	}
+}
+
+void GroupPlayerItem::setData( const tagTeammateData * data )
+{
+	if(data != NULL)
+	{
+		_data.uRoleID = data->uRoleID;
+		_data.strName = data->strName;
+		_data.nLevel = data->nLevel;
+		_data.nHP = data->nHP;
+		_data.nMaxHp = data->nMaxHp;
+		_data.eClassEx = data->eClassEx;
+		_data.b_online = data->b_online;
+		_data.bySex = data->bySex;
+
+		CC_ASSERT(_node);
+
+		setName(_data.strName,!_data.b_online);
+		setHp(_data.nHP, _data.nMaxHp);
+
+		refreshClass();
+
+		clearTeamLeaderFlag();
+		setTeamLeaderFlag(_data.uRoleID);
+		setEmpty(false);
+	}
+	else
+	{
+		_data.uRoleID = INVALID;
+
+		//createItem();
+
+		setEmpty(true);
+	}
+}
+
+void GroupPlayerItem::setHp( int cur, int max )
+{
+	CC_ASSERT(_data.isValid());
+	if(_node != NULL)
+	{
+		//CCProgressTimer *hp = dynamic_cast<CCProgressTimer*>(_node->getChildByTag(GIT_Hp));
+		mpHpBar->setPercentage(cur * 100.0f / max);
+		_data.nHP = cur;
+		_data.nMaxHp = max;
+	}
+}
+
+void GroupPlayerItem::setName( const std::string &name,bool bOffline )
+{
+	CC_ASSERT(_data.isValid());
+	if(_node != NULL)
+	{
+		if (std::string(mpNameft->getString()) != name)
+		{
+			mpNameft->setString(name.c_str());
+		}
+
+		mpNameft->setTextColor(Helper::converColor3B_2_4B(bOffline?ccc3(144,144,144):ccc3(0xff,0xff,0xff)));
+		// 		if(mpName->getColor().r==255 && mpName->getColor().g == 255 && mpName->getColor().b == 255)
+		// 		{
+		// 			mpName->setColor(ccc3(144,144,144));
+		// 		}
+		// 		else
+		// 		{
+		// 			mpName->setColor(ccc3(0xff,0xff,0xff));
+		// 		}
+	}
+}
+
+void GroupPlayerItem::setPosition( const CCPoint &pos )
+{
+	if(_node != NULL)
+	{
+		_node->setPosition(pos);
+	}
+}
+
+cocos2d::CCPoint GroupPlayerItem::getPosition()
+{
+	if(_node != NULL)
+	{
+		return _node->getPosition();
+	}
+
+	return ccp(0.f, 0.f);
+}
+
+void GroupPlayerItem::showTeamHead( const char *name ,bool isOnline)
+{
+	//CCSprite * sprite = /*CCSprite::create()*/dynamic_cast<CCSprite*>(_node->getChildByTag(GIT_Head));
+	mpClass->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(name));
+	//mpClass->setScale(0.8f);
+	//sprite->setAnchorPoint(ccp(0.0f,1.0f));
+	//	sprite->setPosition(ccp(-3.0f, 0.0f));
+	if (isOnline)
+	{
+		mpClass->setColor(ccc3(255,255,255));
+	}else{
+		mpClass->setColor(ccc3(96,96,96));
+	}
+	//_node->addChild(sprite);
+}
+
+void GroupPlayerItem::setTeamLeaderFlag(unsigned int playerId)
+{
+	//CC_ASSERT(_data.isValid());
+	if (_data.isValid() && playerId == TeamMgr::getInstance()->getLeaderID())
+	{
+		if (_teamLeaderSprite == NULL)
+		{	
+			_teamLeaderSprite = CCSprite::create();
+			_teamLeaderSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_hongqi"));
+			_teamLeaderSprite->setVisible(true);
+			_teamLeaderSprite->setAnchorPoint(ccp(1.0f, 0.5f));
+			_teamLeaderSprite->setPosition(ccp(_node->getContentSize().width,_node->getContentSize().height*0.5f));
+			_node->addChild(_teamLeaderSprite);
+		}
+	}
+}
+
+void GroupPlayerItem::clearTeamLeaderFlag()
+{
+	if (_teamLeaderSprite != NULL)
+	{
+		_node->removeChild(_teamLeaderSprite);
+		_teamLeaderSprite = NULL;
+	}
+}
+
+void GroupPlayerItem::init()
+{
+	CCNodeLoaderLibrary* lib  = CCNodeLoaderLibrary::sharedCCNodeLoaderLibrary();
+	CCBReader* reader = new CCBReader(lib);
+	reader->autorelease();
+	std::string strFilepath = CFGReader::instance()->get_ui_ccbi_filepath("tastraceuiitem");
+	CC_ASSERT(_node==NULL);
+	_node = reader->readNodeGraphFromFile(strFilepath.c_str(),NULL);
+	CC_ASSERT(_node);
+	_node->setAnchorPoint(ccp(0,1.0f));
+	//_node = CCNode::create();
+	_node->retain();
+	//_node->ignoreAnchorPointForPosition(true);
+
+	mpNotEmpty = _node->getChildByTag(GIT_NotEmpty);
+	CC_ASSERT(mpNotEmpty);
+
+	mpName = dynamic_cast<CCLabelTTF*>(mpNotEmpty->getChildByTag(GIT_Name));
+	CC_ASSERT(mpName);
+
+	mpNameft = Helper::replaceLabelTTFWithLabelFTAndRemove(mpName);
+	CC_ASSERT(mpNameft);
+
+	CCNode* hpBG =mpNotEmpty->getChildByTag(GIT_Hp);
+	CC_ASSERT(hpBG);
+	hpBG->setVisible(false);
+	mpHpBar= initHProgressBar(dynamic_cast<CCSprite*>(hpBG));
+	mpNotEmpty->addChild(mpHpBar);
+
+	mpClass = dynamic_cast<CCSprite*>(mpNotEmpty->getChildByTag(GIT_Head));
+	CC_ASSERT(mpClass);
+
+	mpEmpty = _node->getChildByTag(GIT_EmptySlot);
+	CC_ASSERT(mpEmpty);
+
+	mpMatchCue = Helper::getLabelFTByParentAndTag(mpEmpty, 2);
+	CC_ASSERT(mpMatchCue);
+
+	mpAddPic = dynamic_cast<CCSprite*>(mpEmpty->getChildByTag(1));
+	CC_ASSERT(mpAddPic);
+
+	// 	CCLabelTTF *label = CCLabelTTF::create();
+	// 	label->setFontSize(14);
+	// 	label->setAnchorPoint(ccp(0.f, 1.f));
+	// 	label->setColor(ccc3(0xff, 0xff, 0xff));
+	// 	label->setTag(GIT_Name);
+	// 	//label->setString(_data.strName.c_str());
+	// 	label->setPosition(ccp(GROUPMEMBERHEADWIDTH-15, -3.f));//名字
+	// 	_node->addChild(label);
+
+	// 	float labelH = label->getContentSize().height;
+	// 	CCSprite *_mysprite= CCSprite::create();
+	// 	_mysprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_teambottom"));//add by vvv 2014.11.18 背景图
+	// 	_mysprite->setAnchorPoint(ccp(0.f, 1.f));
+	// 	_mysprite->setTag(GIT_BG);
+	// 	//_mysprite->setVisible(false);
+	// 	_mysprite->setPosition(ccp(GROUPMEMBERHEADWIDTH-21 ,0));//GROUPMEMBERLINESPACE
+	// 	_node->addChild(_mysprite);
+
+	// 	CCSprite *sprite = CCSprite::create();
+	// 	sprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_teammp"));//血条
+	// 	sprite->setAnchorPoint(ccp(0.f, 1.f));
+	// 	sprite->setPosition(ccp(GROUPMEMBERHEADWIDTH-18 , -(labelH + GROUPMEMBERLINESPACE)));//GROUPMEMBERLINESPACE
+	// 	CCProgressTimer *hp = initHProgressBar(sprite);
+	// 	sprite->setVisible(false);
+	// 	hp->setTag(GIT_Hp);
+	// 	_node->addChild(sprite);
+	// 	_node->addChild(hp);
+
+	// 	CCSprite *head = CCSprite::createWithSpriteFrameName("rendui_zhan");
+	// 	head->setTag(GIT_Head);
+	// 	head->setAnchorPoint(ccp(0.0f,1.0f));
+	// 	head->setPosition(ccp(-3.0f, 0.0f));
+	// 	_node->addChild(head);
+	// 
+	// 	CCSprite *empty = CCSprite::createWithSpriteFrameName("rendui_kong");
+	// 	//empty->setAnchorPoint(ccp(0.f, 1.f));
+	// 	//empty->setPosition(ccp(GROUPMEMBERHEADWIDTH-21 ,0));//GROUPMEMBERLINESPACE
+	// 	empty->setTag(GIT_EmptySlot);
+
+	//	UIUtil::childNodeAlign(_node,empty,eha_left,eva_center,ccp(0,empty->getContentSize().height ));
+	//_node->addChild(empty);
+	//setHp(_data.nHP, _data.nMaxHp);
+
+	//refreshClass();
+	setData(NULL);
+}
+
+void GroupPlayerItem::refreshClass()
+{
+	CC_ASSERT(_data.isValid());
+	if (_data.bySex == 1 && _data.eClassEx == EV_Warrior )
+	{
+		showTeamHead("rendui_zhan",_data.b_online);  //男战士头像;
+	}
+	else if (_data.bySex == 1 && _data.eClassEx == EV_Taoist)
+	{
+		showTeamHead("rendui_dao",_data.b_online);  //男道士头像;
+	} 
+	else if (_data.bySex == 1 && _data.eClassEx == EV_Mage)
+	{
+		showTeamHead("rendui_fa",_data.b_online); //男法师头像;
+	} 
+	else if (_data.bySex == 0 && _data.eClassEx == EV_Warrior)
+	{
+		showTeamHead("rendui_zhan",_data.b_online); //女战士头像;
+	} 
+	else if (_data.bySex == 0 && _data.eClassEx == EV_Taoist)
+	{
+		showTeamHead("rendui_dao",_data.b_online); //女道士头像;
+	} 
+	else
+	{
+		showTeamHead("rendui_fa",_data.b_online); //女法师头像;
+	}
+}
+
+void GroupPlayerItem::setEmpty( bool bEmpty )
+{
+	mpEmpty->setVisible(bEmpty);
+	mpNotEmpty->setVisible(!bEmpty);
+
+	// 	_node->getChildByTag(GIT_EmptySlot)->setVisible(bEmpty);
+	// 
+	// 	_node->getChildByTag(GIT_BG)->setVisible(!bEmpty);
+	// 	_node->getChildByTag(GIT_Name)->setVisible(!bEmpty);
+	// 	_node->getChildByTag(GIT_Hp)->setVisible(!bEmpty);
+	// 	_node->getChildByTag(GIT_Head)->setVisible(!bEmpty);
+
+	if(bEmpty)
+	{
+		clearTeamLeaderFlag();
+	}
+
+	setMatch(bEmpty && TeamMgr::getInstance()->is_matching_state());
+}
+
+void GroupPlayerItem::setMatch(bool is_match)
+{
+	mpMatchCue->setVisible(is_match);
+	mpAddPic->setVisible(!is_match);
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+
+bool TaskTraceUi::init()
+{
+	_scrollView = NULL;
+	_frame = NULL;
+	_taskselect = NULL;
+	_showBtn = NULL;
+	_hideBtn = NULL;
+	_taskContainer = NULL;
+	_taskSprite = NULL;
+	_groupSprite = NULL;
+	_trackUiState = TUS_TaskTrack;
+	_showState = true;
+	_curTouchedItem = NULL;
+	//	_taskAcNode = NULL;
+	m_bIsSERuning = false;
+	m_bNeedSE = false;
+	_isShowFightRecord = false;
+	_isForceHide = false;
+	_xuanshangCurrentNum = 0;
+	_xuanshangFinishNum = 0;
+	_targetSprite = NULL;
+	_isBegined = false;
+	_isInTLInstance = false;
+	if(!CCLayer::init())
+		return false;
+
+	CCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();
+	ccNodeLoaderLibrary->registerCCNodeLoader("TaskTraceUiLayer", TaskTraceUiLoader::loader());
+	ccNodeLoaderLibrary->registerCCNodeLoader("TouchSprite", TouchSpriteLoader::loader());
+	cocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);
+	CCNode * node = ccbReader->readNodeGraphFromFile((CFGReader::instance()->get_profile_string("Art", "UI", "") + "tastraceui.ccbi").c_str());
+	ccbReader->release();
+	if(node != NULL) {
+		addChild(node);
+		node->setPositionY(node->getPositionY() + UiMgr::getInstance()->getOffsetY());
+		node->setPositionX(node->getPositionX()+20);
+		_frame = static_cast<CCSprite*>(node->getChildByTag(1));
+		CC_ASSERT(_frame != NULL);
+		_contentLayer = static_cast<CCLayer*>(_frame->getChildByTag(1));
+		//_contentLayer->setContentSize(CCSize(_contentLayer->getContentSize().width,119));
+		//_contentLayer->setPositionY(-3);
+		CC_ASSERT(_contentLayer != NULL);
+
+
+		_showBtn = static_cast<CCControlButton*>(_frame->getChildByTag(2));
+		CC_ASSERT(_showBtn != NULL);
+		_hideBtn = static_cast<CCControlButton*>(_frame->getChildByTag(0));
+		CC_ASSERT(_hideBtn != NULL);
+
+		//		_taskAcNode = this->getTaskAcNode();
+		//		_taskAcNode->setPosition(node->convertToNodeSpace(convertToWorldSpace(_frame->getChildByTag(5)->getPosition())));
+		//		_taskAcNode->setPosition(_frame->getChildByTag(5)->getPosition());
+		//		_frame->addChild(_taskAcNode, RZN_EFFECT);
+
+		_taskSprite = static_cast<TouchSprite*>(_frame->getChildByTag(3));
+		_groupSprite = static_cast<TouchSprite*>(_frame->getChildByTag(4));
+		_taskSprite->signalTouched.connect(this, &TaskTraceUi::onTouchTaskLabel);
+		_groupSprite->signalTouched.connect(this, &TaskTraceUi::onTouchGroupLable);
+		_flagSprite = NULL;
+
+		_taskContainer = CCNode::create();
+		_taskContainer->retain();
+		//_taskContainer->set_enable_rect(false);
+		_taskContainer->setContentSize(_contentLayer->getContentSize());
+		_groupContainer = CCNode::create();
+		_groupContainer->retain();
+		_groupContainer->setContentSize(_contentLayer->getContentSize());
+		_groupContainer->set_enable_rect(false);
+		_scrollView=createScrollViewWithContent(_contentLayer);
+		_contentLayer->addChild(_scrollView);
+		_scrollView->setContainer(_taskContainer);
+		_scrollView->setTouchEnabled(true);
+		_scrollView->setBounceable(false);
+		_scrollView->setContentSize(_taskContainer->getContentSize());
+		_scrollView->setDirection(kCCScrollViewDirectionVertical);
+		//_scrollView->setPositionX(1);
+		//_scrollView->maxContainerOffset();
+		_scrollView->setContentOffset(_scrollView->minContainerOffset());
+		_scrollView->setVisible(true);
+		_taskContainer->setPositionX(10);
+		//_contentLayer->addChild(_taskContainer);
+
+		mpCreateTeamBtn =dynamic_cast<CCControlButton*>( _contentLayer->getChildByTag(1));
+		mpCreateTeamBtn->removeFromParentAndCleanup(true);
+		//mpCreateTeamBtn->setPosition(ccpAdd(mpCreateTeamBtn->getPosition(),ccp(-mpCreateTeamBtn->getContentSize().width*0.5f,-mpCreateTeamBtn->getContentSize().height*0.5f)));
+		_groupContainer->addChild(mpCreateTeamBtn);
+
+		mpCreateTeamBtn->addTargetWithActionForControlEvents(this,cccontrol_selector(TaskTraceUi::onCreateTeam),CCControlEventTouchUpInside);
+
+
+		mpMatchTeamBtn =dynamic_cast<CCControlButton*>( _contentLayer->getChildByTag(2));
+		mpMatchTeamBtn->removeFromParentAndCleanup(true);
+		_groupContainer->addChild(mpMatchTeamBtn);
+		mpMatchTeamBtn->addTargetWithActionForControlEvents(this,cccontrol_selector(TaskTraceUi::onQuickTeam),CCControlEventTouchUpInside);
+
+
+		AnimationCache::createDefList(1, _anims, false);
+		AnimationCache::getInstance()->getSinEffect(0, "E1_124", _anims);
+
+		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 1,true);
+
+		//initGroupSlot();
+
+		return true;
+	}
+	return false;
+}
+
+void TaskTraceUi::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	AnimationCache::getInstance()->releaseDefList(_anims);
+	AnimationCache::getInstance()->releaseSinEffect("E1_124",true);
+	CCLayer::onExit();
+	//_groupContainer->release();
+	_curTouchedItem = NULL;
+	std::for_each(_tasks.begin(),_tasks.end(),[](TaskTraceItem* p){if(p != NULL) delete p;});
+	_tasks.clear();
+	UNREGISTER_EVENT(CreateTeamSucc,TaskTraceUi,onTeamStateChange);
+
+	removeAllMember();
+}
+
+bool TaskTraceUi::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	_isBegined = true;
+	//屏蔽新手动画的触摸响应
+	if (MapManager::getInstance()->getCurMapId() == FIRE_DESERT_CITY_MAP)
+	{
+		return false;
+	}
+	_curTouchedItem = NULL;
+	if (_trackUiState == TUS_TaskTrack)
+	{
+		if (_targetSprite && _targetSprite->isVisible())
+		{
+			if (isTouchOnNodeContent(_targetSprite,pTouch))
+			{
+				ToolTip::getInstance()->push(GET_STR(9254).c_str());
+				return true;
+			}
+		}
+		else if(_isInTLInstance)
+		{
+			for(int infoIdx = TLTAG_BOSSBG; infoIdx <= TLTAG_GONEXTBG; ++infoIdx)
+			{
+				CCNode* infoBG = _contentLayer->getChildByTag(infoIdx);
+				if(infoBG && infoBG->isVisible()){
+					if(isTouchOnNodeContent(infoBG, pTouch)){
+						_beginTouch = _frame->convertTouchToNodeSpace(pTouch);
+						return true;
+					}
+				}
+			}
+		}
+
+		//此处目标列表的点击事件
+		for(std::list<TargetTouchItem *>::iterator iter = _targetTouchItems.begin(); iter != _targetTouchItems.end(); ++iter)
+		{
+			TargetTouchItem* item = *iter;
+			if(isTouchOnNodeContent(item->getNode(),pTouch))
+			{
+				item->signalItem.emit();
+				return true;
+			}
+		}
+
+		if (!_scrollView->isVisible())
+			return false;
+	}
+	//点击在frame上，返回true
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		_beginTouch = framePoint;
+		AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_23);
+		// 		CCPoint contentPoint = _contentLayer->convertTouchToNodeSpace(pTouch);
+		// 		const CCSize &contentSize = _contentLayer->getContentSize();
+		// 		CCRect contentRect(0.0f, 0.0f, contentSize.width, contentSize.height);
+		// 		if (contentRect.containsPoint(contentPoint))
+		// 		{
+		// 			if (_trackUiState == TUS_TaskTrack)
+		// 			{
+		// 				CCPoint point = _taskContainer->convertTouchToNodeSpace(pTouch);
+		// 				getTouchShowState(point);
+		// 				return true;
+		// 			}
+		// 		}
+
+		CCPoint contentPoint = _contentLayer->convertTouchToNodeSpace(pTouch);
+		const CCSize &contentSize = _contentLayer->getContentSize();
+		CCRect contentRect(0.0f, 0.0f, contentSize.width, contentSize.height);
+		if(contentRect.containsPoint(contentPoint))
+		{
+			if(_trackUiState == TUS_TaskTrack)
+			{
+				unsigned int curMapId = MapManager::getInstance()->getCurMapId();
+				if (curMapId == SHIWANG_HALL_MAP || curMapId == UNDERGROUND_TREASURE_MAP)
+				{
+					ToolTip::getInstance()->push(GET_STR(9329));
+				}
+				//_curTouchedItem = _tasks->getTouchdItem(pTouch);
+				for(std::list<TaskTraceItem*>::iterator iter = _tasks.begin(); iter != _tasks.end(); ++iter)
+				{
+					TaskTraceItem* item = *iter;
+					if(isTouchOnNodeContent(item->getDiSprite(),pTouch))
+					{
+						_curTouchedItem = item;
+						break;
+					}
+				}
+				if (_curTouchedItem)
+				{
+					_curTouchedItem->setHighLight(true);
+				}
+			}
+		}
+
+		return true;
+	}
+	return false;
+}
+
+//[bing] 需要打开战役的任务 目前一共30个 支线任务
+//static short FubenQuestArray[30] = { 105, 106, 157, 110, 111, 113, 115, 116, 117
+//	,120, 122, 123, 125, 126, 127, 130, 131, 132, 135, 136
+//	, 138 ,140, 141, 142, 145, 147, 148, 150, 151, 152 };
+/*static short FubenIdArray[30] = {12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,48,50,52,54,56,58,	
+60,62,64,66,68,70};*/
+
+void TaskTraceUi::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (!_isBegined)
+		return;
+	NPCTalkUi *npctalkUi = World::getInstance()->getNPCDialog();
+	if(npctalkUi)
+	{
+		npctalkUi->setFinishWay(0);
+		npctalkUi->setBiQiFinishWay(0);
+	}
+	_isBegined = false;
+	QuestMgr::getInstance()->setCanOpenNpcUi(true);
+	//做一个特殊处理，如果在沙巴克地图，任务列表点击到会失效
+	unsigned int mapId = MapManager::getInstance()->getCurMapId();
+	if (mapId == SBK_MAP_CRC_ID/* || mapId == SBK_CASTLE_MAP_CRC_ID*/)
+	{
+		//屏蔽掉
+		//return;
+	}
+
+	if (_curTouchedItem)
+	{
+		_curTouchedItem->setHighLight(false);
+	}
+
+	CCPoint framePoint = _frame->convertTouchToNodeSpace(pTouch);
+	const CCSize &frameSize = _frame->getContentSize();
+	CCRect frameRect(0.0f, 0.0f, frameSize.width, frameSize.height);
+	if(frameRect.containsPoint(framePoint))
+	{
+		if(ccpDistance(_beginTouch, framePoint) < TOUCH_MOVE_DIS)
+		{//如果判断为不移动，则进行后续处理;
+			CCPoint contentPoint = _contentLayer->convertTouchToNodeSpace(pTouch);
+			const CCSize &contentSize = _contentLayer->getContentSize();
+			CCRect contentRect(0.0f, 0.0f, contentSize.width, contentSize.height);
+			if(_isInTLInstance){
+				CCNode* tlItemBG = _contentLayer->getChildByTag(TLTAG_BOSSBG);
+				if(tlItemBG){
+					//改为显示3个item后，比下面的_contentLayer界面大
+					contentRect.origin.y = contentSize.height - tlItemBG->getContentSize().height * 3;
+					contentRect.size.height += tlItemBG->getContentSize().height * 3 - contentSize.height;
+				}
+			}
+			if(contentRect.containsPoint(contentPoint))
+			{
+				LocalPlayer* ploc = RoleManager::getInstance()->getLocalPlayer();
+				if (!IS_VALID_PTR(ploc))
+				{
+					_curTouchedItem = NULL;
+					return;
+				}
+				if (ploc->isInRoleStateAny(RA_Stall))
+				{
+					ToolTip::getInstance()->push(GET_STR(2102));
+					_curTouchedItem = NULL;
+					return;
+				}
+				if (ploc->isInRoleStateAny(RA_ShuangXiu))
+				{
+					ToolTip::getInstance()->push(GET_STR(2101));
+					_curTouchedItem = NULL;
+					return;
+				}
+				if(_trackUiState == TUS_TaskTrack)
+				{
+					//勇闯天牢 点击事件处理
+					if(_isInTLInstance)
+					{
+						for(int infoIdx = TLTAG_BOSSBG; infoIdx <= TLTAG_GONEXTBG; ++infoIdx)
+						{
+							CCNode* infoBG = _contentLayer->getChildByTag(infoIdx);
+							if(infoBG && infoBG->isVisible()){
+								if(isTouchOnNodeContent(infoBG, pTouch)){
+									onTouchTianlaoItem((eTianLaoTag)infoIdx);
+									return;
+								}
+							}
+						}
+					}
+
+					//CCPoint point = _contentLayer->convertTouchToNodeSpace(pTouch);
+					//TaskTraceItem* info = _tasks->getTouchdItem(pTouch);
+					if(_curTouchedItem==NULL){
+						return;
+					}
+
+					ploc ->setQuestId(_curTouchedItem->getId());
+
+					//[bing] 如果是寻路到神龙帝国任务 并且是接取状态 直接打开战役副本界面
+					if(QuestMgr::getInstance()->getNowQuestState(_curTouchedItem->getId()) == QS_GET)//判断是否是接取状态，如果是则为true，否则为false
+					{
+						switch(_curTouchedItem->getId())
+						{
+						case 1018:	//主线 神龙帝国
+							{
+								CLOSE_ALL_UI();
+								if (InstanceMgr::getInstance()->IsPlayerInInstanceMap())
+								{
+									ToolTip::getInstance()->push("\xE6\x82\xA8\xE5\xB7\xB2\xE7\xBB\x8F\xE5\x9C\xA8\xE5\x89\xAF\xE6\x9C\xAC\xE4\xB8\xAD");									
+								}
+								else
+								{
+									FubenInfoUi* pUI = (FubenInfoUi*)OPEN_UI(WCT_FubenInfoUI);
+									if(pUI)
+									{
+										SetNodeTintTo2(NULL);	//关闭红闪
+										pUI->getUiLayer()->SetFubenIDAndRefresh(NIMHEROFUBENID);
+									}
+								}
+								_curTouchedItem = NULL;
+								return;
+							}
+							break;
+
+						default:
+							{
+								//[bing] 其他情况目前只有支线任务才检查是否是战役副本任务
+								/*if(info->getId() >= 1000)
+								break;
+
+								for(int i = 0; i < 30; ++i)
+								{
+								if(FubenQuestArray[i] == info->getId())
+								{
+								FubenUiLayer* pUI = getUiNodeByTag<FubenUiLayer>(WCT_FubenUI);
+								if(!pUI)
+								{
+								CLOSE_ALL_UI();
+								if (InstanceMgr::getInstance()->IsPlayerInInstanceMap())
+								{
+								ToolTip::getInstance()->push("\xE6\x82\xA8\xE5\xB7\xB2\xE7\xBB\x8F\xE5\x9C\xA8\xE5\x89\xAF\xE6\x9C\xAC\xE4\xB8\xAD");									
+								}
+								else
+								{
+								OPEN_UI(WCT_FubenUI);
+								}
+
+								}
+								pUI = getUiNodeByTag<FubenUiLayer>(WCT_FubenUI);
+								if(pUI)
+								{
+								//每关有5个战役 看看在第几关
+								int nStage = i / 5 + 1;
+
+								SetNodeTintTo2(NULL);	//关闭红闪
+								pUI->SetStage(nStage);
+								//		pUI->SetTintFuben(FubenIdArray[i]); //开启红闪
+								}
+
+								return;
+								}
+								}*/
+								break;
+							}
+							break;
+						}
+					}
+					if(_curTouchedItem->getId() >= TaskID_Xunshang_Min && _curTouchedItem->getId() <= TaskID_Xunshang_Max)
+					{
+						//检查当前场景是否为副本 
+						if( InstanceMgr::getInstance()->IsCannotFindWayOutTheMap())
+						{
+							//副本中不可寻路
+							ToolTip::getInstance()->push(GET_STR(9254));
+							_curTouchedItem = NULL;
+							return;
+						}
+
+						RewardQuestProto rewardQuest;
+						rewardQuest.questId =_curTouchedItem->getId();
+						RewardQuestMgr::getInstance()->findRewardQusetInfo(rewardQuest);
+						if(_xuanshangCurrentNum >= _xuanshangFinishNum)
+						{
+							RewardQuestMgr::getInstance()->sendUpdateQuestState();
+							RewardQuestMgr::getInstance()->sendUpdateQuestList(0);
+							OPEN_UI(WCT_RewardQuestUi);
+						}
+						else
+						{
+							switch(rewardQuest.type)
+							{
+							case ERQT_Help:
+							case ERQT_Attact:
+								{
+									signalSelectItem.emit(_curTouchedItem->getId());
+									ChangeMonsterName evt;
+									SEND_EVENT(&evt);
+								}
+								break;
+							case ERQT_Boss:
+								{
+									WorldPacket C2G_Msg(NET_C2G_REQUEST_BOSS_LIST);
+									TCP_CLIENT->send_net_cmd((const s_net_cmd*)C2G_Msg.contents(), NP_NORMAL, false);
+									BossPKMgr::getInstance()->setOpenBossUi(true,false);
+								}
+								break;
+							case ERQT_Fuben:
+								{
+									OPEN_UI(WCT_FubenUI);
+									FubenUiLayer* pUI = getUiNodeByTag<FubenUiLayer>(WCT_FubenUI);
+									pUI->hardAction();
+								}
+								break;
+							}
+						}
+					}
+					else
+					{
+						if(_curTouchedItem->getId() != INVALID_SHORT_ID)
+						{
+							if ( CrossSceneUI::getInstance()->isInCross() == false && MapManager::getInstance()->getisEnabled())
+							{
+								CLOSE_ALL_UI();//add by vvv 2014.11.03 点击任务追踪寻路，聊天框还原
+								ploc->SetOneKeyBeishu(0);
+								QuestMgr::getInstance()->changeMainQuestPopupValue(_curTouchedItem->getId());
+								signalSelectItem.emit(_curTouchedItem->getId());
+								ChangeMonsterName evt;
+								SEND_EVENT(&evt);
+							}
+						}
+					}
+					if (ploc->isInRoleStateAny(RA_ShuangXiu) || ploc->isInRoleStateAny(RA_Stall) || ploc->isInRoleStateAny(RA_Exchange))
+					{
+						if (ploc->isInRoleStateAny(RA_Exchange))
+						{
+							ExchangeBusinessMgr::getInstance()->CancleExchange();
+						}
+						_curTouchedItem = NULL;
+						return;
+					}
+				}
+				else if(_trackUiState == TUS_Group)
+				{
+					CCPoint point = _groupContainer->convertTouchToNodeSpace(pTouch);
+					unsigned int roleId =-1;
+					bool ret= getMemberUnderPoint(point,roleId);
+					//没点到
+					if (!ret)
+					{
+						//看看点到开启没
+					}
+					else
+					{
+						if(roleId != -1)
+						{
+							GroupBtnUi *ui = GroupBtnUi::create();
+							ui->setPlayerId(roleId);
+							CCPoint framePos = _frame->getPosition();
+							CCSize size = _frame->getContentSize();
+							GroupPlayerItem * pItem = getGroupMemberItem(roleId);
+							//ui->setPosition(ccp(size.width, framePos.y - _frame->getContentSize().height / 2.f));
+							ui->setPosition(ccp(size.width,pItem->getPosition().y + _frame->getContentSize().height / 2.f + pItem->getContentHeight() / 2.f));
+							World::getInstance()->getScene()->addChild(ui, WZ_POPUI);
+						}
+						else
+						{
+							//打开别的
+							//onCreateTeam(NULL,NULL);
+
+							if(!TeamMgr::getInstance()->is_matching_state())
+							{
+								InviteListView* view = NULL;
+								CCNode* node  =this->getParent()->getChildByTag(message_id_crc("InviteListView"));
+								if (node)
+								{
+									InviteListView* view = dynamic_cast<InviteListView*>(node);
+									view->popShow();
+								}
+								else
+								{
+									view = InviteListView::createFormCCBI("yaoqing",NULL);
+									CC_ASSERT(view);
+									view->popShow();
+
+									this->getParent()->addChild(view,WZ_POPUI);
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	_curTouchedItem = NULL;
+}
+
+//控制战报按钮显示
+void TaskTraceUi::showFightRecord(bool isShow)
+{
+	_isShowFightRecord = isShow;
+}
+void TaskTraceUi::hideUi(bool show)
+{
+	if (_frame != NULL)
+	{
+		_frame->setVisible(show);		
+	}
+}
+void TaskTraceUi::showUi( bool show )
+{
+	if (_isForceHide)
+		return;
+	if(!_showState && show != _showState)
+		return;
+
+	float posX = 0.f;
+	if(!show)
+		posX = -_frame->getContentSize().width;
+	float posY = _frame->getPositionY();
+
+	//float dt = ccpDistance(_frame->getPosition(), ccp(posX, posY));
+	CCAction *moveTo = createMoveTo(_frame->getPosition(), ccp(posX-20, posY));
+	_frame->stopAllActions();
+	_frame->runAction(moveTo);
+
+	_showBtn->setVisible(!show);
+	_hideBtn->setVisible(show);
+
+	//add by lpf 2015-08-31 新手引导弱引导时，打开新的UI要去除新手引导的蒙版
+	NewPlayerGuider::getInstance()->onTaskTraceUiShow(show);
+}
+
+void TaskTraceUi::froceShowUi( bool show )
+{
+	_showState = show;
+	showUi(show);
+}
+
+void TaskTraceUi::onHideBtnPressed()
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_7);//vv
+	_showState = false;
+	showUi(false);
+}
+
+void TaskTraceUi::onShowBtnPressed()
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_7);//vv
+	_showState = true;
+	showUi(true);
+}
+
+void TaskTraceUi::hideFinished()
+{
+	_showBtn->setVisible(true);
+}
+
+void TaskTraceUi::appendTask( unsigned short taskId, const char *title, const char *info, int num, bool needReset, bool CanAccpet /*= true*/ ) //任务列表
+{
+	CC_ASSERT(title != NULL);
+	char infoStr[INFO_STR_LEN];
+	memset(infoStr, 0, sizeof(char) * INFO_STR_LEN);
+	char titleStr[INFO_STR_LEN];
+	memset(titleStr, 0, sizeof(char) * INFO_STR_LEN);
+	strcpy(titleStr, title);
+	questState m_state;
+	if(info != NULL)
+	{
+		if(num < 0)
+		{
+			strcpy(infoStr, info);
+		}
+		else
+		{
+			sprintf(infoStr, info, num);
+		}
+		m_state = ACCEPTING;
+	}
+	else
+	{//title上面加上可接
+		//strcat(titleStr, "(\xe5\x8f\xaf\xe6\x8e\xa5)");
+		m_state = NOACCEPT;
+	}
+	//查找列表中是否含有该项
+	TaskTraceItem *item = NULL;
+	//如果是日常任务 给日常任务后面加上已完成次数与总共可完成次数 //add by XSea 2015.01.07
+	if(taskId >= TaskID_JunXu_Min && taskId <= TaskID_JunXu_Max)
+	{
+		//如果是军需任务
+		LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+		if (lp)
+		{
+			strcat(titleStr, CCString::createWithFormat("(%d/%d)", lp->getRoleDayClearInfo(ERDCT_DAILY_TASKS_COUNT) + 1, VIPMgr::getInstance()->getLocalVipData().junxuRenwuTimes)->getCString());
+		}	
+	}
+	if(taskId >= TaskID_BiQi_Min && taskId <= TaskID_BiQi_Max)
+	{
+		LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+		if (lp)
+		{
+			strcat(titleStr, CCString::createWithFormat("(%d/%d)", lp->getRoleDayClearInfo(ERDCT_BIQI_TASKS_COUNT) + 1, VIPMgr::getInstance()->getLocalVipData().BiQiTasksCount)->getCString());
+		}	
+	}
+	for(std::list<TaskTraceItem*>::iterator iter = _tasks.begin(); iter != _tasks.end(); ++ iter)
+	{
+		TaskTraceItem* taskInfo = *iter;
+		if(taskInfo->getId() == taskId)
+		{
+			item = taskInfo;
+			CC_ASSERT(item != NULL);
+			if (taskId >= TaskID_Main_Min && taskId <= TaskID_Main_Max)
+			{
+				item->setQuestType(Quest_Type_Main);
+				item->setTitle(titleStr,m_state, CanAccpet,true);	
+			}
+			else
+			{
+				item->setTitle(titleStr,m_state, CanAccpet);	
+			}
+			item->setInfo(infoStr,m_state);
+			//	taskInfo.viewHeight = item->getItemHeight() + TASKTRACEITEMSPACE;
+			//taskInfo.viewHeight = 66.0f;
+			taskInfo->setViewHeight(50.0);
+			if(info != NULL)
+			{
+				taskInfo->setInfo(std::string(info));
+			}
+			else
+			{
+				taskInfo->setInfo("");
+			}
+			return;
+		}
+	}
+	//没有找到，新建
+	CC_ASSERT(item == NULL);
+	if (taskId >= TaskID_Main_Min && taskId <= TaskID_Main_Max)
+	{
+		item = TaskTraceItem::create(titleStr, infoStr, _contentLayer->getContentSize().width,m_state,true,CanAccpet);
+		item->setTitle(titleStr,m_state, CanAccpet,true);	
+		item->setQuestType(Quest_Type_Main);
+	}
+	else
+	{
+		item = TaskTraceItem::create(titleStr, infoStr, _contentLayer->getContentSize().width,m_state,false,CanAccpet);
+		if(taskId >= TaskID_BiQi_Min && taskId <= TaskID_BiQi_Max)
+		{
+			item->setQuestType(Quest_Type_BiQi);
+		}
+		else if(taskId >= TaskID_JunXu_Min && taskId <= TaskID_JunXu_Max)
+		{
+			item->setQuestType(Quest_Type_Daily);
+		}
+		else if(taskId >= TaskID_Huan_Min && taskId <= TaskID_Huan_Max)
+		{
+			item->setQuestType(Quest_Type_Huan);
+		}
+		else if(taskId >= TaskID_Zhi_Min && taskId <= TaskID_Zhi_Max)
+		{
+			item->setQuestType(Quest_Type_Sub);
+		}
+	}
+	float height = 50.0f;
+	if(info!=NULL)
+	{
+		item->setInfo(std::string(info));
+	}
+	else
+	{
+		item->setInfo("");
+	}
+	item->setId(taskId);
+	//_taskContainer->addChild(item);
+	item->setViewHeight(height);
+	item->addToParent(_taskContainer);
+	_tasks.push_back(item);
+	_tasks.sort(sort_task_list);
+	updateTaskList(needReset);
+}
+
+void TaskTraceUi::appendTask(unsigned short taskId,const char *title,const char* info,int currentNum,int totalNum, bool needReset, bool CanAccpet /* = true */){
+	CC_ASSERT(title != NULL);
+
+	questState m_state;
+	if(info != NULL)
+	{
+		m_state = ACCEPTING;
+	}
+	else
+	{
+		m_state = NOACCEPT;
+	}
+
+	//查找列表中是否含有该项
+	TaskTraceItem *item = NULL;
+	for(std::list<TaskTraceItem*>::iterator iter = _tasks.begin(); iter != _tasks.end(); ++iter)
+	{
+		TaskTraceItem* taskInfo = *iter;
+		if(taskInfo->getId() == taskId)
+		{
+			item = *iter;
+			CC_ASSERT(item != NULL);
+			if(currentNum >= totalNum){
+				currentNum = totalNum;
+				ToolTip::getInstance()->push(GET_STR(9357).c_str());
+			}
+			std::stringstream ss;
+			ss<<"("<<currentNum<<"/"<<totalNum<<")";
+			std::string information = info;
+			std::string questInfo = information + ss.str();
+			item->setInfo(questInfo.c_str(),m_state);
+			item->setTitle(title,m_state, CanAccpet);
+			taskInfo->setViewHeight(50.0f) ; 
+			if(info != NULL)
+			{
+				taskInfo->setInfo(std::string(questInfo));
+				//CCLOG("%s",info);
+			}
+			else
+			{
+				taskInfo->setInfo("");
+			}
+			return ;
+		}
+	}
+
+	//没有找到，新建
+	CC_ASSERT(item == NULL);
+	// 	char buf[100];
+	// 	char buf1[10000];
+	// 	itoa(currentNum,buf,10);
+	// 	itoa(totalNum,buf1,10);
+	if(currentNum >= totalNum)
+	{
+		currentNum = totalNum;
+	}
+	std::stringstream ss;
+	ss<<"("<<currentNum<<"/"<<totalNum<<")";
+	std::string information = info;
+	std::string questInfo = information + ss.str();
+	item = TaskTraceItem::create(title, questInfo.c_str(), _contentLayer->getContentSize().width,m_state,false,CanAccpet);
+	float height = 50.0f;
+
+	if(questInfo.c_str()!= NULL)
+	{
+		item->setInfo(std::string(questInfo));
+	}
+	else
+	{
+		item->setInfo("");
+	}
+	item->setQuestType(Quest_Type_XuanShang);
+	item->setId(taskId);
+	//_taskContainer->addChild(item);
+	item->setViewHeight(height);
+	_tasks.push_back(item);
+	_tasks.sort(sort_task_list);
+	item->addToParent(_taskContainer);
+	updateTaskList(needReset);
+	_xuanshangCurrentNum = currentNum;
+	_xuanshangFinishNum = totalNum;
+}
+
+void TaskTraceUi::modifyTaskInfo( unsigned short taskId, int num, bool finished )
+{
+	if(num < 0)
+		return;
+
+	//查找列表中是否含有该项
+	for(std::list<TaskTraceItem*>::iterator iter = _tasks.begin(); iter != _tasks.end(); ++iter)
+	{
+		TaskTraceItem* taskInfo = *iter;
+		if(taskInfo->getId() == taskId)
+		{
+			CC_ASSERT(taskInfo != NULL);
+			char infoStr[INFO_STR_LEN];
+			memset(infoStr, 0, sizeof(char) * INFO_STR_LEN);
+			questState state;
+			if(finished)
+			{//完成的任务在文字后面加完成字样
+				///std::string str = taskInfo.info + std::string("(\xe5\xae\x8c\xe6\x88\x90)");
+				std::string str = taskInfo->getInfo();
+				state = Q_COMPLETE;
+				snprintf(infoStr, INFO_STR_LEN , str.c_str(), num);
+			}
+			else
+			{
+				state = ACCEPTING;
+				snprintf(infoStr, INFO_STR_LEN , taskInfo->getInfo().c_str(), num);
+			}
+			if (taskId >= TaskID_Main_Min && taskId <= TaskID_Main_Max)
+			{
+				taskInfo->setTitle(NULL,state,true,true);
+			}
+			else
+			{
+				taskInfo->setTitle(NULL,state,true,false);
+			}
+			taskInfo->setInfo(infoStr,state);
+		}
+	}
+
+	_xuanshangCurrentNum = num;
+}
+
+void TaskTraceUi::erase( unsigned short taskId)
+{
+	for(std::list<TaskTraceItem*>::iterator iter = _tasks.begin(); iter != _tasks.end(); ++iter)
+	{
+		TaskTraceItem *info = *iter;
+		if( info && info->getId() == taskId)
+		{
+			_curTouchedItem = NULL;
+			_tasks.erase(iter);
+			delete info;
+			break;
+		}
+	}
+	updateTaskList(false);
+}
+
+void TaskTraceUi::clear()
+{
+	_curTouchedItem = NULL;
+	_taskContainer->removeAllChildren();
+	_tasks.clear();
+	//updateTaskList();
+}
+
+void TaskTraceUi::updateTaskList(bool needReset)
+{
+	//得到全部高度
+	float height = 0.0;
+	//_tasks.sort(node());//gx add 按任务ID由高到低排序
+	for(std::list<TaskTraceItem*>::iterator iter = _tasks.begin(); iter != _tasks.end(); ++iter)
+	{
+		TaskTraceItem *info = *iter;
+		height += info->getViewHeight();
+		//height += 66.0f;
+	}
+
+	if(height < _contentLayer->getContentSize().height)
+		height = _contentLayer->getContentSize().height;
+	_taskContainer->setContentSize(CCSize(_contentLayer->getContentSize().width, height));
+
+	float height2 = height;
+	for (std::list<TaskTraceItem*>::iterator iter = _tasks.begin(); iter != _tasks.end(); ++iter)
+	{
+		TaskTraceItem* info= *iter;
+		info->setPosition(ccp(0.0f, height2));
+		height2 -= 50.0f;
+	}
+	if(true)
+	{
+		resetScrollPosition();
+	}
+}
+TaskTraceItem TaskTraceUi::getItemUnderPoint( const CCPoint &point )
+{
+	for(std::list<TaskTraceItem*>::iterator iter = _tasks.begin(); iter != _tasks.end(); ++iter)
+	{
+		TaskTraceItem* info = *iter;
+		const CCPoint &pos = info->getPosition();
+		float width = _contentLayer->getContentSize().width;
+		float height = info->getViewHeight();
+		//float height = 66.0f;
+		CCRect itemRect(pos.x, pos.y - height, width, height);
+		if(itemRect.containsPoint(point))
+		{
+			CCSpriteFrame *frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_clickback"); 
+			CC_ASSERT( frame != NULL);
+			if ( _taskselect == NULL)
+			{
+				_taskselect = CCSprite::create(); 
+				_taskselect->setDisplayFrame(frame);
+				_taskselect->setAnchorPoint(ccp(0.0f, 0.0f));
+				_taskselect->runAction(CCFadeOut::create(0.5f));
+				_taskselect->setPosition(ccp(pos.x + 5, pos.y - height + 5));
+				_contentLayer->addChild(_taskselect,-1);
+			}
+			else
+			{
+				_taskselect->runAction(CCFadeOut::create(0.5f));
+				_taskselect->setPosition(ccp(pos.x + 5, pos.y - height + 5));
+			}
+			return *info;
+		}
+	}
+
+	return TaskTraceItem();
+}
+
+bool TaskTraceUi::getMemberUnderPoint( const CCPoint &pos, unsigned int& teammateID )
+{
+	float width = _contentLayer->getContentSize().width;
+	for(GroupItemList::iterator iter = _groupMembers.begin(); iter != _groupMembers.end(); ++ iter)
+	{
+		GroupPlayerItem *item  = *iter;
+		CCPoint point = item->getPosition();
+		float height = item->getContentHeight();
+		CCRect rect(point.x, point.y - height, width, height);
+		if(rect.containsPoint(pos))
+		{
+			teammateID =  item->getPlayerId();
+			return true;
+		}
+	}
+	return false;
+}
+
+void TaskTraceUi::onTouchTaskLabel( TouchSprite *, bool )
+{
+	//屏蔽新手动画的触摸响应
+	if (MapManager::getInstance()->getCurMapId() == FIRE_DESERT_CITY_MAP)
+	{
+		return;
+	}
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+	setUiState(TUS_TaskTrack);
+
+}
+
+void TaskTraceUi::onTouchGroupLable( TouchSprite *, bool )
+{
+	//屏蔽新手动画的触摸响应
+	if (MapManager::getInstance()->getCurMapId() == FIRE_DESERT_CITY_MAP)
+	{
+		return;
+	}
+
+	if (MapManager::getInstance()->getCurMapId() == BF_PREPARE_MAP || MapManager::getInstance()->getCurMapId() == BF_BATTLE_MAP)
+	{
+		ToolTip::getInstance()->push(STRING_TABLE["BF_Error_inTeam"]);
+		return;
+	}
+
+	if (_trackUiState == TUS_Group)
+	{
+		if(TeamMgr::getInstance()->is_inteam())
+		{
+			OPEN_UI(WCT_TeamUi);
+		}
+		else
+		{
+			TeamMgr::getInstance()->open_quick_team(e_open_none);
+		}
+	}
+
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_9);
+	setUiState(TUS_Group);
+}
+
+void TaskTraceUi::setUiState( eTraceUiState state )
+{
+	_trackUiState = state;
+	char *frameName = NULL;
+	if(_trackUiState == TUS_TaskTrack)
+	{
+		if (InstanceMgr::getInstance()->IsPlayerInInstanceMap())
+		{
+			frameName = "rendui_mubiaobtnh";
+			if (_targetSprite)
+			{
+
+				_targetSprite->setVisible(true);
+				_scrollView->setVisible(false);
+			}
+			else if(_isInTLInstance)//需要显示的时勇闯天牢的信息
+			{
+				_scrollView->setVisible(false);
+				for(int infoIdx = TLTAG_BOSSBG; infoIdx <= TLTAG_GONEXTBG; ++infoIdx)
+				{
+					CCNode* infoBG = _contentLayer->getChildByTag(infoIdx);
+					if(infoBG)
+						infoBG->setVisible(true);
+				}
+			}
+			else if(_targetTouchItems.size()>0)
+			{
+				showTargetItems(true);
+				_scrollView->setVisible(false);
+			}
+			else if (_vecShowNode.size() > 0)
+			{
+				_scrollView->setVisible(false);
+			}
+			else
+			{
+				_scrollView->setVisible(true);
+				_scrollView->setContainer(_taskContainer);
+				_taskContainer->setVisible(true);
+			}
+
+
+		}else
+		{
+			frameName = "ren-click";
+			_scrollView->setVisible(true);
+			_taskContainer->setVisible(true);
+			_scrollView->setContainer(_taskContainer);
+			_taskContainer->setVisible(true);
+		}
+		_taskSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName));
+		std::string groupStr = "";
+		if (TeamMgr::getInstance()->is_inteam())
+			groupStr = "rendui_duiwubtnn";
+		else
+			groupStr = "dui-convention";
+		_groupSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(groupStr.c_str()));
+		for(std::list<TaskTraceItem*>::iterator iter = _tasks.begin(); iter != _tasks.end(); ++iter)
+		{
+			TaskTraceItem* item = *iter;
+			if(item != NULL && item->getQuestType() == Quest_Type_Main)
+			{
+				item->setIsRunEffect(false);
+				item->setTaskSE(true);
+				break;
+			}
+		}
+	}
+	else if(_trackUiState == TUS_Group)
+	{ 
+		if (InstanceMgr::getInstance()->IsPlayerInInstanceMap())
+		{
+			frameName = "rendui_mubiaobtnn";
+			if (_targetSprite)
+			{
+				_targetSprite->setVisible(false);
+			}else if(_targetTouchItems.size()>0)
+			{
+				showTargetItems(false);
+			}
+			else if(_isInTLInstance)
+			{
+				for(int infoIdx = TLTAG_BOSSBG; infoIdx <= TLTAG_GONEXTBG; ++infoIdx)
+				{
+					CCNode* infoBG = _contentLayer->getChildByTag(infoIdx);
+					if(infoBG)
+						infoBG->setVisible(false);
+				}
+			}
+		}
+		else
+		{
+			frameName = "ren-convention";
+			_scrollView->setContainer(_groupContainer);
+		}
+		_taskSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(frameName));
+		std::string groupStr = "";
+		if (TeamMgr::getInstance()->is_inteam())
+			groupStr = "rendui_duiwubtnh";
+		else
+			groupStr = "dui-click";
+		_groupSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(groupStr.c_str()));
+		//_scrollView->setContainer(_groupContainer);
+		_scrollView->setContainer(_groupContainer);
+		_scrollView->setVisible(true);
+		//	_taskContainer->setVisible(false);
+	}
+}
+
+void TaskTraceUi::addGroupMember( unsigned int playerId )
+{
+	initGroupSlotIfNess();
+
+	// 	bool bFind = false;
+	// 	for(GroupItemList::iterator iter = _groupMembers.begin(); iter != _groupMembers.end(); ++ iter)
+	// 	{
+	// 		GroupPlayerItem *item = *iter;
+	// 		if(playerId == item->getPlayerId())
+	// 		{
+	// 			bFind = true;
+	// 			break;
+	// 		}
+	// 	}
+
+	//if(!bFind)
+	{
+		bool BOOST_LOCAL_FUNCTION(GroupPlayerItem* item,bind playerId)
+		{
+			return item->getPlayerId() == playerId;
+		}BOOST_LOCAL_FUNCTION_NAME(FindExist);
+		BOOST_AUTO(iter, boost::range::find_if(_groupMembers,FindExist));
+		if (iter != _groupMembers.end())
+		{
+			GroupPlayerItem *item = *iter;
+			item->setData(TeamMgr::getInstance()->get_teammate_data(playerId));
+		}
+		else
+		{
+			bool BOOST_LOCAL_FUNCTION(GroupPlayerItem* item)
+			{
+				return item->getPlayerId() == INVALID;
+			}BOOST_LOCAL_FUNCTION_NAME(Finder);
+
+			BOOST_AUTO(iter, boost::range::find_if(_groupMembers,Finder));
+			if (iter != _groupMembers.end())
+			{
+				GroupPlayerItem *item = *iter;
+				item->setData(TeamMgr::getInstance()->get_teammate_data(playerId));
+			}
+			else
+			{
+				CC_ASSERT("reach max teammate");
+			}
+		}
+
+		mpCreateTeamBtn->setVisible(false);
+		mpMatchTeamBtn->setVisible(false);
+		// 		GroupPlayerItem *item = new GroupPlayerItem;
+		// 		item->setData(TeamMgr::getInstance()->get_teammate_data(playerId));
+		// 		item->addToParent(_groupContainer);
+		// 		_groupMembers.push_back(item);
+	}
+}
+
+void TaskTraceUi::removeGroupMember( unsigned int playerId )
+{
+	for(GroupItemList::iterator iter = _groupMembers.begin(); iter != _groupMembers.end(); ++ iter)
+	{
+		GroupPlayerItem *item = *iter;
+		if(playerId == item->getPlayerId())
+		{
+			item->setData(NULL);
+			//item->removeFromParent();
+			//_groupMembers.erase(iter);
+			//delete item;
+			break;
+		}
+	}
+}
+
+void TaskTraceUi::removeAllMember()
+{
+	for(GroupItemList::iterator iter = _groupMembers.begin(); iter != _groupMembers.end(); ++ iter)
+	{
+		GroupPlayerItem *item = *iter;
+		if(item != NULL)
+		{
+			item->removeFromParent();
+			delete item;
+		}
+	}
+	_groupMembers.clear();
+
+}
+
+void TaskTraceUi::updateGroupList()
+{
+	//排序
+	// 	GroupItemList tmp;
+	// 	TeamMgr::teammates_vector members = TeamMgr::getInstance()->get_teammate_list();
+	// 	for(TeamMgr::teammates_vector::iterator iter = members.begin(); iter != members.end(); ++ iter)
+	// 	{
+	// 		tagTeammateData data = *iter;
+	// 		
+	// 		GroupPlayerItem *memberItem = getGroupMemberItem(data.uRoleID);
+	// 	
+	// 		if(memberItem != NULL)
+	// 			tmp.push_back(memberItem);
+	// 	}
+	// 
+	// 	CC_ASSERT(tmp.size() == _groupMembers.size());
+	// 	_groupMembers = tmp;
+
+	//高度
+	// 	float height = 0.0f;
+	// 	if (!_groupMembers.empty())
+	// 	{
+	// 		height = _groupMembers.size() * (*_groupMembers.begin())->getContentHeight();
+	// 	}
+	// // 	for(GroupItemList::iterator iter = _groupMembers.begin(); iter != _groupMembers.end(); ++ iter)
+	// // 	{
+	// // 		GroupPlayerItem *item = *iter;
+	// // 		height += item->getContentHeight();
+	// // 	}
+	// 
+	// 	if(height < _contentLayer->getContentSize().height)
+	// 		height = _contentLayer->getContentSize().height;
+	// 	_groupContainer->setContentSize(CCSize(_contentLayer->getContentSize().width, height));
+	// 
+	// 	for(GroupItemList::iterator iter = _groupMembers.begin(); iter != _groupMembers.end(); ++ iter)
+	// 	{
+	// 		GroupPlayerItem *item = *iter;
+	// 		item->setPosition(ccp(0.f, height));
+	// 		height -= item->getContentHeight();
+	// 	}
+	// 	
+	// 	resetScrollPosition();
+}
+
+void TaskTraceUi::modifyMemberData( const tagTeammateData * data )
+{
+	CC_ASSERT(data != NULL);
+	for(GroupItemList::iterator iter = _groupMembers.begin(); iter != _groupMembers.end(); ++ iter)
+	{
+		GroupPlayerItem *item = *iter;
+		if(item->getPlayerId() == data->uRoleID)
+		{
+			item->setData(data);
+		}
+	}
+}
+
+GroupPlayerItem * TaskTraceUi::getGroupMemberItem( unsigned int roleId )
+{
+	for(GroupItemList::iterator iter = _groupMembers.begin(); iter != _groupMembers.end(); ++ iter)
+	{
+		GroupPlayerItem *item = *iter;
+		if(item->getPlayerId() == roleId)
+		{
+			return item;
+		}
+	}
+
+	return NULL;
+}
+
+cocos2d::CCRect TaskTraceUi::getGuidePos()
+{
+	CC_ASSERT(_contentLayer != NULL);
+	CCPoint pt = _contentLayer->convertToWorldSpace(ccp(0, 0));
+	CCSize size = _contentLayer->getContentSize();
+	float itemHeight = (size.height - 15) / 2.5f;
+	return CCRect(0.f, pt.y + itemHeight * 1.5f, size.width, itemHeight);
+}
+
+bool TaskTraceUi::getGuidePos( unsigned short taskID, CCRect& rc )
+{
+	//看看有没有这个任务
+	for(std::list<TaskTraceItem*>::iterator iter = _tasks.begin(); iter != _tasks.end(); ++iter)
+	{
+		TaskTraceItem* item = *iter;
+		if(item->getId() != taskID)
+			continue;
+		CCPoint tempPoint = _scrollView->getContainer()->convertToWorldSpace(item->getPosition());
+		rc.setRect(0.0f, tempPoint.y - item->getViewHeight(), item->getItemWidth() - 15.0f, item->getItemHeight());	//[bing] 因为在打开页面时会关闭TaskTraceUI 后又打开 会造成Move时候的控件x位置不准确 所以写死0.0
+		return true;
+	}
+	rc.setRect(0.0f, 0.0f, 0.0f, 0.0f);
+	return false;
+}
+
+void TaskTraceUi::resetScrollPosition()
+{
+	if(_scrollView != NULL)
+	{
+		_scrollView->setContentOffset(_scrollView->minContainerOffset());
+	}
+}
+
+bool TaskTraceUi::HasMainQuest()
+{
+	bool bRet = false;
+	for(std::list<TaskTraceItem*>::iterator iter = _tasks.begin(); iter != _tasks.end(); ++iter)
+	{
+		TaskTraceItem* item = *iter;
+		if((item->getId() >= 1000) &&(item->getId() < 2000))
+		{
+			bRet =true;
+			break;
+		}
+	}
+	return bRet;
+}
+
+void TaskTraceUi::updateTeamLeaderQiZhi()
+{
+	for(GroupItemList::iterator iter = _groupMembers.begin(); iter != _groupMembers.end(); ++iter)
+	{
+		GroupPlayerItem *item = *iter;
+		item->clearTeamLeaderFlag();
+		item->setTeamLeaderFlag(item->getPlayerId());
+	}
+}
+
+void TaskTraceUi::initGroupSlotIfNess()
+{
+	if (!_groupMembers.empty())
+	{
+		return;
+	}
+
+	for (int i = 0; i < 4 ; ++i)
+	{
+		GroupPlayerItem *item = new GroupPlayerItem;
+		item->init();
+		//item->setData(TeamMgr::getInstance()->get_teammate_data(playerId));
+		item->addToParent(_groupContainer);
+		_groupMembers.push_back(item);
+	}
+
+	float height = 0.0f;
+	if (!_groupMembers.empty())
+	{
+		height = _groupMembers.size() * (*_groupMembers.begin())->getContentHeight();
+	}
+	if(height < _contentLayer->getContentSize().height)
+		height = _contentLayer->getContentSize().height;
+	_groupContainer->setContentSize(CCSize(_contentLayer->getContentSize().width, height));
+	//  
+	for(GroupItemList::iterator iter = _groupMembers.begin(); iter != _groupMembers.end(); ++ iter)
+	{
+		GroupPlayerItem *item = *iter;
+		item->setPosition(ccp(0.f, height));
+		height -= item->getContentHeight();
+	}
+	//高度
+	//	float height = 0.0f;
+	//	if (!_groupMembers.empty())
+	//	{
+	//		height = _groupMembers.size() * (*_groupMembers.begin())->getContentHeight();
+	//	}
+	// 	for(GroupItemList::iterator iter = _groupMembers.begin(); iter != _groupMembers.end(); ++ iter)
+	// 	{
+	// 		GroupPlayerItem *item = *iter;
+	// 		height += item->getContentHeight();
+	// 	}
+
+	// 	 	if(height < _contentLayer->getContentSize().height)
+	// 	 		height = _contentLayer->getContentSize().height;
+	// 	 	_groupContainer->setContentSize(CCSize(_contentLayer->getContentSize().width, height));
+	// 	 
+	// 	 	for(GroupItemList::iterator iter = _groupMembers.begin(); iter != _groupMembers.end(); ++ iter)
+	// 	 	{
+	// 	 		GroupPlayerItem *item = *iter;
+	// 	 		item->setPosition(ccp(0.f, height));
+	// 	 		height -= item->getContentHeight();
+	// 	 	}
+}
+
+void TaskTraceUi::onCreateTeam( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	//屏蔽新手动画的触摸响应
+	if (MapManager::getInstance()->getCurMapId() == FIRE_DESERT_CITY_MAP)
+	{
+		return;
+	}
+
+	if(TeamMgr::getInstance()->is_player_in_match())
+	{
+		MessageBoxUi* ui = MessageBoxUi::createWithTwoBtn(TEXT_UTF8_TISHI, STRING_TABLE["sure_create_team_cue"], TEXT_UTF8_QUEDING,TEXT_UTF8_QUXIAO);
+		World::getInstance()->getScene()->addChild(ui, WZ_MESSAGEBOX);
+		ui->signalOkBtnPressed.connect(this,&TaskTraceUi::on_sure_create_team);
+	}
+	else
+	{
+		on_sure_create_team();
+	}
+}
+
+void TaskTraceUi::on_sure_create_team()
+{
+	TeamMgr::getInstance()->sendOwnCreatTeam(e_target_near, 0, 1, 100);
+}
+
+void TaskTraceUi::onQuickTeam( CCObject * pSender, CCControlEvent pCCControlEvent )
+{
+	//屏蔽新手动画的触摸响应
+	if (MapManager::getInstance()->getCurMapId() == FIRE_DESERT_CITY_MAP)
+	{
+		return;
+	}
+	TeamMgr::getInstance()->open_quick_team(e_open_none);
+}
+
+void TaskTraceUi::refreshAllGroupList()
+{
+	initGroupSlotIfNess();
+
+	TeamMgr* mgr = TeamMgr::getInstance();
+	if (mgr->is_inteam())
+	{
+		unsigned int dwLpID = RoleManager::getInstance()->getLocalPlayer()->getId();
+		//GroupItemList tmp;
+		size_t  index= 0;
+		TeamMgr::teammates_vector members = mgr->get_teammate_list();
+		for(TeamMgr::teammates_vector::iterator iter = members.begin(); iter != members.end(); ++ iter)
+		{
+			tagTeammateData& data = *iter;
+			if (data.uRoleID == dwLpID)
+			{
+				continue;
+			}
+
+			GroupPlayerItem *memberItem = _groupMembers[index];
+			memberItem->setData(&data);
+			//GroupPlayerItem *memberItem = getGroupMemberItem(data.uRoleID);
+
+			//if(memberItem != NULL)
+			//	tmp.push_back(memberItem);
+			++index;
+		}
+
+		for (; index < 4 ; ++index)
+		{
+			_groupMembers[index]->setData(NULL);
+		}
+	}
+
+	mpCreateTeamBtn->setVisible(!mgr->is_inteam());
+	mpMatchTeamBtn->setVisible(!mgr->is_inteam());
+}
+
+void TaskTraceUi::onTeamStateChange( CreateTeamSucc* pEvent )
+{
+	refreshAllGroupList();
+}
+
+void TaskTraceUi::onEnter()
+{
+	CCLayer::onEnter();
+
+	REGISTER_EVENT(CreateTeamSucc,TaskTraceUi,onTeamStateChange);
+
+	if(TeamMgr::getInstance()->is_inteam())
+	{
+		refreshAllGroupList();
+		initGroupState();
+	}
+}
+
+void TaskTraceUi::initGroupState()
+{
+	int state = EGS_Null;
+	if(TeamMgr::getInstance()->is_inteam())
+	{
+		state = EGS_Team;
+		if(TeamMgr::getInstance()->is_team_leader(RoleManager::getInstance()->getLocalPlayer()->getId()))
+		{
+			state = EGS_TeamLeader;
+		}
+	}
+	updateGroupState(state);
+}
+
+void TaskTraceUi::updateGroupState( int state )
+{
+	std::string str;
+	if (EGS_Null == state)
+	{
+		if (_trackUiState == TUS_Group)
+			str = "dui-click";
+		else
+			str = "dui-convention";
+		if (_flagSprite)
+		{
+			_flagSprite->setVisible(false);
+		}
+	}
+	else if (EGS_Team == state)
+	{
+		if (_trackUiState == TUS_Group)
+			str = "rendui_duiwubtnh";
+		else
+			str = "rendui_duiwubtnn";
+		if (_flagSprite)
+		{
+			_flagSprite->setVisible(false);
+		}
+	}
+	else if (EGS_TeamLeader == state)
+	{
+		if (_trackUiState == TUS_Group)
+			str = "rendui_duiwubtnh";
+		else
+			str = "rendui_duiwubtnn";
+		if (_flagSprite == NULL)
+		{
+			_flagSprite = CCSprite::createWithSpriteFrameName("rendui_hongqi");
+			_flagSprite->setAnchorPoint(ccp(0.5,0.0));
+			_flagSprite->setPositionX(_groupSprite->getContentSize().width - _flagSprite->getContentSize().width/4);
+			_flagSprite->setScale(0.5);
+			_groupSprite->addChild(_flagSprite);
+		}
+		_flagSprite->setVisible(true);
+	}
+	CCSpriteFrame* frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(str.c_str());
+	if (frame)
+	{
+		_groupSprite->setDisplayFrame(frame);
+	}
+}
+
+// add by lpf 2015-09-09
+void TaskTraceUi::changeTaskUIInFuben(const char* title, bool isChange, bool isChangeState)
+{
+	if(_isInTLInstance)
+	{
+		_isInTLInstance = false;
+		for(int infoIdx = TLTAG_BOSSBG; infoIdx <= TLTAG_GONEXTBG; ++infoIdx)
+		{
+			CCNode* infoBG = _contentLayer->getChildByTag(infoIdx);
+			if(infoBG)
+				infoBG->removeFromParentAndCleanup(true);
+		}
+	}
+
+	if (isChange)
+	{
+		_scrollView->setVisible(false);
+		_taskSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_mubiaobtnh"));
+		if (_targetSprite)
+		{
+			LabelFT *tempLabel = dynamic_cast<LabelFT*>(_targetSprite->getChildByTag(MUBIAOSPRITETAG));
+			if (tempLabel)
+			{
+				tempLabel->setString(title);
+			}
+		}
+		else
+		{
+			_targetSprite = CCSprite::createWithSpriteFrameName("rendui_fubenwenzidi");
+			CCSize spriteSize = _targetSprite->getContentSize();
+			CC_ASSERT(_targetSprite != NULL);
+			if (_targetSprite!= NULL)
+			{
+				_contentLayer->addChild(_targetSprite);
+				CCSize contentLayerSize = _contentLayer->getContentSize();
+				_targetSprite->setPosition(ccp(0.f,contentLayerSize.height));
+				_targetSprite->setAnchorPoint(ccp(0.0f,1.0f));
+				_targetSprite->setTag(MUBIAOSPRITETAG);
+			}
+			TTFConfig config;
+			config.outlineSize=1;
+			config.fontFilePath=FT_FONTFACE;
+			config.fontSize=16;
+			LabelFT *titleLabel = LabelFT::createWithTTF(config,title);
+			CC_ASSERT(titleLabel != NULL);
+			if(titleLabel != NULL)
+			{
+				//titleLabel->setString(title);
+				_targetSprite->addChild(titleLabel);
+				titleLabel->setTag(MUBIAOSPRITETAG);
+				titleLabel->setPosition(ccp(_targetSprite->getContentSize().width / 2, _targetSprite->getContentSize().height / 2));
+			}
+		}
+
+	}
+	else
+	{
+		if (_targetSprite)
+		{
+			_targetSprite->removeFromParentAndCleanup(true);
+			_targetSprite = NULL;
+		}
+		_scrollView->setVisible(true);
+
+		if(isChangeState)
+		{
+			_taskSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("ren-click"));
+		}
+	}
+
+	if(isChangeState)
+	{
+		setUiState(TUS_TaskTrack);
+	}
+}
+
+void TaskTraceUi::changeShowTianlaoInfo(bool isKillBoss /*= false*/)
+{
+	if (_targetSprite)
+	{
+		_targetSprite->removeFromParentAndCleanup(true);
+		_targetSprite = NULL;
+	}
+
+	_isInTLInstance = true;
+	CCSize contentLayerSize = _contentLayer->getContentSize();
+	TTFConfig config;
+	config.outlineSize=1;
+	config.fontFilePath=FT_FONTFACE;
+	config.fontSize=16;
+
+	//显示勇闯天牢的信息
+	for(int infoIdx = TLTAG_BOSSBG; infoIdx <= TLTAG_GONEXTBG; ++infoIdx)
+	{
+		CCNode* infoBG = _contentLayer->getChildByTag(infoIdx);
+		if(infoBG)
+		{
+			LabelFT* infoLab = dynamic_cast<LabelFT*>(infoBG->getChildByTag(TLTAG_COMMON_INFO));
+			if(infoIdx == TLTAG_BOSSBG){
+				changeTianlaoBoss(isKillBoss);
+			}else if(infoIdx == TLTAG_ITEMBG){
+				changeTianlaoItemNums();
+			}else if(infoIdx == TLTAG_GONEXTBG){
+				changeTianlaoCanGoNext();
+			}else{
+				break;
+			}
+			continue;
+		}
+		else
+		{
+			CCSprite* tlInfoBG = CCSprite::createWithSpriteFrameName("rendui_fubenwenzidi");
+			CCSize tlInfoBGSize = tlInfoBG->getContentSize();
+			CC_ASSERT(tlInfoBG != NULL);
+			tlInfoBG->setTag((eTianLaoTag)infoIdx);
+			tlInfoBG->setAnchorPoint(ccp(0.0f,1.0f));
+			tlInfoBG->setPosition(ccp(0.f, contentLayerSize.height - (infoIdx - TLTAG_BOSSBG) * tlInfoBGSize.height));
+			_contentLayer->addChild(tlInfoBG);
+
+			LabelFT* tlInfoLab1 = LabelFT::createWithTTF(config, "");
+			tlInfoBG->addChild(tlInfoLab1);
+
+			LabelFT* tlInfoLab2 = LabelFT::createWithTTF(config, "");
+			tlInfoLab2->setTag(TLTAG_COMMON_INFO);
+			tlInfoBG->addChild(tlInfoLab2);
+
+			std::string tlInfoStr;
+			if(infoIdx == TLTAG_BOSSBG){
+				tlInfoStr = GET_STR(9584);//BOSS:
+				changeTianlaoBoss(isKillBoss);
+			}else if(infoIdx == TLTAG_ITEMBG){
+				tlInfoStr = GET_STR(9585);//通行证:
+				changeTianlaoItemNums();
+			}else if(infoIdx == TLTAG_GONEXTBG){//进入下一层
+				tlInfoStr = "";
+				changeTianlaoCanGoNext();
+			}else{
+				break;
+			}
+
+			if(!tlInfoStr.empty())
+				tlInfoLab1->setString(tlInfoStr.c_str());
+
+			tlInfoLab1->setPosition(ccp((tlInfoBGSize.width - tlInfoLab1->getContentSize().width) * 0.5, tlInfoBGSize.height * 0.5));
+			tlInfoLab2->setPosition(ccp((tlInfoBGSize.width + tlInfoLab2->getContentSize().width) * 0.5, tlInfoBGSize.height * 0.5));
+
+			if(infoIdx == TLTAG_GONEXTBG)
+			{
+				tlInfoLab1->removeFromParentAndCleanup(true);
+				tlInfoLab2->setPositionX(tlInfoBGSize.width * 0.5);
+			}
+		}
+	}
+	setUiState(TUS_TaskTrack);
+}
+
+void TaskTraceUi::changeTianlaoBoss(bool isKillBoss)
+{
+	if(!_isInTLInstance)
+		return;
+
+	CCNode* infoBG = _contentLayer->getChildByTag(TLTAG_BOSSBG);
+	if(infoBG)
+	{
+		LabelFT* infoLab = dynamic_cast<LabelFT*>(infoBG->getChildByTag(TLTAG_COMMON_INFO));
+		if(infoLab)
+		{
+			std::string infoStr;
+			if(isKillBoss){
+				infoStr = GET_STR(9586);//已击杀
+				infoLab->setTextColor(ccc4(0, 255, 0, 255));//绿色
+				changeTianlaoCanGoNext();//当所需物品足够时判断是否可以进入下一层
+			}else{
+				infoStr = GET_STR(9587);//未击杀
+				infoLab->setTextColor(ccc4(255, 0, 0, 255));//红色
+			}
+			infoLab->setString(infoStr.c_str());
+		}
+	}
+}
+
+void TaskTraceUi::changeTianlaoItemNums()
+{
+	if(!_isInTLInstance)
+		return;
+
+	tagTianlaoData nextTLevelData = InstanceMgr::getInstance()->getNextTLLevelData();
+	if(!IS_VALID(nextTLevelData.id))
+		return;
+
+	int itemNums = PackageManager::getInstance()->getItemNumber(EICT_Bag, nextTLevelData.needItemID);
+	int needItemNums = nextTLevelData.needItemNums;
+	bool isBossDead = InstanceMgr::getInstance()->getBoosDead();
+	bool itemEnough = false;
+	if(itemNums >= needItemNums)
+		itemEnough = true;
+
+
+	CCSize tlInfoBGSize = _contentLayer->getContentSize();
+	CCNode* infoBG = _contentLayer->getChildByTag(TLTAG_ITEMBG);
+	if(infoBG)
+	{
+		LabelFT* infoLab = dynamic_cast<LabelFT*>(infoBG->getChildByTag(TLTAG_COMMON_INFO));
+		if(infoLab)
+		{
+			CCString* infoStr; 
+			if(InstanceMgr::getInstance()->getIsMaxTLLevel()){//在最高层显示 拥有物品数/-
+				infoStr = CCString::createWithFormat("%d/-", itemNums);
+				itemEnough = true;
+			}else if(InstanceMgr::getInstance()->getAlreadyInNextLevel()){//已经进入过当前层显示 拥有物品数/0
+				infoStr = CCString::createWithFormat("%d/0", itemNums);
+				itemEnough = true;
+			}else{//正常显示 拥有物品数/需要物品数
+				infoStr = CCString::createWithFormat("%d/%d", itemNums, needItemNums);
+			}
+			if(itemEnough){
+				infoLab->setTextColor(ccc4(0, 255, 0, 255));//绿色
+				changeTianlaoCanGoNext();//当所需物品足够时判断是否可以进入下一层
+			}else{
+				infoLab->setTextColor(ccc4(255, 0, 0, 255));//红色
+			}
+			infoLab->setString(infoStr->getCString());
+			CCSize infoBGSize = infoBG->getContentSize();
+			infoLab->setPosition(ccp((infoBGSize.width + infoLab->getContentSize().width) * 0.5, infoBGSize.height * 0.5));
+		}
+	}
+}
+
+void TaskTraceUi::changeTianlaoCanGoNext()
+{
+	if(!_isInTLInstance)
+		return;
+
+	tagTianlaoData nextLevelData = InstanceMgr::getInstance()->getNextTLLevelData();
+	if(!IS_VALID(nextLevelData.id))
+		return;
+
+	int itemNums = PackageManager::getInstance()->getItemNumber(EICT_Bag, nextLevelData.needItemID);
+	int needItemNums = nextLevelData.needItemNums;
+	bool isBossDead = InstanceMgr::getInstance()->getBoosDead();
+	bool canGoNext = false;
+	if(isBossDead && (itemNums >= needItemNums) || InstanceMgr::getInstance()->getAlreadyInNextLevel())
+		canGoNext = true;
+
+	CCNode* infoBG = _contentLayer->getChildByTag(TLTAG_GONEXTBG);
+	if(infoBG)
+	{
+		LabelFT* infoLab = dynamic_cast<LabelFT*>(infoBG->getChildByTag(TLTAG_COMMON_INFO));
+		if(infoLab)
+		{
+			infoLab->setString(GET_STR(9588).c_str());
+			if(InstanceMgr::getInstance()->getIsMaxTLLevel()){//到达顶层
+				infoLab->setString(GET_STR(9591).c_str());//已到达顶层
+				canGoNext = true;
+			}
+			if(canGoNext){
+				if(!ccc4BEqual(infoLab->getTextColor(), ccc4(0, 255, 0, 255)))
+					infoLab->setTextColor(ccc4(0, 255, 0, 255));//可进入下一层，绿色
+			}else{
+				if(!ccc4BEqual(infoLab->getTextColor(), ccc4(255, 0, 0, 255)))
+					infoLab->setTextColor(ccc4(255, 0, 0, 255));//不可进入下一层，红色
+			}
+		}
+	}	
+}
+
+void TaskTraceUi::onTouchTianlaoItem(eTianLaoTag tlTag)
+{
+	tagTianlaoData nowLevelData = InstanceMgr::getInstance()->getNowTLLevelData();
+	tagTianlaoData nextLevelData = InstanceMgr::getInstance()->getNextTLLevelData();
+	if(!IS_VALID(nowLevelData.id) || !IS_VALID(nextLevelData.id))
+		return;
+
+	if(tlTag == TLTAG_BOSSBG){
+		QuestMgr::getInstance()->onSelectRunNpc(nowLevelData.bossID, true);
+	}else if(tlTag == TLTAG_ITEMBG){
+		QuestMgr::getInstance()->onSelectRunNpc(nowLevelData.eliteID, true);
+	}else{
+		int itemNums = PackageManager::getInstance()->getItemNumber(EICT_Bag, nextLevelData.needItemID);
+		if(InstanceMgr::getInstance()->getAlreadyInNextLevel()){//已经进入过当前层)
+			InstanceMgr::getInstance()->sendGotoNextLevel();
+		}else if(!InstanceMgr::getInstance()->getBoosDead()){
+			ToolTip::getInstance()->push(GET_STR(9589));//本层BOSS未击杀
+		}else if(itemNums < nextLevelData.needItemNums){
+			ToolTip::getInstance()->push(GET_STR(9590));//通行证数量不足
+		}else{
+			InstanceMgr::getInstance()->sendGotoNextLevel();
+		}
+	}
+}
+
+void TaskTraceUi::appendShowNode(CCNode* pNode)
+{
+	_scrollView->setVisible(false);
+	_vecShowNode.push_back(pNode);
+
+	CCSize t_size = _contentLayer->getContentSize();
+	//float height=_contentLayer->getContentSize().height;
+	pNode->setPosition(ccp( t_size.width / 2 ,t_size.height - pNode->getContentSize().height / 2));
+	_contentLayer->addChild(pNode);
+	setUiState(TUS_TaskTrack);
+}
+
+void TaskTraceUi::removeShowNodes()
+{
+	vector<CCNode*>::iterator iter = _vecShowNode.begin();
+	while(iter != _vecShowNode.end())
+	{
+		(*iter)->removeFromParent();
+		iter++;
+	}
+	_vecShowNode.clear();
+	setUiState(TUS_TaskTrack);
+	_scrollView->setVisible(true);
+	_taskSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("ren-click"));
+}
+
+void TaskTraceUi::getQuestIdNameList(std::map<unsigned short, string>& id_name_map)
+{
+	for(std::list<TaskTraceItem*>::iterator iter = _tasks.begin(); iter != _tasks.end(); ++iter)
+	{
+		TaskTraceItem* info = *iter;
+		if(info)
+		{
+			id_name_map.insert(std::make_pair(info->getId(), info->getTitle()));
+		}
+	}
+}
+
+//[huo] 支持多条可点击的目标列表
+void TaskTraceUi::appendTargetItem(TargetTouchItem * item )
+{
+
+	_scrollView->setVisible(false);
+	_taskSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("rendui_mubiaobtnh"));
+
+	float height=_contentLayer->getContentSize().height;
+	item->setPosition(ccp(0,height-_targetTouchItems.size()*(item->getSize().height)));
+	if (item->getNode() && item->getNode()->getParent() != _contentLayer) // whp处理行会家园地图中使用小飞鞋时重复添加节点警告问题
+	{
+		item->getNode()->removeFromParent();
+		item->addToParent(_contentLayer);
+	}
+	_targetTouchItems.push_back(item);
+	if(_trackUiState!=TUS_TaskTrack)
+		setUiState(TUS_TaskTrack);
+}
+void TaskTraceUi::showTargetItems( bool show )
+{
+	for(std::list<TargetTouchItem *>::iterator iter = _targetTouchItems.begin(); iter != _targetTouchItems.end(); ++iter)
+	{
+		TargetTouchItem* item = *iter;
+		if(item)
+			item->setVisible(show);
+	}
+}
+
+void TaskTraceUi::removeTargetItems()
+{
+	for(std::list<TargetTouchItem *>::iterator iter = _targetTouchItems.begin(); iter != _targetTouchItems.end(); ++iter)
+	{
+		TargetTouchItem* item = *iter;
+		item->removeFromParent();
+		//CC_SAFE_DELETE(item);
+	}
+	_targetTouchItems.clear();
+
+	setUiState(TUS_TaskTrack);
+	_scrollView->setVisible(true);
+	_taskSprite->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("ren-click"));
+
+}
+
+
+TaskTraceUi::~TaskTraceUi()
+{
+	CC_SAFE_RELEASE_NULL(_groupContainer);
+	CC_SAFE_RELEASE_NULL(_taskContainer);
+}
+
+void TaskTraceUi::clearMemberGroup()
+{
+	removeAllMember();
+	updateGroupList();
+
+	mpCreateTeamBtn->setVisible(true);
+	mpMatchTeamBtn->setVisible(true);
+}
+
+
+
+
+
+
+// ActionNode* TaskTraceUi::getTaskAcNode()
+// {
+// 	ActionNode* taskSEAcNode = ActionNode::create();
+// 	for (int i=1; i<99; ++i)
+// 	{
+// 		CCString* fireStr = CCString::createWithFormat("%s%02d", "E1_91", i);
+// 		if(!taskSEAcNode->AddTexture(fireStr->getCString(), "Effect", "png"))
+// 			break;
+// 	}
+// 	return taskSEAcNode;
+// }
+
+// void TaskTraceUi::setTaskSE( bool hasBegan )
+// {
+// 	m_bIsSERuning = hasBegan;
+// 	if(hasBegan && m_bNeedSE && (_trackUiState == TUS_TaskTrack))
+// 	{
+// 		if (!_taskAcNode->isVisible())
+// 		{
+// 			_taskAcNode->setVisible(true);
+// 			_taskAcNode->BeginAction(0.12f, true);
+// 		}
+// 	}
+// 	else
+// 	{
+// 		if(_taskAcNode->isVisible())
+// 		{
+// 			_taskAcNode->StopAction();
+// 			_taskAcNode->setVisible(false);
+// 		}
+// 	}
+// }
+
+//////////////////////////////////////////////////////////////////////////
+
+cocos2d::SEL_MenuHandler TaskTraceUiLayer::onResolveCCBCCMenuItemSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	return NULL;
+}
+
+cocos2d::extension::SEL_CCControlHandler TaskTraceUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHideBtnPressed", TaskTraceUiLayer::onHideBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onShowBtnPressed", TaskTraceUiLayer::onShowBtnPressed);
+
+	//SIMPLE_SELECTORRESOLVER_CCCONTROL_GLUE(TaskTraceUiLayer,onOpenMainTeamPanel);
+	return NULL;
+}
+
+bool TaskTraceUiLayer::onAssignCCBMemberVariable( CCObject* pTarget, const char* pMemberVariableName, CCNode* pNode )
+{
+	return false;
+}
+
+void TaskTraceUiLayer::onNodeLoaded( cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader )
+{
+	// 	std::string sSEDir = CFGReader::instance()->get_profile_string("Art","Effect","");
+	// 	std::string sSETask = sSEDir + "E1_91.plist";
+	// 	_plist.insert(sSETask);
+	// 	UiResourceMgr::getInstance()->retainPlistFile(_plist);
+	// 	CCSpriteFrameCache::sharedSpriteFrameCache()->addSpriteFramesWithFile(sSETask.c_str());
+
+	return;
+}
+
+void TaskTraceUiLayer::onHideBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CCNode *parent = getParent();
+	TaskTraceUi *p = static_cast<TaskTraceUi*>(parent);
+	CC_ASSERT(p != NULL);
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_7);
+	p->onHideBtnPressed();
+}
+
+void TaskTraceUiLayer::onShowBtnPressed( cocos2d::CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent )
+{
+	CCNode *parent = getParent();
+	TaskTraceUi *p = static_cast<TaskTraceUi*>(parent);
+	CC_ASSERT(p != NULL);
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_7);
+	p->onShowBtnPressed();
+}
+
+void TaskTraceUiLayer::onExit()
+{
+	CCLayer::onExit();
+	//	UiResourceMgr::getInstance()->releasePlistFile(_plist);
+}
+
+
+
+////
+
+
+TargetTouchItem::~TargetTouchItem()
+{
+	if(m_node!=NULL)
+		m_node->release();
+	m_nodes.clear();
+	m_labels.clear();
+	AnimationCache::getInstance()->releaseDefList(m_anims);
+	AnimationCache::getInstance()->releaseSinEffect("E1_124",true);
+}
+
+
+TargetTouchItem::TargetTouchItem()
+	: isUpDown(false)
+{
+	m_node= CCSprite::createWithSpriteFrameName("rendui_fubenwenzidi");
+	m_node->setAnchorPoint(ccp(0,1.0));
+	m_node->retain();
+	m_size=m_node->getContentSize();
+
+	m_effectSprite= CCSprite::createWithSpriteFrameName("rendui_fubenwenzidi");;
+
+	AnimationCache::createDefList(1, m_anims, false);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_124", m_anims);
+	m_effectSprite->runAction(CCRepeatForever::create(m_anims[0]));
+	m_effectSprite->setVisible(false);
+	m_effectSprite->setPosition(ccp(m_size.width/2,m_size.height/2));
+	m_node->addChild(m_effectSprite);
+
+	//小手特效
+	std::string sSEDir01= CFGReader::instance()->get_profile_string("Art", "Effect", "");
+	std::string sSEPlist = sSEDir01 + "E1_151.plist";
+	m_hand = GameActionNode::create();
+	m_hand->InitWithPList(sSEPlist.c_str(),"E1_151");
+	m_hand->setPosition(ccp(m_size.width/2,m_size.height/2));
+	m_hand->setZOrder(100);
+	m_node->addChild(m_hand);
+}
+
+
+void TargetTouchItem::addToParent( CCNode * content )
+{
+	if(m_node!=NULL)
+		content->addChild(m_node);
+}
+
+void TargetTouchItem::appendText( string str,char * key,ccColor3B color,bool isUD)
+{
+	//CCSize size=m_node->getContentSize();
+	// 	CCLabelTTF * label=CCLabelTTF::create();
+	// 	m_node->addChild(label);
+	// 	label->setAnchorPoint(ccp(0,0.5));
+	// 	label->setColor(color);
+	// 	label->setString(str.c_str());
+
+
+	TTFConfig config;
+	config.outlineSize=1;
+	config.fontFilePath=FT_FONTFACE;
+	config.fontSize=15;
+	LabelFT *label = LabelFT::createWithTTF(config,str.c_str());
+	label->setAnchorPoint(ccp(0,0.5));
+	label->setColor(color);	
+	m_node->addChild(label);
+
+	m_nodes.push_back(label);
+	if(key!=NULL)
+	{
+		std::string keyStr(key);
+		m_labels[keyStr]=label;
+	}
+	isUpDown = isUD;
+	if (isUpDown)
+	{
+		updateDisplayByUpAndDown();
+	}
+	else
+	{
+		updateDisplay();
+	}
+}
+
+void TargetTouchItem::appendSprite( char * iconName,float scale,bool isUD)
+{
+	CCSprite * icon=CCSprite::createWithSpriteFrame(PackageManager::getInstance()->getIconFrameByName(iconName));
+	icon->setScale(scale);
+	icon->setContentSize(icon->getContentSize()*scale);
+	icon->setAnchorPoint(ccp(0,0.5));
+
+	m_node->addChild(icon);
+	m_nodes.push_back(icon);
+	isUpDown = isUD;
+	if (isUpDown)
+	{
+		updateDisplayByUpAndDown();
+	}
+	else
+	{
+		updateDisplay();
+	}
+
+}
+
+
+
+
+void TargetTouchItem::updateText( char * key,string _value, bool isUD)
+{
+	std::string keyStr(key);
+	map<std::string,LabelFT*>::iterator iter=m_labels.find(keyStr);
+
+	if(iter!=m_labels.end())
+	{
+		iter->second->setString(_value);
+	}
+	isUpDown = isUD;
+	if (isUpDown)
+	{
+		this->updateDisplayByUpAndDown();
+	}
+	else
+	{
+		this->updateDisplay();
+	}
+}
+
+void TargetTouchItem::updateTextAndColor( char * key,string _value,ccColor3B pColor,bool isUD)
+{
+	std::string keyStr(key);
+	map<std::string,LabelFT*>::iterator iter=m_labels.find(keyStr);
+
+	if(iter!=m_labels.end())
+	{
+		iter->second->setString(_value);
+		iter->second->setColor(pColor);
+	}
+	isUpDown = isUD;
+	if (isUpDown)
+	{
+		this->updateDisplayByUpAndDown();
+	}
+	else
+	{
+		this->updateDisplay();
+	}
+}
+
+void TargetTouchItem::removeFromParent()
+{
+	if(m_node!=NULL)
+		m_node->removeFromParent();
+}
+
+void TargetTouchItem::updateDisplay()
+{
+	float width=0;
+	for (vector<CCNode*>::iterator iter=m_nodes.begin();iter!=m_nodes.end();iter++)
+	{
+		CCNode* node=*iter;
+		node->setAnchorPoint(ccp(0,0.5));
+		node->setPosition(width,m_size.height/2);
+		width+=node->getContentSize().width;
+
+	}
+	//	float offx=(m_node->getContentSize().width-width)/2;
+	float offx=10;
+	for (vector<CCNode*>::iterator iter=m_nodes.begin();iter!=m_nodes.end();iter++)
+	{
+		CCNode* node=*iter;
+		node->setPosition(node->getPositionX()+offx,node->getPositionY());
+	}	
+}
+
+void TargetTouchItem::updateDisplayByUpAndDown()
+{
+	float height=0;
+	for (vector<CCNode*>::iterator iter=m_nodes.begin();iter!=m_nodes.end();iter++)
+	{
+		CCNode* node=*iter;
+		UIUtil::childNodeAlign(m_node,node,eha_left,eva_top,ccp(0,-height),true);
+		height-=node->getContentSize().height;
+	}
+	//	float offx=(m_node->getContentSize().width-width)/2;
+	float offx=0;
+	for (vector<CCNode*>::iterator iter=m_nodes.begin();iter!=m_nodes.end();iter++)
+	{
+		CCNode* node=*iter;
+		node->setPosition(node->getPositionX()+offx,node->getPositionY());
+	}	
+}
+
+void TargetTouchItem::removeAll()
+{
+	m_nodes.clear();
+	m_node->removeAllChildren();
+}
+
+void TargetTouchItem::runEffect(bool effect)
+{
+	m_effectSprite->setVisible(effect);
+}
+
+void TargetTouchItem::showHand( bool show )
+{
+	if(m_hand)
+	{
+		m_hand->setVisible(show);
+		m_hand->StopAction();
+		if(show)
+		{
+			m_hand->BeginAction(0.09f,true);
+		}
+	}
+}
+
+
+

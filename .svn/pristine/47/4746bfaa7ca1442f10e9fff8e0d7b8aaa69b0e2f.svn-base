@@ -1,0 +1,115 @@
+#include "TouchSprite.h"
+#include "BaseDefine.h"
+#include "UiTools.h"
+
+TouchSprite::TouchSprite()
+	: _touchPriority(2)
+	, _touchEnable(true)
+{
+
+}
+
+bool TouchSprite::init()
+{
+	_signalWhenNotTouched = false;
+	if(!CCSprite::init())
+		return false;
+	return true;
+}
+
+void TouchSprite::onEnter()
+{
+	CCSprite::onEnter();
+	if(_touchEnable)
+		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, _touchPriority, true);
+}
+
+void TouchSprite::setPriority(int pPriority)
+{
+	if(_touchEnable)
+	{
+		_touchPriority = pPriority;
+		CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+		CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, _touchPriority, true);
+	}
+}
+
+void TouchSprite::onExit()
+{
+	CCSprite::onExit();
+	if(_touchEnable)
+		CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+
+
+bool TouchSprite::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if ( !isVisible() || !hasVisibleParents() )
+	{
+		return false;
+	}
+
+	_isMoved = false;
+	_touchPt = pTouch->getLocationInView();
+	CCPoint p = convertTouchToNodeSpace(pTouch);
+	CCRect boundBox = boundingBox();
+	CCRect rect(0, 0, boundBox.size.width, boundBox.size.height);
+	if(rect.containsPoint(p))
+	{
+		return true;
+	}
+	else
+	{
+		if(_signalWhenNotTouched)
+			signalTouched.emit(this, false);
+	}
+	return false;
+}
+
+void TouchSprite::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isVisible())
+	{
+		CCPoint touchPt = pTouch->getLocationInView();
+		float dis = ccpDistance(_touchPt, touchPt);
+		if(dis < TOUCH_MOVE_DIS)
+		{
+			CCPoint p = convertTouchToNodeSpace(pTouch);
+			CCRect boundBox = boundingBox();
+			CCRect rect(0, 0, boundBox.size.width, boundBox.size.height);
+			if(rect.containsPoint(p))
+			{
+				signalTouched.emit(this, true);
+			}
+		}
+	}
+}
+
+TouchSprite::~TouchSprite()
+{
+
+}
+
+void TouchSprite::ccTouchMoved( CCTouch *pTouch, CCEvent *pEvent )
+{
+
+}
+
+bool TouchSprite::isTouched( CCTouch *pTouch )
+{
+	return isTouchOnNodeContent(this, pTouch);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+void TouchSpriteLoader::onHandlePropTypeInteger( CCNode * pNode, CCNode * pParent, const char* pPropertyName, int pInteger, CCBReader * pCCBReader )
+{
+	if(CCString::create(pPropertyName)->isEqual(CCString::create("touchPriority")))
+	{
+		((TouchSprite*)pNode)->_touchPriority = pInteger;
+	}
+	else
+	{
+		CCSpriteLoader::onHandlePropTypeInteger(pNode, pParent, pPropertyName, pInteger, pCCBReader);
+	}
+}

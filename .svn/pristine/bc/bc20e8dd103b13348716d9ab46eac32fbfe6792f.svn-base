@@ -1,0 +1,1256 @@
+#include "PlayerStallUi.h"
+#include "AudioProto.h"
+#include "ToolTip.h"
+#include "Auto_ActionMgr.h"
+#include "UiLoader.h"
+#include "UiTools.h"
+#include "CfgReader.h"
+#include "UiManager.h"
+#include "PlayerStallMgr.h"
+#include "LocalPlayer.h"
+#include "ItemNode.h"
+#include "PackageManager.h"
+#include "string.h"
+#include "BuySetUi.h"
+#include "AudioPlayer.h"
+#include "AudioProto.h"
+#include "ToolTip.h"
+#include "Auto_ActionMgr.h"
+#include "InputMessageBox.h" 
+#include "RoleManager.h"
+#include "StringMgr.h"
+#include "WorldPacket.h"
+#include "TCPClient.h"
+#include "CommonMsgDefine.h"
+#include "NumericalIniMgr.h"
+#include "BaseDefine.h"
+#include "GongfaTip.h"
+#include "EquipTipUi.h"
+#include "ItemTip.h"
+#include "DBMgr.h"
+#include "World.h"
+#include "Helper.h"
+#include "f_string_util.h"
+#include "f_string_table.h"
+#include "PlacardManager.h"
+
+static const int MAX_ITEM_NUM = 10;
+
+USING_NS_CC;
+USING_NS_CC_EXT;
+
+void TouchPriorityLayer::onEnter()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 2, true);
+}
+void TouchPriorityLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+bool TouchPriorityLayer::ccTouchBegan( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if(isTouchOnNodeContent(this, pTouch))
+	{
+		return true;
+	}
+	return false;
+}
+
+void TouchPriorityLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+
+}
+
+PlayerStall_Ui::PlayerStall_Ui()
+	:mTouchPriorityLayer(0)
+{
+}
+PlayerStall_Ui::~PlayerStall_Ui()
+{
+}
+
+void PlayerStall_Ui::closeUI()
+{
+	if (!RoleManager::getInstance()->getLocalPlayer()->isInRoleStateAny(RA_Stall)) {
+		PlayerStallMgr::getInstance()->send_NET_C2G_REQUEST_NEW_STALL_END();
+	}
+
+	if (mTouchPriorityLayer)
+	{
+		CCScene *scene = UiMgr::getInstance()->getCurScene();
+		scene->removeChild(mTouchPriorityLayer);
+		mTouchPriorityLayer = 0;
+	}
+}
+
+CCNode * PlayerStall_Ui::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["PlayerStallUiLayer"] = UiLayerLoader<PlayerStallUiLayer>::loader();
+	nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+	CCNode *node = readUiFromCCBI("stallnew", nodeLoaders, _loadSpriteSheet);
+	CCNode *p = node->getChildByTag(0);
+	if (!mTouchPriorityLayer)
+	{
+		mTouchPriorityLayer = TouchPriorityLayer::create();
+		mTouchPriorityLayer->setContentSize(CCSizeMake(p->getContentSize().width, p->getContentSize().height));
+		CCPoint pt = p->convertToWorldSpace(ccp(0,0));
+		CCScene *scene = UiMgr::getInstance()->getCurScene();
+		mTouchPriorityLayer->setPosition(pt);
+		scene->addChild(mTouchPriorityLayer,3);
+
+		CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(SEL_SCHEDULE(&CloseUIObject::CloseUI), &this->DelayCloseUIObj);
+	}
+	return node;
+}
+
+////////////////////////////
+PlayerStallUiLayer::PlayerStallUiLayer()
+	:_id(0)
+	,_selectItemId(0)
+{
+
+}
+PlayerStallUiLayer::~PlayerStallUiLayer()
+{
+
+}
+cocos2d::extension::SEL_CCControlHandler PlayerStallUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBaiTanBtnPressed", PlayerStallUiLayer::onBaiTanBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onShouTanBtnPressed", PlayerStallUiLayer::onShouTanBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onBuyBtnPressed", PlayerStallUiLayer::onBuyBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onClose1BtnPressed", PlayerStallUiLayer::onClose1BtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onHelpBtnPressed", PlayerStallUiLayer::onHelpBtnPressed);
+	/*CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", PlayerStallUiLayer::onOkBtnPressed);*/
+    return NULL;
+}
+SEL_MenuHandler PlayerStallUiLayer::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+void PlayerStallUiLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	m_shouTanBtn = (CCControlButton*)this->getChildByTag(0)->getChildByTag(21);
+	m_BaiTanBtn  = (CCControlButton*)this->getChildByTag(0)->getChildByTag(22);
+	m_BuyTanBtn  = (CCControlButton*)this->getChildByTag(0)->getChildByTag(23);
+	m_BaiTanLabel = (CCLabelTTF*)this->getChildByTag(0)->getChildByTag(25);
+	m_BuyLabel = (CCLabelTTF*)this->getChildByTag(0)->getChildByTag(24);
+	for (int i = 10; i < 20; ++i)
+	{
+		CCLabelTTF* priceLabel = (CCLabelTTF*)this->getChildByTag(0)->getChildByTag(i);
+		priceLabel->setString(" ");
+	}
+	createItemNode();
+	int id = RoleManager::getInstance()->getLocalPlayer()->getId();
+	updateItem(id);
+}
+
+void PlayerStallUiLayer::onBaiTan()
+{
+	AudioPlayer::getSigletonPtr()->playerSoundUIEffect(SOUND_11);
+	LocalPlayer* localPlayer = RoleManager::getInstance()->getLocalPlayer();
+	if( !localPlayer )
+		return;
+	int nOpenLevel = GetFunOpenLevel(EFOL_Stall);
+	if( localPlayer->getLevel() < nOpenLevel )//检查开放等级
+	{
+		ToolTip::getInstance()->push(GET_STR(9352).c_str());
+		return;
+	}
+	//检查摆摊栏是否为空
+	const PlayerStallMgr::StallData_Vec* list = PlayerStallMgr::getInstance()->getByid(localPlayer->getId());
+	if (!list)
+	{
+		//请设置摆摊物品
+		ToolTip::getInstance()->push("\xE8\xAF\xB7\xE8\xAE\xBE\xE7\xBD\xAE\xE6\x91\x86\xE6\x91\x8A\xE7\x89\xA9\xE5\x93\x81");
+		return;
+	}
+	//若玩家在挂机中，则摆摊会停止挂机
+	if (AutoActionMgr::getInstance()->Get_Auto_Action())
+	{
+		AutoActionMgr::getInstance()->Set_Auto_Action(false);
+	}
+	//若玩家正在双修状态中，则不允许摆摊
+	if (localPlayer->isInRoleStateAny(RA_ShuangXiu))
+	{
+		ToolTip::getInstance()->push(GET_STR(187));
+		return;
+	}
+	//若玩家处于骑乘状态，应该下马
+	if (localPlayer->getAttribute(RA_RideState))
+	{
+		RoleManager::getInstance()->sendUnRideMsg();
+	}
+
+	//弹出input框 输入摊位名称后方可摆摊
+	InputMessageBox::getInstace()->open();
+	//InputMessageBox::getInstace()->setNumOnly(false, 10);
+
+	PlayerStallUiLayer* pLayer = getUiNodeByTag<PlayerStallUiLayer>(WCT_StallUi);
+	CCString* pStr = CCString::createWithFormat("%s\xE7\x9A\x84\xE6\x91\x8A\xE4\xBD\x8D", RoleManager::getInstance()->getLocalPlayer()->getNameUtf8().c_str());		//xxx的摊位
+	InputMessageBox::getInstace()->setDefaultText(pStr->getCString());
+	InputMessageBox::getInstace()->setMessage(GET_STR(2386).c_str());//摊位名称
+	InputMessageBox::getInstace()->getBtnSignal()->connect(pLayer, &PlayerStallUiLayer::OnBaitanConfrim);
+
+}
+
+void PlayerStallUiLayer::OnBaitanConfrim(bool isOk, std::string str)
+{
+	if(isOk)
+	{
+		wchar_t nametemp[12];
+		memset(nametemp, 0, sizeof(wchar_t) * 12);
+		Utf8ToUtf16(str.c_str(), nametemp, 12, 0);
+		if (FilterMgr::getInstance()->IsNameInNameFilterFile(str) != 0)
+		{
+			//含有敏感词
+			ToolTip::getInstance()->push(GET_STR(189));
+			return;
+		}
+		if (nametemp[11] != '\0')
+		{
+			ToolTip::getInstance()->push(GET_STR(7228));
+		}
+		else
+		{
+			wchar_t name[11];
+			memset(name, 0, sizeof(wchar_t) * 11);
+			Utf8ToUtf16(str.c_str(), name, 11, 0);
+			PlayerStallMgr::StallData_Vec list;
+			PlayerStallMgr::getInstance()->send_NET_C2G_REQUEST_NEW_STALL_START(str,list);
+		}	
+	}
+}
+unsigned int PlayerStallUiLayer::getId()
+{
+	return _id;
+}
+void PlayerStallUiLayer::onShouTan()
+{
+	RoleManager::getInstance()->getLocalPlayer()->setAttribute(RA_Stall,0);
+	PlayerStallMgr::getInstance()->send_NET_C2G_REQUEST_NEW_STALL_END();
+	UiMgr::getInstance()->closeUi(WCT_StallUi);
+}
+
+void PlayerStallUiLayer::onBuyImpl( bool isOk, int num )
+{
+	
+	f_item *item = PackageManager::getInstance()->getItem(EICT_StallItem,_selectItemId); 
+	if (NULL == item)
+		return;
+
+	if(isOk)
+	{
+		PlayerStallMgr::tagNewStallData* data = PlayerStallMgr::getInstance()->getByItemId(_id,_selectItemId);
+		if (data)
+		{
+			PlayerStallMgr::tagNewStallData s;
+			s.byIndex = data->byIndex;
+			s.dwItemID = data->dwItemID;
+			s.n32YuanBao = data->n32YuanBao;
+			s.n64Serial = data->n64Serial;
+			s.nCount = item->get_item_number();
+			PlayerStallMgr::getInstance()->send_NET_C2G_REQUEST_NEW_STALL_BUY(_id,s);
+		}
+	}
+}
+
+void PlayerStallUiLayer::onBuy()
+{
+	PlayerStallMgr::tagNewStallData* data = PlayerStallMgr::getInstance()->\
+		getByItemId(_id,_selectItemId);
+	if (!data)
+	{
+		return;
+	}
+
+	f_item *item = PackageManager::getInstance()->getItem(EICT_StallItem,_selectItemId); 
+	if (!item)
+	{
+		return;
+	}
+
+	BuySetUi::getInstance()->open();
+	BuySetUi::getInstance()->setDataId(item->get_item_type_id());
+	BuySetUi::getInstance()->setPrice(data->n32YuanBao);
+
+	BuySetUi::getInstance()->setNumKeyIsOpen(false);
+	if(!MIsEquipment(item->get_item_type_id()))
+		BuySetUi::getInstance()->setNum(item->get_item_number());
+	else
+		BuySetUi::getInstance()->setNum(1);
+
+	BuySetUi::getInstance()->_signalBtnPressed->connect(this, &PlayerStallUiLayer::onBuyImpl);
+}
+void PlayerStallUiLayer::onClose()
+{
+	//unsigned long id = RoleManager::getInstance()->getLocalPlayer()->getId();
+	//if ( id != _id)
+	//{
+	//	PlayerStallMgr::getInstance()->destory(_id);
+	//}
+	//else if (!RoleManager::getInstance()->getLocalPlayer()->isInRoleStateAny(RA_Stall))
+	//{
+	//	PlayerStallMgr::getInstance()->send_NET_C2G_REQUEST_NEW_STALL_END();
+	//}
+	unsigned int id = RoleManager::getInstance()->getLocalPlayer()->getId();
+	if (id == _id)
+	{
+		if (!RoleManager::getInstance()->getLocalPlayer()->isInRoleStateAny(RA_Stall))
+		{
+			PlayerStallMgr::getInstance()->send_NET_C2G_REQUEST_NEW_STALL_END();
+		}
+	}
+	UiMgr::getInstance()->closeUi(WCT_StallUi);
+}
+
+void PlayerStallUiLayer::CloseStall(int id)
+{
+	PlayerStallUiLayer* layer = getUI();
+	int localId = RoleManager::getInstance()->getLocalPlayer()->getId();
+	if ( id == layer->_id && id != localId)
+	{
+		ToolTip::getInstance()->push("\xE6\x82\xA8\xE6\x89\x80\xE6\x9F\xA5\xE7\x9C\x8B\xE7\x9A\x84\xE6\x91\x8A\xE4\xB8\xBB\xE5\xB7\xB2\xE4\xB8\x8B\xE7\xBA\xBF\xE6\x88\x96\xE6\x94\xB6\xE6\x91\x8A");
+		if(BuySetUi::getInstance()->isOpen())
+			BuySetUi::getInstance()->close();
+		if (NumKeypad::getInstance()->isOpen())
+			NumKeypad::getInstance()->close();
+		//if (ItemTip::getInstace()->isOpen())
+		//	ItemTip::getInstace()->close();
+		//EquipTipUiLayer* pNode = (EquipTipUiLayer*)World::getInstance()->getScene()->getChildByTag(WCT_EQUIP_TIPS_UI_TAG);
+		//if(pNode)
+		//	pNode->close();
+		PlayerStallMgr::getInstance()->destory(_id);
+		UiMgr::getInstance()->closeUi(WCT_StallUi);
+	}
+}
+
+// void PlayerStallUiLayer::onHelp()
+// {
+// 	/*CCNode* node = getChildByTag(10);
+// 	bool st = node->isVisible();
+// 	node->setVisible(!st);*/
+// 	//OPEN_UI(WCT_StallTipsUi);
+// }
+
+//void PlayerStallUiLayer::onOk()
+//{
+//	/*CCNode* node = getChildByTag(10);
+//	node->setVisible(false);*/
+//}
+
+void PlayerStallUiLayer::setStallState(int state)
+{
+	if (state == SHOU)
+	{
+		m_shouTanBtn->setVisible(true);
+		m_BaiTanBtn->setVisible(false);
+		m_BuyTanBtn->setVisible(false);
+		m_BaiTanLabel->setVisible(true);
+		m_BuyLabel->setVisible(false);
+	}
+	if (state == BAI)
+	{
+		m_shouTanBtn->setVisible(false);
+		m_BaiTanBtn->setVisible(true);
+		m_BuyTanBtn->setVisible(false);
+		m_BaiTanLabel->setVisible(true);
+		m_BuyLabel->setVisible(false);
+	}
+	if (state == BUY)
+	{
+		m_shouTanBtn->setVisible(false);
+		m_BaiTanBtn->setVisible(false);
+		m_BuyTanBtn->setVisible(true);
+		m_BaiTanLabel->setVisible(false);
+		m_BuyLabel->setVisible(true);
+	}
+}
+
+void PlayerStallUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	if (!(RoleManager::getInstance()->getLocalPlayer()->isInRoleStateAny(RA_Stall)))
+	{
+		PlayerStallMgr::getInstance()->register_net_cmd();
+	}
+	DropDragDelegate::getInstance()->addDropLayer(this);
+}
+
+void PlayerStallUiLayer::onExit()
+{
+	unsigned int id = RoleManager::getInstance()->getLocalPlayer()->getId();
+	if ( id != _id)
+	{
+		PlayerStallMgr::getInstance()->destory(_id);
+	}
+	else if (!RoleManager::getInstance()->getLocalPlayer()->isInRoleStateAny(RA_Stall))
+	{
+		PlayerStallMgr::getInstance()->destory(_id);
+	}
+	DropDragDelegate::getInstance()->removeDropLayer(this);
+	CCLayer::onExit();
+}
+
+void PlayerStallUiLayer::createItemNode()
+{
+	for (int i = 0; i < MAX_ITEM_NUM; ++i)
+	{
+		ItemNode * itemnode = ItemNode::create();
+		CCNode *parent = this->getChildByTag(0)->getChildByTag(i);
+
+		//itemnode->setBlank();
+		//itemnode->setClickable(true);
+		//itemnode->hideItemOpBtn();
+		//itemnode->enableSurroundSE();
+
+		parent->addChild(itemnode);
+		itemnode->setTag(i+1);
+		_nodeList.push_back(itemnode);
+	}
+}
+
+void PlayerStallUiLayer::clearItemNode()
+{
+	ItemNode_List::iterator i,iend = _nodeList.end();
+	for (i = _nodeList.begin();i != iend; ++i)
+	{
+		ItemNode *node = *i;
+		node->setBlank();
+		node->setConType(-1);
+		node->setItemID(0);
+	}
+}
+
+void PlayerStallUiLayer::clearOtherInfo()
+{
+	for (int i = 10; i < 20; ++i)
+	{
+		CCLabelTTF* priceLabel = (CCLabelTTF*)this->getChildByTag(0)->getChildByTag(i);
+		priceLabel->setString(" ");
+	}
+}
+
+void PlayerStallUiLayer::updateItem(unsigned int id)
+{
+	_id = id;
+	EItemConType type = EICT_Bag;
+	int nodetype = EICT_Bag;
+	LocalPlayer *lp = RoleManager::getInstance()->getLocalPlayer();
+	if( !lp )
+		return;
+	if (lp->getId() != id)
+	{
+		nodetype = EICT_StallItem | EICT_Bag << 16;
+		type = EICT_StallItem;
+	}
+	
+	clearItemNode();
+	clearOtherInfo();
+	const PlayerStallMgr::StallData_Vec* list = PlayerStallMgr::getInstance()->getByid(id);
+	if (list == 0)
+		return;
+	PlayerStallMgr::StallData_Vec::const_iterator i,iend = list->end();
+	ItemNode * node = 0;
+	f_item* item = 0;
+	CCLabelTTF* priceLabel = 0;
+	for (i = list->begin(); i != iend; ++i)
+	{
+		node = _nodeList.at(i->byIndex-1);
+		if (!node)
+		{
+			continue;
+		}
+		//remind me!!!
+		item = PackageManager::getInstance()->getItem(type,i->n64Serial);
+		if (!item)
+		{
+			continue;
+		}
+		item->set_item_number(i->nCount);
+		if (item)
+		{
+			item->unlock();
+			node->initWithItem(item);
+			item->lock();
+			node->setConType(nodetype);
+			node->setItemID(item->get_item_id());
+			node->setNum(i->nCount);
+
+			//更新价格
+			priceLabel = (CCLabelTTF*)this->getChildByTag(0)\
+				->getChildByTag(i->byIndex + 9);
+			CCString* priceStr = CCString::createWithFormat("%d",i->n32YuanBao);
+			priceLabel->setString(priceStr->getCString());
+
+		}
+	}
+}
+
+ItemNode* PlayerStallUiLayer::getItemNode(CCTouch &touch)
+{
+	ItemNode_List::iterator i, iend = _nodeList.end();
+	for (i = _nodeList.begin(); i != iend; ++i)
+	{
+		if(isTouchOnNodeContent(*i, &touch))
+		{
+			return (*i);
+		}
+	}
+	return 0;
+}
+f_item* PlayerStallUiLayer::getItem(CCTouch &touch)
+{
+	ItemNode *node = getItemNode(touch);
+	f_item *item = 0;
+	if (node)
+	{
+		EItemConType type = (EItemConType)(node->getConType() & 0xff);
+		item = PackageManager::getInstance()->getItem(type,node->getItemID()); 
+	}
+	return item;
+}
+
+short PlayerStallUiLayer::getItemNode(CCTouch &touch, eGetResult &result)
+{
+	result = DropDragInterface::GR_NULL;
+	int r = -1;
+	ItemNode *node = getItemNode(touch);
+	if (node)
+	{
+		result = DropDragInterface::GR_SUCCESS;
+		r = node->getTag();
+	}
+	else
+	{
+		ItemNode *newNode = getNewItemNode();
+		if (newNode)
+		{
+			result = DropDragInterface::GR_SUCCESS;
+			r = newNode->getTag();
+		}
+	}
+	return r;
+}
+
+ItemNode* PlayerStallUiLayer::getNewItemNode()
+{
+	ItemNode_List::iterator i,iend = _nodeList.end();
+	for (i = _nodeList.begin();i != iend; ++i)
+	{
+		ItemNode *node = *i;
+		if (node->getItemID() == 0)
+		{
+			return node;
+		}
+	}
+	i = _nodeList.begin();
+	return (*i);
+}
+
+short PlayerStallUiLayer::getItemBegin(CCTouch &touch, eGetResult &result)
+{
+	short r = -1;
+	if (isTouchOnNodeContent(this->getChildByTag(0),&touch))
+	{
+		r = getItemNode(touch,result);
+		//return r;
+	}
+	return r;
+}
+short PlayerStallUiLayer::getItemEnd(CCTouch &touch, eGetResult &result, EItemConType src, short itemIndex)
+{
+	short r = -1;
+	if (isTouchOnNodeContent(this->getChildByTag(0),&touch))
+	{
+		r = getItemNode(touch,result);
+		//return r;
+	}
+	return r;
+}
+bool PlayerStallUiLayer::onClicked(CCTouch &touch)
+{
+	f_item* item = getItem(touch);
+	if (!item)
+	{
+		return true;
+	}
+	ItemNode *node = getItemNode(touch);
+	if (!node)
+	{
+		return true;
+	}
+	PlayerStallMgr::tagNewStallData* data = PlayerStallMgr::getInstance()->\
+		getByItemId(_id,item->get_item_id());
+	if (!data)
+	{
+		return true;
+	}
+	setItemSelect(data->byIndex - 1);
+	if (item->get_container_type() == EICT_StallItem)
+	{
+		_selectItemId = item->get_item_id();
+		if(MIsEquipment(item->get_item_type_id()))
+		{
+			const ItemTypeData &typeData  = PackageManager::getInstance()->getItemTypeData(item->get_item_type_id());
+			ePackageItemType eItemType = typeData.type;
+			if(eItemType != PIT_Kungfu && eItemType != PIT_KungfuExp)
+			{
+				EquipTipUiLayer* ui = EquipTipUi::create();
+				f_item* woreEquip = PackageManager::getInstance()->getItem(EICT_Equip, (INT64)item->get_item_id());
+				if(woreEquip != NULL)	
+					ui->showSelfEquip();
+				ui->showUi(dynamic_cast<f_equipment*>(item),false);
+				ui->setAllButtonOff();
+
+				//EquipTipUiLayer* ui = EquipTipUi::create();
+				//f_item* woreEquip = PackageManager::getInstance()->getItem(EICT_Equip, (INT64)item->get_item_id());
+				//if(woreEquip != NULL)	
+				//{
+				//	ui->showSelfEquip();
+				//
+				//}
+				//f_equipment* selfEquip;
+				//EEquipPos equipPosIndex;
+				//c_sql_command* cmd = c_db_manager::getSingleton()->begin_operation("SELECT * FROM EquipData WHERE typeId = ?1");
+				//cmd->set_integer32(1 , dynamic_cast<f_equipment*>(item)->get_item_type_id());
+				//c_sql_table* table = c_db_manager::getSingleton()->create_table();
+				//while(table->retrieve_row())
+				//{
+				//	unsigned int idx = table->get_index("PosIndex");
+				//	equipPosIndex = (EEquipPos)table->get_integer32(idx);
+				//}
+				//unsigned int idx = table->get_index("PosIndex");
+				//equipPosIndex = (EEquipPos)table->get_integer32(idx);
+				//c_db_manager::getSingleton()->destroy_table(table);
+				//c_db_manager::getSingleton()->end_operation(cmd);
+				//selfEquip = dynamic_cast<f_equipment*>(PackageManager::getInstance()->getItem(EICT_Equip, (short)equipPosIndex));
+				//if (selfEquip != NULL)
+				//{
+				//	ui->showUi(dynamic_cast<f_equipment*>(item));	
+				//}
+				//else
+				//{
+				//	ui->showUiSetPT(ccp(-200,CCDirector::sharedDirector()->getWinSize().height/8),dynamic_cast<f_equipment*>(item));
+				//}
+				//ui->setAllButtonOff();
+			}
+		}
+		else
+		{
+			ItemTip::getInstace()->open();
+			CCPoint pt = (this->getParent())->convertToWorldSpace(this->getPosition());
+			ItemTip::getInstace()->setPosition(ccp(pt.x + 135,pt.y + 125));
+			ItemTip::getInstace()->setData(item);
+			ItemTip::getInstace()->hideOpBtn();
+		}
+	}
+	else
+	{
+		OPEN_UI(WCT_StallUnSetUi);
+		StallUnsetUiLayer* layer = getUiNodeByTag<StallUnsetUiLayer>(WCT_StallUnSetUi);
+		if(NULL != layer)
+			layer->setData(item,data->byIndex);
+	}
+	return true;
+}
+bool PlayerStallUiLayer::onDoubleClicked(CCTouch &touch)
+{
+	return true;
+}
+bool PlayerStallUiLayer::setItemSelect(int index)
+{
+	if(index < 0 || index >= MAX_ITEM_NUM)
+		return false;
+
+	ItemNode* pNode = NULL;
+	for(int i = 0; i < MAX_ITEM_NUM; i++)
+	{
+		pNode = dynamic_cast<ItemNode*>(this->getChildByTag(0)->getChildByTag(i)->getChildByTag(i + 1));
+		if(pNode && i == index)
+			pNode->setSelect(true);
+		else if(pNode)
+			pNode->setSelect(false);
+	}
+
+	return true;
+}
+EItemConType PlayerStallUiLayer::getConType()
+{
+	return EICT_StallItem;
+}
+
+
+PlayerStallUiLayer *PlayerStallUiLayer::getUI()
+{
+	return getUiNodeByTag<PlayerStallUiLayer>(WCT_StallUi);
+}
+
+void PlayerStallUiLayer::onBaiTanBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	PlayerStallUiLayer* layer = getUI();
+	if(layer)
+	{
+		layer->onBaiTan();
+	}
+}
+void PlayerStallUiLayer::onShouTanBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	PlayerStallUiLayer* layer = getUI();
+	if(layer)
+	{
+		layer->onShouTan();
+	}
+}
+void PlayerStallUiLayer::onBuyBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	PlayerStallUiLayer* layer = getUI();
+	if(layer)
+	{
+		layer->onBuy();
+	}
+}
+void PlayerStallUiLayer::onClose1BtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	PlayerStallUiLayer* layer = getUI();
+	if(layer)
+	{
+		layer->onClose();
+	}
+}
+void PlayerStallUiLayer::onHelpBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+// 	PlayerStallUiLayer* layer = getUI();
+// 	if(layer)
+// 	{
+// 		layer->onHelp();
+// 	}
+
+	PlacardManager::getInstance()->open_placard_node(6);
+}
+//void PlayerStallUiLayer::onOkBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+//{
+//	PlayerStallUiLayer* layer = getUI();
+//	if(layer)
+//	{
+//		layer->onOk();
+//	}
+//}
+
+/////////////////////////
+Stallbuyui::Stallbuyui()
+{
+
+}
+Stallbuyui::~Stallbuyui()
+{
+
+}
+CCNode* Stallbuyui::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["StallBuyUiLayer"] = UiNodeLoader<StallBuyUiLayer>::loader();
+	nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+	CCNode *node = readUiFromCCBI("stallbuyui", nodeLoaders, _loadSpriteSheet);
+	return node;
+}
+
+///////////////////////////////
+cocos2d::extension::SEL_CCControlHandler StallBuyUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCancelBtnPressed", StallBuyUiLayer::onCancelBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOKBtnPressed", StallBuyUiLayer::onOKBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onClosePressedBtn", StallBuyUiLayer::onClosePressedBtn);
+	return NULL;
+}
+
+SEL_MenuHandler StallBuyUiLayer::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+void StallBuyUiLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	m_nameLabel = (CCLabelTTF*)this->getChildByTag(0)->getChildByTag(3);
+	m_onePriceLabel = (CCLabelTTF*)this->getChildByTag(0)->getChildByTag(1);
+	m_allPriceLabel = (CCLabelTTF*)this->getChildByTag(0)->getChildByTag(2);
+	m_pNode = (CCNode*)this->getChildByTag(0)->getChildByTag(0);
+	m_priceNode = (CCNode*)this->getChildByTag(0)->getChildByTag(4);
+	m_OkNode = (CCControlButton*)this->getChildByTag(0)->getChildByTag(5);    
+	m_CancelNode = (CCNode*)this->getChildByTag(0)->getChildByTag(6);
+	m_CloseNode = (CCNode*)this->getChildByTag(0)->getChildByTag(7); 
+	m_pNumPad = (CCNode*)this->getChildByTag(0)->getChildByTag(8); 
+
+	m_pBuyPriceText = (CCLabelTTF*)this->getChildByTag(0)->getChildByTag(10);
+	m_pBuyNewPriceText = Helper::replaceLabelTTFWithLabelFTAndRemove(m_pBuyPriceText);
+	if(NULL != m_pBuyNewPriceText)
+	{
+		std::stringstream oss;
+		oss << floor(NumericalIniMgr::getInstance()->get_stall_price_tax() * 100 + 0.5);
+		std::string str = "      " + oss.str() + " %";
+		m_pBuyNewPriceText->setString(str.c_str());															 
+	}
+
+
+	m_nameNewLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(m_nameLabel);
+	CC_ASSERT(NULL != m_nameNewLabel);
+
+	m_pOneNewPriceLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(m_onePriceLabel);
+	CC_ASSERT(NULL != m_pOneNewPriceLabel);
+
+	m_pAllNewPriceLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(m_allPriceLabel);
+	CC_ASSERT(NULL != m_pAllNewPriceLabel);
+
+	_stallNum = 1;
+	_stallPrice = 0;
+	_maxPrice = 999999;
+	m_pOneNewPriceLabel->setString("0");
+	m_pAllNewPriceLabel->setString("0");
+
+	m_pItemNode = ItemNode::create();		//1 物品
+	m_pItemNode->setPosition(m_pNode->getPosition());
+	m_pNode->setVisible(false);
+	this->getChildByTag(0)->addChild(m_pItemNode);
+}
+
+void StallBuyUiLayer::onCancelBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	NumKeypad::getInstance()->close();
+	CLOSE_UI(WCT_Stallbuyui);
+}
+
+void StallBuyUiLayer::onOKBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	CC_ASSERT(_stallNum != 0);
+	const ItemTypeData & pdate = PackageManager::getInstance()->getItemTypeData(_itemID);
+	if (_stallPrice < pdate.bottomPrice  || _stallPrice/* / _stallNum*/ > pdate.maxPrice )// 判断是否贵重 ZhangYajie TODO;
+	{
+		string strkey;
+		if (pdate.bottomPrice > _stallPrice/* / _stallNum*/)
+		{
+			strkey = STRING_TABLE["Trade_Item_Cheap"];
+			safe_sprintf(strkey,strkey.c_str(),pdate.bottomPrice);
+		}
+		else if (pdate.maxPrice < _stallPrice/* / _stallNum*/)
+		{
+			strkey = STRING_TABLE["Trade_Item_Expensive"];
+			safe_sprintf(strkey,strkey.c_str(),pdate.maxPrice);
+		}
+		ToolTip::getInstance()->push(strkey);
+
+		return;
+	}
+	else
+		m_OkNode->setEnabled(true);
+
+	PlayerStallMgr::tagNewStallData data;
+	data.n64Serial = _id;
+	data.n32YuanBao = _stallPrice;
+	data.nCount = _stallNum;
+	PlayerStallMgr::getInstance()->_playerStall_connected.emit(_playerid,data);
+	NumKeypad::getInstance()->close();
+	CLOSE_UI(WCT_Stallbuyui);
+}
+void StallBuyUiLayer::onClosePressedBtn(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	NumKeypad::getInstance()->close();
+	CLOSE_UI(WCT_Stallbuyui);
+}
+
+void StallBuyUiLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCSprite::onExit();
+}
+void StallBuyUiLayer::onEnter()
+{
+	CCSprite::onEnter();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+	setAllChildernButtonPriority(this,-1);
+}
+bool StallBuyUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if(isTouchOnNodeContent(m_priceNode, pTouch))
+	{
+		b_touched = true;
+
+	}
+// 	else if (isTouchOnNodeContent(m_OkNode,pTouch))                                                                
+// 	{
+// 		CC_ASSERT(_stallNum != 0);
+// 		const ItemTypeData & pdate = PackageManager::getInstance()->getItemTypeData(_itemID);
+// 		if (_stallPrice < pdate.bottomPrice  || _stallPrice > pdate.maxPrice )// 判断是否贵重 ZhangYajie TODO;
+// 		{
+// 			string strkey;
+// 			if (pdate.bottomPrice > _stallPrice)
+// 			{
+// 				strkey = STRING_TABLE["Trade_Item_Cheap"];
+// 				safe_sprintf(strkey,strkey.c_str(),pdate.bottomPrice);
+// 			}
+// 			else if (pdate.maxPrice < _stallPrice)
+// 			{
+// 				strkey = STRING_TABLE["Trade_Item_Expensive"];
+// 				safe_sprintf(strkey,strkey.c_str(),pdate.maxPrice);
+// 			}
+// 			ToolTip::getInstance()->push(strkey);
+// 
+// 			return true;
+// 		}
+// 
+// 		if (NumericalIniMgr::getInstance()->get_stall_info_yuanbao_min() > _stallPrice)
+// 		{
+// 			m_OkNode->setEnabled(false);
+// 			ToolTip::getInstance()->push(GET_STR(9272));
+// 			return true;
+// 		}
+// 		else
+// 			m_OkNode->setEnabled(true);
+// 
+// 		PlayerStallMgr::tagNewStallData data;                                                                        
+// 		data.n64Serial = _id;                                                                                        
+// 		data.n32YuanBao = _stallPrice;                                                                               
+// 		data.nCount = _stallNum;                                                                                     
+// 		PlayerStallMgr::getInstance()->_playerStall_connected.emit(_playerid,data);                                  
+// 		CLOSE_UI(WCT_Stallbuyui);
+// 		NumKeypad::getInstance()->close();
+// 	}                                                                                                              
+// 	else if (isTouchOnNodeContent(m_CancelNode,pTouch))                                                            
+// 	{                                                                                                              
+// 		CLOSE_UI(WCT_Stallbuyui); 
+// 		NumKeypad::getInstance()->close();
+// 	}                                                                                                              
+// 	else if (isTouchOnNodeContent(m_CloseNode,pTouch))                                                             
+// 	{                                                                                                              
+// 		CLOSE_UI(WCT_Stallbuyui);
+// 		NumKeypad::getInstance()->close();
+// 	}                                                                                                              
+	return true;
+}
+
+void StallBuyUiLayer::setItemNodeData(f_item* item, unsigned int pid)
+{
+	_id = item->get_item_id();
+	_itemID = item->get_item_type_id();
+	_playerid = pid;
+
+	const ItemTypeData& itemdata = PackageManager::getInstance()->getItemTypeData(item->get_item_type_id());
+	//CCString* pstr = CCString::createWithFormat("%s%d",itemdata.name.c_str(),_stallNum);
+	//m_nameLabel->setString(pstr->getCString());
+	m_nameNewLabel->setString(itemdata.name);
+	_stallNum = item->get_data()->GetNum();
+	CCString* allstr = CCString::createWithFormat("%d",_stallNum * _stallPrice);
+	m_allPriceLabel->setString(allstr->getCString());
+	m_pItemNode->setDataId(item->get_item_type_id());
+
+	if (pid != 0)
+	{
+		PlayerStallMgr::tagNewStallData* data = PlayerStallMgr::getInstance()->getByItemId(pid,_playerid);
+		if (data)
+			_maxPrice = data->nCount;
+	}
+}
+
+int StallBuyUiLayer::onAttach()
+{
+	return getNum();
+}
+
+void StallBuyUiLayer::onNumChange( int num)
+{
+	setNum(num);
+}
+
+void StallBuyUiLayer::onFinished( int num, int srcNum )
+{
+	setNum(num);
+}
+
+void StallBuyUiLayer::onCancel( int num )
+{
+	setNum(num);
+}
+
+int StallBuyUiLayer::getNum()
+{
+	CC_ASSERT(m_pOneNewPriceLabel != NULL);
+	return atoi(m_pOneNewPriceLabel->getString());
+}
+
+void StallBuyUiLayer::setNum( int num )
+{
+	CC_ASSERT(m_pOneNewPriceLabel != NULL);
+	std::ostringstream ostrNum;
+	ostrNum << num;
+	m_pOneNewPriceLabel->setString(ostrNum.str().c_str());
+
+	int taxPrice = (num * _stallNum * NumericalIniMgr::getInstance()->get_stall_price_tax()) + 1;
+	if(NumericalIniMgr::getInstance()->get_stall_info_yuanbao_max() < taxPrice)
+		taxPrice = NumericalIniMgr::getInstance()->get_stall_info_yuanbao_max();
+
+	CC_ASSERT(m_pAllNewPriceLabel != NULL);
+	std::ostringstream ostrPrice;
+	int final = 0 ;
+	if((0 < (num * _stallNum) - taxPrice))
+		final = (num * _stallNum) - taxPrice;
+	ostrPrice << final;
+	m_pAllNewPriceLabel->setString(ostrPrice.str().c_str());
+
+	CC_ASSERT(_stallNum != 0);
+// 	const ItemTypeData & pdate = PackageManager::getInstance()->getItemTypeData(_itemID);
+// 	if (num < pdate.bottomPrice  || num > pdate.maxPrice )// 判断是否贵重 ZhangYajie TODO;
+// 	{
+// 		string strkey;
+// 		if (pdate.bottomPrice > num )
+// 		{
+// 			strkey = STRING_TABLE["Trade_Item_Cheap"];
+// 			safe_sprintf(strkey,strkey.c_str(),pdate.bottomPrice);
+// 		}
+// 		else if (pdate.maxPrice < num )
+// 		{
+// 			strkey = STRING_TABLE["Trade_Item_Expensive"];
+// 			safe_sprintf(strkey,strkey.c_str(),pdate.maxPrice);
+// 		}
+// 		ToolTip::getInstance()->push(strkey);
+// 	}
+// 	else
+// 		m_OkNode->setEnabled(true);
+
+	_stallPrice = num;
+}
+
+StallBuyUiLayer::StallBuyUiLayer()
+	:m_pBuyPriceText(NULL)
+	,m_onePriceLabel(NULL)
+	,m_allPriceLabel(NULL)
+	,m_nameLabel(NULL)
+	,m_nameNewLabel(NULL)
+	,m_pBuyNewPriceText(NULL)
+	,m_pOneNewPriceLabel(NULL)
+	,m_pAllNewPriceLabel(NULL)
+	,_itemID(0)
+	,b_touched(false)
+{
+
+}
+
+void StallBuyUiLayer::ccTouchEnded( CCTouch *pTouch, CCEvent *pEvent )
+{
+	if (b_touched)
+	{
+		NumKeypad::getInstance()->open();
+		NumKeypad::getInstance()->setPositionByContent(m_pNumPad);
+		NumKeypad::getInstance()->attachToDelegate(this);
+		NumKeypad::getInstance()->setMaxNum(_maxPrice);
+	}
+}
+
+////////////
+StallUnSetUi::StallUnSetUi()
+{
+}
+StallUnSetUi::~StallUnSetUi()
+{
+
+}
+CCNode* StallUnSetUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["StallUnsetUiLayer"] = UiLayerLoader<StallUnsetUiLayer>::loader();
+	nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+	CCNode *node = readUiFromCCBI("stallunsetui", nodeLoaders, _loadSpriteSheet);
+	return node;
+}
+
+///////////////////////////
+cocos2d::extension::SEL_CCControlHandler StallUnsetUiLayer::onResolveCCBCCControlSelector( CCObject * pTarget, const char* pSelectorName )
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onUnuseBtnPressed", StallUnsetUiLayer::onUnuseBtnPressed);
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onCloseBtnPressed", StallUnsetUiLayer::onCloseBtnPressed);
+	return NULL;
+}
+SEL_MenuHandler StallUnsetUiLayer::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+void StallUnsetUiLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	m_nameLabel = (CCLabelTTF*)this->getChildByTag(0)->getChildByTag(3);
+	m_onePriceLabel = (CCLabelTTF*)this->getChildByTag(0)->getChildByTag(1);
+	m_allPriceLabel = (CCLabelTTF*)this->getChildByTag(0)->getChildByTag(2);
+	m_pNode = (CCNode*)this->getChildByTag(0)->getChildByTag(0);
+	m_UnuseNode = (CCNode*)this->getChildByTag(0)->getChildByTag(5);
+	m_CloseNode = (CCNode*)this->getChildByTag(0)->getChildByTag(6);
+
+	_stallNum = 1;
+	_stallPrice = 1;
+	m_pItemNode = ItemNode::create();		//1 物品
+	m_pItemNode->setPosition(m_pNode->getPosition());
+	m_pNode->setVisible(false);
+	this->getChildByTag(0)->addChild(m_pItemNode);
+
+	m_pBuyPriceText = (CCLabelTTF*)this->getChildByTag(0)->getChildByTag(10);
+	m_pBuyNewPriceText = Helper::replaceLabelTTFWithLabelFTAndRemove(m_pBuyPriceText);
+	if(NULL != m_pBuyNewPriceText)
+	{
+		std::stringstream oss;
+		oss << floor(NumericalIniMgr::getInstance()->get_stall_price_tax() * 100 + 0.5);
+		std::string str = "      " + oss.str() + " %";
+		m_pBuyNewPriceText->setString(str.c_str());
+	}
+
+	m_nameNewLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(m_nameLabel);
+	CC_ASSERT(NULL != m_nameNewLabel);
+
+	m_pOneNewPriceLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(m_onePriceLabel);
+	CC_ASSERT(NULL != m_pOneNewPriceLabel);
+
+	m_pAllNewPriceLabel = Helper::replaceLabelTTFWithLabelFTAndRemove(m_allPriceLabel);
+	CC_ASSERT(NULL != m_pAllNewPriceLabel);
+
+	m_pOneNewPriceLabel->setString("0");
+	m_pAllNewPriceLabel->setString("0");
+}
+void StallUnsetUiLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+void StallUnsetUiLayer::onEnter()
+{
+	CCLayer::onEnter();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, 0, true);
+}
+
+bool StallUnsetUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if (isTouchOnNodeContent(m_UnuseNode,pTouch))                                                            
+	{                                                                                                              
+		PlayerStallMgr::getInstance()->send_NET_C2G_REQUEST_NEW_STALL_DOWN(_id);
+		CLOSE_UI(WCT_StallUnSetUi);                                                                                   
+	}                                                                                                              
+	else if (isTouchOnNodeContent(m_CloseNode,pTouch))                                                             
+	{                                                                                                              
+		CLOSE_UI(WCT_StallUnSetUi);                                                                                    
+	}
+	return true;
+}
+
+void StallUnsetUiLayer::onUnuseBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	PlayerStallMgr::getInstance()->send_NET_C2G_REQUEST_NEW_STALL_DOWN(_id);
+	CLOSE_UI(WCT_StallUnSetUi);
+}
+
+void StallUnsetUiLayer::onCloseBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	CLOSE_UI(WCT_StallUnSetUi);
+}
+
+void StallUnsetUiLayer::setData(f_item* item,int idx)
+{
+	_id = idx;
+	const ItemTypeData& itemdata = PackageManager::getInstance()->getItemTypeData(item->get_item_type_id());
+	_stallNum = item->get_data()->GetNum();
+	//CCString* pstr = CCString::createWithFormat("%s%d",itemdata.name.c_str(),_stallNum);
+	//m_nameLabel->setString(pstr->getCString());
+	m_nameNewLabel->setString(itemdata.name);
+
+	int id = RoleManager::getInstance()->getLocalPlayer()->getId();
+	PlayerStallMgr::tagNewStallData* data = PlayerStallMgr::getInstance()->getByItemId( id ,item->get_item_id());
+
+	_stallPrice = data->n32YuanBao;
+	std::ostringstream ostrPrice0;
+	ostrPrice0 << _stallPrice;
+	m_pOneNewPriceLabel->setString(ostrPrice0.str().c_str());
+
+	CC_ASSERT(m_pAllNewPriceLabel != NULL);
+	int taxPrice = (_stallNum * _stallPrice * NumericalIniMgr::getInstance()->get_stall_price_tax()) + 1;
+	if(NumericalIniMgr::getInstance()->get_stall_info_yuanbao_max() < taxPrice)
+		taxPrice = NumericalIniMgr::getInstance()->get_stall_info_yuanbao_max();
+	std::ostringstream ostrPrice;
+	int final = 0 ;
+	if((0 < (_stallNum * _stallPrice ) - taxPrice))
+		final = (_stallNum * _stallPrice ) - taxPrice;
+	ostrPrice << final;
+	m_pAllNewPriceLabel->setString(ostrPrice.str().c_str());
+
+	m_pItemNode->setDataId(item->get_item_type_id());
+	m_pStallItem = item;
+}
+
+StallUnsetUiLayer::StallUnsetUiLayer()
+	:m_pOneNewPriceLabel(NULL)
+	,m_pAllNewPriceLabel(NULL)
+	,m_onePriceLabel(NULL)
+	,m_allPriceLabel(NULL)
+	,m_pBuyPriceText(NULL)
+	,m_pBuyNewPriceText(NULL)
+	,m_nameLabel(NULL)
+	,m_nameNewLabel(NULL)
+{
+
+}
+
+//////////////////////////////////////////////////////////////////////////
+//stall ui tips
+
+StallTipsUI::StallTipsUI()
+{
+
+}
+
+StallTipsUI::~StallTipsUI()
+{
+
+}
+
+CCNode* StallTipsUI::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["FrameUiLayer"] = UiLayerLoader<StallTipsLayer>::loader();
+	nodeLoaders["FrameSprite"] = FrameSpriteLoader::loader();
+	CCNode *node = readUiFromCCBI("stallnewitem", nodeLoaders, _loadSpriteSheet);
+
+	return node;
+}
+
+SEL_CCControlHandler StallTipsLayer::onResolveCCBCCControlSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	CCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, "onOkBtnPressed", StallTipsLayer::onOkBtnPressed);
+
+	return NULL;
+}
+
+SEL_MenuHandler StallTipsLayer::onResolveCCBCCMenuItemSelector(CCObject * pTarget, const char* pSelectorName)
+{
+	return NULL;
+}
+
+void StallTipsLayer::onNodeLoaded(cocos2d::CCNode * pNode, cocos2d::extension::CCNodeLoader * pNodeLoader)
+{
+	setAllChildernButtonPriority(this, -2);
+}
+
+void StallTipsLayer::onEnter()
+{
+	CCLayer::onEnter();
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this, -1, true);
+}
+
+void StallTipsLayer::onExit()
+{
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+	CCLayer::onExit();
+}
+
+bool StallTipsLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	return true;
+}
+
+void StallTipsLayer::onOkBtnPressed(CCObject * pSender, CCControlEvent pCCControlEvent)
+{
+	CLOSE_UI(WCT_StallTipsUi);
+}
+

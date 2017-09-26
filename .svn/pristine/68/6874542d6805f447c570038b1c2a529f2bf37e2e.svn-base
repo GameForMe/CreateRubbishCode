@@ -1,0 +1,1458 @@
+#include "Role.h"
+#include "MapManager.h"
+#include <algorithm>
+#include "BaseDefine.h"
+#include "CfgReader.h"
+#include "RoleHeadBloodUi.h"
+#include "RoleManager.h"
+#include "PlayerState.h"
+#include "LocalPlayer.h"
+#include "MessageDispatcher.h"
+#include "GuildMgr.h"
+#include "AssaultSkillEffect.h"
+#include "SkillManager.h"
+#include "SkillAnimManager.h"
+#include "MagicShield.h"
+//#include "BossSkillManager.h"
+#include <fstream>
+#include "UiTools.h"
+#include "UiManager.h"
+//#include "MiniMapUi.h"
+#include "World.h"
+#include "LandNode.h"
+//#include "GameMapNode.h"
+#include "cc_profiler.h"
+#if ENABLE_GOTYE==1
+#include "voice/VoiceMgr.h"
+#endif
+
+//extern std::ofstream testOf;
+
+//int gRoleNum = 0;
+
+Role::Role()
+	: _id(-1)
+	, _boundBox(-25.0f, 0.0f, 50.0f, 100.0f)
+	, _roleHeadBloodUi(NULL)
+	, _isAniLoaded(false)
+	, _firstUpdate(true)
+	, _stateMechine(NULL) 
+	, _level(0)
+	, _stateMovePosition(false)
+	, _lastAni(NULL)
+	, _isNewMap(false)
+	, _roleState(0)
+	, _skillTargetPos(0.f,0.f)
+	//, _mapID(-1)
+	,_dwSrcRoleID(-1)
+	//, _blackSp(NULL)
+	//, pClip(NULL)
+	//,_curLine(NULL)
+	, _endFace(ccp(0.0f, 0.0f))
+	, _typeID(0)
+	, _guildID(INVALID)
+{
+	_node = LandNode::create();
+	_node->setTag(ELN_NPC);
+	_node->retain();
+
+	//_nodeName = LandNode::create();
+	//_nodeName->retain();
+
+	memset(_name , 0 , sizeof(_name));
+	_bBloodShowFlag = false;
+	//gRoleNum ++;
+}
+
+Role::~Role()
+{
+	//MapManager::getInstance()->getMap()->removeChild(_node);
+	CCProfileBegin("~Role resetAllActionConfig");
+	resetAllActionConfig();
+	CCProfileEnd("~Role resetAllActionConfig");
+
+	CCProfileBegin("~Role removeFromMap");
+	removeFromMap();
+	CCProfileEnd("~Role removeFromMap");
+
+	//stopAni();
+	//_node->stopAllActions();
+	//_nodeName->stopAllActions();
+	//CC_ASSERT(_node->retainCount() == 1);
+	//CC_ASSERT(_nodeName->retainCount() == 1);
+	//CCArray *childern = _node->getChildren();
+	//int count = childern->count();
+	//for(int i = 0; i < count; i ++)
+	//{
+	//	CCNode *node = dynamic_cast<CCNode*>(childern->objectAtIndex(i));
+	//	CC_ASSERT(node != NULL);
+	//	CC_ASSERT(node->realRefCount() == 1);
+	//}
+	CCProfileBegin("~Role _node");
+	_node->removeAllChildrenWithCleanup(true);
+	CCProfileEnd("~Role _node");
+
+	_node->release();
+
+	//CCProfileBegin("~Role _nodeName");
+	//_nodeName->release();
+	//CCProfileEnd("~Role _nodeName");
+
+	CC_SAFE_DELETE(_stateMechine);
+	//gRoleNum --;
+
+	releaseAllLoadAnim();
+}
+
+const wchar_t * Role::getName() const
+{
+	return _name;
+}
+
+std::string Role::getNameUtf8()
+{
+
+	if(_roleHeadBloodUi)
+		return _roleHeadBloodUi->getName();
+	return std::string();
+}
+
+void Role::setName( const wchar_t *name)
+{
+	memcpy(_name, name, sizeof(wchar_t) * X_SHORT_NAME);
+
+	if(_roleHeadBloodUi)
+		_roleHeadBloodUi->setName(_name);
+}
+
+void Role::setName( const char *name)
+{
+	wchar_t wname[X_SHORT_NAME];
+	memset(wname, 0, sizeof(wchar_t) * X_SHORT_NAME);
+	Utf8ToUtf16(name, wname, X_SHORT_NAME, 0);
+	memset(_name, 0, sizeof(wchar_t) * X_SHORT_NAME);
+	memcpy(_name, wname, sizeof(wchar_t) * X_SHORT_NAME);
+
+	if(_roleHeadBloodUi)
+		_roleHeadBloodUi->setName(name);
+	//setName(wname);
+}
+
+void Role::setName( const wchar_t *name,bool flag)
+{
+	memcpy(_name, name, sizeof(wchar_t) * X_SHORT_NAME);
+
+	if(_roleHeadBloodUi)
+		_roleHeadBloodUi->setName(_name,flag);
+}
+
+void Role::setName( const char *name,bool flag)
+{
+	wchar_t wname[X_SHORT_NAME];
+	memset(wname, 0, sizeof(wchar_t) * X_SHORT_NAME);
+	Utf8ToUtf16(name, wname, X_SHORT_NAME, 0);
+	memcpy(_name, wname, sizeof(wchar_t) * X_SHORT_NAME);
+
+	if(_roleHeadBloodUi)
+		_roleHeadBloodUi->setName(name,flag);
+	//setName(wname);
+}
+
+const cocos2d::CCPoint &Role::getPosition() const
+{
+	return _node->getPosition();
+	//CCPoint pos = _node->getPosition();
+	//return pos;
+	//return ccp(_roledata[RA_POSX], _roledata[RA_POSY]);
+}
+
+void Role::setLevel( int val, bool isLevelUp /*= false*/ )
+{
+	_level = val;
+}
+
+void Role::on_net_msg( s_net_cmd* pNetCmd )
+{
+
+}
+
+void Role::setBloodUiDelay(CCObject *node, void *data)
+{
+	if (_roleHeadBloodUi)
+		_roleHeadBloodUi->setBlood(_roledata[RA_HP], _roledata[RA_MaxHP]);
+}
+
+void Role::setAttribute( eRoleAttribute attr, int val )
+{
+	if (attr > RA_NUM)
+	{
+		StateMap::iterator i = _role_data_state.find((int)attr);
+		if (i != _role_data_state.end())
+		{
+			i->second = val;
+		}
+		else
+		{
+			_role_data_state.insert(StateMap::value_type(attr,val));
+		}
+		return;
+	}
+	_roledata[attr] = val;
+
+	//TODO: 发送游戏事件， 如升级等
+	if(attr == RA_POSX || attr == RA_POSY)
+	{
+		_node->setPosition(_roledata[RA_POSX], _roledata[RA_POSY]);
+		//_nodeName->setPosition(_roledata[RA_POSX], _roledata[RA_POSY]);
+	}
+	else if(attr == RA_HP || attr == RA_MaxHP)
+	{
+		//这里也要做延迟
+		//if (attr == RA_HP)
+		//{
+		//	CCCallFunc *fn1 = CCCallFuncND::create(	getRoleNode(),callfuncND_selector(Role::setBloodUiDelay),(void*)NULL);
+		//	CCDelayTime* act = CCDelayTime::create(0.2f); 
+		//	CCSequence *sequence = CCSequence::create(act,fn1,NULL);
+		//	getRoleNode()->runAction(sequence);
+		////CCLOG("--------------------------------------hp:%d",msg->nHPChange);
+		//}
+		//else
+		{
+			//CC_ASSERT(_roleHeadBloodUi != NULL);
+
+			if(_roleHeadBloodUi)
+				_roleHeadBloodUi->setBlood(_roledata[RA_HP], _roledata[RA_MaxHP]);
+		}
+	}
+	else if(attr == RA_PKVALUE)
+	{
+		int IsGrayName = getAttribute(RA_IsGrayName);
+		if(val >= 2)
+		{//红名
+			setNameColor(ccc3(0xff, 0x00, 0x00));
+		}
+		else if(val == 1)
+		{
+			if(IsGrayName>0)
+			{
+				setNameColor(ccc3(0x88, 0x69, 0x55));
+			}
+			else
+			{
+				setNameColor(ccc3(0xff, 0xff, 0x30));
+			}
+			
+		}
+		else
+		{
+			if(IsGrayName>0)
+			{
+				setNameColor(ccc3(0x98, 0x98, 0x98));
+			}
+			else
+			{
+				setNameColor(ccc3(0xff, 0xff, 0xff));
+			}
+			
+		}
+	}
+	else if(attr == RA_IsGrayName)
+	{
+		if(val > 0)
+		{
+			setNameColor(ccc3(0x88, 0x69, 0x55));
+		}
+		else 
+		{
+			int pkval = getAttribute(RA_PKVALUE);
+			if(pkval >= 2)
+			{//红名
+				setNameColor(ccc3(0xff, 0x00, 0x00));
+			}
+			else if(pkval == 1)
+			{
+				setNameColor(ccc3(0xff, 0xff, 0x30));
+			}
+			else
+			{
+				setNameColor(ccc3(0xff, 0xff, 0xff));
+			}
+		}
+	}
+}
+
+int Role::getAttribute( eRoleAttribute attr)
+{
+	if (attr > RA_NUM)
+	{
+		StateMap::iterator i = _role_data_state.find((int)attr);
+		if (i != _role_data_state.end())
+		{
+			return i->second;
+		}
+		return 0;
+	}
+	else
+	{
+		return _roledata[attr];
+	}
+}
+
+void Role::addToMap( bool repetLogin /*= false*/ )
+{
+	if (repetLogin)
+	{
+		_node->removeFromParent();
+		//_nodeName->removeFromParent();
+		CCNode* mapNode  =MapManager::getInstance()->getMap();
+		if (mapNode)
+		{
+			mapNode->addChild(_node, MZ_ROLE);
+			//mapNode->addChild(_nodeName, MZ_ROLE_NAME);
+		}
+		//updateRoleOrderOnMap();
+		//_mapID = MapManager::getInstance()->getCurMapId();
+		//_curLine = MapManager::getInstance()->getCurLine();
+	}
+	else
+	{
+		if (_node->getParent() == NULL)
+		{
+			CCNode* mapNode  =MapManager::getInstance()->getMap();
+			if (mapNode)
+			{
+				mapNode->addChild(_node, MZ_ROLE);
+				//mapNode->addChild(_nodeName, MZ_ROLE_NAME);
+			}
+			//updateRoleOrderOnMap();
+			//_mapID = MapManager::getInstance()->getCurMapId();
+			//_curLine = MapManager::getInstance()->getCurLine();
+		}
+	}
+	
+	//_node->setVertexZ(-0.5f);
+	//CC_ASSERT(_node->realRefCount() == 2);
+}
+
+// void Role::SetClip(const CCRect& rc )
+// {
+// 	if(pClip)
+// 		pClip->removeFromParentAndCleanup(true);
+// 
+// 	CCSize vSize = CCDirector::sharedDirector()->getVisibleSize();
+// 	pClip = CCNode::create();
+// 	pClip->setContentSize(ccp(vSize.width, vSize.height));
+// 	pClip->setAnchorPoint(ccp(0.0,0.0));
+// 	
+// 	int nMinX = (int)rc.getMinX();
+// 	int nMinY = (int)rc.getMinY();
+// 	int nMaxX = (int)rc.getMaxX();
+// 	int nMaxY = (int)rc.getMaxY();
+// 
+// 	float fWidth = abs(nMinX);
+// 	float fHeight = vSize.height;
+// 	CCLayerColor* pLeft = CCLayerColor::create(ccc4(0, 0, 0, 255), fWidth, fHeight);
+// 	if (nMinX < 0)
+// 		pLeft->setPosition(ccp(nMinX - fWidth, 0.0f));
+// 	else
+// 		pLeft->setPosition(ccp(0.0f, 0.0f));
+// 	pClip->addChild(pLeft);
+// 
+// 	fWidth = nMaxX - nMinX;
+// 	fHeight = abs((int)vSize.height - nMaxY);
+// 	CCLayerColor* pTop = CCLayerColor::create(ccc4(0, 0, 0, 255), fWidth, fHeight);
+// 	pTop->setPosition(ccp(nMinX, nMaxY));
+// 	pClip->addChild(pTop);
+// 
+// 	fWidth = nMaxX - nMinX;
+// 	fHeight = abs(nMinY);
+// 	CCLayerColor* pMid = CCLayerColor::create(ccc4(0, 0, 0, 255), fWidth, fHeight);
+// 	if (nMinY < 0)
+// 		pMid->setPosition(ccp(nMinX, nMinY - fHeight));
+// 	else
+// 		pMid->setPosition(ccp(nMinX, 0.0f));
+// 	pClip->addChild(pMid);
+// 
+// 	fWidth = abs((int)vSize.width - nMaxX);
+// 	fHeight = vSize.height;
+// 	CCLayerColor* pRight = CCLayerColor::create(ccc4(0, 0, 0, 255), fWidth, fHeight);
+// 	pRight->setPosition(ccp(nMaxX, 0.0f));
+// 	pClip->addChild(pRight);
+// 
+// 	//_blackSp->addChild(pClip, 0);
+// 	CCScene *scene = UiMgr::getInstance()->getCurScene();
+// 	CC_ASSERT(scene != NULL);
+// 	scene->addChild(pClip, WZ_JOY);
+// }
+
+void Role::removeFromMap()
+{
+	//CC_ASSERT(_node->realRefCount() == 1);
+	_node->removeFromParentAndCleanup(true);
+	//_nodeName->removeFromParentAndCleanup(true);
+
+}
+
+float Role::getRoleAngle()
+{
+	float angle = atan2((float)_roledata[RA_DIRY], (float)_roledata[RA_DIRX]);
+	if(isnan(angle))
+		return 0.0f;
+	return angle;
+}
+
+cocos2d::CCPoint Role::getDirection() const
+{
+	return ccp(_roledata[RA_DIRX], _roledata[RA_DIRY]);
+}
+
+void Role::setPosition( const CCPoint &pos )
+{
+	_roledata[RA_POSX] = pos.x;
+	_roledata[RA_POSY] = pos.y;
+	_node->setPosition(pos);
+	//_nodeName->setPosition(pos);
+	updateRoleOrderOnMap();
+}
+
+void Role::setDirection( const CCPoint &dir )
+{
+	_roledata[RA_DIRX] = dir.x * 1000;
+	_roledata[RA_DIRY] = dir.y * 1000;
+}
+
+void Role::updateRealPosition()
+{
+	if(NULL == _node)
+		return;
+
+	const CCPoint &pos = _node->getPosition();
+	_roledata[RA_POSX] = pos.x;
+	_roledata[RA_POSY] = pos.y;
+
+	 //if(NULL == _nodeName)
+	//	 return ;
+
+	//_nodeName->setPosition(pos);
+
+	//updateRoleOrderOnMap();
+}
+
+void Role::updateRoleOrderOnMap()
+{
+	if(NULL == _node /*|| NULL == MapManager::getInstance()*/)
+		return ;
+	const CCPoint &pos = _node->getPosition();
+	MapManager* map_mgr = MapManager::getInstance();
+	//不死亡才根据位置更新前后层次
+	if (!isDead())
+	{
+		//if(_node->getParent() != NULL)
+		{
+			int new_zoder = map_mgr->getZOrderAtPoint(pos);
+			if (_node->getZOrder() !=new_zoder )
+			{
+				_node->setZOrder(new_zoder);
+			}
+			//_node->getParent()->reorderChild(_node, );
+		}
+	}
+
+	setAlpha(map_mgr->isAlpha(pos));
+
+// 	if(MapManager::getInstance()->isAlpha(pos))
+// 	{
+// 		setAlpha(true);
+// 	}
+// 	else
+// 	{
+// 		setAlpha(false);
+// 	}
+}
+
+eRoleType Role::getRoleType()
+{
+	RoleType roletype = (RoleType)_roledata[RA_ROLETYPE];
+	int sex = _roledata[RA_SEX];
+
+	eRoleType type;
+	switch(roletype)//选择角色类型
+	{
+	case RT_Warrior:
+		if(sex == 0) type = RT_WWARRIOR;
+		else type = RT_MWARRIOR;
+		break;
+	case RT_Mage:
+		if(sex == 0) type = RT_WMAGE;
+		else type = RT_MMAGE;
+		break;
+	case RT_Taoist:
+		if(sex == 0) type = RT_WTAOIST;
+		else type = RT_MTAOIST;
+		break;
+	default:
+		CC_ASSERT(0);
+	}
+
+	return type;
+}
+
+void Role::initBloodUi()
+{
+	//添加角色血条UI
+	//CC_ASSERT(_roleHeadBloodUi == NULL);
+	if(_roleHeadBloodUi == NULL)
+	{
+		_roleHeadBloodUi = RoleHeadBloodUi::create();
+		//_nodeName->addChild(_roleHeadBloodUi, RZN_BLOOD);
+		_node->addChild(_roleHeadBloodUi, RZN_BLOOD);
+		_roleHeadBloodUi->setPositionY(_boundBox.getMaxY() - 15);
+	}
+	_roleHeadBloodUi->setHpVisiable(false);
+	//_roleHeadBloodUi->setVisible(false);
+	_bBloodShowFlag = false;
+}
+
+void Role::showRoleHeadHpUi( bool show /*= true*/ )
+{
+	if(_roleHeadBloodUi != NULL)
+	{
+		_roleHeadBloodUi->setHpVisiable(show);
+		_bBloodShowFlag = show;
+		changeTitleUiShow();
+	}
+}
+
+void Role::setVisiable( bool visiable /*= true*/ )
+{
+	_node->setVisible(visiable);
+	//_nodeName->setVisible(visiable);
+}
+
+bool Role::isDead() const
+{
+	return _roledata[RA_DEAD] == 1;
+}
+
+void Role::runTo( const CCPoint &pos, bool st /*= false */ )
+{
+	//CC_ASSERT(getId() != RoleManager::getInstance()->getLocalPlayer()->getId());
+	CC_ASSERT(_stateMechine != NULL);
+	const CCPoint &curPos = _node->getPosition();
+	float dis = ccpDistance(curPos, pos);
+
+	int oldDir = getRoleDir();
+	setDirection(ccp(pos.x - curPos.x, pos.y - curPos.y));
+	int newDir = getRoleDir();
+
+	CCMoveTo *moveTo = CCMoveTo::create(dis / (float)(_roledata[RA_SPEED]), pos);
+	CCAction *action = NULL;
+	action = CCSequence::createWithTwoActions(moveTo, CCCallFuncND::create(RoleActionCallBack::getInstance(), SEL_CallFuncND(&RoleActionCallBack::runToCallBack), this));
+	if (oldDir != newDir || st == true)
+	{
+		stopAni();
+		runRunAni();
+	}
+	_node->stopAllActions();
+	_node->runAction(action);
+}
+
+void Role::standCallback()
+{
+	if (_stateMechine == NULL)
+		return;
+	CC_ASSERT(_stateMechine != NULL);
+	CC_ASSERT(getId() != RoleManager::getInstance()->getLocalPlayer()->getId());
+
+	setMovePositionState(false);
+
+	CCPoint pos = getPosition();
+	MessageDispatcher::Instance()->DispatchMsg(-1, this, this, M_STAND, &pos);
+
+	//testOf << getId() << "	stop RunTo	curPos = (" << getPosition().x << ", " << getPosition().y << ")" <<std::endl;
+	//testOf.flush();
+	//stateMachine()->ChangeState(RoleStateStand::getInstance());
+}
+
+void Role::runToCallabck()
+{
+	if (_stateMechine == NULL)
+		return;
+	stateMachine()->CurrentState()->Execute(this, 1000.f);
+	//testOf << getId() <<"	stop RunTo	curPos = (" << getPosition().x << ", " << getPosition().y << ")" <<std::endl;
+	//testOf.flush();
+}
+
+void Role::attrackFinish()
+{
+	runStandAni();
+}
+
+bool Role::HandleMessage( const Telegram& msg )
+{
+	if(_stateMechine == NULL)
+		return false;
+
+	return _stateMechine->HandleMessage(msg);
+}
+
+bool Role::isAnimationFinished() const
+{
+	if(_lastAni)
+		return _lastAni->isDone();
+	return true;
+}
+
+void Role::setNameColor( const ccColor3B &color )
+{
+	if (_roleHeadBloodUi)
+		_roleHeadBloodUi->setNameColor(color);
+}
+
+
+void Role::setNameColor( int color )
+{
+	int r = (color >> 16) & 0xff;
+	int g = (color >> 8) & 0xff;
+	int b = color & 0xff;
+	setNameColor(ccc3(r, g, b));
+}
+void Role::setSpouseName(const std::string& name,int sex)
+{/*
+	if(NULL != _roleHeadBloodUi)
+	{
+		_roleHeadBloodUi->setSpouseName(name,sex);
+	}
+	updateTitleUi();
+*/
+}
+void Role::setGuildName( const std::string &guildName )
+{
+	if(NULL != _roleHeadBloodUi)
+		_roleHeadBloodUi->setGuildName(guildName);
+	updateTitleUi();
+}
+
+void Role::showWarGuild( bool isVisible )
+{
+	if(NULL != _roleHeadBloodUi)
+		_roleHeadBloodUi->showWarGuild(isVisible);
+	updateTitleUi();
+}
+void Role::showGuidName(bool isVisible)
+{
+	if(NULL != _roleHeadBloodUi)
+		_roleHeadBloodUi->setGuildVisible(isVisible);
+	updateTitleUi();
+}
+void Role::setGuildNameColor( const ccColor3B &color )
+{
+	if(NULL != _roleHeadBloodUi)
+		_roleHeadBloodUi->setGuildNameColor(color);
+}
+
+bool Role::needShowGuildColor( ccColor3B &color )
+{
+	color = ccc3(255,255,255);//白色
+	return false;
+}
+
+void Role::setGuild( unsigned int gid )
+{
+	_guildID = gid;
+	if(_guildID != (unsigned int) -1 )
+	{
+		LocalPlayer* lp = RoleManager::getInstance()->getLocalPlayer();
+		if (lp->getId() == _id)
+		{
+			std::string guildName = RoleManager::getInstance()->getGuildName(_id, _guildID);
+			if(!guildName.empty())
+			{
+				//ccColor3B guildColor;
+				if(_guildID == GuildMgr::getInstance()->getSBKGuildId())
+				{
+					//guildColor = ccc3(0xb4, 0x00, 0xff);
+					guildName += "\xE3\x80\x90\xE6\xB2\x99\xE3\x80\x91";
+				}
+// 				else 
+// 				{
+// 					guildColor = ccc3(0xff, 0x5a, 0x00);
+// 				}
+// 
+// 				if(_guildID == RoleManager::getInstance()->getLocalPlayer()->getGuildID())
+// 				{
+// 					guildColor = ccc3(0x00, 0x7d, 0xe2);
+// 				}
+				//add by XSea 2014.11.21 是否显示行会名
+				bool isShowRoleName = RoleManager::getInstance()->getIsShowSelfRoleName();
+				if( isShowRoleName )
+				{
+					//setGuildNameColor(guildColor);
+					updateGuildNameColor();
+					setGuildName(guildName);
+				}
+			}
+		}
+		else
+		{
+			//其他人的行会名显示 //add by XSea 2014.11.24
+			std::string guildName = RoleManager::getInstance()->getGuildName(_id, _guildID);
+			if(!guildName.empty())
+			{
+				//ccColor3B guildColor;
+				if(_guildID == GuildMgr::getInstance()->getSBKGuildId())
+				{
+					//guildColor = ccc3(0xb4, 0x00, 0xff);
+					guildName += "\xE3\x80\x90\xE6\xB2\x99\xE3\x80\x91";
+				}
+// 				else 
+// 				{
+// 					guildColor = ccc3(0xff, 0x5a, 0x00);
+// 				}
+// 
+// 				if(_guildID == RoleManager::getInstance()->getLocalPlayer()->getGuildID())
+// 				{
+// 					guildColor = ccc3(0x00, 0x7d, 0xe2);
+// 				}
+// 				setGuildNameColor(guildColor);
+				updateGuildNameColor();
+				setGuildName(guildName);
+			}
+		}
+	}
+	else
+	{
+		setGuildName("");
+	}
+}
+
+void Role::setColorPoisoning(unsigned char r,unsigned char g,unsigned char b)
+{
+
+}
+
+bool Role::move(const CCPoint& pt, MoveRoleType checkState)
+{
+	if(checkState == MV_PET)
+	{
+		clearWayPoint();
+	}
+	addWayPoint(pt);
+	if(checkState == MV_PLAYER)
+	{
+		if (stateMachine()->CurrentState() == RoleStateRunTo::getInstance())
+			return false;
+		else
+			stateMachine()->ChangeState(RoleStateRunTo::getInstance());
+	}
+	else
+	{
+		stateMachine()->ChangeState(RoleStateRunTo::getInstance());
+		return true;
+	}
+	
+	return false;
+}
+
+bool Role::changeState(unsigned int mask, const Telegram& telegram)
+{
+	if((mask & MSG_MASK(telegram.Msg)) == 0)
+		return false;
+
+	switch(telegram.Msg)
+	{
+	case M_RUNTO:
+		{
+			CCPoint dest = *(CCPoint *)(telegram.ExtraInfo);
+			MoveRoleType is = MV_OTHER;
+			if (IS_PET(getTypeID()))
+			{
+				is = MV_PET;
+			}
+			else if(IS_PLAYER(getId()))
+			{
+				is = MV_PLAYER;
+			}
+			move(dest,is);
+			return true;
+		}
+	case M_STAND:
+		{
+			CC_ASSERT(telegram.ExtraInfo != NULL);
+			CCPoint dest = *(CCPoint *)(telegram.ExtraInfo);
+
+			if(ccpDistance(dest, getPosition()) < 1.0f)
+			{
+				clearWayPoint();
+				setDirection(getEndFace());
+				setMovePositionState(false);
+				_node->stopAllActions();
+				//_nodeName->stopAllActions();
+				stateMachine()->ChangeState(RoleStateStand::getInstance());
+			}
+			else
+			{
+				clearWayPoint();
+				move(dest,MV_OTHER);
+			}
+			return true;
+		}
+	case M_ASSAULT:
+		{
+			CCPoint dest = *(CCPoint*)(telegram.ExtraInfo);
+			setDestMovePoint(*(CCPoint*)(telegram.ExtraInfo));
+			stateMachine()->ChangeState(RoleStateAssault::getInstance());
+			return true;
+		}
+	case M_REPEL:
+		{
+			CCPoint dest = *(CCPoint*)(telegram.ExtraInfo);
+			setDestMovePoint(*(CCPoint*)(telegram.ExtraInfo));
+			stateMachine()->ChangeState(RoleStateRepel::getInstance());
+			return true;
+		}
+	case M_DEAD:
+		{
+			stateMachine()->ChangeState(RoleStateDead::getInstance());
+			return true;
+		}
+	case M_LIVE:
+		{
+			stateMachine()->ChangeState(RoleStateStand::getInstance());
+			return true;
+		}
+	case M_SIT:
+		{
+			stateMachine()->ChangeState(RoleStateSit::getInstance());
+			return true;
+		}
+	case M_UNSIT:
+		{
+			stateMachine()->ChangeState(RoleStateStand::getInstance());
+			return true;
+		}
+	case M_ATTRACK:
+		{
+			if (MapManager::getInstance() && !MapManager::getInstance()->checkIsInView(getPosition()))
+				return false;
+			CC_ASSERT(telegram.ExtraInfo != NULL);
+			RoleSkillStateData *data = (RoleSkillStateData*)telegram.ExtraInfo;
+			Role *targetRole = RoleManager::getInstance()->findRole(data->targetId);
+			if(targetRole != NULL && targetRole != this)
+				setDirection(ccpSub(targetRole->getPosition(), getPosition()));
+			_currentSkillId = data->skillId;
+			_skillTargetId = data->targetId;
+			stateMachine()->ChangeState(RoleStateAttack::getInstance());
+
+// 			if(getCreatureType() == CT_MONSTER)
+// 			{
+// 				BossSkillManager::getInstance()->runSkillAnimation(data->skillId, getPosition(), (eFourDirEx)getRoleDir());
+// 			}
+
+			return true;
+		}
+	case M_ATTRACKED:
+		{
+
+			stateMachine()->ChangeState(RoleStateBeAttack::getInstance());
+
+			return true;
+		}
+	case M_Dizzy:
+		stateMachine()->ChangeState(RoleStateDizzy::getInstance());
+		return true;
+	case M_Tie:
+		stateMachine()->ChangeState(RoleStateTie::getInstance());
+		return true;
+	case M_UnTie:
+	case M_UnDizzy:
+		stateMachine()->ChangeState(RoleStateStand::getInstance());
+		return true;
+	case M_UpdateDis:
+		stateMachine()->ChangeState(RoleStateUpdateDisplay::getInstance());
+		return true;
+	default:
+		//CC_ASSERT(0);
+		return false;
+	}
+
+	return false;
+}
+
+void Role::releaseAllLoadAnim()
+{
+	_lastAni = NULL;
+	AnimationCache::getInstance()->releaseAnims(_usedAnim);
+}
+
+std::string Role::getMonsterHeadFrameName()
+{
+	return "rendui_npcguai";
+}
+
+std::string Role::getNpcHeadFrameName()
+{
+	return "rendui_npc";
+}
+
+std::string Role::getHeadFrameName()
+{
+	return "rendui_npcguai";
+}
+
+std::string Role::getMonsterBossHeadFrameName()
+{
+	return "rendui_monsterboss";
+}
+
+void Role::setRoleState( EState state, bool set /*= true*/ )
+{
+	if(set)
+	{
+		_roleState |= (1 << state);
+
+		switch(state)
+		{
+		case ES_Dizzy:
+			MessageDispatcher::Instance()->DispatchMsg(-1.0, NULL, this, M_Dizzy, NULL);
+			break;
+		case ES_Tie:
+			MessageDispatcher::Instance()->DispatchMsg(-1.0, NULL, this, M_Tie, NULL);
+			break;
+		}
+	}
+	else
+	{
+		_roleState &= (~(1 << state));
+		switch(state)
+		{
+		case ES_Dizzy:
+			MessageDispatcher::Instance()->DispatchMsg(-1.0, NULL, this, M_UnDizzy, NULL);
+			break;
+		case ES_Tie:
+			MessageDispatcher::Instance()->DispatchMsg(-1.0, NULL, this, M_UnTie, NULL);
+			break;
+		}
+	}
+}
+
+bool Role::getRoleState( EState state )
+{
+	return ((_roleState >> state) & 1) != 0;
+}
+
+//播放眩晕特效
+void Role::runDizzyAnim()
+{
+	AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_49", anims);
+	BSAnimate *animate = anims[0];
+	CCSprite *sprite = CCSprite::create();
+	float offestX = 0.0f;
+	float offestY = 0.0f;
+	getModelOffest("E1_49", offestX, offestY);
+	sprite->setPosition(ccp(offestX, offestY));
+	//sprite->setAnchorPoint(ccp(0.0f, 1.0f));
+	_node->addChild(sprite, RZN_EFFECT, NT_DizzyEffect);
+	sprite->runAction(CCRepeatForever::create(animate));
+}
+
+//结束眩晕特效
+void Role::stopDizzyAnim()
+{
+	CCSprite *sprite = dynamic_cast<CCSprite*>(_node->getChildByTag(NT_DizzyEffect));
+	if(sprite != NULL)
+	{
+		sprite->stopAllActions();
+		sprite->removeFromParentAndCleanup(true);
+	}
+}
+
+void Role::revertToPreviousState()
+{
+	if(_stateMechine != NULL)
+	{
+		State<Role> *preState = _stateMechine->PreviousState();
+		State<Role> *curState = _stateMechine->CurrentState();
+		if(preState == curState|| preState ==RoleStateUpdateDisplay::getInstance())
+		{
+			_stateMechine->ChangeState(RoleStateStand::getInstance());
+// 			if(getId() == RoleManager::getInstance()->getLocalPlayer()->getId())
+// 			{
+// 				_stateMechine->ChangeState(LocalPlayerStateStand::getInstance());
+// 			}
+// 			else
+// 			{
+// 				_stateMechine->ChangeState(RoleStateStand::getInstance());
+// 			}
+		}
+		//如果上个状态是自动寻路且是重连之后，则取消为站立状态
+// 		else if (preState == LocalPlayerStateRunPath::getInstance() && !World::getInstance()->getRepetCanAutoRun())
+// 		{
+// 			_stateMechine->ChangeState(LocalPlayerStateStand::getInstance());
+// 			World::getInstance()->setRepetCanAutoRun(true);
+// 		}
+		else
+		{
+			_stateMechine->RevertToPreviousState();
+		}
+	}
+}
+
+//播放特戒回血特效
+void Role::runAddHpRingHot()
+{
+	AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_59", anims);
+	BSAnimate *animate = anims[0];
+	CCSprite *sprite = CCSprite::create();
+	float offestX = 0.0f;
+	float offestY = 0.0f;
+	getModelOffest("E1_59", offestX, offestY);
+	sprite->setPosition(ccp(offestX, offestY));
+	//sprite->setAnchorPoint(ccp(0.0f, 1.0f));
+	_node->addChild(sprite, RZN_EFFECT, NT_AddHpHot);
+	sprite->runAction(CCRepeatForever::create(animate));
+}
+
+//结束特戒回血特效
+void Role::stopAddHpRingHot()
+{
+	CCSprite *sprite = dynamic_cast<CCSprite*>(_node->getChildByTag(NT_AddHpHot));
+	if(sprite != NULL)
+	{
+		sprite->stopAllActions();
+		sprite->removeFromParentAndCleanup(true);
+	}
+}
+
+//播放特戒加盾特效
+void Role::runAddShieldRingHot()
+{
+	AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_58", anims);
+	BSAnimate *animate = anims[0];
+	CCSprite *sprite = CCSprite::create();
+	float offestX = 0.0f;
+	float offestY = 0.0f;
+	getModelOffest("E1_58", offestX, offestY);
+	sprite->setPosition(ccp(offestX, offestY));
+	//sprite->setAnchorPoint(ccp(0.0f, 1.0f));
+	_node->addChild(sprite, RZN_EFFECT, NT_AddShieldHot);
+	sprite->runAction(CCRepeatForever::create(animate));
+}
+
+//结束特戒加盾特效
+void Role::stopAddShieldRingHot()
+{
+	CCSprite *sprite = dynamic_cast<CCSprite*>(_node->getChildByTag(NT_AddShieldHot));
+	if(sprite != NULL)
+	{
+		sprite->stopAllActions();
+		sprite->removeFromParentAndCleanup(true);
+	}
+}
+
+//播放特戒灼烧特效
+void Role::runAddFireRingDot()
+{
+	AnimationCache::AnimateList anims;
+	AnimationCache::createDefList(1, anims);
+	AnimationCache::getInstance()->getSinEffect(0, "E1_57", anims);
+	BSAnimate *animate = anims[0];
+	CCSprite *sprite = CCSprite::create();
+	float offestX = 0.0f;
+	float offestY = 0.0f;
+	getModelOffest("E1_57", offestX, offestY);
+	sprite->setPosition(ccp(offestX, offestY));
+	//sprite->setAnchorPoint(ccp(0.0f, 1.0f));
+	_node->addChild(sprite, RZN_EFFECT, NT_FireDot);
+	sprite->runAction(CCRepeatForever::create(animate));
+}
+
+//结束特戒灼烧特效
+void Role::stopAddFireRingDot()
+{
+	CCSprite *sprite = dynamic_cast<CCSprite*>(_node->getChildByTag(NT_FireDot));
+	if(sprite != NULL)
+	{
+		sprite->stopAllActions();
+		sprite->removeFromParentAndCleanup(true);
+	}
+}
+
+void Role::setCurrentSkillid(unsigned int id)
+{
+	_currentSkillId = id;
+}
+
+void Role::setCurrentTargetid(unsigned int id)
+{
+	_skillTargetId = id;
+}
+
+void Role::setCurrentTargetPos(const CCPoint& pt)
+{
+	_skillTargetPos = pt;
+}
+
+const CCPoint& Role::getTargetPos()
+{
+	return _skillTargetPos;
+}
+
+//结束所有特戒特效
+void Role::stopAllRingEffect()
+{
+	stopDizzyAnim();
+	stopAddHpRingHot();
+	stopAddShieldRingHot();
+	stopAddFireRingDot();
+}
+
+
+void Role::runHeightenEffect(const std::string &animFile,eRoleZorderNum layerTag,eNodeTag effectTag)
+{
+
+}
+
+void Role::stopHeightenEffect(eNodeTag effectTag)
+{
+
+}
+
+void Role::setBossHeighten( unsigned int dw_data_id,bool isHeighten )
+{
+	//RoleManager::CreatureInfo creatureInfo = RoleManager::getInstance()->getCreatureInfo(dw_data_id);
+	stCreateProto const* proto  = RoleManager::getInstance()->getCreatureProto(dw_data_id);
+	if (proto && proto->nBossType == 1)
+	{
+		_boosHeightenMap[dw_data_id] = isHeighten;
+	}
+}
+
+bool Role::getBossHeighten( unsigned int dw_data_id )
+{
+	std::map<unsigned int, bool>::iterator iter = _boosHeightenMap.find(dw_data_id);
+	if (iter != _boosHeightenMap.end())
+	{
+		return iter->second;
+	}
+	return true;
+}
+
+void Role::setColorHoc()
+{
+
+}
+
+void Role::delColorHoc()
+{
+
+}
+
+void Role::setCreatureNameColor( Eaiaction type )
+{
+
+}
+
+void Role::clearWayPoint()
+{
+	_wayPointLists.clear();
+}
+
+void Role::addWayPoint(const CCPoint& pt)
+{
+	if (_wayPointLists.size() > 2)
+	{
+		_wayPointLists.pop_front();
+	}
+	if (_wayPointLists.size())
+	{
+		CCPoint _back = _wayPointLists.back();
+		float dis = ccpDistance(pt, _back);
+		if (dis <= 1.0f)
+		_wayPointLists.pop_back();
+	}
+	else
+	{
+		float dis = ccpDistance(pt, getPosition());
+		if (dis <= 1.0f)
+			return;
+	}
+	_wayPointLists.push_back(pt);
+}
+
+bool Role::hasWayPoint()
+{
+	return !_wayPointLists.empty();
+}
+bool Role::popFrontWayPoint(CCPoint& pt)
+{
+	if (!hasWayPoint())
+		return false;
+
+	pt = _wayPointLists.front();
+	_wayPointLists.pop_front();
+
+	return true;
+}
+
+void Role::runTransmitEffect()
+{
+
+}
+
+void Role::runTransmitEffect_UP()
+{
+
+}
+
+void Role::playStoneEffect()
+{
+	LandNode* landNode = LandNode::create();
+	landNode->setPosition(_node->getPosition());
+	AnimationCache::AnimateList anime = World::getInstance()->getStoneAnim();
+	BSAnimate *bsanims = anime[0];
+	CCSprite *sprite = CCSprite::create();
+	//sprite->setPosition(_node->getPosition());
+	//sprite->setAnchorPoint(ccp(0.5,0.5));
+	landNode->addChild(sprite);
+	MapManager* map_mgr = MapManager::getInstance();
+	CCTMXTiledMap* map = map_mgr->getMap();
+	if (map)
+	{
+		landNode->setTag(NT_StoneEffect);
+		map->addChild(landNode, map_mgr->getZOrderAtPoint(_node->getPosition()), NT_StoneEffect);
+		sprite->stopAllActions();
+		sprite->runAction(CCSequence::createWithTwoActions(bsanims, CCCallFuncN::create(sprite, SEL_CallFuncN(&Role::stoneEffectCallback))));
+	}
+}
+
+void Role::stoneEffectCallback(CCNode *node)
+{
+	node->stopAllActions();
+	LandNode* landNode = dynamic_cast<LandNode*>(node->getParent());
+	if (landNode)
+	{
+		CCTMXTiledMap* map = dynamic_cast<CCTMXTiledMap*>(landNode->getParent());
+		if (map)
+		{
+			map->removeChild(landNode,true);
+		}
+		//landNode->removeFromParent();
+	}
+}
+
+void Role::setFirstUpdate( bool isFirst )
+{
+	_firstUpdate = isFirst;
+}
+
+
+void Role::runCreatureSpreakPaoPao(int msgId,float ntime)
+{
+
+}
+
+CCNode*  Role::getNameNode()
+{
+	if(NULL != _roleHeadBloodUi)
+		return _roleHeadBloodUi->GetNameNode();
+
+	return NULL;
+}
+
+// void Role::updateAnimConfig()
+// {
+// 	BOOST_FOREACH(AnimConfigMap::value_type& kv,mmapAnimConfig)
+// 	{
+// 		stAnimConfig& one = kv.second;
+// 		int type = kv.first;
+// 		//有没读取到的动作
+// 		if (one.mnCurPos != INVALID && one.last==NULL)
+// 		{
+// 			BSAnimate* ani = makeAnimate(one,one.mnCurPos);
+// 			if (ani)
+// 			{
+// 				CCSprite* target = getTarget(type);
+// 				target->stopAllActions();
+// 				if (one.bRepeat)
+// 					target->runAction(CCRepeatForever::create(ani));
+// 				else
+// 					target->runAction(ani);
+// 			}
+// 		}
+// 	}
+// }
+
+bool Role::resetConfig( int type,std::string const& modelName )
+{
+	BOOST_AUTO(iter,mmapAnimConfig.find(type));
+	if (iter != mmapAnimConfig.end())
+	{
+		stAnimConfig& config =iter->second;
+		if (config.strModelFileName != modelName)
+		{
+			AnimationCache::getInstance()->releaseAnimsNew(config.convertAnimType(),config.strModelFileName);
+
+			config.reset();
+
+			config.type= type;
+			config.strModelFileName = modelName;
+
+			return true;
+			//mmapAnimConfig.erase(iter);
+			//iter失效
+			//stAnimConfig config;
+			//config.type = type;
+			//config.strModelFileName = modelName;
+			//mmapAnimConfig.insert(std::make_pair(type,config));
+		}
+	}
+	else
+	{
+		stAnimConfig config;
+		config.type = type;
+		config.strModelFileName = modelName;
+		mmapAnimConfig.insert(std::make_pair(type,config));
+
+		return true;
+	}
+
+	return false;
+}
+
+void Role::resetAllActionConfig()
+{
+	BOOST_FOREACH(AnimConfigMap::value_type& kv,mmapAnimConfig)
+	{
+		stAnimConfig& one  = kv.second;
+		if (!one.strModelFileName.empty())
+		{
+			AnimationCache::getInstance()->releaseAnimsNew(one.convertAnimType(),one.strModelFileName);
+		}
+	}
+	mmapAnimConfig.clear();
+}
+
+BSAnimate* Role::makeAnimate( stAnimConfig const& config )
+{
+	//config.mnCurPos = newPos;
+	BSAnimation* animation = AnimationCache::getInstance()->peekBSAnimation(config.convertAnimType(),config.strModelFileName,config.mnCurPos);
+	if (animation)
+	{
+		BSAnimate* ani = BSAnimate::create();
+
+		ani->initWithAnimation(animation);
+		//config.setupLast(ani);
+
+		return ani;
+	}
+
+	return NULL;
+}
+
+void Role::runRoleAction(CCSprite* target, int actionType,size_t pos,bool bRepeat,ActionSeqCreateFunc func /*= ActionSeqCreateFunc() */)
+{
+	BOOST_AUTO(iter,mmapAnimConfig.find(actionType));
+	if (iter== mmapAnimConfig.end())
+	{
+		return;
+	}
+	stAnimConfig& config = iter->second;
+	if (config.type==INVALID)
+	{
+		return;
+	}
+// 	if (config.mnCurPos == pos && bRepeat)
+// 	{
+// 		return;
+// 	}
+	//需要变更或者需要再来一次
+	config.bRepeat = bRepeat;
+	config.mnCurPos = pos;
+	config.actFnc = func;
+
+	BSAnimate* ani = makeAnimate(config);
+	if (ani)
+	{
+		config.setupLast(ani);
+		runWithTarget(target,config);
+	}
+	else
+	{
+		target->stopAllActions();
+		config.releaseLast();
+	}
+}
+
+void Role::runWithTarget( CCSprite* target,stAnimConfig const& config )
+{
+	CC_ASSERT(target);
+	if (config.actFnc)
+	{
+		CCSequence *all = CCSequence::createWithTwoActions(config.last,config.actFnc());
+
+		target->stopAllActions();
+		if (config.bRepeat)
+			target->runAction(CCRepeatForever::create(all));
+		else
+			target->runAction(all);
+	}
+	else
+	{
+		//CCSprite* target = getTarget(type);
+		target->stopAllActions();
+		if (config.bRepeat)
+			target->runAction(CCRepeatForever::create(config.last));
+		else
+			target->runAction(config.last);
+	}
+	target->setVisible(true);
+}
+
+void Role::deleteConfig( int type )
+{
+	BOOST_AUTO(iter, mmapAnimConfig.find(type));
+	if (iter != mmapAnimConfig.end())
+	{
+		stAnimConfig& one = iter->second;
+		if (!one.strModelFileName.empty())
+		{
+			AnimationCache::getInstance()->releaseAnimsNew(one.convertAnimType(),one.strModelFileName);
+		}
+	}
+	mmapAnimConfig.erase(type);
+}
+
+void Role::saveUsedAnim( AnimsUsed const& anim )
+{
+	bool BOOST_LOCAL_FUNCTION(AnimsUsed const& one,bind anim)
+	{
+		return one.animType == anim.animType && one.name== anim.name;
+	}BOOST_LOCAL_FUNCTION_NAME(CustomFinder);
+
+	BOOST_AUTO(iter,boost::range::find_if(_usedAnim,CustomFinder));
+	if (iter == _usedAnim.end())
+	{
+		_usedAnim.push_back(anim);
+	}
+}
+
+void Role::setRoleTag( int tag )
+{
+	_node->setTag(tag);
+}
+
+bool Role::haveGuild()
+{
+	if (getGuildID() != 0 && getGuildID() != INVALID)
+	{
+		return true;
+	}
+	return false;
+}

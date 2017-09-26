@@ -1,0 +1,242 @@
+#include "NameMgr2.h"
+#include "RankProto.h"
+#include "TCPClient.h"
+#include "GuildProto.h"
+NameMgr2::NameMgr2()
+{
+	_lastSendTime = 0;
+	_lastSendTime2 = 0;
+	_curTime = 0;
+	_curTime2 = 0;
+}
+
+NameMgr2::~NameMgr2()
+{
+	//TCP_CLIENT->unregister_net_cmd("NET_SIS_role_get_some_name" , this , &NameMgr2::onGetNames);
+}
+
+NameMgr2* NameMgr2::getInstance()
+{
+	static NameMgr2 mgr;
+	return &mgr;
+}
+void NameMgr2::init()
+{
+	TCP_CLIENT->register_net_cmd("NET_SIS_role_get_some_name" , this , &NameMgr2::onGetNames);
+	TCP_CLIENT->register_net_cmd("NET_SIS_get_guild_name" , this , &NameMgr2::onGetGuildNames);	
+}
+void NameMgr2::Destroy()
+{
+	_lastSendTime = 0;
+	_lastSendTime2 = 0;
+	_curTime = 0;
+	_curTime2 = 0;
+	_namePool.clear();
+	_guildPool.clear();
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_role_get_some_name" , this , &NameMgr2::onGetNames);
+	TCP_CLIENT->unregister_net_cmd("NET_SIS_get_guild_name" , this , &NameMgr2::onGetGuildNames);
+	_NameEmitPool.clear();
+	return;
+}
+bool NameMgr2::queryName( unsigned int roleid , std::string& ret )
+{
+	if (!IS_VALID(roleid))
+	{
+		return false;
+	}
+
+	std::map<unsigned int , std::string>::iterator iter = _namePool.find(roleid);
+	if(iter!= _namePool.end())
+	{
+		ret = iter->second;
+		return true;
+	}
+	else
+	{
+		for(std::list<unsigned int>::iterator innerIter = _nameQueue.begin() ; innerIter!= _nameQueue.end() ; ++innerIter)
+		{
+			if(*innerIter == roleid)
+				return false;
+		}
+		_nameQueue.push_back(roleid);
+		return false;
+	}
+}
+
+
+bool NameMgr2::queryGuildName( unsigned int guildid , std::string& ret )
+{
+	std::map<unsigned int , std::string>::iterator iter = _guildPool.find(guildid);
+	if(iter!= _guildPool.end())
+	{
+		ret = iter->second;
+		return true;
+	}
+	else
+	{
+		for(std::list<unsigned int>::iterator iter = _guildQueue.begin() ; iter!= _guildQueue.end() ; ++iter)
+		{
+			if(*iter == guildid)
+				return false;
+		}
+		_guildQueue.push_back(guildid);
+		return false;
+	}
+}
+
+
+void NameMgr2::update( float dt )
+{
+	_curTime += dt*1000;
+	_curTime2 += dt*1000;
+	//if(_nameQueue.empty() && _guildQueue.empty())
+	//	return;
+	//!5秒后群发
+	if(_curTime - _lastSendTime >= 500 && !_nameQueue.empty())
+	{
+		_lastSendTime = _curTime;
+		NET_SIC_role_set_some_name NetCmdData;
+		int sz = (_nameQueue.size()>=25)?25:_nameQueue.size();
+		NetCmdData.n_num = sz;
+		int size = sizeof(NET_SIC_role_set_some_name) - sizeof(unsigned int) + sizeof(unsigned int) * sz;
+		//unsigned char *pAllocData = new unsigned char[size];
+		if (size>220)
+		{
+			//int sdlfjsdklf = 0;
+		}
+		unsigned char aData[220];
+		unsigned char *pAllocData = aData;
+		NET_SIC_role_set_some_name *pRGSCmd = reinterpret_cast<NET_SIC_role_set_some_name*>(pAllocData);
+		memset(pRGSCmd, 0 , size);
+		memcpy(pRGSCmd, &NetCmdData, (sizeof(NetCmdData) - sizeof(unsigned int)));
+		for(int i = 0 ; i < sz ; ++i)
+		{
+			unsigned int roleid = _nameQueue.front();
+			_nameQueue.pop_front();
+			pRGSCmd->dwAllID[i] = roleid;
+		}
+		pRGSCmd->size = size;
+		TCP_CLIENT->send_net_cmd(pRGSCmd , NP_NORMAL , false);
+		//delete[] pAllocData;
+	}
+	//!每隔0.5秒发一个
+	if(_curTime2 - _lastSendTime2 >= 500)
+	{
+		_lastSendTime2 = _curTime2;
+		if(_guildQueue.empty())
+			return;
+		NET_SIC_get_guild_name gnCmd;
+		unsigned int guildid = _guildQueue.front();
+		_guildQueue.pop_front();
+		gnCmd.dwGuildID = guildid;
+		TCP_CLIENT->send_net_cmd(&gnCmd , NP_NORMAL , false);
+	}
+	int num = 0;
+	std::vector<SNamePool>::iterator it = _NameEmitPool.begin();
+	for (; it != _NameEmitPool.end();)
+	{
+		_sigGetName.emit((*it).id, (*it).name);
+		it = _NameEmitPool.erase(it++);
+		num++;
+		if (num > 8)
+			break;
+	}
+}
+
+unsigned int NameMgr2::onGetNames( s_net_cmd* cmd )
+{
+	NET_SIS_role_get_some_name* msg = (NET_SIS_role_get_some_name*)cmd;
+	bool isEmit = false;
+	if (msg->n_num < 5)
+		isEmit = true;
+	for (int i = 0; i < msg->n_num; ++i)
+	{
+		unsigned int id = msg->IdName[i].dwID;
+		//char temp[512];
+		//memset(temp, 0, sizeof(char) * 512);
+		//Utf16ToUtf8(msg->IdName[i].szName, temp, 512, 0);
+		std::string ret;
+		ret.assign(msg->IdName[i].szName);
+		_namePool[id] = ret;
+		if (isEmit)
+		{
+			_sigGetName.emit(id, ret);
+		}
+		else
+		{
+			SNamePool pool;
+			pool.id = id;
+			pool.name = ret;
+			_NameEmitPool.push_back(pool);
+		}
+		
+	}
+	return 0;
+}
+void NameMgr2::SetLeaderName(unsigned int roleid , wchar_t* wNameStr)
+{
+	char temp[512];
+	memset(temp, 0, sizeof(char) * 512);
+	Utf16ToUtf8(wNameStr, temp, 512, 0);
+	std::string ret;
+	ret.assign(temp);
+	_namePool[roleid] = ret;
+	
+}
+void NameMgr2::SetGuildName(unsigned int guildid, wchar_t* wNameStr)
+{
+	char temp[512];
+	memset(temp, 0, sizeof(char) * 512);
+	Utf16ToUtf8(wNameStr, temp, 512, 0);
+	std::string ret;
+	ret.assign(temp);
+	_guildPool[guildid] = ret;
+}
+unsigned int NameMgr2::onGetGuildNames( s_net_cmd* cmd )
+{
+	NET_SIS_get_guild_name* msg = (NET_SIS_get_guild_name*)cmd;
+	for (int i = 0; i < msg->n_num; ++i)
+	{
+		unsigned int id = msg->szGuildName[i].dwID;
+		char temp[512];
+		memset(temp, 0, sizeof(char) * 512);
+		Utf16ToUtf8(msg->szGuildName[i].szName, temp, 512, 0);
+		std::string ret;
+		ret.assign(temp);
+		_guildPool[id] = ret;
+		_sigGetGuildName.emit(id , ret);
+	}
+	return 0;
+}
+
+void NameMgr2::updateRoleName( unsigned int role_id,std::string role_name)
+{
+	if (role_name.empty())
+		return;
+	std::map<unsigned int , std::string>::iterator iter = _namePool.find(role_id);
+	if (iter != _namePool.end())
+	{
+		iter->second = role_name;
+	}
+	else
+	{
+		_namePool[role_id] = role_name;
+	}
+	_sigGetName.emit(role_id,role_name);
+}
+
+void NameMgr2::updateGuildName( unsigned int guild_id,std::string guild_name )
+{
+	if (guild_name.empty())
+		return;
+	std::map<unsigned int, std::string>::iterator iter = _guildPool.find(guild_id);
+	if (iter != _guildPool.end())
+	{
+		iter->second=guild_name;
+	}
+	else
+	{
+		_guildPool[guild_id] = guild_name;
+	}
+	_sigGetGuildName.emit(guild_id , guild_name);
+}

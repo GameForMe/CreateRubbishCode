@@ -1,0 +1,94 @@
+#include "PKResultUi.h"
+#include "UiTools.h"
+#include "UiLoader.h"
+#include "UiManager.h"
+CCNode * PKResultUi::openUi()
+{
+	std::map<std::string, CCNodeLoader*> nodeLoaders;
+	nodeLoaders["BiSaiUiLayer"] = UiLayerLoader<PKResultUiLayer>::loader();
+	CCNode *uiNode = readUiFromCCBI("bisai", nodeLoaders, _loadSpriteSheet);
+	CC_ASSERT(uiNode != NULL);
+	return uiNode;
+}
+
+void PKResultUi::playAnimate( bool _win )
+{
+	PKResultUiLayer * uilayer=getUiNodeByTag<PKResultUiLayer>(WCT_PKResultUi);
+	if(uilayer)
+		uilayer->playAnimate(_win);
+}
+
+
+
+void PKResultUiLayer::onNodeLoaded( cocos2d::CCNode *pNode, cocos2d::extension::CCNodeLoader *pNodeLoader )
+{
+	CCNode * frame=this->getChildByTag(0);
+	m_winNode=dynamic_cast<CCNode*>(frame->getChildByTag(2));
+	m_lostNode=dynamic_cast<CCNode*>(frame->getChildByTag(3));
+
+	for (int i=1;i<5;i++)
+	{
+		CCSprite * winSp=dynamic_cast<CCSprite*>(m_winNode->getChildByTag(i));
+		if(winSp)
+		{
+			m_winSprites.push_back(winSp);
+			winSp->setVisible(false);
+		}
+			
+		CCSprite * lostsp=dynamic_cast<CCSprite*>(m_lostNode->getChildByTag(i));
+		if(lostsp)
+		{
+			m_lostSprites.push_back(lostsp);
+			lostsp->setVisible(false);
+		}
+			
+	}
+	CCDirector::sharedDirector()->getTouchDispatcher()->addTargetedDelegate(this,-1,true);
+	m_canClose=false;
+}
+void PKResultUiLayer::playAnimate(bool _win)
+{
+	vector<CCSprite *> sprites;
+	if(_win)
+	{
+		m_winNode->setVisible(true);
+		sprites=m_winSprites;
+	}
+	else
+	{
+		m_lostNode->setVisible(true);
+		sprites=m_lostSprites;
+	}
+
+	//战斗胜利四个字的动画
+	int i=0;
+	for (vector<CCSprite*>::iterator iter=sprites.begin();iter!=sprites.end();iter++)
+	{
+		(*iter)->setScale(8.0);
+		CCScaleBy* scaleBy = CCScaleBy::create(0.3f,0.125f);
+		CCFadeIn* fadeIn = CCFadeIn::create(0.3f);
+		(*iter)->runAction(CCSequence::create(CCDelayTime::create(0.5+0.3*i),CCShow::create(),CCSpawn::create(scaleBy,fadeIn,NULL),NULL));
+		i++;
+	}
+	this->scheduleOnce(SEL_SCHEDULE(&PKResultUiLayer::setCanClose),(i+2)*0.3);
+}
+
+void PKResultUiLayer::onExit()
+{
+	CCLayer::onExit();
+	CCDirector::sharedDirector()->getTouchDispatcher()->removeDelegate(this);
+}
+bool PKResultUiLayer::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
+{
+	if(m_canClose)
+	{
+		CLOSE_UI(WCT_PKResultUi);
+	}
+	return true;
+}
+
+void PKResultUiLayer::setCanClose( float dt )
+{
+	m_canClose=true;
+}
+
